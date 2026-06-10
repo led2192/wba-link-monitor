@@ -1,0 +1,23 @@
+name: Browser monitor (weekly)
+
+on:
+  schedule:
+    - cron: "0 3 * * 6"        # Saturdays 03:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt playwright
+      - run: playwright install --with-deps chromium
+      - run: python playwright_monitor.py
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_TABLE: monitored_links
