@@ -25,12 +25,18 @@ from urllib.parse import urljoin, urlsplit, parse_qsl, urlencode, quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter, defaultdict
 
+import warnings
 try:
     import requests
     from bs4 import BeautifulSoup
     import tldextract
 except ImportError:
     sys.exit("pip install requests beautifulsoup4 tldextract")
+try:  # silence the "looks like XML" noise from RSS feeds / sitemaps
+    from bs4 import XMLParsedAsHTMLWarning
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+except Exception:
+    pass
 
 API   = "https://api.airtable.com/v0"
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
