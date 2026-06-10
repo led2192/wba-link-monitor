@@ -31,12 +31,18 @@ import os, re, sys, time, hashlib, datetime as dt
 from urllib.parse import urljoin, urlsplit, parse_qsl, urlencode, quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import warnings
 try:
     import requests
     from bs4 import BeautifulSoup
     import tldextract
 except ImportError:
     sys.exit("pip install requests beautifulsoup4 tldextract")
+try:  # silence the "looks like XML" noise from RSS feeds / sitemaps
+    from bs4 import XMLParsedAsHTMLWarning
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+except Exception:
+    pass
 
 API   = "https://api.airtable.com/v0"
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
@@ -109,7 +115,9 @@ def fetch(session, url, timeout=20):
 
 def get_monitored():
     url=f"{API}/{BASE}/{quote(TABLE)}"
-    params={"pageSize":100, "filterByFormula":"{%s}=TRUE()"%F_MON}  # monitor is a checkbox
+    # monitor is a checkbox; rows marked needs_browser belong to the weekly Playwright job
+    formula="AND({%s}=TRUE(), NOT({needs_browser}=TRUE()))" % F_MON
+    params={"pageSize":100, "filterByFormula":formula}
     out=[]; offset=None
     while True:
         if offset: params["offset"]=offset
@@ -136,11 +144,12 @@ def process(rec, sess):
     upd[F_STATUS]="redirected" if r.history else "ok"
     upd[F_HTTP]=str(r.status_code)
     current=doc_links(r.text, r.url)
+    had_baseline=bool(f.get(F_HASH))   # content_hash present = page visited before
     upd[F_HASH]=hashlib.md5("\n".join(sorted(current)).encode()).hexdigest()
     seen=set((f.get(F_SEEN) or "").split("\n")) - {""}
     new=sorted(current - seen)
     upd[F_SEEN]="\n".join(sorted(current))[:90000]
-    return rec["id"], upd, (new if (seen and new) else None)  # baseline first time, no false alert
+    return rec["id"], upd, (new if (had_baseline and new) else None)  # first visit = baseline, no false alert
 
 def main():
     recs=get_monitored()
