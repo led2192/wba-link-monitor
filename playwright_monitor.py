@@ -47,11 +47,12 @@ API   = "https://api.airtable.com/v0"
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
 BASE  = os.environ.get("AIRTABLE_BASE")
 TABLE = os.environ.get("AIRTABLE_TABLE", "monitored_links")
+DETECTIONS_TABLE = os.environ.get("AIRTABLE_DETECTIONS_TABLE", "detections")
 if not (TOKEN and BASE):
     sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE environment variables.")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
-F_URL="url"; F_STATUS="status"; F_HTTP="http_status"; F_FINAL="final_url"
+F_WBA="wba_id"; F_NAME="company_name"; F_URL="url"; F_TYPE="type"; F_STATUS="status"; F_HTTP="http_status"; F_FINAL="final_url"
 F_CHECKED="last_checked"; F_HASH="content_hash"; F_SEEN="seen_links"
 F_NEW="new_links"; F_CHANGE="last_change"; F_ALERT="alert_status"; F_BROWSER="needs_browser"
 
@@ -80,16 +81,20 @@ def normalize(url):
     return (host+path+("?"+urlencode(q) if q else "")).lower()
 
 def doc_links(html, base):
-    rdom=reg_domain(base); out=set()
+    """Same-domain links that are PDFs or whose URL PATH looks report-ish.
+    Returns {normalized_url: anchor_text}. Anchor text is annotation only;
+    it no longer triggers a match (anchor-based matching produced noise)."""
+    rdom=reg_domain(base); out={}
     for a in BeautifulSoup(html,"html.parser").find_all("a",href=True):
         href=a["href"].strip()
         if href.startswith(("#","mailto:","tel:","javascript:")): continue
         absu=urljoin(base,href)
         if reg_domain(absu)!=rdom: continue
         path=urlsplit(absu).path.lower()
-        if path.endswith(".pdf") or DOCISH.search(path+" "+a.get_text(" ",strip=True).lower()):
+        if path.endswith(".pdf") or DOCISH.search(path):
             n=normalize(absu)
-            if n: out.add(n)
+            if n and n not in out:
+                out[n]=(absu, a.get_text(" ",strip=True)[:80])
     return out
 
 def get_targets():
@@ -122,6 +127,33 @@ def get_page():
                       lambda route: route.abort())
     return _tl.ctx
 
+def detection_fields(f, upd, current, had_baseline):
+    """Shared bookkeeping: diff vs seen, annotate with anchor text, append history,
+    gate the alert. Returns (changed, high_signal)."""
+    cur=set(current)
+    upd[F_HASH]=hashlib.md5("\n".join(sorted(cur)).encode()).hexdigest()
+    seen=set((f.get(F_SEEN) or "").split("\n")) - {""}
+    new=sorted(cur - seen)
+    upd[F_SEEN]="\n".join(sorted(cur))[:90000]
+    if not (had_baseline and new):
+        return False, False, []
+    entries=[]; docs=[]
+    for n in new:
+        disp, t = current.get(n, ("",""))
+        t=(t or "").strip()
+        entries.append(n + (f"  [{t[:70]}]" if t else ""))
+        docs.append({"detected":TODAY.isoformat(), "wba_id":f.get(F_WBA,""),
+                     "company_name":f.get(F_NAME,""), "document_url":disp or ("https://"+n),
+                     "title":t, "found_on":f.get(F_URL,""), "page_type":f.get(F_TYPE,""),
+                     "is_pdf":n.endswith(".pdf"), "status":"new"})
+    line=f"{TODAY.isoformat()}: " + " ; ".join(entries)
+    old=(f.get(F_NEW) or "").strip()
+    upd[F_NEW]=(line + ("\n"+old if old else ""))[:90000]
+    upd[F_CHANGE]=TODAY.isoformat()
+    high = any(n.endswith(".pdf") for n in new) or (f.get(F_TYPE) in ("reports_hub","sustainability_page"))
+    if high: upd[F_ALERT]="new"
+    return True, high, docs
+
 def process(rec):
     f=rec.get("fields",{}); u=f.get(F_URL,"")
     upd={F_CHECKED:TODAY.isoformat()}
@@ -133,49 +165,59 @@ def process(rec):
         code=resp.status if resp else None
         if code and code>=400:
             upd[F_STATUS]="dead"; upd[F_HTTP]=str(code)
-            return rec["id"], upd, None, False
+            return rec["id"], upd, False, False, [], False
         final=page.url
         upd[F_HTTP]=str(code or "")
         upd[F_FINAL]=final
         upd[F_STATUS]="redirected" if normalize(final)!=normalize(u) else "ok"
         current=doc_links(page.content(), final)
-        upd[F_HASH]=hashlib.md5("\n".join(sorted(current)).encode()).hexdigest()
         had_baseline=bool(f.get(F_HASH))          # content_hash present = visited before
-        seen=set((f.get(F_SEEN) or "").split("\n")) - {""}
-        new=sorted(current-seen)
-        upd[F_SEEN]="\n".join(sorted(current))[:90000]
+        changed, high, docs = detection_fields(f, upd, current, had_baseline)
         upd[F_BROWSER]=True                        # browser owns this page from now on
-        return rec["id"], upd, (new if (had_baseline and new) else None), True
+        return rec["id"], upd, changed, high, docs, True
     except Exception:
         upd[F_STATUS]="error"
-        return rec["id"], upd, None, False
+        return rec["id"], upd, False, False, [], False
     finally:
         if page:
             try: page.close()
             except Exception: pass
+
+def post_detections(rows):
+    """One row per detected document, into the detections table. Non-fatal if missing."""
+    if not rows: return
+    url=f"{API}/{BASE}/{quote(DETECTIONS_TABLE)}"
+    try:
+        for i in range(0,len(rows),10):
+            r=requests.post(url,headers={**HEADERS,"Content-Type":"application/json"},
+                            json={"records":[{"fields":x} for x in rows[i:i+10]],"typecast":True},timeout=30)
+            r.raise_for_status(); time.sleep(0.25)
+        print(f"Logged {len(rows)} detections to '{DETECTIONS_TABLE}'.")
+    except Exception as e:
+        print(f"WARNING: could not write detections to '{DETECTIONS_TABLE}' ({e}). Create that table in Airtable.")
 
 def main():
     recs=get_targets()
     random.shuffle(recs)   # avoid hammering one domain in a burst (the 429s)
     print(f"{len(recs)} hard pages to render with a real browser ({WORKERS} workers).")
     updates=[]; rescued=changed=still_dead=0; done=0
+    alerted=0; detections=[]
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         futs=[ex.submit(process,r) for r in recs]
         for fut in as_completed(futs):
-            rid, upd, new, ok = fut.result()
+            rid, upd, ch, high, docs, ok = fut.result()
             if ok: rescued+=1
             elif upd.get(F_STATUS) in ("dead","error"): still_dead+=1
-            if new:
-                changed+=1
-                upd[F_NEW]=f"{TODAY.isoformat()}: " + ", ".join(new)
-                upd[F_CHANGE]=TODAY.isoformat()
-                upd[F_ALERT]="new"
+            if ch: changed+=1
+            if high: alerted+=1
+            detections.extend(docs)
             updates.append({"id":rid,"fields":upd}); done+=1
             if done%100==0: print(f"  {done}/{len(recs)}")
     print(f"Writing {len(updates)} updates back to Airtable ...")
     patch(updates)
+    post_detections(detections)
     print(f"Done. Readable in a real browser: {rescued}.  Still dead/error: {still_dead}.  "
-          f"Pages with NEW document links: {changed}.")
+          f"Pages with new doc links: {changed} (high-signal alerts: {alerted}).")
     print("Rescued pages are now marked needs_browser and owned by this weekly job.")
 
 if __name__=="__main__":
