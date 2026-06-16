@@ -38,6 +38,7 @@ try:
     warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 except Exception:
     pass
+from ids import link_id, detection_id   # deterministic ids: detection -> source link
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:
@@ -142,10 +143,13 @@ def detection_fields(f, upd, current, had_baseline):
         disp, t = current.get(n, ("",""))
         t=(t or "").strip()
         entries.append(n + (f"  [{t[:70]}]" if t else ""))
-        docs.append({"detected":TODAY.isoformat(), "wba_id":f.get(F_WBA,""),
-                     "company_name":f.get(F_NAME,""), "document_url":disp or ("https://"+n),
-                     "title":t, "found_on":f.get(F_URL,""), "page_type":f.get(F_TYPE,""),
-                     "is_pdf":n.endswith(".pdf"), "status":"new"})
+        _doc = disp or ("https://"+n); _page = f.get(F_URL,""); _wba = f.get(F_WBA,"")
+        docs.append({"detected":TODAY.isoformat(), "wba_id":_wba,
+                     "company_name":f.get(F_NAME,""), "document_url":_doc,
+                     "title":t, "found_on":_page, "page_type":f.get(F_TYPE,""),
+                     "is_pdf":n.endswith(".pdf"), "status":"new",
+                     "source_link_id":link_id(_wba,_page),
+                     "detection_id":detection_id(_wba,_page,_doc)})
     line=f"{TODAY.isoformat()}: " + " ; ".join(entries)
     old=(f.get(F_NEW) or "").strip()
     upd[F_NEW]=(line + ("\n"+old if old else ""))[:90000]
