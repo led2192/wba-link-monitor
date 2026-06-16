@@ -1,0 +1,31 @@
+name: Unmonitor shared third-party URLs (one-off)
+
+on:
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: "Switch off URLs linked by >= this many distinct companies"
+        type: string
+        default: "3"
+      dry_run:
+        description: "Only print what would change (no writes)"
+        type: boolean
+        default: true
+
+jobs:
+  unmonitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python unmonitor_shared.py
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_TABLE: monitored_links
+          THRESHOLD: ${{ github.event.inputs.threshold }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
