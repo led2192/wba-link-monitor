@@ -43,9 +43,19 @@ UA = "Mozilla/5.0 (compatible; WBA-LinkMonitor/1.0)"
 WORKERS=10; MAX_CHILDREN=25; MAX_LOCS=20000; MAX_REPORT=60
 _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 TRACKING = re.compile(r"^(utm_|fbclid|gclid|mc_|_hs|ref$)", re.I)
-REPORTISH = re.compile(r"sustainab|\besg\b|\bcsr\b|environment|climat|responsib|\bimpact\b|"
-                       r"report|annual|integrated|disclosur|\bcdp\b|policy|policies|"
-                       r"code.?of.?conduct|governance|publication|\.pdf$", re.I)
+# Strict: a URL is report-ish only if it pairs a TOPIC with a DOC word, or is a policy doc.
+# (Loose single tokens like "report"/"annual"/"cdp" swept in product pages, press releases,
+#  logos and earnings PDFs. "cdp" especially matched Customer Data Platform marketing.)
+_TOPIC  = re.compile(r"sustainab|esg|csr|climate|environment|carbon|emission|net.?zero|responsib|"
+                     r"non.?financial|materiality|tcfd|decarboni|biodiversit|ghg|integrated|annual|stewardship", re.I)
+_DOCW   = re.compile(r"report|statement|review|disclosure|memoria|rapport|bericht|informe", re.I)
+_POLICY = re.compile(r"code.?of.?conduct|policy|policies", re.I)
+_ASSET  = re.compile(r"\.(png|jpe?g|gif|svg|webp|ico|css|js|woff2?|ttf|eot|mp4|mov|avi|zip|json|rss)$", re.I)
+def report_ish(path):
+    if _ASSET.search(path): return False
+    if _TOPIC.search(path) and _DOCW.search(path): return True
+    if _POLICY.search(path): return True
+    return False
 RULES=[("sustainability_report", re.compile(r"sustainab|\besg\b|\bcsr\b|environment|climat|responsib|impact",re.I)),
        ("reports_hub",           re.compile(r"report|annual|integrated|financ|result|disclosur|publication|download",re.I)),
        ("policies",              re.compile(r"policy|policies|code.?of.?conduct|governance|ethic|compliance",re.I))]
@@ -114,7 +124,7 @@ def work(rec):
     seen=set()
     for u in locs:
         if reg_domain(u)!=rdom: continue
-        if not REPORTISH.search(urlsplit(u).path): continue
+        if not report_ish(urlsplit(u).path): continue
         k,clean=normalize(u)
         if not k or k in seen: continue
         seen.add(k); reps.append(clean)
