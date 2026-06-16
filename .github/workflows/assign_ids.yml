@@ -1,0 +1,27 @@
+name: Assign join ids (one-off / re-runnable)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Recompute ids for ALL rows (otherwise only fills empty ones)"
+        type: boolean
+        default: false
+
+jobs:
+  assign-ids:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python assign_ids.py
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_TABLE: monitored_links
+          AIRTABLE_DETECTIONS_TABLE: detections
+          IDS_FORCE: ${{ github.event.inputs.force }}
