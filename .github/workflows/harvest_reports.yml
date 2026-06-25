@@ -1,0 +1,40 @@
+name: Harvest report PDFs (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      types:
+        description: "Page types to include (comma-separated)."
+        type: string
+        default: "reports_hub,sustainability_page,sustainability_report,investor_relations,policies"
+      reports_only:
+        description: "Keep only PDFs whose file name looks like a report (year / annual / report / ...)."
+        type: boolean
+        default: false
+      commit:
+        description: "WRITE into report_library. Leave OFF for a dry-run that only prints the counts."
+        type: boolean
+        default: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run harvester
+        run: |
+          ARGS="--types ${{ inputs.types }}"
+          if [ "${{ inputs.reports_only }}" = "true" ]; then ARGS="$ARGS --reports-only"; fi
+          if [ "${{ inputs.commit }}" = "true" ]; then ARGS="$ARGS --commit"; fi
+          echo ">>> python harvest_reports.py $ARGS"
+          python harvest_reports.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_TABLE: monitored_links
+          AIRTABLE_LIBRARY_TABLE: report_library
