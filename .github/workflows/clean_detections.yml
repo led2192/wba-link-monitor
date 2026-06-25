@@ -1,0 +1,35 @@
+name: Clean detections (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "WRITE the status values. Leave OFF for a dry-run that only prints the numbers."
+        type: boolean
+        default: false
+      archive_stale:
+        description: "Also archive non-recent detections (recommended: leaves only recent reports as 'new')."
+        type: boolean
+        default: true
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run cleanup
+        run: |
+          ARGS=""
+          if [ "${{ inputs.commit }}" = "true" ]; then ARGS="$ARGS --commit"; fi
+          if [ "${{ inputs.archive_stale }}" = "true" ]; then ARGS="$ARGS --archive-stale"; fi
+          echo ">>> python clean_detections.py $ARGS"
+          python clean_detections.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_DETECTIONS_TABLE: detections
