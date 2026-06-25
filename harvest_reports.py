@@ -157,6 +157,27 @@ def from_airtable(base, token, table, types):
     return out
 
 
+def existing_library(base, token, table):
+    """{library_id: document_url} already in the library table (fetches only those 2 fields),
+    so a re-run can write just the new/changed rows instead of all of them."""
+    import requests
+    url = f"{API}/{base}/{quote(table)}"
+    headers = {"Authorization": f"Bearer {token}"}
+    base_params = [("pageSize", "100"), ("fields[]", "library_id"), ("fields[]", "document_url")]
+    out = {}; offset = None
+    while True:
+        p = list(base_params) + ([("offset", offset)] if offset else [])
+        r = requests.get(url, headers=headers, params=p, timeout=30); r.raise_for_status()
+        j = r.json()
+        for rec in j.get("records", []):
+            f = rec.get("fields", {})
+            if f.get("library_id"):
+                out[f["library_id"]] = f.get("document_url", "")
+        offset = j.get("offset"); time.sleep(0.22)
+        if not offset: break
+    return out
+
+
 def commit(base, token, table, rows):
     import requests
     url = f"{API}/{base}/{quote(table)}"
@@ -180,6 +201,8 @@ def main():
                     help="comma-separated page types to include")
     ap.add_argument("--reports-only", action="store_true")
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--full", action="store_true",
+                    help="re-upsert every row; default only writes new/changed rows")
     args = ap.parse_args()
     types = {t.strip().lower() for t in args.types.split(",") if t.strip()}
 
@@ -199,8 +222,15 @@ def main():
     report(rows, per_company, per_type, ok, bare)
 
     if args.source == "airtable" and args.commit:
-        commit(os.environ["AIRTABLE_BASE"], os.environ["AIRTABLE_TOKEN"],
-               os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library"), rows)
+        base = os.environ["AIRTABLE_BASE"]; token = os.environ["AIRTABLE_TOKEN"]
+        lib_table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
+        to_write = rows
+        if not args.full:
+            existing = existing_library(base, token, lib_table)
+            to_write = [r for r in rows if existing.get(r["library_id"]) != r["document_url"]]
+            print(f"delta mode: {len(to_write)} new/changed of {len(rows)} harvested "
+                  f"({len(existing)} already in '{lib_table}'). Use --full to rewrite all.")
+        commit(base, token, lib_table, to_write)
     elif args.source == "airtable":
         print("\nDRY-RUN. Re-run with --commit to write into the library table.")
 
