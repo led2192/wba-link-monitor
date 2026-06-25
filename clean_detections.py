@@ -127,9 +127,13 @@ def commit_airtable(base, token, table, records, action):
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     label = {"duplicate": "duplicate", "excluded": "excluded", "archive": "archive"}
-    updates = [{"id": k, "fields": {F_STATUS: label[a]}}
-               for (k, f), a in ((kf, action[kf[0]]) for kf in records) if action[kf[0]] in label]
-    print(f"writing status on {len(updates)} rows (leaving {sum(1 for a in action.values() if a=='keep_new')} as 'new') ...")
+    updates = []
+    for k, f in records:
+        a = action.get(k)
+        if a in label:
+            updates.append({"id": k, "fields": {F_STATUS: label[a]}})
+    kept = sum(1 for a in action.values() if a == "keep_new")
+    print(f"writing status on {len(updates)} rows (leaving {kept} as 'new') ...")
     for i in range(0, len(updates), 10):
         r = requests.patch(url, headers=headers,
                            json={"records": updates[i:i + 10], "typecast": True}, timeout=30)
