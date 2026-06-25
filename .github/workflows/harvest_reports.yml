@@ -1,4 +1,4 @@
-name: Harvest report PDFs (manual)
+name: Harvest report PDFs
 
 on:
   workflow_dispatch:
@@ -8,18 +8,23 @@ on:
         type: string
         default: "reports_hub,sustainability_page,sustainability_report,investor_relations,policies"
       reports_only:
-        description: "Keep only PDFs whose file name looks like a report (year / annual / report / ...)."
+        description: "Keep only PDFs whose file name looks like a report."
         type: boolean
         default: false
       commit:
-        description: "WRITE into report_library. Leave OFF for a dry-run that only prints the counts."
+        description: "WRITE into report_library. Leave OFF for a dry-run."
         type: boolean
         default: false
+  workflow_run:
+    workflows: ["Monitor links (daily)"]   # runs right after the daily monitor finishes
+    types: [completed]
 
 jobs:
   harvest:
     runs-on: ubuntu-latest
     timeout-minutes: 330
+    # auto-run only if the monitor succeeded; manual runs always allowed
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,9 +33,16 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run harvester
         run: |
-          ARGS="--types ${{ inputs.types }}"
-          if [ "${{ inputs.reports_only }}" = "true" ]; then ARGS="$ARGS --reports-only"; fi
-          if [ "${{ inputs.commit }}" = "true" ]; then ARGS="$ARGS --commit"; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TYPES="${{ inputs.types }}"; RO="${{ inputs.reports_only }}"; DO_COMMIT="${{ inputs.commit }}"
+          else
+            # nightly auto-run after the monitor: same scope you harvested, delta write, committed
+            TYPES="reports_hub,sustainability_page,sustainability_report,investor_relations,policies"
+            RO="false"; DO_COMMIT="true"
+          fi
+          ARGS="--types $TYPES"
+          [ "$RO" = "true" ] && ARGS="$ARGS --reports-only"
+          [ "$DO_COMMIT" = "true" ] && ARGS="$ARGS --commit"
           echo ">>> python harvest_reports.py $ARGS"
           python harvest_reports.py $ARGS
         env:
