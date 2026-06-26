@@ -1,0 +1,49 @@
+name: Attach report PDFs (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      all:
+        description: "Attach ANY row missing a file (default: only classified rows)."
+        type: boolean
+        default: false
+      types:
+        description: "Only these source_types (comma-separated). Blank = all."
+        type: string
+        default: ""
+      year_min:
+        description: "Only doc_year >= this (e.g. 2024). Blank/0 = all."
+        type: string
+        default: "0"
+      limit:
+        description: "Max files to attach this run (attach in waves). 0 = no cap."
+        type: string
+        default: "2000"
+      commit:
+        description: "Actually attach. Leave OFF for a dry-run count."
+        type: boolean
+        default: false
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run attacher
+        run: |
+          ARGS="--year-min ${{ inputs.year_min }} --limit ${{ inputs.limit }}"
+          [ -n "${{ inputs.types }}" ] && ARGS="$ARGS --types ${{ inputs.types }}"
+          [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          echo ">>> python attach_files.py $ARGS"
+          python attach_files.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_ATTACH_FIELD: file
