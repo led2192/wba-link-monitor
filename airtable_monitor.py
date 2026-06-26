@@ -27,7 +27,7 @@ except ImportError:
     sys.exit("pip install requests beautifulsoup4 tldextract")
 
 from monitor_core import (
-    API, doc_links, detection_fields, post_detections,
+    API, doc_links, detection_fields, post_detections, airtable_request,
     F_WBA, F_NAME, F_URL, F_FREQ, F_MON, F_STATUS, F_TYPE,
     F_HTTP, F_CHECKED, F_HASH, F_SEEN, F_NEW, F_CHANGE, F_ALERT,
 )
@@ -86,11 +86,13 @@ def get_monitored():
 
 
 def patch(updates):
+    if not updates:
+        return
     url = f"{API}/{BASE}/{quote(TABLE)}"
+    headers = {**HEADERS, "Content-Type": "application/json"}
     for i in range(0, len(updates), 10):
-        r = requests.patch(url, headers={**HEADERS, "Content-Type": "application/json"},
-                           json={"records": updates[i:i + 10], "typecast": True}, timeout=30)
-        r.raise_for_status(); time.sleep(0.25)
+        airtable_request("PATCH", url, headers, {"records": updates[i:i + 10], "typecast": True})
+        time.sleep(0.2)
 
 
 def process(rec, sess):
@@ -125,9 +127,13 @@ def main():
             if high: alerted += 1
             detections.extend(docs)
             updates.append({"id": rid, "fields": upd}); done += 1
+            if len(updates) >= 400:        # checkpoint progress so a long run survives a hiccup
+                patch(updates); updates = []
+            if len(detections) >= 200:
+                post_detections(detections, BASE, TOKEN, DETECTIONS_TABLE); detections = []
             if done % 200 == 0: print(f"  {done}/{len(due)}")
 
-    print(f"Writing {len(updates)} updates back to Airtable ...")
+    print(f"Writing the final {len(updates)} updates back to Airtable ...")
     patch(updates)
     post_detections(detections, BASE, TOKEN, DETECTIONS_TABLE)
     print(f"Done. Pages with new doc links: {changed} (high-signal alerts: {alerted}).  Failed to fetch: {failed}.")
