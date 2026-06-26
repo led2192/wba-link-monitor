@@ -33,10 +33,11 @@ Modes:
 Env (airtable source): AIRTABLE_TOKEN, AIRTABLE_BASE,
   AIRTABLE_TABLE (default monitored_links), AIRTABLE_LIBRARY_TABLE (default report_library)
 """
-import argparse, os, re, sys, time, collections, hashlib
+import argparse, os, re, sys, time, collections, hashlib, datetime as dt
 from urllib.parse import quote, urlsplit
 
 API = "https://api.airtable.com/v0"
+TODAY_ISO = dt.date.today().isoformat()
 ALL_TYPES = ["reports_hub", "sustainability_page", "sustainability_report",
              "investor_relations", "policies"]
 
@@ -158,12 +159,13 @@ def from_airtable(base, token, table, types):
 
 
 def existing_library(base, token, table):
-    """{library_id: document_url} already in the library table (fetches only those 2 fields),
-    so a re-run can write just the new/changed rows instead of all of them."""
+    """{library_id: {"url": document_url, "first_seen": first_seen}} already in the library,
+    so a re-run writes only new/changed rows and preserves the original first_seen date."""
     import requests
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
-    base_params = [("pageSize", "100"), ("fields[]", "library_id"), ("fields[]", "document_url")]
+    base_params = [("pageSize", "100"), ("fields[]", "library_id"),
+                   ("fields[]", "document_url"), ("fields[]", "first_seen")]
     out = {}; offset = None
     while True:
         p = list(base_params) + ([("offset", offset)] if offset else [])
@@ -172,25 +174,50 @@ def existing_library(base, token, table):
         for rec in j.get("records", []):
             f = rec.get("fields", {})
             if f.get("library_id"):
-                out[f["library_id"]] = f.get("document_url", "")
+                out[f["library_id"]] = {"url": f.get("document_url", ""),
+                                        "first_seen": f.get("first_seen", ""),
+                                        "id": rec["id"]}
         offset = j.get("offset"); time.sleep(0.22)
         if not offset: break
     return out
 
 
-def commit(base, token, table, rows):
+def _request(method, url, headers, payload, timeout=60, tries=5):
+    """Airtable write with retry/backoff on timeouts, 429 and 5xx, so a slow response during a
+    long run does not lose progress."""
     import requests
+    delay = 2
+    for attempt in range(1, tries + 1):
+        try:
+            r = requests.request(method, url, headers=headers, json=payload, timeout=timeout)
+        except requests.exceptions.RequestException:
+            if attempt == tries:
+                raise
+            time.sleep(delay); delay = min(delay * 2, 30); continue
+        if r.status_code == 429 or r.status_code >= 500:
+            if attempt == tries:
+                r.raise_for_status()
+            time.sleep(delay); delay = min(delay * 2, 30); continue
+        r.raise_for_status()
+        return r
+    return r
+
+
+def write_records(base, token, table, records, method):
+    """method='PATCH' updates existing rows (records carry 'id'); method='POST' creates new ones.
+    These are DIRECT record-id writes, not performUpsert, so each call is fast regardless of how
+    big the table is (no server-side match against the whole table)."""
+    if not records:
+        return
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    print(f"upserting {len(rows)} library rows into '{table}' ...")
-    for i in range(0, len(rows), 10):
-        payload = {"performUpsert": {"fieldsToMergeOn": ["library_id"]},
-                   "records": [{"fields": x} for x in rows[i:i + 10]], "typecast": True}
-        r = requests.patch(url, headers=headers, json=payload, timeout=30)
-        r.raise_for_status(); time.sleep(0.22)
-        if i and i % 1000 == 0:
-            print(f"  {i}/{len(rows)}")
-    print("done.")
+    verb = "updating" if method == "PATCH" else "creating"
+    print(f"{verb} {len(records)} rows in '{table}' ...")
+    for i in range(0, len(records), 10):
+        _request(method, url, headers, {"records": records[i:i + 10], "typecast": True})
+        time.sleep(0.2)
+        if i and i % 2000 == 0:
+            print(f"  {i}/{len(records)}")
 
 
 def main():
@@ -224,13 +251,21 @@ def main():
     if args.source == "airtable" and args.commit:
         base = os.environ["AIRTABLE_BASE"]; token = os.environ["AIRTABLE_TOKEN"]
         lib_table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
-        to_write = rows
-        if not args.full:
-            existing = existing_library(base, token, lib_table)
-            to_write = [r for r in rows if existing.get(r["library_id"]) != r["document_url"]]
-            print(f"delta mode: {len(to_write)} new/changed of {len(rows)} harvested "
-                  f"({len(existing)} already in '{lib_table}'). Use --full to rewrite all.")
-        commit(base, token, lib_table, to_write)
+        existing = existing_library(base, token, lib_table)
+        to_update = []; to_create = []
+        for r in rows:
+            prev = existing.get(r["library_id"])
+            if prev:
+                r["first_seen"] = prev.get("first_seen") or TODAY_ISO   # keep original date
+                if args.full or prev.get("url") != r["document_url"]:
+                    to_update.append({"id": prev["id"], "fields": r})
+            else:
+                r["first_seen"] = TODAY_ISO
+                to_create.append({"fields": r})
+        print(f"{len(rows)} harvested; {len(existing)} already in '{lib_table}'. "
+              f"writing {len(to_create)} new + {len(to_update)} changed (direct record writes).")
+        write_records(base, token, lib_table, to_create, "POST")
+        write_records(base, token, lib_table, to_update, "PATCH")
     elif args.source == "airtable":
         print("\nDRY-RUN. Re-run with --commit to write into the library table.")
 
