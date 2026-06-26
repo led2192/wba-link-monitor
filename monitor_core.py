@@ -145,6 +145,27 @@ def detection_fields(f, upd, current, had_baseline, today):
     return True, high, docs
 
 
+def airtable_request(method, url, headers, payload, timeout=60, tries=5):
+    """PATCH/POST to Airtable, retrying transient failures (read timeouts, connection drops,
+    429 rate limits, 5xx) with exponential backoff. A single slow response no longer kills a run.
+    Fails fast on real 4xx (e.g. a bad field)."""
+    delay = 2
+    for attempt in range(1, tries + 1):
+        try:
+            r = requests.request(method, url, headers=headers, json=payload, timeout=timeout)
+        except requests.exceptions.RequestException:
+            if attempt == tries:
+                raise
+            time.sleep(delay); delay = min(delay * 2, 30); continue
+        if r.status_code == 429 or r.status_code >= 500:
+            if attempt == tries:
+                r.raise_for_status()
+            time.sleep(delay); delay = min(delay * 2, 30); continue
+        r.raise_for_status()
+        return r
+    return r
+
+
 def post_detections(rows, base, token, table):
     """One row per detected document. UPSERTS on detection_id so re-detections update in place
     instead of duplicating. Non-fatal if the table is missing.
@@ -161,9 +182,7 @@ def post_detections(rows, base, token, table):
             payload = {"performUpsert": {"fieldsToMergeOn": ["detection_id"]},
                        "records": [{"fields": x} for x in rows[i:i + 10]],
                        "typecast": True}
-            r = requests.patch(url, headers=headers, json=payload, timeout=30)
-            r.raise_for_status(); time.sleep(0.25)
-        print(f"Upserted {len(rows)} detections to '{table}'.")
+            airtable_request("PATCH", url, headers, payload); time.sleep(0.2)
     except Exception as e:
         print(f"WARNING: could not write detections to '{table}' ({e}).")
 
