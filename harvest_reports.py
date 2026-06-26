@@ -143,7 +143,6 @@ def from_csv(path):
 
 
 def from_airtable(base, token, table, types):
-    import requests
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
     type_or = ", ".join(f"{{type}}='{t}'" for t in sorted(types))
@@ -151,7 +150,7 @@ def from_airtable(base, token, table, types):
     out = []; offset = None
     while True:
         if offset: params["offset"] = offset
-        r = requests.get(url, headers=headers, params=params, timeout=30); r.raise_for_status()
+        r = _request("GET", url, headers, params=params)
         j = r.json(); out.extend(rec.get("fields", {}) for rec in j.get("records", []))
         offset = j.get("offset"); time.sleep(0.22)
         if not offset: break
@@ -159,9 +158,8 @@ def from_airtable(base, token, table, types):
 
 
 def existing_library(base, token, table):
-    """{library_id: {"url": document_url, "first_seen": first_seen}} already in the library,
-    so a re-run writes only new/changed rows and preserves the original first_seen date."""
-    import requests
+    """{library_id: {"url": document_url, "first_seen": first_seen, "id": record_id}} already in
+    the library, so a re-run writes only new/changed rows (by record id) and preserves first_seen."""
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
     base_params = [("pageSize", "100"), ("fields[]", "library_id"),
@@ -169,7 +167,7 @@ def existing_library(base, token, table):
     out = {}; offset = None
     while True:
         p = list(base_params) + ([("offset", offset)] if offset else [])
-        r = requests.get(url, headers=headers, params=p, timeout=30); r.raise_for_status()
+        r = _request("GET", url, headers, params=p)
         j = r.json()
         for rec in j.get("records", []):
             f = rec.get("fields", {})
@@ -182,22 +180,26 @@ def existing_library(base, token, table):
     return out
 
 
-def _request(method, url, headers, payload, timeout=60, tries=5):
-    """Airtable write with retry/backoff on timeouts, 429 and 5xx, so a slow response during a
-    long run does not lose progress."""
+def _request(method, url, headers, payload=None, params=None, timeout=60, tries=5):
+    """Airtable request (GET/POST/PATCH) with retry/backoff on timeouts, 429 and 5xx, so a single
+    slow or rate-limited response during a long run does not crash it. Prints Airtable's error body
+    on a real 4xx so the cause (bad field, bad value) is visible in the log."""
     import requests
     delay = 2
     for attempt in range(1, tries + 1):
         try:
-            r = requests.request(method, url, headers=headers, json=payload, timeout=timeout)
+            r = requests.request(method, url, headers=headers, json=payload, params=params, timeout=timeout)
         except requests.exceptions.RequestException:
             if attempt == tries:
                 raise
             time.sleep(delay); delay = min(delay * 2, 30); continue
         if r.status_code == 429 or r.status_code >= 500:
             if attempt == tries:
+                print(f"Airtable {method} {r.status_code}: {r.text[:400]}")
                 r.raise_for_status()
             time.sleep(delay); delay = min(delay * 2, 30); continue
+        if r.status_code >= 400:
+            print(f"Airtable {method} {r.status_code}: {r.text[:400]}")
         r.raise_for_status()
         return r
     return r
