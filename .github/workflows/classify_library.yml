@@ -1,0 +1,42 @@
+name: Classify report library
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-classify ALL rows (default: only rows with no source_type yet)."
+        type: boolean
+        default: false
+      commit:
+        description: "WRITE source_type/match_confidence. Leave OFF for a dry-run."
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: ["Harvest report PDFs"]   # runs right after the harvester finishes
+    types: [completed]
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run classifier
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            [ "${{ inputs.force }}" = "true" ] && ARGS="--force" || ARGS=""
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          else
+            ARGS="--commit"     # nightly: classify the new rows the harvester just added
+          fi
+          echo ">>> python classify_library.py $ARGS"
+          python classify_library.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
