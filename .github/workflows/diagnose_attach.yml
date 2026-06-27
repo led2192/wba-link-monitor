@@ -1,0 +1,35 @@
+name: Diagnose missing attachments (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: "How many of the missing rows to test (representative sample)."
+        type: string
+        default: "800"
+      all:
+        description: "Check every missing row instead of a sample."
+        type: boolean
+        default: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run diagnosis
+        run: |
+          ARGS="--sample ${{ inputs.sample }}"
+          [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"
+          echo ">>> python diagnose_attach.py $ARGS"
+          python diagnose_attach.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_ATTACH_FIELD: file
