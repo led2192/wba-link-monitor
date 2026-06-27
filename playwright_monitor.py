@@ -58,7 +58,7 @@ def get_targets():
     out = []; offset = None
     while True:
         if offset: params["offset"] = offset
-        r = requests.get(url, headers=HEADERS, params=params, timeout=30); r.raise_for_status()
+        r = airtable_request("GET", url, HEADERS, params=params)
         j = r.json(); out.extend(j.get("records", [])); offset = j.get("offset"); time.sleep(0.25)
         if not offset: break
     return out
