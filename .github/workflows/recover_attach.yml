@@ -1,0 +1,53 @@
+name: Recover missing attachments
+
+on:
+  workflow_dispatch:
+    inputs:
+      types:
+        description: "Optional source_type filter, comma-separated (blank = all)."
+        type: string
+        default: ""
+      year_min:
+        description: "Only rows with doc_year >= this (0 = no filter)."
+        type: string
+        default: "0"
+      limit:
+        description: "Process at most this many rows (0 = all). Use for waves."
+        type: string
+        default: "0"
+      commit:
+        description: "Actually download, upload and stamp status. Off = dry run (count only)."
+        type: boolean
+        default: false
+  # Daily at 19:00 UTC, hours after the morning attach chain so Airtable has
+  # finished its URL fetches; recover then handles only the genuine leftovers.
+  schedule:
+    - cron: "0 19 * * *"
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run recovery
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ARGS="--year-min ${{ inputs.year_min }} --limit ${{ inputs.limit }}"
+            [ -n "${{ inputs.types }}" ] && ARGS="$ARGS --types ${{ inputs.types }}"
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          else
+            ARGS="--year-min 0 --limit 0 --commit"
+          fi
+          echo ">>> python recover_attach.py $ARGS"
+          python recover_attach.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_ATTACH_FIELD: file
+          AIRTABLE_STATUS_FIELD: file_status
