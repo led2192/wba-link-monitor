@@ -30,6 +30,7 @@ from urllib.parse import quote
 
 API = "https://api.airtable.com/v0"
 F_ID = "library_id"; F_URL = "document_url"; F_TYPE = "source_type"; F_YEAR = "doc_year"
+F_STATUS = "file_status"  # set by recover_attach on rows it could not attach; skip those here
 
 
 def airtable_request(method, url, headers, payload=None, params=None, timeout=60, tries=5):
@@ -51,11 +52,11 @@ def airtable_request(method, url, headers, payload=None, params=None, timeout=60
     return r
 
 
-def select_rows(base, token, table, attach_field, types, year_min, attach_all):
+def select_rows(base, token, table, attach_field, status_field, types, year_min, attach_all):
     """Rows missing the attachment that pass the filters: (record_id, document_url)."""
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
-    fields = [F_ID, F_URL, F_TYPE, F_YEAR, attach_field]
+    fields = [F_ID, F_URL, F_TYPE, F_YEAR, attach_field, status_field]
     params = [("pageSize", "100")] + [("fields[]", f) for f in fields]
     out = []; offset = None
     while True:
@@ -66,6 +67,8 @@ def select_rows(base, token, table, attach_field, types, year_min, attach_all):
             f = rec.get("fields", {})
             doc = f.get(F_URL, "")
             if not doc or f.get(attach_field):           # no url, or already attached
+                continue
+            if f.get(status_field):                       # recover marked it dead/blocked/oversize
                 continue
             if not attach_all and not f.get(F_TYPE):      # default: only classified rows
                 continue
@@ -108,11 +111,12 @@ def main():
     token = os.environ.get("AIRTABLE_TOKEN"); base = os.environ.get("AIRTABLE_BASE")
     table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
     attach_field = os.environ.get("AIRTABLE_ATTACH_FIELD", "file")
+    status_field = os.environ.get("AIRTABLE_STATUS_FIELD", "file_status")
     if not (token and base):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
     types = {t.strip() for t in args.types.split(",") if t.strip()}
 
-    rows = select_rows(base, token, table, attach_field, types, args.year_min, args.all)
+    rows = select_rows(base, token, table, attach_field, status_field, types, args.year_min, args.all)
     print(f"{len(rows)} rows selected (missing a file"
           f"{', any' if args.all else ', classified only'}"
           f"{', types=' + ','.join(sorted(types)) if types else ''}"
