@@ -32,6 +32,7 @@ from urllib.parse import quote
 F_ID="detection_id"; F_DETECTED="detected"; F_WBA="wba_id"; F_PTYPE="page_type"
 F_DTYPE="doc_type"; F_RECENT="recent"; F_LABEL="label"; F_STATUS="status"
 API = "https://api.airtable.com/v0"
+from monitor_core import airtable_request
 
 
 def classified(fields):
@@ -114,7 +115,7 @@ def from_airtable(base, token, table):
     params = {"pageSize": 100}; out = []; offset = None
     while True:
         if offset: params["offset"] = offset
-        r = requests.get(url, headers=headers, params=params, timeout=30); r.raise_for_status()
+        r = airtable_request("GET", url, headers, params=params); r.raise_for_status()
         j = r.json()
         out.extend((rec["id"], rec.get("fields", {})) for rec in j.get("records", []))
         offset = j.get("offset"); time.sleep(0.22)
@@ -135,8 +136,7 @@ def commit_airtable(base, token, table, records, action):
     kept = sum(1 for a in action.values() if a == "keep_new")
     print(f"writing status on {len(updates)} rows (leaving {kept} as 'new') ...")
     for i in range(0, len(updates), 10):
-        r = requests.patch(url, headers=headers,
-                           json={"records": updates[i:i + 10], "typecast": True}, timeout=30)
+        r = airtable_request("PATCH", url, headers, {"records": updates[i:i + 10], "typecast": True})
         r.raise_for_status(); time.sleep(0.22)
         if i % 1000 == 0 and i:
             print(f"  {i}/{len(updates)}")
