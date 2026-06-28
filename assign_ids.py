@@ -27,6 +27,7 @@ except ImportError:
 from ids import link_id, detection_id
 
 API   = "https://api.airtable.com/v0"
+from monitor_core import airtable_request
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
 BASE  = os.environ.get("AIRTABLE_BASE")
 LINKS = os.environ.get("AIRTABLE_TABLE", "monitored_links")
@@ -40,7 +41,7 @@ def get_all(table):
     url=f"{API}/{BASE}/{quote(table)}"; params={"pageSize":100}; out=[]; offset=None
     while True:
         if offset: params["offset"]=offset
-        r=requests.get(url,headers=HEADERS,params=params,timeout=30); r.raise_for_status()
+        r=airtable_request("GET", url, HEADERS, params=params); r.raise_for_status()
         j=r.json(); out.extend(j.get("records",[])); offset=j.get("offset"); time.sleep(0.25)
         if not offset: break
     return out
@@ -48,8 +49,7 @@ def get_all(table):
 def patch(table, updates):
     url=f"{API}/{BASE}/{quote(table)}"
     for i in range(0,len(updates),10):
-        r=requests.patch(url,headers={**HEADERS,"Content-Type":"application/json"},
-                         json={"records":updates[i:i+10],"typecast":True},timeout=30)
+        r=airtable_request("PATCH", url, {**HEADERS,"Content-Type":"application/json"}, {"records":updates[i:i+10],"typecast":True})
         r.raise_for_status(); time.sleep(0.25)
 
 def backfill_links():
