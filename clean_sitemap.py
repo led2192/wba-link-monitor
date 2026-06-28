@@ -20,6 +20,7 @@ except ImportError:
     sys.exit("pip install requests")
 
 API   = "https://api.airtable.com/v0"
+from monitor_core import airtable_request
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
 BASE  = os.environ.get("AIRTABLE_BASE")
 TABLE = os.environ.get("AIRTABLE_TABLE", "monitored_links")
@@ -43,7 +44,7 @@ def get_all():
     url=f"{API}/{BASE}/{quote(TABLE)}"; params={"pageSize":100}; out=[]; offset=None
     while True:
         if offset: params["offset"]=offset
-        r=requests.get(url,headers=HEADERS,params=params,timeout=30); r.raise_for_status()
+        r=airtable_request("GET", url, HEADERS, params=params); r.raise_for_status()
         j=r.json(); out.extend(j.get("records",[])); offset=j.get("offset"); time.sleep(0.25)
         if not offset: break
     return out
@@ -52,7 +53,7 @@ def delete(ids):
     url=f"{API}/{BASE}/{quote(TABLE)}"
     for i in range(0,len(ids),10):
         params=[("records[]",x) for x in ids[i:i+10]]
-        r=requests.delete(url,headers=HEADERS,params=params,timeout=30); r.raise_for_status(); time.sleep(0.25)
+        r=airtable_request("DELETE", url, HEADERS, params=params); r.raise_for_status(); time.sleep(0.25)
         if (i//10)%50==0: print(f"  deleted {min(i+10,len(ids))}/{len(ids)}")
 
 def main():
