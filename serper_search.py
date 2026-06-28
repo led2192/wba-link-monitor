@@ -33,6 +33,7 @@ except ImportError:
     sys.exit("pip install requests tldextract")
 
 API   = "https://api.airtable.com/v0"
+from monitor_core import airtable_request
 SERPER= "https://google.serper.dev/search"
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
 BASE  = os.environ.get("AIRTABLE_BASE")
@@ -89,7 +90,7 @@ def get_companies():
     url=f"{API}/{BASE}/{quote(TABLE)}"; params={"pageSize":100}; out=[]; offset=None
     while True:
         if offset: params["offset"]=offset
-        r=requests.get(url,headers=HEADERS,params=params,timeout=30); r.raise_for_status()
+        r=airtable_request("GET", url, HEADERS, params=params); r.raise_for_status()
         j=r.json(); out.extend(j.get("records",[])); offset=j.get("offset"); time.sleep(0.25)
         if not offset: break
     name={}; dom=defaultdict(Counter)
@@ -106,7 +107,7 @@ def existing_urls():
     while True:
         if offset: params["offset"]=offset
         try:
-            r=requests.get(url,headers=HEADERS,params=params,timeout=30); r.raise_for_status()
+            r=airtable_request("GET", url, HEADERS, params=params); r.raise_for_status()
         except Exception:
             return seen   # table empty / new
         j=r.json()
@@ -118,8 +119,7 @@ def existing_urls():
 def post(records):
     url=f"{API}/{BASE}/{quote(RTABLE)}"
     for i in range(0,len(records),10):
-        r=requests.post(url,headers={**HEADERS,"Content-Type":"application/json"},
-                        json={"records":[{"fields":x} for x in records[i:i+10]],"typecast":True},timeout=30)
+        r=airtable_request("POST", url, {**HEADERS,"Content-Type":"application/json"}, {"records":[{"fields":x} for x in records[i:i+10]],"typecast":True})
         r.raise_for_status(); time.sleep(0.25)
 
 def main():
