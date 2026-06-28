@@ -32,7 +32,6 @@ jobs:
   attach:
     runs-on: ubuntu-latest
     timeout-minutes: 330
-    # manual run, or only when the upstream classify succeeded
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
@@ -48,8 +47,8 @@ jobs:
             [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"
             [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
           else
-            # daily auto-run: classified rows still missing a file, no cap, committed
-            ARGS="--year-min 0 --limit 0 --commit"
+            # daily auto-run: any in-scope row still missing a file (skips rows recover marked dead)
+            ARGS="--all --year-min 0 --limit 0 --commit"
           fi
           echo ">>> python attach_files.py $ARGS"
           python attach_files.py $ARGS
@@ -58,3 +57,4 @@ jobs:
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_LIBRARY_TABLE: report_library
           AIRTABLE_ATTACH_FIELD: file
+          AIRTABLE_STATUS_FIELD: file_status
