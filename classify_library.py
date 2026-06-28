@@ -28,6 +28,7 @@ import argparse, os, re, sys, time, collections
 from urllib.parse import quote, urlsplit
 
 API = "https://api.airtable.com/v0"
+from monitor_core import airtable_request
 F_ID = "library_id"; F_URL = "document_url"; F_TYPE = "source_type"; F_CONF = "match_confidence"
 
 # Curated, overlapping on purpose (an ESG doc that is really a sustainability report still counts).
@@ -77,7 +78,7 @@ def from_airtable(base, token, table, force):
     out = []; offset = None
     while True:
         p = list(params) + ([("offset", offset)] if offset else [])
-        r = requests.get(url, headers=headers, params=p, timeout=30); r.raise_for_status()
+        r = airtable_request("GET", url, headers, params=p); r.raise_for_status()
         j = r.json()
         for rec in j.get("records", []):
             f = rec.get("fields", {})
@@ -95,8 +96,7 @@ def commit(base, token, table, updates):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     print(f"writing source_type/match_confidence on {len(updates)} rows ...")
     for i in range(0, len(updates), 10):
-        r = requests.patch(url, headers=headers,
-                           json={"records": updates[i:i + 10], "typecast": True}, timeout=30)
+        r = airtable_request("PATCH", url, headers, {"records": updates[i:i + 10], "typecast": True})
         r.raise_for_status(); time.sleep(0.22)
         if i and i % 1000 == 0:
             print(f"  {i}/{len(updates)}")
