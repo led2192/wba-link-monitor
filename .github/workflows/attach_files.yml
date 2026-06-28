@@ -1,4 +1,4 @@
-name: Attach report PDFs (manual)
+name: Attach report PDFs
 
 on:
   workflow_dispatch:
@@ -23,11 +23,17 @@ on:
         description: "Actually attach. Leave OFF for a dry-run count."
         type: boolean
         default: false
+  # Daily: runs automatically after the library is (re)classified.
+  workflow_run:
+    workflows: ["Classify report library"]
+    types: [completed]
 
 jobs:
   attach:
     runs-on: ubuntu-latest
     timeout-minutes: 330
+    # manual run, or only when the upstream classify succeeded
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,10 +42,15 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run attacher
         run: |
-          ARGS="--year-min ${{ inputs.year_min }} --limit ${{ inputs.limit }}"
-          [ -n "${{ inputs.types }}" ] && ARGS="$ARGS --types ${{ inputs.types }}"
-          [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"
-          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ARGS="--year-min ${{ inputs.year_min }} --limit ${{ inputs.limit }}"
+            [ -n "${{ inputs.types }}" ] && ARGS="$ARGS --types ${{ inputs.types }}"
+            [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          else
+            # daily auto-run: classified rows still missing a file, no cap, committed
+            ARGS="--year-min 0 --limit 0 --commit"
+          fi
           echo ">>> python attach_files.py $ARGS"
           python attach_files.py $ARGS
         env:
