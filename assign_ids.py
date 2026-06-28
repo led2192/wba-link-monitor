@@ -24,14 +24,13 @@ try:
     import requests
 except ImportError:
     sys.exit("pip install requests")
-from ids import link_id, detection_id
+from ids import link_id
 
 API   = "https://api.airtable.com/v0"
 from monitor_core import airtable_request
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
 BASE  = os.environ.get("AIRTABLE_BASE")
 LINKS = os.environ.get("AIRTABLE_TABLE", "monitored_links")
-DETS  = os.environ.get("AIRTABLE_DETECTIONS_TABLE", "detections")
 FORCE = os.environ.get("IDS_FORCE", "").lower() in ("true", "1", "yes")
 if not (TOKEN and BASE):
     sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE environment variables.")
@@ -61,22 +60,9 @@ def backfill_links():
     print(f"monitored_links: {len(ups)} of {len(rows)} rows to set link_id.")
     patch(LINKS, ups)
 
-def backfill_detections():
-    rows=get_all(DETS); ups=[]
-    for r in rows:
-        f=r.get("fields",{})
-        if not FORCE and f.get("detection_id") and f.get("source_link_id"): continue
-        wba=f.get("wba_id",""); found=f.get("found_on",""); doc=f.get("document_url","")
-        ups.append({"id":r["id"],"fields":{
-            "detection_id":detection_id(wba, found, doc),
-            "source_link_id":link_id(wba, found)}})
-    print(f"detections: {len(ups)} of {len(rows)} rows to set ids.")
-    patch(DETS, ups)
-
 def main():
     print(f"Backfilling ids{' [FORCE]' if FORCE else ''} ...")
     backfill_links()
-    backfill_detections()
     print("Done.")
 
 if __name__=="__main__":
