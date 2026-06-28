@@ -7,6 +7,10 @@ on:
         description: "Recompute ids for ALL rows (otherwise only fills empty ones)"
         type: boolean
         default: false
+  # Daily at 05:45 UTC, 15 min before the monitor, so analyst-added rows get a
+  # link_id before the monitor reads them and the harvester tags source_link_id.
+  schedule:
+    - cron: "45 5 * * *"
 
 jobs:
   assign-ids:
@@ -18,10 +22,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - run: python assign_ids.py
+      - name: Assign ids
+        run: python assign_ids.py
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_TABLE: monitored_links
-          AIRTABLE_DETECTIONS_TABLE: detections
-          IDS_FORCE: ${{ github.event.inputs.force }}
+          IDS_FORCE: ${{ inputs.force && 'true' || '' }}
