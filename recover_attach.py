@@ -5,7 +5,7 @@ recover_attach.py — recover the report_library files Airtable's own URL-fetch 
 It downloads each still-missing PDF here (browser User-Agent), validates that it really is a PDF,
 and uploads the bytes straight into the attachment cell via Airtable's upload endpoint:
 
-    POST {API}/{base}/{recordId}/{attachmentFieldIdOrName}/uploadAttachment   (hard limit 5 MB/file)
+    POST {CONTENT_API}/{base}/{recordId}/{attachmentFieldIdOrName}/uploadAttachment   (hard limit 5 MB/file)
 
 For anything it genuinely cannot attach it writes a terminal `file_status`, so the daily run never
 retries a dead row again and the cost stays flat as the library grows. The status field only records
@@ -33,6 +33,7 @@ from monitor_core import airtable_request   # retrying Airtable helper (reads, w
 import requests
 
 API = "https://api.airtable.com/v0"
+CONTENT_API = "https://content.airtable.com/v0"   # upload endpoint lives on a different host
 F_URL = "document_url"; F_TYPE = "source_type"; F_ID = "library_id"; F_YEAR = "doc_year"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -105,7 +106,7 @@ def download(url):
 
 
 def upload(base, token, attach_field, rid, filename, data):
-    url = f"{API}/{base}/{rid}/{quote(attach_field)}/uploadAttachment"
+    url = f"{CONTENT_API}/{base}/{rid}/{quote(attach_field)}/uploadAttachment"
     payload = {"contentType": "application/pdf",
                "file": base64.b64encode(data).decode(),
                "filename": filename}
