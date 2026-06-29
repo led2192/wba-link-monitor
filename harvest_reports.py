@@ -101,9 +101,11 @@ def build(records, types, reports_only):
             if lib_id not in rows:
                 per_company[wba] += 1
                 per_type[str(typ).strip().lower()] += 1
+                slid = link_id(wba, page)
                 rows[lib_id] = {"library_id": lib_id, "wba_id": wba, "company_name": name,
                                 "document_url": doc, "found_on": page, "page_type": typ,
-                                "doc_year": year_of(doc), "source_link_id": link_id(wba, page)}
+                                "doc_year": year_of(doc), "source_link_id": slid,
+                                "source_page": [slid]}   # typecast resolves to monitored_links by link_id
     return list(rows.values()), per_company, per_type
 
 
