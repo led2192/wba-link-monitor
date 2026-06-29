@@ -1,0 +1,36 @@
+name: Link documents to source page (one-off)
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max rows to link this run (0 = all). Use for waves."
+        type: string
+        default: "0"
+      commit:
+        description: "Actually write the links. Off = dry run (count only)."
+        type: boolean
+        default: false
+
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Link documents
+        run: |
+          ARGS="--limit ${{ inputs.limit }}"
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          echo ">>> python link_documents.py $ARGS"
+          python link_documents.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_LINKS_TABLE: monitored_links
+          AIRTABLE_LINK_FIELD: source_page
