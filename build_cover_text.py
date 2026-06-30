@@ -6,26 +6,29 @@ For every report_library row that has a file attachment, open the PDF and write:
     cover_text   -> text of the first N pages (cheap input for the AI fields)
     page_count   -> total number of pages in the PDF
     doc_language -> ISO language code detected from the cover text (en, de, ja, ...)
-    cover_status -> outcome (the real reason); see page_count note below
+    cover_status -> outcome (the real reason)
 
 cover_status values:
-    ok            -> text extracted, cover_text + page_count + doc_language written
-    no_text       -> PDF parsed but no extractable text (scanned / image-only); page_count still written
+    ok            -> text extracted; cover_text + page_count + doc_language written
+    no_text       -> PDF parsed but no extractable text (scanned / image-only); page_count written
+    parse_fail    -> file arrived COMPLETE (ends in %%EOF) but pypdf still cannot read it -> genuinely broken
+    truncated     -> download arrived INCOMPLETE after retries (no %%EOF / short body) -> transient, retry later
     not_pdf       -> attachment did not start with %PDF
-    download_fail -> could not download the attachment
-    parse_fail    -> pypdf could not open the file
+    download_fail -> could not download at all after retries -> transient, retry later
 
-The AI fields read @cover_text instead of @file, which is far cheaper in credits.
-Rows that end up no_text / not_pdf / parse_fail are the small remainder for OCR or
-the full-PDF path later.
+page_count is ALWAYS written (real count, or 0 when there is no usable PDF), so the queue
+(driven by page_count being empty) terminates. page_count = 0 means "see cover_status".
 
-The queue is driven by page_count being empty, and page_count is ALWAYS written (the real
-page count, or 0 when the PDF could not be opened). That makes the run terminate and lets it
-auto-reclaim rows left half-done by an earlier version that did not write page_count.
-page_count = 0 means "no usable PDF, see cover_status".
+Why the completeness check: under heavy concurrency the attachment CDN can throttle and return
+a body cut short with a 200. That body starts with %PDF but lacks the trailing %%EOF, so pypdf
+fails. We verify Content-Length and the %%EOF tail, retry, and only then mark 'truncated' (NOT a
+permanent failure). This also avoids handing pypdf broken files, whose recovery scan is very slow.
 
-Dry run (no writes): downloads a small sample and prints what it would extract.
-Add --commit to run the full backfill.
+Modes:
+    (no flag)   dry run: download a small sample and print what would be extracted (no writes)
+    --commit    run the backfill (queue = rows with a file and empty page_count)
+    --reclaim   clear page_count + cover_status on rows previously marked as a (possibly transient)
+                failure, so a later --commit reprocesses them with the hardened downloader
 
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE,
      AIRTABLE_LIBRARY_TABLE   (default report_library),
@@ -45,7 +48,6 @@ from pypdf import PdfReader
 
 from monitor_core import airtable_request
 
-# soft import: if langdetect is missing, keep going without the language field
 try:
     from langdetect import detect as _ld_detect, DetectorFactory
     DetectorFactory.seed = 0
@@ -68,11 +70,14 @@ UA  = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                      "AppleWebKit/537.36 (KHTML, like Gecko) "
                      "Chrome/124.0 Safari/537.36"}
 
-MAX_CHARS = 90_000        # stay under Airtable's ~100k long-text cap
-DL_TIMEOUT = 45
-WORKERS = 20
+MAX_CHARS = 90_000
+DL_TIMEOUT = 60
+DL_TRIES = 3
+WORKERS = 6              # gentle: high concurrency was triggering CDN throttling / truncation
 WRITE_BATCH = 10
 WRITE_PAUSE = 0.25
+# failure states that --reclaim puts back into the queue
+RETRYABLE = ("parse_fail", "not_pdf", "truncated", "download_fail")
 
 
 def detect_lang(text):
@@ -85,7 +90,6 @@ def detect_lang(text):
 
 
 def fetch_todo(page_size):
-    """First `page_size` rows that have a file but no cover_status yet."""
     formula = f"AND({{{FILE_F}}}, {{{PAGE_F}}} = BLANK())"
     params = [("pageSize", page_size), ("filterByFormula", formula), ("fields[]", FILE_F)]
     r = airtable_request("GET", API, H, params=params)
@@ -93,7 +97,6 @@ def fetch_todo(page_size):
 
 
 def fetch_sample(n):
-    """Any rows that have a file, for a dry-run quality check."""
     params = [("pageSize", min(n, 100)), ("filterByFormula", f"{{{FILE_F}}}"), ("fields[]", FILE_F)]
     r = airtable_request("GET", API, H, params=params)
     return r.json().get("records", [])[:n]
@@ -104,16 +107,35 @@ def attachment_url(rec):
     return cell[0].get("url") if cell else None
 
 
+def download_pdf(url):
+    """Return (kind, data). kind in {'ok','not_pdf','truncated','download_fail'}.
+    Verifies the body is a COMPLETE PDF (Content-Length match and %%EOF tail); retries
+    incomplete or failed downloads before giving up."""
+    last = "download_fail"
+    delay = 1.0
+    for _ in range(DL_TRIES):
+        try:
+            resp = requests.get(url, headers=UA, timeout=DL_TIMEOUT)
+            resp.raise_for_status()
+            data = resp.content
+        except Exception:
+            last = "download_fail"; time.sleep(delay); delay *= 2; continue
+        if not data[:5].startswith(b"%PDF"):
+            return "not_pdf", b""           # genuinely not a PDF (or an error page)
+        clen = resp.headers.get("Content-Length")
+        short = bool(clen and clen.isdigit() and len(data) < int(clen))
+        no_eof = b"%%EOF" not in data[-2048:]
+        if short or no_eof:                  # incomplete body -> throttled/cut; retry
+            last = "truncated"; time.sleep(delay); delay *= 2; continue
+        return "ok", data
+    return last, b""
+
+
 def extract_cover(url, pages):
     """Return (status, text, page_count). page_count is None unless the PDF parsed."""
-    try:
-        resp = requests.get(url, headers=UA, timeout=DL_TIMEOUT)
-        resp.raise_for_status()
-        data = resp.content
-    except Exception:
-        return "download_fail", "", None
-    if not data[:5].startswith(b"%PDF"):
-        return "not_pdf", "", None
+    kind, data = download_pdf(url)
+    if kind != "ok":
+        return kind, "", None                # not_pdf / truncated / download_fail
     try:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
@@ -130,7 +152,7 @@ def extract_cover(url, pages):
                 chunks.append("")
         text = "\n".join(chunks).strip()
     except Exception:
-        return "parse_fail", "", None
+        return "parse_fail", "", None        # complete file, but genuinely unreadable
     if not text:
         return "no_text", "", n_pages
     return "ok", text[:MAX_CHARS], n_pages
@@ -146,7 +168,6 @@ def process_one(rec, pages):
 
 
 def write_batch(updates):
-    """updates: list of (record_id, status, text, page_count, lang)."""
     for i in range(0, len(updates), WRITE_BATCH):
         chunk = updates[i:i + WRITE_BATCH]
         records = []
@@ -171,8 +192,7 @@ def run_dry(sample, pages):
         counts[status] = counts.get(status, 0) + 1
         preview = text[:600].replace("\n", " ")
         pg = n_pages if n_pages is not None else "-"
-        lg = lang or "-"
-        print(f"[{status:13}] {rid}  pages={pg:>4}  lang={lg:<6}  chars={len(text):>6}  {preview}")
+        print(f"[{status:13}] {rid}  pages={pg!s:>4}  lang={lang or '-':<6}  chars={len(text):>6}  {preview}")
     print("\nsummary:", counts)
     print("\nIf the [ok] previews look right, point the AI fields at @cover_text and run with --commit.")
 
@@ -197,14 +217,37 @@ def run_commit(pages, limit):
     print(f">>> DONE. processed {done} rows. {counts}")
 
 
+def run_reclaim():
+    """Put previously-failed rows back into the queue (clear page_count + cover_status), so a
+    later --commit reprocesses them with the hardened downloader."""
+    formula = "OR(" + ",".join(f"{{{STAT_F}}}='{v}'" for v in RETRYABLE) + ")"
+    cleared = 0
+    while True:
+        params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", STAT_F)]
+        r = airtable_request("GET", API, H, params=params)
+        rows = r.json().get("records", [])
+        if not rows:
+            break
+        for i in range(0, len(rows), WRITE_BATCH):
+            recs = [{"id": x["id"], "fields": {PAGE_F: None, STAT_F: None}} for x in rows[i:i + WRITE_BATCH]]
+            airtable_request("PATCH", API, H, {"records": recs, "typecast": True})
+            time.sleep(WRITE_PAUSE)
+        cleared += len(rows)
+        print(f"  cleared {cleared}", flush=True)
+    print(f">>> RECLAIM done. {cleared} rows put back into the queue. Now run with --commit.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pages", type=int, default=8, help="first N pages to read")
     ap.add_argument("--limit", type=int, default=0, help="cap total rows (0 = all)")
     ap.add_argument("--sample", type=int, default=20, help="dry-run sample size")
     ap.add_argument("--commit", action="store_true", help="write to Airtable")
+    ap.add_argument("--reclaim", action="store_true", help="requeue previously-failed rows, then exit")
     args = ap.parse_args()
-    if args.commit:
+    if args.reclaim:
+        run_reclaim()
+    elif args.commit:
         run_commit(args.pages, args.limit)
     else:
         run_dry(args.sample, args.pages)
