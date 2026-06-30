@@ -143,9 +143,8 @@ def extract_cover(url, pages):
                 reader.decrypt("")
             except Exception:
                 pass
-        n_pages = len(reader.pages)
         chunks = []
-        for p in reader.pages[:pages]:
+        for p in reader.pages[:pages]:        # v1 path: only resolves the first N pages
             try:
                 chunks.append(p.extract_text() or "")
             except Exception:
@@ -153,6 +152,11 @@ def extract_cover(url, pages):
         text = "\n".join(chunks).strip()
     except Exception:
         return "parse_fail", "", None        # complete file, but genuinely unreadable
+    # page count is best-effort; it must NEVER gate the text extraction above
+    try:
+        n_pages = len(reader.pages)
+    except Exception:
+        n_pages = None
     if not text:
         return "no_text", "", n_pages
     return "ok", text[:MAX_CHARS], n_pages
@@ -237,6 +241,68 @@ def run_reclaim():
     print(f">>> RECLAIM done. {cleared} rows put back into the queue. Now run with --commit.")
 
 
+def run_diagnose(n, pages):
+    """Inspect rows straight from the queue (page_count empty) and print, per file, what actually
+    comes down the wire: real header, Content-Type, completeness, encryption, and the exact pypdf
+    error. No writes. This tells us WHY files fail instead of guessing."""
+    rows = fetch_todo(min(n, 100))
+    print(f">>> DIAGNOSE: inspecting {len(rows)} rows from the queue (no writes)\n")
+    summ = {}
+    for rec in rows:
+        url = attachment_url(rec)
+        fn = ((rec.get("fields", {}).get(FILE_F) or [{}])[0].get("filename", "") or "")[:45]
+        if not url:
+            print(f"{rec['id']}  NO URL"); summ["no_url"] = summ.get("no_url", 0) + 1; continue
+        try:
+            resp = requests.get(url, headers=UA, timeout=DL_TIMEOUT)
+            data = resp.content
+        except Exception as e:
+            print(f"{rec['id']}  DOWNLOAD ERROR {type(e).__name__}: {e}")
+            summ["dl_err"] = summ.get("dl_err", 0) + 1; continue
+        ctype = resp.headers.get("Content-Type", "")
+        clen = resp.headers.get("Content-Length", "")
+        eof = b"%%EOF" in data[-2048:]
+        is_pdf = data[:5].startswith(b"%PDF")
+        verdict = "ok"
+        line = (f"{rec['id']}  fn={fn!r}\n"
+                f"    http={resp.status_code} ctype={ctype!r} clen={clen} got={len(data)} "
+                f"pdf_header={is_pdf} eof_tail={eof}\n"
+                f"    head={data[:20]!r}\n    tail={data[-32:]!r}")
+        if is_pdf:
+            try:
+                rd = PdfReader(io.BytesIO(data))
+                enc = rd.is_encrypted
+                if enc:
+                    try: rd.decrypt("")
+                    except Exception: pass
+                note = ""
+                txt_chars = None
+                try:                                   # probe A: first-page text (the v1 path)
+                    txt_chars = len((rd.pages[0].extract_text() or "").strip())
+                except Exception as e:
+                    note += f" TEXT_ERR={type(e).__name__}:{str(e)[:45]}"
+                len_pages = None
+                try:                                   # probe B: full page count (the v2 line)
+                    len_pages = len(rd.pages)
+                except Exception as e:
+                    note += f" LEN_ERR={type(e).__name__}:{str(e)[:45]}"
+                line += f"\n    pypdf: encrypted={enc} first_page_text_chars={txt_chars} len_pages={len_pages}{note}"
+                if txt_chars:
+                    verdict = "text_ok_len_fail" if len_pages is None else "ok"
+                elif len_pages is not None:
+                    verdict = "no_text"
+                else:
+                    verdict = "parse_fail"
+            except Exception as e:
+                line += f"\n    pypdf: READER_ERROR {type(e).__name__}: {str(e)[:90]}"
+                verdict = "reader_fail"
+        else:
+            verdict = "not_pdf"
+        summ[verdict] = summ.get(verdict, 0) + 1
+        print(line + f"\n    => {verdict}\n")
+    print("verdict summary:", summ)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pages", type=int, default=8, help="first N pages to read")
@@ -244,8 +310,11 @@ def main():
     ap.add_argument("--sample", type=int, default=20, help="dry-run sample size")
     ap.add_argument("--commit", action="store_true", help="write to Airtable")
     ap.add_argument("--reclaim", action="store_true", help="requeue previously-failed rows, then exit")
+    ap.add_argument("--diagnose", type=int, default=0, metavar="N", help="inspect N queue rows verbosely, then exit")
     args = ap.parse_args()
-    if args.reclaim:
+    if args.diagnose:
+        run_diagnose(args.diagnose, args.pages)
+    elif args.reclaim:
         run_reclaim()
     elif args.commit:
         run_commit(args.pages, args.limit)
