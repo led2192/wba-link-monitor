@@ -26,6 +26,15 @@ import requests
 from bs4 import BeautifulSoup
 import tldextract
 
+# Optional language detection (used by page_language). Soft import so the monitor never
+# breaks if the dependency is missing; the language field is simply skipped in that case.
+try:
+    from langdetect import detect as _ld_detect, DetectorFactory
+    DetectorFactory.seed = 0
+    _HAVE_LD = True
+except Exception:
+    _HAVE_LD = False
+
 API = "https://api.airtable.com/v0"
 
 # ---- Airtable field names (single source of truth; edit here if a field is renamed) ----
@@ -34,6 +43,7 @@ F_TYPE="type"; F_STATUS="status"; F_HTTP="http_status"; F_FINAL="final_url"
 F_CHECKED="last_checked"; F_HASH="content_hash"
 F_SEEN="seen_links"; F_NEW="new_links"; F_CHANGE="last_change"; F_ALERT="alert_status"
 F_BROWSER="needs_browser"
+F_LANG="page_language"
 
 # Page types whose detections we drop entirely (news pages produce press-release noise).
 SKIP_DETECTION_TYPES = {"news"}
@@ -98,6 +108,37 @@ def doc_links(html, base):
             if n and n not in out:
                 out[n] = (absu, a.get_text(" ", strip=True)[:80])
     return out
+
+
+def page_language(html):
+    """Best-effort primary language of a page. Tries the declared <html lang> attribute first
+    (most reliable), then falls back to detecting from the visible text. Fully guarded: returns
+    a short ISO code (e.g. "en", "de") or None, and never raises, so it can't break the monitor."""
+    if not html:
+        return None
+    soup = None
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        tag = soup.find("html")
+        if tag and tag.get("lang"):
+            code = tag.get("lang").strip().lower().split("-")[0].split("_")[0]
+            if code.isalpha() and 2 <= len(code) <= 3:
+                return code
+    except Exception:
+        soup = None
+    if not _HAVE_LD:
+        return None
+    try:
+        if soup is None:
+            soup = BeautifulSoup(html, "html.parser")
+        for t in soup(["script", "style", "noscript"]):
+            t.extract()
+        text = soup.get_text(" ", strip=True)[:3000]
+        if len(text) < 20:
+            return None
+        return _ld_detect(text)
+    except Exception:
+        return None
 
 
 def detection_fields(f, upd, current, had_baseline, today):
