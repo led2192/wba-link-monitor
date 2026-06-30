@@ -110,10 +110,32 @@ def doc_links(html, base):
     return out
 
 
+LANG_NAMES = {
+    "af":"Afrikaans","ar":"Arabic","bg":"Bulgarian","bn":"Bengali","ca":"Catalan",
+    "cs":"Czech","cy":"Welsh","da":"Danish","de":"German","el":"Greek","en":"English",
+    "es":"Spanish","et":"Estonian","fa":"Persian","fi":"Finnish","fr":"French",
+    "gu":"Gujarati","he":"Hebrew","hi":"Hindi","hr":"Croatian","hu":"Hungarian",
+    "id":"Indonesian","it":"Italian","ja":"Japanese","kn":"Kannada","ko":"Korean",
+    "lt":"Lithuanian","lv":"Latvian","mk":"Macedonian","ml":"Malayalam","mr":"Marathi",
+    "ne":"Nepali","nl":"Dutch","no":"Norwegian","pa":"Punjabi","pl":"Polish",
+    "pt":"Portuguese","ro":"Romanian","ru":"Russian","sk":"Slovak","sl":"Slovenian",
+    "so":"Somali","sq":"Albanian","sv":"Swedish","sw":"Swahili","ta":"Tamil",
+    "te":"Telugu","th":"Thai","tl":"Tagalog","tr":"Turkish","uk":"Ukrainian",
+    "ur":"Urdu","vi":"Vietnamese","zh-cn":"Chinese (Simplified)","zh-tw":"Chinese (Traditional)",
+}
+
+
+def lang_name(code):
+    """Map a detector/HTML language code to a readable name; fall back to the raw code if unknown."""
+    if not code:
+        return None
+    return LANG_NAMES.get(code) or LANG_NAMES.get(code.split("-")[0]) or code
+
+
 def page_language(html):
     """Best-effort primary language of a page. Tries the declared <html lang> attribute first
-    (most reliable), then falls back to detecting from the visible text. Fully guarded: returns
-    a short ISO code (e.g. "en", "de") or None, and never raises, so it can't break the monitor."""
+    (most reliable), then falls back to detecting from the visible text. Returns a readable
+    language name (e.g. "English", "German") or None, and never raises, so it can't break the monitor."""
     if not html:
         return None
     soup = None
@@ -123,7 +145,7 @@ def page_language(html):
         if tag and tag.get("lang"):
             code = tag.get("lang").strip().lower().split("-")[0].split("_")[0]
             if code.isalpha() and 2 <= len(code) <= 3:
-                return code
+                return lang_name(code)
     except Exception:
         soup = None
     if not _HAVE_LD:
@@ -133,10 +155,10 @@ def page_language(html):
             soup = BeautifulSoup(html, "html.parser")
         for t in soup(["script", "style", "noscript"]):
             t.extract()
-        text = soup.get_text(" ", strip=True)[:3000]
-        if len(text) < 20:
+        text = soup.get_text(" ", strip=True)
+        if sum(ch.isalpha() for ch in text) < 30:
             return None
-        return _ld_detect(text)
+        return lang_name(_ld_detect(text[:10000]))
     except Exception:
         return None
 
