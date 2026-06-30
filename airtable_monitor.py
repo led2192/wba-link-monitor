@@ -27,9 +27,9 @@ except ImportError:
     sys.exit("pip install requests beautifulsoup4 tldextract")
 
 from monitor_core import (
-    API, doc_links, detection_fields, post_detections, airtable_request,
+    API, doc_links, detection_fields, post_detections, airtable_request, page_language,
     F_WBA, F_NAME, F_URL, F_FREQ, F_MON, F_STATUS, F_TYPE,
-    F_HTTP, F_CHECKED, F_HASH, F_SEEN, F_NEW, F_CHANGE, F_ALERT,
+    F_HTTP, F_CHECKED, F_HASH, F_SEEN, F_NEW, F_CHANGE, F_ALERT, F_LANG,
 )
 
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
@@ -105,6 +105,9 @@ def process(rec, sess):
         return rec["id"], upd, False, False, []
     upd[F_STATUS] = "redirected" if r.history else "ok"
     upd[F_HTTP] = str(r.status_code)
+    lang = page_language(r.text)
+    if lang:
+        upd[F_LANG] = lang
     current = doc_links(r.text, r.url)
     had_baseline = bool(f.get(F_HASH))   # content_hash present = page visited before
     changed, high, docs = detection_fields(f, upd, current, had_baseline, TODAY)
