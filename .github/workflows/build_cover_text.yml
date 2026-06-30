@@ -9,6 +9,7 @@ on:
         default: "dry-run"
         options:
           - dry-run
+          - diagnose
           - commit
           - reclaim
       pages:
@@ -41,6 +42,7 @@ jobs:
         run: |
           ARGS="--pages ${{ inputs.pages }} --limit ${{ inputs.limit }}"
           [ "${{ inputs.mode }}" = "commit" ]  && ARGS="$ARGS --commit"
-          [ "${{ inputs.mode }}" = "reclaim" ] && ARGS="$ARGS --reclaim"
+          [ "${{ inputs.mode }}" = "reclaim" ]  && ARGS="$ARGS --reclaim"
+          [ "${{ inputs.mode }}" = "diagnose" ] && ARGS="$ARGS --diagnose 30"
           echo ">>> python build_cover_text.py $ARGS"
           python build_cover_text.py $ARGS
