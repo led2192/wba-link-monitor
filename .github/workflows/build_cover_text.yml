@@ -14,7 +14,7 @@ on:
           - reclaim
       pages:
         description: "First N pages to read"
-        default: "8"
+        default: "6"
       limit:
         description: "Cap total rows (0 = all)"
         default: "0"
