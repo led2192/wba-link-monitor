@@ -40,13 +40,13 @@ Env: AIRTABLE_TOKEN, AIRTABLE_BASE,
 
 requirements.txt must include: pypdf, langdetect
 """
-import os, io, time, argparse
+import os, io, re, time, argparse
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from pypdf import PdfReader
 
-from monitor_core import airtable_request
+from monitor_core import airtable_request, lang_name
 
 try:
     from langdetect import detect as _ld_detect, DetectorFactory
@@ -70,7 +70,8 @@ UA  = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                      "AppleWebKit/537.36 (KHTML, like Gecko) "
                      "Chrome/124.0 Safari/537.36"}
 
-MAX_CHARS = 90_000
+MAX_CHARS = 90_000        # Airtable long-text safety cap
+COVER_CHARS = 10_000      # cost cap: enough for cover/title/framing; clips dense docs
 DL_TIMEOUT = 60
 DL_TRIES = 3
 WORKERS = 6              # gentle: high concurrency was triggering CDN throttling / truncation
@@ -83,8 +84,10 @@ RETRYABLE = ("parse_fail", "not_pdf", "truncated", "download_fail")
 def detect_lang(text):
     if not _HAVE_LD or not text:
         return None
+    if sum(ch.isalpha() for ch in text) < 30:    # number/code-only covers fool the detector (often -> Greek)
+        return None
     try:
-        return _ld_detect(text[:3000])
+        return lang_name(_ld_detect(text))        # detect over the whole cover, then map code -> name
     except Exception:
         return None
 
@@ -149,7 +152,7 @@ def extract_cover(url, pages):
                 chunks.append(p.extract_text() or "")
             except Exception:
                 chunks.append("")
-        text = "\n".join(chunks).strip()
+        text = re.sub(r"\s+", " ", "\n".join(chunks)).strip()   # collapse whitespace (token economy)
     except Exception:
         return "parse_fail", "", None        # complete file, but genuinely unreadable
     # page count is best-effort; it must NEVER gate the text extraction above
@@ -159,7 +162,7 @@ def extract_cover(url, pages):
         n_pages = None
     if not text:
         return "no_text", "", n_pages
-    return "ok", text[:MAX_CHARS], n_pages
+    return "ok", text[:COVER_CHARS], n_pages
 
 
 def process_one(rec, pages):
@@ -307,7 +310,7 @@ def run_diagnose(n, pages):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pages", type=int, default=8, help="first N pages to read")
+    ap.add_argument("--pages", type=int, default=6, help="first N pages to read")
     ap.add_argument("--limit", type=int, default=0, help="cap total rows (0 = all)")
     ap.add_argument("--sample", type=int, default=20, help="dry-run sample size")
     ap.add_argument("--commit", action="store_true", help="write to Airtable")
