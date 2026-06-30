@@ -6,7 +6,7 @@ For every report_library row that has a file attachment, open the PDF and write:
     cover_text   -> text of the first N pages (cheap input for the AI fields)
     page_count   -> total number of pages in the PDF
     doc_language -> ISO language code detected from the cover text (en, de, ja, ...)
-    cover_status -> outcome, so the queue drains and the run is resumable
+    cover_status -> outcome (the real reason); see page_count note below
 
 cover_status values:
     ok            -> text extracted, cover_text + page_count + doc_language written
@@ -18,6 +18,11 @@ cover_status values:
 The AI fields read @cover_text instead of @file, which is far cheaper in credits.
 Rows that end up no_text / not_pdf / parse_fail are the small remainder for OCR or
 the full-PDF path later.
+
+The queue is driven by page_count being empty, and page_count is ALWAYS written (the real
+page count, or 0 when the PDF could not be opened). That makes the run terminate and lets it
+auto-reclaim rows left half-done by an earlier version that did not write page_count.
+page_count = 0 means "no usable PDF, see cover_status".
 
 Dry run (no writes): downloads a small sample and prints what it would extract.
 Add --commit to run the full backfill.
@@ -81,7 +86,7 @@ def detect_lang(text):
 
 def fetch_todo(page_size):
     """First `page_size` rows that have a file but no cover_status yet."""
-    formula = f"AND({{{FILE_F}}}, {{{STAT_F}}} = BLANK())"
+    formula = f"AND({{{FILE_F}}}, {{{PAGE_F}}} = BLANK())"
     params = [("pageSize", page_size), ("filterByFormula", formula), ("fields[]", FILE_F)]
     r = airtable_request("GET", API, H, params=params)
     return r.json().get("records", [])
@@ -146,9 +151,7 @@ def write_batch(updates):
         chunk = updates[i:i + WRITE_BATCH]
         records = []
         for rid, status, text, n_pages, lang in chunk:
-            fields = {STAT_F: status}
-            if n_pages is not None:
-                fields[PAGE_F] = n_pages
+            fields = {STAT_F: status, PAGE_F: n_pages if n_pages is not None else 0}
             if status == "ok":
                 fields[TEXT_F] = text
                 if lang:
