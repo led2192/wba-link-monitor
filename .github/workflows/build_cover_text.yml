@@ -1,0 +1,39 @@
+name: Build cover text (one-off)
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Write to Airtable (false = dry-run sample)"
+        type: boolean
+        default: false
+      pages:
+        description: "First N pages to read"
+        default: "8"
+      limit:
+        description: "Cap total rows (0 = all)"
+        default: "0"
+
+jobs:
+  cover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Build cover text
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_FILE_FIELD: file
+          AIRTABLE_COVER_FIELD: cover_text
+          AIRTABLE_COVER_STATUS: cover_status
+        run: |
+          ARGS="--pages ${{ inputs.pages }} --limit ${{ inputs.limit }}"
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          echo ">>> python build_cover_text.py $ARGS"
+          python build_cover_text.py $ARGS
