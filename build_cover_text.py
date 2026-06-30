@@ -223,11 +223,13 @@ def run_commit(pages, limit):
 
 def run_reclaim():
     """Put previously-failed rows back into the queue (clear page_count + cover_status), so a
-    later --commit reprocesses them with the hardened downloader."""
-    formula = "OR(" + ",".join(f"{{{STAT_F}}}='{v}'" for v in RETRYABLE) + ")"
+    later --commit reprocesses them. We key off page_count = 0, which is the universal failure
+    sentinel (every failure writes it, no real PDF has 0 pages, no_text keeps its real count),
+    so this catches all failures regardless of what cover_status currently holds."""
+    formula = f"AND({{{PAGE_F}}} = 0, NOT({{{PAGE_F}}} = BLANK()))"
     cleared = 0
     while True:
-        params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", STAT_F)]
+        params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", PAGE_F)]
         r = airtable_request("GET", API, H, params=params)
         rows = r.json().get("records", [])
         if not rows:
