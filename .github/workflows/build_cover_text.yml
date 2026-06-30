@@ -3,10 +3,14 @@ name: Build cover text (one-off)
 on:
   workflow_dispatch:
     inputs:
-      commit:
-        description: "Write to Airtable (false = dry-run sample)"
-        type: boolean
-        default: false
+      mode:
+        description: "What to run"
+        type: choice
+        default: "dry-run"
+        options:
+          - dry-run
+          - commit
+          - reclaim
       pages:
         description: "First N pages to read"
         default: "8"
@@ -36,6 +40,7 @@ jobs:
           AIRTABLE_DOCLANG_FIELD: doc_language
         run: |
           ARGS="--pages ${{ inputs.pages }} --limit ${{ inputs.limit }}"
-          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          [ "${{ inputs.mode }}" = "commit" ]  && ARGS="$ARGS --commit"
+          [ "${{ inputs.mode }}" = "reclaim" ] && ARGS="$ARGS --reclaim"
           echo ">>> python build_cover_text.py $ARGS"
           python build_cover_text.py $ARGS
