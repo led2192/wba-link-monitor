@@ -32,6 +32,8 @@ jobs:
           AIRTABLE_FILE_FIELD: file
           AIRTABLE_COVER_FIELD: cover_text
           AIRTABLE_COVER_STATUS: cover_status
+          AIRTABLE_PAGECOUNT_FIELD: page_count
+          AIRTABLE_DOCLANG_FIELD: doc_language
         run: |
           ARGS="--pages ${{ inputs.pages }} --limit ${{ inputs.limit }}"
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
