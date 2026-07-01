@@ -16,8 +16,10 @@ cover_status values:
     not_pdf       -> attachment did not start with %PDF
     download_fail -> could not download at all after retries -> transient, retry later
 
-page_count is ALWAYS written (real count, or 0 when there is no usable PDF), so the queue
-(driven by page_count being empty) terminates. page_count = 0 means "see cover_status".
+The queue keys off cover_status (written on EVERY processed row), NOT page_count. Airtable treats
+a 0 in a number field as EQUAL to BLANK(), so a page_count = 0 sentinel cannot mark a row done and
+{page_count} = BLANK() re-selects every failure forever. page_count now holds the real page count
+for readable PDFs and is left blank otherwise; the reason lives in cover_status.
 
 Why the completeness check: under heavy concurrency the attachment CDN can throttle and return
 a body cut short with a 200. That body starts with %PDF but lacks the trailing %%EOF, so pypdf
@@ -26,7 +28,7 @@ permanent failure). This also avoids handing pypdf broken files, whose recovery 
 
 Modes:
     (no flag)   dry run: download a small sample and print what would be extracted (no writes)
-    --commit    run the backfill (queue = rows with a file and empty page_count)
+    --commit    run the backfill (queue = rows with a file and empty cover_status)
     --reclaim   clear page_count + cover_status on rows previously marked as a (possibly transient)
                 failure, so a later --commit reprocesses them with the hardened downloader
 
@@ -93,7 +95,12 @@ def detect_lang(text):
 
 
 def fetch_todo(page_size):
-    formula = f"AND({{{FILE_F}}}, {{{PAGE_F}}} = BLANK())"
+    # Queue keys off cover_status (text), NOT page_count. A number field holding 0 compares EQUAL
+    # to BLANK() in Airtable, so {page_count} = BLANK() also matched every failure row we wrote
+    # with page_count = 0: they were re-selected forever and the job spun on the same 100 rows
+    # until it timed out. cover_status is set on every processed row and blank on every
+    # unprocessed one, so "empty" is unambiguous here.
+    formula = f"AND({{{FILE_F}}}, {{{STAT_F}}} = BLANK())"
     params = [("pageSize", page_size), ("filterByFormula", formula), ("fields[]", FILE_F)]
     r = airtable_request("GET", API, H, params=params)
     return r.json().get("records", [])
@@ -179,7 +186,13 @@ def write_batch(updates):
         chunk = updates[i:i + WRITE_BATCH]
         records = []
         for rid, status, text, n_pages, lang in chunk:
-            fields = {STAT_F: status, PAGE_F: n_pages if n_pages is not None else 0}
+            # cover_status is written on EVERY row -> it is what the queue keys off (see fetch_todo).
+            # page_count is written only when we actually read the PDF; failures leave it blank so
+            # page_count never holds 0 (Airtable treats a 0 in a number field as equal to BLANK(),
+            # which previously kept every failure row in the queue forever).
+            fields = {STAT_F: status}
+            if n_pages is not None:
+                fields[PAGE_F] = n_pages
             if status == "ok":
                 fields[TEXT_F] = text
                 if lang:
@@ -206,12 +219,31 @@ def run_dry(sample, pages):
 
 def run_commit(pages, limit):
     done, counts = 0, {}
+    seen = set()          # record ids already attempted THIS run
+    stalls = 0            # consecutive fetches that returned only already-seen rows
     while True:
         rows = fetch_todo(100)
         if not rows:
             break
+        # Safety net: if a whole page comes back already-processed this run, the queue is not
+        # shrinking (a marker did not stick, or the formula is still matching processed rows).
+        # Tolerate brief Airtable index lag, then hard-stop instead of spinning for hours.
+        fresh = [r for r in rows if r["id"] not in seen]
+        if not fresh:
+            stalls += 1
+            if stalls >= 3:
+                print(">>> STOP: 3 consecutive fetches returned only rows already processed this "
+                      "run. The queue is not shrinking; check that cover_status is being written "
+                      "and that fetch_todo excludes processed rows.", flush=True)
+                break
+            time.sleep(2)
+            continue
+        stalls = 0
+        rows = fresh
         if limit and done + len(rows) > limit:
             rows = rows[:limit - done]
+        for r in rows:
+            seen.add(r["id"])
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             results = list(ex.map(lambda r: process_one(r, pages), rows))
         write_batch(results)
@@ -225,14 +257,15 @@ def run_commit(pages, limit):
 
 
 def run_reclaim():
-    """Put previously-failed rows back into the queue (clear page_count + cover_status), so a
-    later --commit reprocesses them. We key off page_count = 0, which is the universal failure
-    sentinel (every failure writes it, no real PDF has 0 pages, no_text keeps its real count),
-    so this catches all failures regardless of what cover_status currently holds."""
-    formula = f"AND({{{PAGE_F}}} = 0, NOT({{{PAGE_F}}} = BLANK()))"
+    """Put previously-failed rows back into the queue (clear cover_status + page_count) so a later
+    --commit reprocesses them with the hardened downloader. Select by cover_status, which reliably
+    holds the failure reason on every failed row. (The old page_count = 0 selector could not work:
+    Airtable treats 0 and BLANK() as equal, so NOT({page_count} = BLANK()) is false for a 0 and the
+    formula matched nothing.)"""
+    formula = "OR(" + ",".join(f"{{{STAT_F}}} = '{v}'" for v in RETRYABLE) + ")"
     cleared = 0
     while True:
-        params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", PAGE_F)]
+        params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", STAT_F)]
         r = airtable_request("GET", API, H, params=params)
         rows = r.json().get("records", [])
         if not rows:
