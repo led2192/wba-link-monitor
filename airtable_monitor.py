@@ -17,8 +17,8 @@ Due logic is by weekday, NOT "days since last check":
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, AIRTABLE_TABLE (default monitored_links),
      AIRTABLE_DETECTIONS_TABLE (default detections), MONITOR_FORCE_ALL (optional).
 """
-import os, sys, time, datetime as dt
-from urllib.parse import quote
+import os, re, sys, time, datetime as dt
+from urllib.parse import quote, urlsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
@@ -27,9 +27,9 @@ except ImportError:
     sys.exit("pip install requests beautifulsoup4 tldextract")
 
 from monitor_core import (
-    API, doc_links, detection_fields, post_detections, airtable_request, page_language,
+    API, doc_links, detection_fields, post_detections, airtable_request, page_language, DOC_ID_Q,
     F_WBA, F_NAME, F_URL, F_FREQ, F_MON, F_STATUS, F_TYPE,
-    F_HTTP, F_CHECKED, F_HASH, F_SEEN, F_NEW, F_CHANGE, F_ALERT, F_LANG,
+    F_HTTP, F_CHECKED, F_HASH, F_SEEN, F_NEW, F_CHANGE, F_ALERT, F_LANG, F_BROWSER,
 )
 
 TOKEN = os.environ.get("AIRTABLE_TOKEN")
@@ -37,12 +37,40 @@ BASE  = os.environ.get("AIRTABLE_BASE")
 TABLE = os.environ.get("AIRTABLE_TABLE", "monitored_links")
 DETECTIONS_TABLE = os.environ.get("AIRTABLE_DETECTIONS_TABLE", "detections")
 FORCE_ALL = os.environ.get("MONITOR_FORCE_ALL", "").lower() in ("true", "1", "yes")
+# Optional: hand JS-rendered document pages to the weekly browser monitor instead of writing an
+# empty baseline from their static shell. OFF by default so turning it on is a deliberate rollout
+# (it moves the matched pages into the weekly Playwright lane, which has less capacity). Enable
+# with MONITOR_FLAG_SPA=true once you've confirmed the browser job can absorb the extra volume.
+FLAG_SPA = os.environ.get("MONITOR_FLAG_SPA", "").lower() in ("true", "1", "yes")
+SPA_DOC_TYPES = {"sustainability_page", "reports_hub", "sustainability_report",
+                 "policies", "investor_relations"}
+SPA_MARKERS = re.compile(
+    r"__NEXT_DATA__|/_next/|id=[\"']__next[\"']|window\.__NUXT__|data-reactroot|"
+    r"ng-version=|window\.__INITIAL_STATE__|__remixContext|_sitecoreJSS", re.I)
 if not (TOKEN and BASE):
     sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE environment variables.")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
 TODAY = dt.date.today()
 WD = TODAY.weekday()  # Mon=0 .. Sun=6
+
+
+def looks_like_spa(html):
+    """True if the static HTML is a JS app shell (Next/Nuxt/React/Angular/Remix/Sitecore JSS). Such
+    pages build their document list client-side, so a plain requests fetch sees no report links."""
+    return bool(html) and bool(SPA_MARKERS.search(html[:200000]))
+
+
+def has_hard_doc(current):
+    """True if doc_links found a REAL downloadable document (a .pdf or a CMS document-server link),
+    as opposed to only report-ish navigation links (e.g. /group-sustainability, which matches on
+    the word 'sustainab' but is not a document). Used to decide whether a JS page is actually
+    missing its documents and should go to the browser monitor."""
+    for u, _t in current.values():
+        base = u.lower().split("?", 1)[0]
+        if base.endswith(".pdf") or DOC_ID_Q.search(urlsplit(u).query or ""):
+            return True
+    return False
 
 
 def due_today(freq):
@@ -109,6 +137,15 @@ def process(rec, sess):
     if lang:
         upd[F_LANG] = lang
     current = doc_links(r.text, r.url)
+    # A JS-rendered doc page has no REAL document in its static shell, only navigation links that
+    # happen to match on a word like 'sustainab'. If it's a doc-type SPA and we found no actual
+    # document (.pdf / CMS doc-server link), hand it to the weekly browser monitor to render, rather
+    # than writing a misleading baseline. Gated by MONITOR_FLAG_SPA.
+    if (FLAG_SPA and not has_hard_doc(current)
+            and (f.get(F_TYPE) or "").strip().lower() in SPA_DOC_TYPES
+            and looks_like_spa(r.text)):
+        upd[F_BROWSER] = True
+        return rec["id"], upd, False, False, []
     had_baseline = bool(f.get(F_HASH))   # content_hash present = page visited before
     changed, high, docs = detection_fields(f, upd, current, had_baseline, TODAY)
     return rec["id"], upd, changed, high, docs
@@ -120,12 +157,13 @@ def main():
     print(f"{len(recs)} monitored links, {len(due)} due today "
           f"({'FORCE_ALL' if FORCE_ALL else TODAY.strftime('%A')}).")
     sess = requests.Session(); updates = []; changed = failed = done = 0
-    alerted = 0; detections = []
+    alerted = 0; promoted = 0; detections = []
     with ThreadPoolExecutor(max_workers=20) as ex:
         futs = [ex.submit(process, r, sess) for r in due]
         for fut in as_completed(futs):
             rid, upd, ch, high, docs = fut.result()
             if upd.get(F_STATUS) in ("dead", "error"): failed += 1
+            if upd.get(F_BROWSER): promoted += 1
             if ch: changed += 1
             if high: alerted += 1
             detections.extend(docs)
@@ -140,6 +178,8 @@ def main():
     patch(updates)
     post_detections(detections, BASE, TOKEN, DETECTIONS_TABLE)
     print(f"Done. Pages with new doc links: {changed} (high-signal alerts: {alerted}).  Failed to fetch: {failed}.")
+    if promoted:
+        print(f"Handed {promoted} JS-rendered doc pages to the weekly browser monitor (needs_browser set).")
     if alerted: print('See them: filter the table by alert_status = "new".')
 
 
