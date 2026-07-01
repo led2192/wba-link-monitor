@@ -182,6 +182,13 @@ def process_one(rec, pages):
 
 
 def write_batch(updates):
+    """PATCH processed rows back to Airtable in chunks. airtable_request already retries transient
+    Airtable failures (429 / 5xx) with backoff; if a chunk STILL fails after all those retries
+    (e.g. a sustained Airtable outage, as happened once on the final batch of a 4,600-row run),
+    log the affected row ids and carry on instead of letting one bad chunk kill the whole job.
+    Those rows keep cover_status blank, so they stay in the queue and a later --commit / --reclaim
+    reprocesses them. Returns the number of rows that could not be written."""
+    failed = 0
     for i in range(0, len(updates), WRITE_BATCH):
         chunk = updates[i:i + WRITE_BATCH]
         records = []
@@ -198,8 +205,15 @@ def write_batch(updates):
                 if lang:
                     fields[LANG_F] = lang
             records.append({"id": rid, "fields": fields})
-        airtable_request("PATCH", API, H, {"records": records, "typecast": True})
+        try:
+            airtable_request("PATCH", API, H, {"records": records, "typecast": True})
+        except Exception as e:
+            failed += len(records)
+            ids = ", ".join(r["id"] for r in records)
+            print(f">>> WARN: batch write failed after retries; leaving {len(records)} rows in the "
+                  f"queue for a later --commit/--reclaim ({e}): {ids}", flush=True)
         time.sleep(WRITE_PAUSE)
+    return failed
 
 
 def run_dry(sample, pages):
@@ -219,6 +233,7 @@ def run_dry(sample, pages):
 
 def run_commit(pages, limit):
     done, counts = 0, {}
+    write_fail = 0        # rows whose Airtable write failed even after retries (left in queue)
     seen = set()          # record ids already attempted THIS run
     stalls = 0            # consecutive fetches that returned only already-seen rows
     while True:
@@ -246,14 +261,15 @@ def run_commit(pages, limit):
             seen.add(r["id"])
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             results = list(ex.map(lambda r: process_one(r, pages), rows))
-        write_batch(results)
+        write_fail += write_batch(results)
         for _, status, _, _, _ in results:
             counts[status] = counts.get(status, 0) + 1
         done += len(results)
         print(f"  processed {done} so far  {counts}", flush=True)
         if limit and done >= limit:
             break
-    print(f">>> DONE. processed {done} rows. {counts}")
+    tail = f"  ({write_fail} rows could not be written and remain queued)" if write_fail else ""
+    print(f">>> DONE. processed {done} rows. {counts}{tail}")
 
 
 def run_reclaim():
