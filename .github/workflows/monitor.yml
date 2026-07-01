@@ -26,3 +26,4 @@ jobs:
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_TABLE: monitored_links
           MONITOR_FORCE_ALL: ${{ inputs.force_all }}
+          MONITOR_FLAG_SPA: "true"
