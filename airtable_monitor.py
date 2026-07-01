@@ -44,6 +44,13 @@ FORCE_ALL = os.environ.get("MONITOR_FORCE_ALL", "").lower() in ("true", "1", "ye
 FLAG_SPA = os.environ.get("MONITOR_FLAG_SPA", "").lower() in ("true", "1", "yes")
 SPA_DOC_TYPES = {"sustainability_page", "reports_hub", "sustainability_report",
                  "policies", "investor_relations"}
+# A genuine document library exposes several reports in its HTML. If a JS doc-type page shows
+# FEWER than this many real documents in the STATIC shell, its real list is being drawn
+# client-side and only boilerplate leaked through (e.g. a site-wide "Modern Slavery Statement"
+# /docs?editionId=... link that sits in every page's footer) -> hand it to the browser monitor.
+# A plain "has any doc?" test is fooled by that single footer link, which is why abrdn, whose
+# footer carries exactly one such link, was not promoted on the first run.
+SPA_STATIC_DOC_FLOOR = 3
 SPA_MARKERS = re.compile(
     r"__NEXT_DATA__|/_next/|id=[\"']__next[\"']|window\.__NUXT__|data-reactroot|"
     r"ng-version=|window\.__INITIAL_STATE__|__remixContext|_sitecoreJSS", re.I)
@@ -61,16 +68,16 @@ def looks_like_spa(html):
     return bool(html) and bool(SPA_MARKERS.search(html[:200000]))
 
 
-def has_hard_doc(current):
-    """True if doc_links found a REAL downloadable document (a .pdf or a CMS document-server link),
-    as opposed to only report-ish navigation links (e.g. /group-sustainability, which matches on
-    the word 'sustainab' but is not a document). Used to decide whether a JS page is actually
-    missing its documents and should go to the browser monitor."""
+def n_hard_docs(current):
+    """How many REAL downloadable documents doc_links found (a .pdf or a CMS document-server link),
+    as opposed to report-ish navigation links (e.g. /group-sustainability, which matches on the
+    word 'sustainab' but is not a document)."""
+    c = 0
     for u, _t in current.values():
         base = u.lower().split("?", 1)[0]
         if base.endswith(".pdf") or DOC_ID_Q.search(urlsplit(u).query or ""):
-            return True
-    return False
+            c += 1
+    return c
 
 
 def due_today(freq):
@@ -137,11 +144,11 @@ def process(rec, sess):
     if lang:
         upd[F_LANG] = lang
     current = doc_links(r.text, r.url)
-    # A JS-rendered doc page has no REAL document in its static shell, only navigation links that
-    # happen to match on a word like 'sustainab'. If it's a doc-type SPA and we found no actual
-    # document (.pdf / CMS doc-server link), hand it to the weekly browser monitor to render, rather
+    # A JS-rendered doc page shows no real report in its static shell, only navigation links and
+    # maybe a stray footer document. If it's a doc-type SPA and the static shell has fewer than
+    # SPA_STATIC_DOC_FLOOR real documents, hand it to the weekly browser monitor to render, rather
     # than writing a misleading baseline. Gated by MONITOR_FLAG_SPA.
-    if (FLAG_SPA and not has_hard_doc(current)
+    if (FLAG_SPA and n_hard_docs(current) < SPA_STATIC_DOC_FLOOR
             and (f.get(F_TYPE) or "").strip().lower() in SPA_DOC_TYPES
             and looks_like_spa(r.text)):
         upd[F_BROWSER] = True
