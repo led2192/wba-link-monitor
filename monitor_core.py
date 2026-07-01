@@ -51,6 +51,10 @@ SKIP_DETECTION_TYPES = {"news"}
 _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 TRACKING = re.compile(r"^(utm_|fbclid|gclid|mc_|_hs|ref$)", re.I)
 DOCISH   = re.compile(r"report|annual|sustainab|esg|/download|/publication|/disclosur", re.I)
+# Document-server pattern: modern CMSs (Sitecore/Next, etc.) serve every PDF from an opaque
+# endpoint like /docs?documentId=... or ?editionId=..., where the URL PATH is just /docs and the
+# only document signal is the query-string id. Path-only matching misses all of these.
+DOC_ID_Q = re.compile(r"\b(document|edition|asset|media|file)[-_]?id=", re.I)
 
 
 def reg_domain(u):
@@ -90,9 +94,16 @@ def canon_seen(x):
 
 
 def doc_links(html, base):
-    """Same-domain links that are PDFs or whose URL PATH looks report-ish.
+    """Links that are PDFs, report-ish paths, or CMS document-server endpoints.
     Returns {normalized_key: (fetchable_absolute_url, anchor_text)}.
-    Anchor text is annotation only; it does not trigger a match."""
+    Anchor text is annotation only; it does not trigger a match.
+
+    Same-domain links are kept if they look like a document (.pdf, a DOCISH path, or a
+    documentId/editionId query). Cross-domain links are kept ONLY when they carry a
+    documentId/editionId query, i.e. the company's own CMS content served from a sibling brand or
+    CDN domain (abrdn hosts its reports on aberdeeninvestments.com). We deliberately do NOT admit
+    cross-domain raw PDFs, so third-party framework PDFs (SBTi, GRI, WEPS...) are not re-flagged as
+    this company's disclosures."""
     rdom = reg_domain(base)
     out = {}
     for a in BeautifulSoup(html, "html.parser").find_all("a", href=True):
@@ -100,13 +111,17 @@ def doc_links(html, base):
         if href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
         absu = urljoin(base, href)
-        if reg_domain(absu) != rdom:
+        s = urlsplit(absu)
+        path = (s.path or "").lower()
+        is_doc_q = bool(DOC_ID_Q.search(s.query or ""))          # /docs?documentId=... CMS endpoint
+        is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q
+        if not is_document:
             continue
-        path = urlsplit(absu).path.lower()
-        if path.endswith(".pdf") or DOCISH.search(path):
-            n = normalize(absu)
-            if n and n not in out:
-                out[n] = (absu, a.get_text(" ", strip=True)[:80])
+        if reg_domain(absu) != rdom and not is_doc_q:            # cross-domain: CMS docs only
+            continue
+        n = normalize(absu)
+        if n and n not in out:
+            out[n] = (absu, a.get_text(" ", strip=True)[:80])
     return out
 
 
