@@ -30,7 +30,7 @@ except ImportError:
     sys.exit("pip install playwright  &&  playwright install --with-deps chromium")
 
 from monitor_core import (
-    API, normalize, doc_links, detection_fields, post_detections, airtable_request,
+    API, normalize, doc_links, detection_fields, airtable_request,
     F_WBA, F_NAME, F_URL, F_TYPE, F_STATUS, F_HTTP, F_FINAL,
     F_CHECKED, F_HASH, F_SEEN, F_NEW, F_CHANGE, F_ALERT, F_BROWSER,
 )
@@ -121,25 +121,21 @@ def main():
     random.shuffle(recs)   # avoid hammering one domain in a burst (the 429s)
     print(f"{len(recs)} hard pages to render with a real browser ({WORKERS} workers).")
     updates = []; rescued = changed = still_dead = 0; done = 0
-    alerted = 0; detections = []
+    alerted = 0
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         futs = [ex.submit(process, r) for r in recs]
         for fut in as_completed(futs):
-            rid, upd, ch, high, docs, ok = fut.result()
+            rid, upd, ch, high, _docs, ok = fut.result()   # _docs (per-doc detections) no longer written
             if ok: rescued += 1
             elif upd.get(F_STATUS) in ("dead", "error"): still_dead += 1
             if ch: changed += 1
             if high: alerted += 1
-            detections.extend(docs)
             updates.append({"id": rid, "fields": upd}); done += 1
             if len(updates) >= 200:        # checkpoint progress so a long run survives a hiccup
                 patch(updates); updates = []
-            if len(detections) >= 200:
-                post_detections(detections, BASE, TOKEN, DETECTIONS_TABLE); detections = []
             if done % 100 == 0: print(f"  {done}/{len(recs)}")
     print(f"Writing the final {len(updates)} updates back to Airtable ...")
     patch(updates)
-    post_detections(detections, BASE, TOKEN, DETECTIONS_TABLE)
     print(f"Done. Readable in a real browser: {rescued}.  Still dead/error: {still_dead}.  "
           f"Pages with new doc links: {changed} (high-signal alerts: {alerted}).")
     print("Rescued pages are now marked needs_browser and owned by this weekly job.")
