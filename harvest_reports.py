@@ -102,10 +102,13 @@ def build(records, types, reports_only):
                 per_company[wba] += 1
                 per_type[str(typ).strip().lower()] += 1
                 slid = link_id(wba, page)
+                # source_link_id stays as a text audit trail. source_page (the real link) is NOT set
+                # here from a string: a string + typecast makes Airtable fabricate an empty
+                # monitored_links row whenever slid does not match an existing page. It is resolved to
+                # a real record id, by URL, at write time in main().
                 rows[lib_id] = {"library_id": lib_id, "wba_id": wba, "company_name": name,
                                 "document_url": doc, "found_on": page, "page_type": typ,
-                                "doc_year": year_of(doc), "source_link_id": slid,
-                                "source_page": [slid]}   # typecast resolves to monitored_links by link_id
+                                "doc_year": year_of(doc), "source_link_id": slid}
     return list(rows.values()), per_company, per_type
 
 
@@ -145,18 +148,31 @@ def from_csv(path):
 
 
 def from_airtable(base, token, table, types):
+    """Returns (list_of_field_dicts, {normalized_url: record_id}) for rows whose type is in `types`.
+    The url->record_id map lets harvest link each document to its source page by RECORD ID, matched
+    on the page's normalized URL. That is drift-proof: it does NOT rely on the page's stored link_id
+    equalling link_id(wba, url). Pages added by the sweep/discovered lanes can carry a link_id that
+    no longer matches their url, and matching by URL sidesteps that entirely (and, crucially, stops
+    Airtable's typecast from fabricating an empty monitored_links row for an unmatched id)."""
+    from ids import normalize
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
     type_or = ", ".join(f"{{type}}='{t}'" for t in sorted(types))
     params = {"pageSize": 100, "filterByFormula": f"OR({type_or})"}
-    out = []; offset = None
+    out = []; id_by_url = {}; offset = None
     while True:
         if offset: params["offset"] = offset
         r = _request("GET", url, headers, params=params)
-        j = r.json(); out.extend(rec.get("fields", {}) for rec in j.get("records", []))
+        j = r.json()
+        for rec in j.get("records", []):
+            f = rec.get("fields", {})
+            out.append(f)
+            u = f.get(F_URL, "")
+            if u:
+                id_by_url[normalize(u)] = rec["id"]
         offset = j.get("offset"); time.sleep(0.22)
         if not offset: break
-    return out
+    return out, id_by_url
 
 
 def existing_library(base, token, table):
@@ -237,6 +253,7 @@ def main():
     args = ap.parse_args()
     types = {t.strip().lower() for t in args.types.split(",") if t.strip()}
 
+    id_by_url = {}                       # normalized page url -> monitored_links record id
     if args.source == "csv":
         if not args.csv:
             sys.exit("--csv PATH required with --source csv")
@@ -246,15 +263,31 @@ def main():
         table = os.environ.get("AIRTABLE_TABLE", "monitored_links")
         if not (token and base):
             sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
-        records = from_airtable(base, token, table, types)
+        records, id_by_url = from_airtable(base, token, table, types)
 
     rows, per_company, per_type = build(records, types, args.reports_only)
     ok, bare = scheme_stats(records, types, args.reports_only)
     report(rows, per_company, per_type, ok, bare)
 
     if args.source == "airtable" and args.commit:
+        from ids import normalize
         base = os.environ["AIRTABLE_BASE"]; token = os.environ["AIRTABLE_TOKEN"]
         lib_table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
+
+        # Resolve each document's source page to a REAL monitored_links record id, matched on the
+        # page's normalized URL. No string ever enters the source_page link field, so typecast can
+        # never fabricate a page. A document whose page is not in the table is left unlinked
+        # (source_page absent) rather than pointed at a fabricated row.
+        linked = unlinked = 0
+        for r in rows:
+            rid = id_by_url.get(normalize(r.get("found_on", "")))
+            if rid:
+                r["source_page"] = [rid]; linked += 1
+            else:
+                unlinked += 1
+        print(f"source_page resolved by URL: {linked} linked, {unlinked} with no matching page "
+              f"(left unlinked).")
+
         existing = existing_library(base, token, lib_table)
         to_update = []; to_create = []
         for r in rows:
