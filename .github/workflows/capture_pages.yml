@@ -1,0 +1,53 @@
+name: Capture web pages (print to PDF)
+
+on:
+  schedule:
+    - cron: "0 3 * * 0"        # Sundays 03:00 UTC (Saturdays belong to the browser monitor)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run"
+        type: choice
+        default: "dry-run"
+        options:
+          - dry-run
+          - commit
+          - seed
+      limit:
+        description: "Pages per run (0 = all due)"
+        default: "1200"
+      refresh_days:
+        description: "Re-print pages whose capture is older than this many days"
+        default: "90"
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt playwright
+      - run: playwright install --with-deps chromium
+      - name: Capture pages
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_TABLE: monitored_links
+          AIRTABLE_WEBPAGE_TABLE: webpage_library
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.mode }}"; LIMIT="${{ inputs.limit }}"; RD="${{ inputs.refresh_days }}"
+          else
+            MODE="commit"; LIMIT="1200"; RD="90"     # weekly: new flags first, then 90-day refresh
+          fi
+          if [ "$MODE" = "seed" ]; then
+            ARGS="--seed --commit"
+          else
+            ARGS="--limit $LIMIT --refresh-days $RD"
+            [ "$MODE" = "commit" ] && ARGS="$ARGS --commit"
+          fi
+          echo ">>> python capture_pages.py $ARGS"
+          python capture_pages.py $ARGS
