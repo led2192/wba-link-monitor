@@ -158,7 +158,11 @@ def from_airtable(base, token, table, types):
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
     type_or = ", ".join(f"{{type}}='{t}'" for t in sorted(types))
-    params = {"pageSize": 100, "filterByFormula": f"OR({type_or})"}
+    # Harvest only pages that are still monitored. Unmonitoring a page (monitor=false) now also drops
+    # it from harvest's input, so its seen_links are not read and its documents stop being (re-)ingested
+    # into report_library. Previously harvest filtered purely by type and ignored the monitor flag, so
+    # unmonitored pages kept feeding the library.
+    params = {"pageSize": 100, "filterByFormula": f"AND({{monitor}}=TRUE(), OR({type_or}))"}
     out = []; id_by_url = {}; offset = None
     while True:
         if offset: params["offset"] = offset
