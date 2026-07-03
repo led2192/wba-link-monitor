@@ -51,6 +51,9 @@ SKIP_DETECTION_TYPES = {"news"}
 _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 TRACKING = re.compile(r"^(utm_|fbclid|gclid|mc_|_hs|ref$)", re.I)
 DOCISH   = re.compile(r"report|annual|sustainab|esg|/download|/publication|/disclosur|/pdfs?/", re.I)  # /pdfs?/ catches extensionless CMS doc routes like /PDF/ModernSlaveryStatement (2sfg-style)
+PDF_SEG  = re.compile(r"/pdfs?/", re.I)                   # hard doc signal for the raw-HTML sweep
+ASSET_EXT = re.compile(r"\.(png|jpe?g|gif|svg|webp|ico|css|js|woff2?|ttf|mp4)([?#]|$)", re.I)
+RAW_DOC_RX = re.compile(r"https?://[^\s\"'<>\\){}]+|(?<=[\"'])/[^\s\"'<>\\){}]+")
 # Document-server pattern: modern CMSs (Sitecore/Next, etc.) serve every PDF from an opaque
 # endpoint like /docs?documentId=... or ?editionId=..., where the URL PATH is just /docs and the
 # only document signal is the query-string id. Path-only matching misses all of these.
@@ -122,6 +125,27 @@ def doc_links(html, base):
         n = normalize(absu)
         if n and n not in out:
             out[n] = (absu, a.get_text(" ", strip=True)[:80])
+
+    # Raw-HTML sweep: JS-rendered sites often carry their document URLs inside inline JSON/config
+    # that a client script turns into links later (2sfg-style), so the anchor pass above never
+    # sees them. Scan the raw HTML for HARD document URLs only — .pdf files, /pdf/ CMS routes, or
+    # documentId queries. DOCISH words are deliberately NOT reused here: free-text matches inside
+    # scripts would sweep in navigation junk. Cross-domain policy identical to the anchor pass.
+    raw = html[:500000].replace("\\/", "/")               # unescape JSON-escaped slashes
+    for m in RAW_DOC_RX.finditer(raw):
+        absu = urljoin(base, m.group(0))
+        s = urlsplit(absu)
+        path = (s.path or "").lower()
+        if ASSET_EXT.search(path):
+            continue
+        is_doc_q = bool(DOC_ID_Q.search(s.query or ""))
+        if not (path.endswith(".pdf") or PDF_SEG.search(path) or is_doc_q):
+            continue
+        if reg_domain(absu) != rdom and not is_doc_q:
+            continue
+        n = normalize(absu)
+        if n and n not in out:
+            out[n] = (absu, "")
     return out
 
 
