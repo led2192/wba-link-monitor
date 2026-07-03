@@ -63,9 +63,24 @@ WD = TODAY.weekday()  # Mon=0 .. Sun=6
 
 
 def looks_like_spa(html):
-    """True if the static HTML is a JS app shell (Next/Nuxt/React/Angular/Remix/Sitecore JSS). Such
-    pages build their document list client-side, so a plain requests fetch sees no report links."""
-    return bool(html) and bool(SPA_MARKERS.search(html[:200000]))
+    """True if the static HTML is a JS app shell that builds its content client-side, so a plain
+    requests fetch sees no report links. Two signals:
+      1. Framework fingerprints (Next/Nuxt/React/Angular/Remix/Sitecore JSS) via SPA_MARKERS.
+      2. Emptiness fallback for custom/unrecognized JS stacks (e.g. 2sfg.com): a sizeable page
+         whose body carries almost no visible text is a shell — nav chrome plus scripts, with the
+         content (document links included) injected client-side. Thresholds are conservative:
+         real content pages carry far more than 800 chars of visible text, and small static pages
+         under 10 kB of HTML are left alone, so genuinely sparse hubs don't flood the browser lane."""
+    if not html:
+        return False
+    h = html[:200000]
+    if SPA_MARKERS.search(h):
+        return True
+    body = re.sub(r"(?s)<!--.*?-->", " ", h)
+    body = re.sub(r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body)
+    text = re.sub(r"(?s)<[^>]+>", " ", body)
+    text = re.sub(r"\s+", " ", text).strip()
+    return len(h) > 10000 and len(text) < 800
 
 
 def n_hard_docs(current):
