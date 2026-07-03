@@ -62,6 +62,15 @@ TODAY = dt.date.today()
 WD = TODAY.weekday()  # Mon=0 .. Sun=6
 
 
+def _visible_text(html):
+    """Visible body text of a static HTML document: comments, scripts, styles, noscript and inline
+    SVG stripped, tags removed, whitespace collapsed."""
+    body = re.sub(r"(?s)<!--.*?-->", " ", html)
+    body = re.sub(r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body)
+    text = re.sub(r"(?s)<[^>]+>", " ", body)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def looks_like_spa(html):
     """True if the static HTML is a JS app shell that builds its content client-side, so a plain
     requests fetch sees no report links. Two signals:
@@ -76,11 +85,21 @@ def looks_like_spa(html):
     h = html[:200000]
     if SPA_MARKERS.search(h):
         return True
-    body = re.sub(r"(?s)<!--.*?-->", " ", h)
-    body = re.sub(r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", body)
-    text = re.sub(r"(?s)<[^>]+>", " ", body)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = _visible_text(h)
     return len(h) > 10000 and len(text) < 800
+
+
+DOWNLOAD_BAIT = re.compile(
+    r"click here|download|\bpdf\b|view (?:our|the)|read (?:our|the)|see (?:our|the)", re.I)
+
+
+def has_download_bait(html):
+    """Hybrid-page signal: the server-rendered text ADVERTISES documents ('to view our policy
+    (click here)', 'download', 'pdf') that the anchor pass did not find as links — static text,
+    JS-injected hrefs. Only consulted when n_hard_docs is already below SPA_STATIC_DOC_FLOOR and
+    the page is a doc type, so an ordinary page that merely says 'download' somewhere is never
+    flagged: the bait only matters on a page whose documents are missing."""
+    return bool(html) and bool(DOWNLOAD_BAIT.search(_visible_text(html[:200000])))
 
 
 def n_hard_docs(current):
@@ -160,12 +179,13 @@ def process(rec, sess):
         upd[F_LANG] = lang
     current = doc_links(r.text, r.url)
     # A JS-rendered doc page shows no real report in its static shell, only navigation links and
-    # maybe a stray footer document. If it's a doc-type SPA and the static shell has fewer than
-    # SPA_STATIC_DOC_FLOOR real documents, hand it to the weekly browser monitor to render, rather
-    # than writing a misleading baseline. Gated by MONITOR_FLAG_SPA.
+    # maybe a stray footer document. If it's a doc-type page with fewer than SPA_STATIC_DOC_FLOOR
+    # real documents AND it either looks like a JS shell (looks_like_spa) or its static text baits
+    # documents the anchor pass didn't find (has_download_bait, the hybrid case), hand it to the
+    # weekly browser monitor to render rather than writing a misleading baseline. MONITOR_FLAG_SPA.
     if (FLAG_SPA and n_hard_docs(current) < SPA_STATIC_DOC_FLOOR
             and (f.get(F_TYPE) or "").strip().lower() in SPA_DOC_TYPES
-            and looks_like_spa(r.text)):
+            and (looks_like_spa(r.text) or has_download_bait(r.text))):
         upd[F_BROWSER] = True
         return rec["id"], upd, False, False, []
     had_baseline = bool(f.get(F_HASH))   # content_hash present = page visited before
