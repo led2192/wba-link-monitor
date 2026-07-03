@@ -50,7 +50,7 @@ SKIP_DETECTION_TYPES = {"news"}
 
 _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 TRACKING = re.compile(r"^(utm_|fbclid|gclid|mc_|_hs|ref$)", re.I)
-DOCISH   = re.compile(r"report|annual|sustainab|esg|/download|/publication|/disclosur", re.I)
+DOCISH   = re.compile(r"report|annual|sustainab|esg|/download|/publication|/disclosur|/pdfs?/", re.I)  # /pdfs?/ catches extensionless CMS doc routes like /PDF/ModernSlaveryStatement (2sfg-style)
 # Document-server pattern: modern CMSs (Sitecore/Next, etc.) serve every PDF from an opaque
 # endpoint like /docs?documentId=... or ?editionId=..., where the URL PATH is just /docs and the
 # only document signal is the query-string id. Path-only matching misses all of these.
