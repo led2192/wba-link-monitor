@@ -64,11 +64,31 @@ JUNK     = re.compile(r"login|signin|sign-in|account|cart|basket|checkout|privac
 SECTION  = re.compile(r"sustainab|esg|environment|csr|responsib|climate|impact|report|annual|"
                       r"financ|result|filing|investor|shareholder|news|press|media|about|"
                       r"governance|policy|policies|ethics|compliance|publication|download|disclosur", re.I)
-RULES=[("sustainability_page", re.compile(r"sustainab|esg|environment|csr|responsib|climate|impact",re.I)),
-       ("reports_hub",         re.compile(r"report|annual|financ|result|filing|disclosur|publication|download",re.I)),
-       ("investor_relations",  re.compile(r"investor|shareholder|/ir/|/ir$|stock|equity",re.I)),
+# Rule order = priority: the FIRST matching rule wins, so the ESG rule outranks the generic
+# report/IR words (a /diversity-report/ page is sustainability_page, not merely reports_hub).
+# Terms beyond the original set were validated against the live "other" bucket (Jul 2026): each
+# was checked for pull and for business-line false positives before inclusion. Deliberately NOT
+# added: leadership/board/director (executive-bio pages), target/strategy (third-party SBTi
+# dashboards), bare carbon (hydrocarbon), energy/water/waste (business lines for utilities and
+# logistics), bare people (mixed with careers), announcement (ASX/RNS pages need their own call),
+# privacy/legal/terms (boilerplate).
+RULES=[("sustainability_page", re.compile(
+            r"sustainab|esg|environment|csr|responsib|climate|impact|"
+            r"sourcing|supplier|procure|supply.?chain|divers|inclusion|gender|"
+            r"human.?right|modern.?slavery|forced.?labo|trafficking|"
+            r"decarbon|net.?zero|emission|biodivers|circular.?econom|"
+            r"health.?safety|\behs\b|wellbeing|community|philanthrop", re.I)),
+       ("reports_hub",         re.compile(
+            r"report|annual|financ|result|filing|disclosur|publication|download|"
+            r"presentations|interim|half.?year|factbook|databook|/documents?(/|$)|librar", re.I)),
+       ("investor_relations",  re.compile(
+            r"investor|shareholder|/ir/|/ir$|stock|equity|"
+            r"\bagm\b|general.?meeting|prospectus|dividend", re.I)),
        ("news",                re.compile(r"news|press|media|/article|story|release|/blog",re.I)),
-       ("policies",            re.compile(r"policy|policies|code-of-conduct|governance|ethics|compliance",re.I))]
+       ("policies",            re.compile(
+            r"policy|policies|code-of-conduct|governance|ethics|compliance|"
+            r"whistleblow|anti.?corruption|anti.?bribery|conflict.?of.?interest|"
+            r"remuneration|charter|\btax\b", re.I))]
 FREQ={"news":"daily","reports_hub":"mon_wed_fri","sustainability_page":"mon_wed_fri",
       "investor_relations":"mon_wed_fri","policies":"mon_fri","other":"mon_fri"}
 LABEL={"sustainability_page":"Sustainability","reports_hub":"Reports","news":"News",
