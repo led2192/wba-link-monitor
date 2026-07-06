@@ -53,7 +53,7 @@ TRACKING = re.compile(r"^(utm_|fbclid|gclid|mc_|_hs|ref$)", re.I)
 DOCISH   = re.compile(r"report|annual|sustainab|esg|/download|/publication|/disclosur|/pdfs?/", re.I)  # /pdfs?/ catches extensionless CMS doc routes like /PDF/ModernSlaveryStatement (2sfg-style)
 PDF_SEG  = re.compile(r"/pdfs?/", re.I)                   # hard doc signal for the raw-HTML sweep
 ASSET_EXT = re.compile(r"\.(png|jpe?g|gif|svg|webp|ico|css|js|woff2?|ttf|mp4)([?#]|$)", re.I)
-RAW_DOC_RX = re.compile(r"https?://[^\s\"'<>\\){}]+|(?<=[\"'])/[^\s\"'<>\\){}]+")
+RAW_DOC_RX = re.compile(r"https?://[^\s\"'<>\\){}\[\]]+|(?<=[\"'])/[^\s\"'<>\\){}\[\]]+")
 # Document-server pattern: modern CMSs (Sitecore/Next, etc.) serve every PDF from an opaque
 # endpoint like /docs?documentId=... or ?editionId=..., where the URL PATH is just /docs and the
 # only document signal is the query-string id. Path-only matching misses all of these.
@@ -113,16 +113,19 @@ def doc_links(html, base):
         href = a["href"].strip()
         if href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
-        absu = urljoin(base, href)
-        s = urlsplit(absu)
-        path = (s.path or "").lower()
-        is_doc_q = bool(DOC_ID_Q.search(s.query or ""))          # /docs?documentId=... CMS endpoint
-        is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q
-        if not is_document:
-            continue
-        if reg_domain(absu) != rdom and not is_doc_q:            # cross-domain: CMS docs only
-            continue
-        n = normalize(absu)
+        try:
+            absu = urljoin(base, href)
+            s = urlsplit(absu)
+            path = (s.path or "").lower()
+            is_doc_q = bool(DOC_ID_Q.search(s.query or ""))      # /docs?documentId=... CMS endpoint
+            is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q
+            if not is_document:
+                continue
+            if reg_domain(absu) != rdom and not is_doc_q:        # cross-domain: CMS docs only
+                continue
+            n = normalize(absu)
+        except ValueError:
+            continue          # malformed href (an unclosed '[' parses as a broken IPv6 host)
         if n and n not in out:
             out[n] = (absu, a.get_text(" ", strip=True)[:80])
 
@@ -133,17 +136,24 @@ def doc_links(html, base):
     # scripts would sweep in navigation junk. Cross-domain policy identical to the anchor pass.
     raw = html[:500000].replace("\\/", "/")               # unescape JSON-escaped slashes
     for m in RAW_DOC_RX.finditer(raw):
-        absu = urljoin(base, m.group(0))
-        s = urlsplit(absu)
-        path = (s.path or "").lower()
-        if ASSET_EXT.search(path):
+        try:
+            absu = urljoin(base, m.group(0))
+            s = urlsplit(absu)
+            path = (s.path or "").lower()
+            if ASSET_EXT.search(path):
+                continue
+            is_doc_q = bool(DOC_ID_Q.search(s.query or ""))
+            if not (path.endswith(".pdf") or PDF_SEG.search(path) or is_doc_q):
+                continue
+            if reg_domain(absu) != rdom and not is_doc_q:
+                continue
+            n = normalize(absu)
+        except Exception:
+            # Sweep candidates come from raw JS and can be URL-SHAPED junk (regex sources like
+            # "https://[a-z0-9]+...", template fragments). urlsplit raises ValueError on such
+            # strings ("Invalid IPv6 URL", the 2026-07-05 run killer). A junk candidate must
+            # never kill a run: skip it and move on.
             continue
-        is_doc_q = bool(DOC_ID_Q.search(s.query or ""))
-        if not (path.endswith(".pdf") or PDF_SEG.search(path) or is_doc_q):
-            continue
-        if reg_domain(absu) != rdom and not is_doc_q:
-            continue
-        n = normalize(absu)
         if n and n not in out:
             out[n] = (absu, "")
     return out
