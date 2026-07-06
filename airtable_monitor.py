@@ -203,7 +203,15 @@ def main():
     with ThreadPoolExecutor(max_workers=20) as ex:
         futs = [ex.submit(process, r, sess) for r in due]
         for fut in as_completed(futs):
-            rid, upd, ch, high, _docs = fut.result()   # _docs (per-doc detections) no longer written
+            try:
+                rid, upd, ch, high, _docs = fut.result()   # _docs (per-doc detections) no longer written
+            except Exception as e:
+                # One pathological page must never kill a 50k-page run: log it, skip it, and let
+                # the next pass retry it (its last_checked is untouched, so it stays due).
+                failed += 1; done += 1
+                print(f">>> WARN: page processing failed ({type(e).__name__}: {e}); row skipped.",
+                      flush=True)
+                continue
             if upd.get(F_STATUS) in ("dead", "error"): failed += 1
             if upd.get(F_BROWSER): promoted += 1
             if ch: changed += 1
