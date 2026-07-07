@@ -2,7 +2,9 @@ name: Monitor links (daily)
 
 on:
   schedule:
-    - cron: "0 6 * * *"        # every day at 06:00 UTC
+    - cron: "23 2 * * *"       # daily 02:23 UTC (04:23 CEST): the whole cascade (harvest ->
+                               # classify -> attach -> cover text) lands before the working day.
+                               # Off-hour minute on purpose: GitHub delays :00 schedules under load.
   workflow_dispatch:
     inputs:
       force_all:
