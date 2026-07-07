@@ -1,6 +1,14 @@
-name: Build cover text (one-off)
+name: Build cover text
 
 on:
+  # Chained: runs automatically after each attachment job completes, so freshly attached PDFs
+  # get their cover_text (and doc_language) the same day — after the morning cascade
+  # (Monitor -> Harvest -> Classify -> Attach) and again after the 19:00 UTC attachment
+  # recovery. The queue is incremental (rows with blank cover_status only), so chained runs
+  # are short and idempotent.
+  workflow_run:
+    workflows: ["Attach report PDFs", "Recover missing attachments"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       mode:
@@ -19,8 +27,13 @@ on:
         description: "Cap total rows (0 = all)"
         default: "0"
 
+concurrency:
+  group: build-cover-text
+  cancel-in-progress: false    # chained + manual runs queue instead of processing the same rows twice
+
 jobs:
   cover:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
@@ -40,9 +53,13 @@ jobs:
           AIRTABLE_PAGECOUNT_FIELD: page_count
           AIRTABLE_DOCLANG_FIELD: doc_language
         run: |
-          ARGS="--pages ${{ inputs.pages }} --limit ${{ inputs.limit }}"
-          [ "${{ inputs.mode }}" = "commit" ]  && ARGS="$ARGS --commit"
-          [ "${{ inputs.mode }}" = "reclaim" ]  && ARGS="$ARGS --reclaim"
-          [ "${{ inputs.mode }}" = "diagnose" ] && ARGS="$ARGS --diagnose 30"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            ARGS="--pages 6 --limit 0 --commit"     # chained daily run: incremental queue, commit
+          else
+            ARGS="--pages ${{ inputs.pages }} --limit ${{ inputs.limit }}"
+            [ "${{ inputs.mode }}" = "commit" ]  && ARGS="$ARGS --commit"
+            [ "${{ inputs.mode }}" = "reclaim" ]  && ARGS="$ARGS --reclaim"
+            [ "${{ inputs.mode }}" = "diagnose" ] && ARGS="$ARGS --diagnose 30"
+          fi
           echo ">>> python build_cover_text.py $ARGS"
           python build_cover_text.py $ARGS
