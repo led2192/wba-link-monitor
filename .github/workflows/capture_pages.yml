@@ -1,8 +1,12 @@
 name: Capture web pages (print to PDF)
 
+concurrency:
+  group: capture-pages
+  cancel-in-progress: false    # a long manual backfill queues the Sunday run instead of overlapping it
+
 on:
   schedule:
-    - cron: "0 3 * * 0"        # Sundays 03:00 UTC (Saturdays belong to the browser monitor)
+    - cron: "23 0 * * 0"       # Sundays 00:23 UTC (Saturdays belong to the browser monitor)
   workflow_dispatch:
     inputs:
       mode:
