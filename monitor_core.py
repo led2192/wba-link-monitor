@@ -259,21 +259,34 @@ def detection_fields(f, upd, current, had_baseline, today):
 
 def airtable_request(method, url, headers, payload=None, params=None, timeout=60, tries=5):
     """GET/POST/PATCH to Airtable, retrying transient failures (read timeouts, connection drops,
-    429 rate limits, 5xx) with exponential backoff. A single slow response no longer kills a run.
-    Prints Airtable's error body on a real 4xx (e.g. a bad field) before failing fast."""
+    429 rate limits, 5xx) with exponential backoff. On timeout retries the per-request timeout
+    ESCALATES (60 -> 96 -> 153 -> 240s) instead of reusing the same ceiling: during the
+    2026-07-12 Airtable slow window, five identical 60s attempts all failed inside the same
+    ~5-minute incident. Escalating headroom plus a longer backoff ceiling lets the ladder ride
+    out a degraded-API window. Prints Airtable's error body on a real 4xx before failing fast."""
     delay = 2
     for attempt in range(1, tries + 1):
         try:
             r = requests.request(method, url, headers=headers, json=payload, params=params, timeout=timeout)
-        except requests.exceptions.RequestException:
+        except requests.exceptions.Timeout:
             if attempt == tries:
                 raise
-            time.sleep(delay); delay = min(delay * 2, 30); continue
+            nxt = min(int(timeout * 1.6), 240)
+            print(f"Airtable {method} timed out after {timeout}s (attempt {attempt}/{tries}); "
+                  f"retrying in {delay}s with a {nxt}s timeout", flush=True)
+            timeout = nxt
+            time.sleep(delay); delay = min(delay * 2, 90); continue
+        except requests.exceptions.RequestException as e:
+            if attempt == tries:
+                raise
+            print(f"Airtable {method} {type(e).__name__} (attempt {attempt}/{tries}); "
+                  f"retrying in {delay}s", flush=True)
+            time.sleep(delay); delay = min(delay * 2, 90); continue
         if r.status_code == 429 or r.status_code >= 500:
             if attempt == tries:
                 print(f"Airtable {method} {r.status_code}: {r.text[:400]}")
                 r.raise_for_status()
-            time.sleep(delay); delay = min(delay * 2, 30); continue
+            time.sleep(delay); delay = min(delay * 2, 90); continue
         if r.status_code >= 400:
             print(f"Airtable {method} {r.status_code}: {r.text[:400]}")
         r.raise_for_status()
