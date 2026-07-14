@@ -1,0 +1,61 @@
+# Runs company_coverage.py after "Build cover text" completes, i.e. at the very tail of the
+# daily cascade (Monitor -> Harvest -> Classify -> Attach -> Cover text -> Coverage), so the
+# numbers on `companies` reflect everything the pipeline did that night. Writes are diffed,
+# so chained runs only touch rows whose stats actually changed.
+#
+# companies must have these fields (exact names):
+#   urls_total, urls_monitored, docs_total, docs_with_file, docs_typed,
+#   latest_report_year                      -> Number (0 decimals)
+#   coverage_breakdown                      -> Long text
+#   coverage_flags                          -> Single line text
+#   coverage_updated                        -> Date (ISO)
+name: Company coverage
+
+on:
+  workflow_run:
+    workflows: ["Build cover text"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run"
+        type: choice
+        default: "dry-run"
+        options:
+          - dry-run
+          - commit
+      year_min:
+        description: "Report family counts as current when latest year >= this"
+        default: "2024"
+
+concurrency:
+  group: company-coverage
+  cancel-in-progress: false
+
+jobs:
+  coverage:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Aggregate coverage into companies
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LINKS_TABLE: monitored_links
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_COMPANIES_TABLE: companies
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            ARGS="--commit"
+          else
+            ARGS="--year-min ${{ inputs.year_min }}"
+            [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"
+          fi
+          echo ">>> python company_coverage.py $ARGS"
+          python company_coverage.py $ARGS
