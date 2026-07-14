@@ -234,9 +234,19 @@ def main():
                     help="a report family counts as current when its latest year >= this")
     args = ap.parse_args()
 
-    agg = aggregate()
+    # companies goes FIRST: it is the cheapest sweep (~2k rows) and the only one whose
+    # fields might not exist yet. A missing stat field 422s here in seconds instead of
+    # after the ~17-minute aggregation of the two big tables (learned the hard way on
+    # the first live run, which died on UNKNOWN_FIELD_NAME at minute 17).
     print(">>> sweeping companies ...", flush=True)
-    comp = companies_index()
+    try:
+        comp = companies_index()
+    except Exception:
+        print(">>> companies needs these fields (exact names): "
+              + ", ".join([C_WBA] + STAT_FIELDS + [C_UPDATED]), flush=True)
+        raise
+
+    agg = aggregate()
 
     orphans = sorted((w for w in agg if w not in comp),
                      key=lambda w: -agg[w]["docs_total"])
