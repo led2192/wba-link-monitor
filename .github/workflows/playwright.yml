@@ -1,14 +1,36 @@
+# Rotating-queue browser monitor. Two scheduled sweeps a week; each run self-limits via
+# MAX_PAGES and finishes cleanly (GitHub hard-kills jobs at 6h; this one caps at 350 min),
+# and the oldest-first ordering in playwright_monitor.py guarantees every page is covered
+# across consecutive runs even when one run can't finish the whole queue.
+#
+# Manual dispatch is the debug lever: set wba_id (e.g. PT_00019) to render ALL monitored
+# URLs of that company in minutes — targeted runs ignore needs_browser/status and do NOT
+# claim pages for the browser, so debug sweeps never grow the weekly queue.
 name: Browser monitor (weekly)
 
 on:
   schedule:
     - cron: "0 3 * * 6"        # Saturdays 03:00 UTC
-  workflow_dispatch: {}
+    - cron: "0 3 * * 3"        # Wednesdays 03:00 UTC — second sweep so the full queue fits in a week
+  workflow_dispatch:
+    inputs:
+      wba_id:
+        description: "Comma-separated wba_ids: render ALL monitored URLs of these companies"
+        default: ""
+      url_contains:
+        description: "Substring filter on url (case-insensitive), e.g. grupoacs"
+        default: ""
+      max_pages:
+        description: "Cap pages this run (queue mode only; 0 = no cap)"
+        default: "6000"
+      workers:
+        description: "Parallel browser workers"
+        default: "4"
 
 jobs:
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,3 +43,7 @@ jobs:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_TABLE: monitored_links
+          PW_WBA: ${{ inputs.wba_id }}
+          PW_CONTAINS: ${{ inputs.url_contains }}
+          MAX_PAGES: ${{ inputs.max_pages || '6000' }}
+          PW_WORKERS: ${{ inputs.workers || '4' }}
