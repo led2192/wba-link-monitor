@@ -17,7 +17,9 @@ Fields written on `companies` (create them first; see company_coverage.yml heade
     docs_typed          -> of those, rows with an effective type (not blank / UNKNOWN)
     latest_report_year  -> max {year} over periodic report types
     coverage_breakdown  -> one line per effective type: "Sustainability Report: 14 (latest 2025)"
-    coverage_flags      -> semicolon gap flags ("no_reports_hub; no_sust_report_2024+"); blank = healthy
+    coverage_flags      -> semicolon gap flags ("no_reports_hub; no_sust_report_2024+"); blank = healthy;
+                           browser_dependent marks zero-doc companies whose pages need the browser
+                           monitor (JS-rendered / CDN-walled sites): a tech case, not a silent company
     coverage_updated    -> date the stats last CHANGED (unchanged rows are not rewritten)
 
 Effective type = source_type_check (AI) when set, else source_type (keyword classifier).
@@ -54,7 +56,7 @@ H   = {"Authorization": f"Bearer {TOKEN}"}
 WRITE_BATCH = 10
 
 # monitored_links fields
-F_WBA = "wba_id"; F_MON = "monitor"; F_PTYPE = "type"
+F_WBA = "wba_id"; F_MON = "monitor"; F_PTYPE = "type"; F_NB = "needs_browser"
 # report_library fields
 F_TYPE_AI = "source_type_check"; F_TYPE_KW = "source_type"; F_YEAR = "year"
 F_FILE = "file"; F_DISCARD = "discard"
@@ -110,12 +112,12 @@ def aggregate():
 
     def co(wba):
         return agg.setdefault(wba, {
-            "urls_total": 0, "urls_monitored": 0, "page_types": set(),
+            "urls_total": 0, "urls_monitored": 0, "page_types": set(), "needs_browser": 0,
             "docs_total": 0, "docs_with_file": 0, "docs_typed": 0,
             "type_counts": {}, "type_latest": {}, "latest_report_year": None})
 
     print(">>> sweeping monitored_links ...", flush=True)
-    for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE], "monitored_links"):
+    for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB], "monitored_links"):
         f = rec.get("fields", {})
         wba = (f.get(F_WBA) or "").strip()
         if not wba:
@@ -124,6 +126,8 @@ def aggregate():
         c["urls_total"] += 1
         if f.get(F_MON):
             c["urls_monitored"] += 1
+        if f.get(F_NB):
+            c["needs_browser"] += 1
         pt = (f.get(F_PTYPE) or "").strip()
         if pt:
             c["page_types"].add(pt)
@@ -176,6 +180,10 @@ def compose(c, year_min):
         flags.append("no_sustainability_page")
     if c["docs_total"] == 0:
         flags.append("no_docs")
+        if c["needs_browser"] > 0:
+            # zero docs on a site the daily monitor can't read = likely a technical wall
+            # (JS rendering / CDN-hosted documents), not a company that doesn't publish.
+            flags.append("browser_dependent")
     else:
         if c["docs_with_file"] == 0:
             flags.append("no_files")
@@ -193,7 +201,7 @@ def compose(c, year_min):
 
 
 def empty_stats():
-    return {"urls_total": 0, "urls_monitored": 0, "page_types": set(), "docs_total": 0,
+    return {"urls_total": 0, "urls_monitored": 0, "page_types": set(), "needs_browser": 0, "docs_total": 0,
             "docs_with_file": 0, "docs_typed": 0, "type_counts": {}, "type_latest": {},
             "latest_report_year": None}
 
