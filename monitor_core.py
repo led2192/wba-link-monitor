@@ -59,6 +59,26 @@ RAW_DOC_RX = re.compile(r"https?://[^\s\"'<>\\){}\[\]]+|(?<=[\"'])/[^\s\"'<>\\){
 # only document signal is the query-string id. Path-only matching misses all of these.
 DOC_ID_Q = re.compile(r"\b(document|edition|asset|media|file)[-_]?id=", re.I)
 
+# Headless-CMS / asset-CDN hosts. Corporates on Sitecore XM Cloud, Contentful, Azure, etc. serve
+# their OWN documents from these domains (grupoacs.com links its PDFs from edge.sitecorecloud.io),
+# so the blanket "no cross-domain raw PDFs" rule silently dropped every document of every
+# headless-CMS company: pages rendered fine, seen_links held only nav page-links, harvest got
+# nothing (the ACS zero-docs case, 2026-07-15). Cross-domain PDFs are admitted when the host is a
+# tenant-asset CDN; framework sites (sciencebasedtargets.org, globalreporting.org...) publish from
+# their own branded domains and stay excluded. Suffix-matched on the HOSTNAME, not reg_domain:
+# several of these are on the Public Suffix List, which makes registrable-domain equality lie.
+ASSET_CDN_SUFFIXES = (
+    "sitecorecloud.io", "ctfassets.net", "cloudfront.net", "amazonaws.com",
+    "azureedge.net", "azurefd.net", "windows.net", "cloudinary.com",
+    "akamaized.net", "sanity.io", "storyblok.com", "contentstack.io",
+    "prismic.io", "kontent.ai", "imgix.net", "b-cdn.net", "frontify.com",
+)
+
+
+def is_asset_cdn(host):
+    host = (host or "").lower()
+    return any(host == s or host.endswith("." + s) for s in ASSET_CDN_SUFFIXES)
+
 
 def reg_domain(u):
     e = _EXTRACT(u)
@@ -106,7 +126,9 @@ def doc_links(html, base):
     documentId/editionId query, i.e. the company's own CMS content served from a sibling brand or
     CDN domain (abrdn hosts its reports on aberdeeninvestments.com). We deliberately do NOT admit
     cross-domain raw PDFs, so third-party framework PDFs (SBTi, GRI, WEPS...) are not re-flagged as
-    this company's disclosures."""
+    this company's disclosures — EXCEPT when the PDF is hosted on a known tenant-asset CDN
+    (ASSET_CDN_SUFFIXES): headless-CMS sites serve their own documents cross-domain and were
+    losing every document under the blanket rule."""
     rdom = reg_domain(base)
     out = {}
     for a in BeautifulSoup(html, "html.parser").find_all("a", href=True):
@@ -121,7 +143,8 @@ def doc_links(html, base):
             is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q
             if not is_document:
                 continue
-            if reg_domain(absu) != rdom and not is_doc_q:        # cross-domain: CMS docs only
+            cdn_pdf = path.endswith(".pdf") and is_asset_cdn(s.hostname)
+            if reg_domain(absu) != rdom and not (is_doc_q or cdn_pdf):   # cross-domain: CMS docs + asset-CDN PDFs
                 continue
             n = normalize(absu)
         except ValueError:
@@ -145,7 +168,7 @@ def doc_links(html, base):
             is_doc_q = bool(DOC_ID_Q.search(s.query or ""))
             if not (path.endswith(".pdf") or PDF_SEG.search(path) or is_doc_q):
                 continue
-            if reg_domain(absu) != rdom and not is_doc_q:
+            if reg_domain(absu) != rdom and not (is_doc_q or (path.endswith(".pdf") and is_asset_cdn(s.hostname))):
                 continue
             n = normalize(absu)
         except Exception:
