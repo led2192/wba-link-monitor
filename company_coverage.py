@@ -18,8 +18,9 @@ Fields written on `companies` (create them first; see company_coverage.yml heade
     latest_report_year  -> max {year} over periodic report types
     coverage_breakdown  -> one line per effective type: "Sustainability Report: 14 (latest 2025)"
     coverage_flags      -> semicolon gap flags ("no_reports_hub; no_sust_report_2024+"); blank = healthy;
-                           browser_dependent marks zero-doc companies whose pages need the browser
-                           monitor (JS-rendered / CDN-walled sites): a tech case, not a silent company
+                           browser_dependent marks zero-doc companies whose pages sit in the
+                           browser lane (needs_browser OR dead/error): JS-rendered, CDN-walled or
+                           bot-blocked sites. A tech case, not a silent company
     coverage_updated    -> date the stats last CHANGED (unchanged rows are not rewritten)
 
 Effective type = source_type_check (AI) when set, else source_type (keyword classifier).
@@ -56,7 +57,7 @@ H   = {"Authorization": f"Bearer {TOKEN}"}
 WRITE_BATCH = 10
 
 # monitored_links fields
-F_WBA = "wba_id"; F_MON = "monitor"; F_PTYPE = "type"; F_NB = "needs_browser"
+F_WBA = "wba_id"; F_MON = "monitor"; F_PTYPE = "type"; F_NB = "needs_browser"; F_ST = "status"
 # report_library fields
 F_TYPE_AI = "source_type_check"; F_TYPE_KW = "source_type"; F_YEAR = "year"
 F_FILE = "file"; F_DISCARD = "discard"
@@ -117,7 +118,7 @@ def aggregate():
             "type_counts": {}, "type_latest": {}, "latest_report_year": None})
 
     print(">>> sweeping monitored_links ...", flush=True)
-    for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB], "monitored_links"):
+    for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST], "monitored_links"):
         f = rec.get("fields", {})
         wba = (f.get(F_WBA) or "").strip()
         if not wba:
@@ -126,7 +127,10 @@ def aggregate():
         c["urls_total"] += 1
         if f.get(F_MON):
             c["urls_monitored"] += 1
-        if f.get(F_NB):
+        # browser-lane rows: explicitly claimed (needs_browser) OR dead/error, which the
+        # browser queue also owns. Counting only needs_browser hid hard bot-walled domains
+        # (BMO case, 2026-07-16: every bmo.com row status=error, none flagged needs_browser).
+        if f.get(F_NB) or f.get(F_ST) in ("dead", "error"):
             c["needs_browser"] += 1
         pt = (f.get(F_PTYPE) or "").strip()
         if pt:
