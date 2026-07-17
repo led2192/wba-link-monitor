@@ -84,6 +84,28 @@ def pdfs_from_row(fields, types):
         yield fetchable(page), page
 
 
+SHARED_DOC_MIN = int(os.environ.get("SHARED_DOC_MIN", "5") or 5)
+
+
+def drop_shared_docs(rows):
+    """Remove documents linked from >= SHARED_DOC_MIN distinct companies. With cross-domain
+    PDFs admitted by default (monitor_core v3 rule), an unknown third-party PDF that many
+    company pages link (an industry framework, a lobby report) would otherwise become one
+    library row PER company. A document under that many companies is nobody's disclosure;
+    same logic as unmonitor_shared, applied at document level. Returns (kept, skipped_summary)."""
+    from ids import normalize
+    per_doc = collections.defaultdict(set)
+    for r in rows.values():
+        per_doc[normalize(r["document_url"]) or r["document_url"]].add(r["wba_id"])
+    shared = {k for k, wbas in per_doc.items() if len(wbas) >= SHARED_DOC_MIN}
+    if not shared:
+        return rows, []
+    kept = {lid: r for lid, r in rows.items()
+            if (normalize(r["document_url"]) or r["document_url"]) not in shared}
+    summary = sorted(((len(per_doc[k]), k) for k in shared), reverse=True)
+    return kept, summary
+
+
 def build(records, types, reports_only):
     """Returns deduped library rows + per-company / per-type counts. Dedup is by
     company+document, so a PDF linked from several pages is ONE library row."""
@@ -109,6 +131,12 @@ def build(records, types, reports_only):
                 rows[lib_id] = {"library_id": lib_id, "wba_id": wba, "company_name": name,
                                 "document_url": doc, "found_on": page, "page_type": typ,
                                 "doc_year": year_of(doc), "source_link_id": slid}
+    rows, shared_summary = drop_shared_docs(rows)
+    if shared_summary:
+        print(f">>> shared-document guard: skipped {len(shared_summary)} documents linked by "
+              f">={SHARED_DOC_MIN} companies (SHARED_DOC_MIN). Top offenders:")
+        for n, k in shared_summary[:10]:
+            print(f"      {n} companies -> {k}")
     return list(rows.values()), per_company, per_type
 
 
