@@ -61,6 +61,8 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 OWN_PAGES = True    # queue mode claims pages for the browser; targeted mode (set False) does not
+RESCUE_SHARE = float(os.environ.get("RESCUE_SHARE", "0.25") or 0.25)   # max fraction of a batch spent on dead/error rescues
+RECYCLE_EVERY = int(os.environ.get("RECYCLE_EVERY", "150") or 150)     # relaunch each worker's Chromium every N pages
 
 
 def build_formula(wba_csv, contains):
@@ -91,21 +93,42 @@ def get_targets(formula):
     return out
 
 
-def order_targets(recs, max_pages):
-    """Oldest-first rotating queue: never-visited pages first, then ascending last_checked.
-    Within one date the order is shuffled so a run doesn't hammer one domain in a burst.
-    Returns (batch, remaining) where remaining is what the NEXT run will start from."""
+def _oldest_first(recs):
     groups = collections.defaultdict(list)
     for r in recs:
         groups[(r.get("fields", {}).get(F_CHECKED) or "")].append(r)
     ordered = []
     for day in sorted(groups):            # "" (never visited) sorts before any ISO date
         batch = groups[day]
-        random.shuffle(batch)
+        random.shuffle(batch)             # avoid hammering one domain in a burst
         ordered.extend(batch)
-    if max_pages and max_pages > 0 and len(ordered) > max_pages:
-        return ordered[:max_pages], len(ordered) - max_pages
-    return ordered, 0
+    return ordered
+
+
+def order_targets(recs, max_pages):
+    """Rotating queue, oldest-first, with batch composition control. The queue has two pools:
+    PRODUCTIVE pages (needs_browser and readable: JS sites that actually yield documents) and
+    RESCUE pages (status dead/error: bot-walls and dead links, each burning the full nav
+    timeout). Oldest-first alone let the rescue pool monopolise whole batches with the slowest
+    possible pages; now rescues are capped at RESCUE_SHARE of the batch and productive pages
+    fill the rest, so JS companies get guaranteed daily throughput whatever the wall pool does.
+    Returns (batch, remaining)."""
+    rescue = [r for r in recs if (r.get("fields", {}).get(F_STATUS)) in ("dead", "error")]
+    productive = [r for r in recs if r not in rescue] if len(recs) < 5000 else None
+    if productive is None:   # avoid O(n^2) membership on big queues
+        rescue_ids = {r["id"] for r in rescue}
+        productive = [r for r in recs if r["id"] not in rescue_ids]
+    productive = _oldest_first(productive); rescue = _oldest_first(rescue)
+    if not max_pages or max_pages <= 0:
+        ordered = productive + rescue
+        return ordered, 0
+    r_cap = int(max_pages * RESCUE_SHARE)
+    batch = productive[:max_pages - r_cap] + rescue[:r_cap]
+    # backfill if one pool is short
+    if len(batch) < max_pages:
+        batch += (productive[max_pages - r_cap:] + rescue[r_cap:])[:max_pages - len(batch)]
+    remaining = len(recs) - len(batch)
+    return batch, max(remaining, 0)
 
 
 def patch(updates):
@@ -120,11 +143,22 @@ def patch(updates):
 
 _tl = threading.local()
 def get_page():
-    """One Playwright+Chromium per worker thread, reused across its pages."""
+    """One Playwright+Chromium per worker thread, RELAUNCHED every RECYCLE_EVERY pages:
+    long-lived Chromium instances degrade over hundreds of renders, and a fresh launch is
+    cheaper than the slow creep."""
+    n = getattr(_tl, "count", 0)
+    if n and n % RECYCLE_EVERY == 0 and hasattr(_tl, "ctx"):
+        try:
+            _tl.browser.close(); _tl.pw.stop()
+        except Exception:
+            pass
+        del _tl.ctx
+    _tl.count = n + 1
     if not hasattr(_tl, "ctx"):
         _tl.pw = sync_playwright().start()
         _tl.browser = _tl.pw.chromium.launch(headless=True)
         _tl.ctx = _tl.browser.new_context(user_agent=UA, viewport={"width": 1366, "height": 900})
+        _tl.ctx.set_default_timeout(NAV_TIMEOUT_MS)
         _tl.ctx.route(re.compile(r"\.(png|jpe?g|gif|webp|svg|ico|woff2?|ttf|mp4|webm)(\?|$)", re.I),
                       lambda route: route.abort())
     return _tl.ctx
@@ -134,6 +168,7 @@ def process(rec):
     f = rec.get("fields", {}); u = f.get(F_URL, "")
     upd = {F_CHECKED: TODAY.isoformat()}
     page = None
+    t0 = time.time()
     try:
         page = get_page().new_page()
         resp = page.goto(u, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
@@ -141,7 +176,7 @@ def process(rec):
         code = resp.status if resp else None
         if code and code >= 400:
             upd[F_STATUS] = "dead"; upd[F_HTTP] = str(code)
-            return rec["id"], upd, False, False, [], False
+            return rec["id"], upd, False, False, [], False, time.time() - t0
         final = page.url
         upd[F_HTTP] = str(code or "")
         upd[F_FINAL] = final
@@ -151,10 +186,10 @@ def process(rec):
         changed, high, docs = detection_fields(f, upd, current, had_baseline, TODAY)
         if OWN_PAGES or f.get(F_BROWSER):
             upd[F_BROWSER] = True                    # browser owns this page from now on
-        return rec["id"], upd, changed, high, docs, True
+        return rec["id"], upd, changed, high, docs, True, time.time() - t0
     except Exception:
         upd[F_STATUS] = "error"
-        return rec["id"], upd, False, False, [], False
+        return rec["id"], upd, False, False, [], False, time.time() - t0
     finally:
         if page:
             try: page.close()
@@ -169,6 +204,8 @@ def main():
     ap.add_argument("--max-pages", type=int, default=int(os.environ.get("MAX_PAGES", "0") or 0),
                     help="cap pages this run (0 = no cap); the queue rotates, next run continues")
     ap.add_argument("--workers", type=int, default=int(os.environ.get("PW_WORKERS", "4") or 4))
+    ap.add_argument("--budget-min", type=int, default=int(os.environ.get("RUN_BUDGET_MIN", "180") or 180),
+                    help="wall-clock budget; the run always finishes cleanly inside it (0 = off)")
     args = ap.parse_args()
 
     targeted = bool(args.wba.strip() or args.contains.strip())
@@ -181,27 +218,43 @@ def main():
            else f"queue, oldest-first (cap {args.max_pages or 'none'})"
     print(f"{len(recs)} pages to render with a real browser ({args.workers} workers). Mode: {mode}.")
 
-    updates = []; rescued = changed = still_dead = 0; done = 0
-    alerted = 0
+    budget_s = args.budget_min * 60
+    t0 = time.time()
+    updates = []; rescued = changed = still_dead = 0; done = 0; alerted = 0; slow = 0
+    stopped_early = False
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = [ex.submit(process, r) for r in recs]
-        for fut in as_completed(futs):
-            rid, upd, ch, high, _docs, ok = fut.result()   # _docs (per-doc detections) no longer written
-            if ok: rescued += 1
-            elif upd.get(F_STATUS) in ("dead", "error"): still_dead += 1
-            if ch: changed += 1
-            if high: alerted += 1
-            updates.append({"id": rid, "fields": upd}); done += 1
-            if len(updates) >= 100:        # checkpoint progress so a long run survives a hiccup
-                patch(updates); updates = []
-            if done % 100 == 0: print(f"  {done}/{len(recs)}")
+        i = 0
+        CHUNK = max(args.workers * 10, 20)
+        while i < len(recs):
+            if budget_s and time.time() - t0 > budget_s:
+                stopped_early = True
+                print(f">>> time budget ({args.budget_min} min) reached with {len(recs) - i} "
+                      f"pages unprocessed this run; they stay at the head of the rotation.", flush=True)
+                break
+            chunk = recs[i:i + CHUNK]; i += len(chunk)
+            for fut in as_completed([ex.submit(process, r) for r in chunk]):
+                rid, upd, ch, high, _docs, ok, secs = fut.result()
+                if ok: rescued += 1
+                elif upd.get(F_STATUS) in ("dead", "error"): still_dead += 1
+                if ch: changed += 1
+                if high: alerted += 1
+                if secs > 30:
+                    slow += 1
+                    print(f"    SLOW {secs:.0f}s  {upd.get(F_FINAL) or ''}", flush=True)
+                updates.append({"id": rid, "fields": upd}); done += 1
+                if len(updates) >= 100:    # checkpoint progress so a long run survives a hiccup
+                    patch(updates); updates = []
+            if done % 200 < CHUNK: print(f"  {done}/{len(recs)}  ({(time.time()-t0)/60:.0f} min)", flush=True)
     print(f"Writing the final {len(updates)} updates back to Airtable ...")
     patch(updates)
     print(f"Done. Readable in a real browser: {rescued}.  Still dead/error: {still_dead}.  "
           f"Pages with new doc links: {changed} (high-signal alerts: {alerted}).")
-    if remaining:
-        print(f"Queue not fully covered this run: {remaining} pages left, "
-              f"oldest-first rotation continues on the next run.")
+    left = remaining + (len(recs) - done)
+    if left or stopped_early:
+        print(f"Queue not fully covered this run: {left} pages left "
+              f"(cap {remaining}, budget {len(recs) - done}); rotation continues next run.")
+    if slow:
+        print(f"Slow pages (>30s): {slow} — listed above; recurring hosts are stealth-wall candidates.")
 
 
 if __name__ == "__main__":
