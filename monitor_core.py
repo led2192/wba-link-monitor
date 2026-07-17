@@ -59,25 +59,30 @@ RAW_DOC_RX = re.compile(r"https?://[^\s\"'<>\\){}\[\]]+|(?<=[\"'])/[^\s\"'<>\\){
 # only document signal is the query-string id. Path-only matching misses all of these.
 DOC_ID_Q = re.compile(r"\b(document|edition|asset|media|file)[-_]?id=", re.I)
 
-# Headless-CMS / asset-CDN hosts. Corporates on Sitecore XM Cloud, Contentful, Azure, etc. serve
-# their OWN documents from these domains (grupoacs.com links its PDFs from edge.sitecorecloud.io),
-# so the blanket "no cross-domain raw PDFs" rule silently dropped every document of every
-# headless-CMS company: pages rendered fine, seen_links held only nav page-links, harvest got
-# nothing (the ACS zero-docs case, 2026-07-15). Cross-domain PDFs are admitted when the host is a
-# tenant-asset CDN; framework sites (sciencebasedtargets.org, globalreporting.org...) publish from
-# their own branded domains and stay excluded. Suffix-matched on the HOSTNAME, not reg_domain:
-# several of these are on the Public Suffix List, which makes registrable-domain equality lie.
-ASSET_CDN_SUFFIXES = (
-    "sitecorecloud.io", "ctfassets.net", "cloudfront.net", "amazonaws.com",
-    "azureedge.net", "azurefd.net", "windows.net", "cloudinary.com",
-    "akamaized.net", "sanity.io", "storyblok.com", "contentstack.io",
-    "prismic.io", "kontent.ai", "imgix.net", "b-cdn.net", "frontify.com",
+# Branded framework / standard-setter hosts. Cross-domain PDF policy, third iteration:
+# v1 dropped ALL cross-domain raw PDFs (kept SBTi/GRI out, but silently lost every document of
+# every headless-CMS company - the ACS/Sitecore case). v2 allowlisted known asset CDNs, which
+# fixed ACS but is whack-a-mole: it missed Q4 (q4cdn.com, half of North-American IR), group
+# parent domains, exchange-hosted filings (hkexnews) and every CDN not yet on the list.
+# v3 (2026-07-17) inverts the burden, per the design principle "a PDF linked from the company's
+# own monitored page is the company's document, wherever it is stored": cross-domain PDFs are
+# ADMITTED by default and only these branded framework publishers are excluded, because their
+# PDFs are standards/initiative material, never a specific company's disclosure. The remaining
+# risk (an unknown shared third-party PDF linked by many companies) is handled downstream by the
+# shared-document threshold in harvest_reports (SHARED_DOC_MIN), mirroring unmonitor_shared's
+# page-level logic at document level. Suffix-matched on the hostname.
+FRAMEWORK_SUFFIXES = (
+    "sciencebasedtargets.org", "globalreporting.org", "weps.org", "unglobalcompact.org",
+    "cdp.net", "sasb.org", "ifrs.org", "integratedreporting.org", "wbcsd.org",
+    "ghgprotocol.org", "iso.org", "weforum.org", "oecd.org", "ilo.org", "un.org",
+    "europa.eu", "tcfdhub.org", "fsb.org", "msci.com", "sustainalytics.com",
+    "ecovadis.com", "ellenmacarthurfoundation.org", "fairlabor.org", "bcorporation.net",
 )
 
 
-def is_asset_cdn(host):
+def is_framework_host(host):
     host = (host or "").lower()
-    return any(host == s or host.endswith("." + s) for s in ASSET_CDN_SUFFIXES)
+    return any(host == s or host.endswith("." + s) for s in FRAMEWORK_SUFFIXES)
 
 
 def reg_domain(u):
@@ -123,12 +128,13 @@ def doc_links(html, base):
 
     Same-domain links are kept if they look like a document (.pdf, a DOCISH path, or a
     documentId/editionId query). Cross-domain links are kept ONLY when they carry a
-    documentId/editionId query, i.e. the company's own CMS content served from a sibling brand or
-    CDN domain (abrdn hosts its reports on aberdeeninvestments.com). We deliberately do NOT admit
-    cross-domain raw PDFs, so third-party framework PDFs (SBTi, GRI, WEPS...) are not re-flagged as
-    this company's disclosures — EXCEPT when the PDF is hosted on a known tenant-asset CDN
-    (ASSET_CDN_SUFFIXES): headless-CMS sites serve their own documents cross-domain and were
-    losing every document under the blanket rule."""
+    documentId/editionId query (the company's own CMS content on a sibling domain), OR when they are
+    a .pdf: a PDF linked from the company's own monitored page is treated as the company's document
+    wherever it is stored (CDNs, IR providers like Q4 or MZiq, group domains, exchange hosts).
+    Only branded framework/standard-setter/ratings publishers (FRAMEWORK_SUFFIXES) stay excluded,
+    and mass-shared documents are additionally filtered at harvest by the SHARED_DOC_MIN
+    threshold. Page discovery (DOCISH paths) remains same-domain only: third-party PAGES never
+    become monitoring candidates."""
     rdom = reg_domain(base)
     out = {}
     for a in BeautifulSoup(html, "html.parser").find_all("a", href=True):
@@ -143,8 +149,8 @@ def doc_links(html, base):
             is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q
             if not is_document:
                 continue
-            cdn_pdf = path.endswith(".pdf") and is_asset_cdn(s.hostname)
-            if reg_domain(absu) != rdom and not (is_doc_q or cdn_pdf):   # cross-domain: CMS docs + asset-CDN PDFs
+            xdom_pdf = path.endswith(".pdf") and not is_framework_host(s.hostname)
+            if reg_domain(absu) != rdom and not (is_doc_q or xdom_pdf):  # cross-domain: CMS docs + any non-framework PDF
                 continue
             n = normalize(absu)
         except ValueError:
@@ -168,7 +174,7 @@ def doc_links(html, base):
             is_doc_q = bool(DOC_ID_Q.search(s.query or ""))
             if not (path.endswith(".pdf") or PDF_SEG.search(path) or is_doc_q):
                 continue
-            if reg_domain(absu) != rdom and not (is_doc_q or (path.endswith(".pdf") and is_asset_cdn(s.hostname))):
+            if reg_domain(absu) != rdom and not (is_doc_q or (path.endswith(".pdf") and not is_framework_host(s.hostname))):
                 continue
             n = normalize(absu)
         except Exception:
