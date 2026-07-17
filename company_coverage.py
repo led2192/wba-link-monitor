@@ -24,6 +24,12 @@ Fields written on `companies` (create them first; see company_coverage.yml heade
     missing_types       -> key source types the company has NO document of, any year:
                            the two report families plus IMPORTANT_EXACT. Analyst-facing:
                            "which important sources are we missing per company"
+    pages_breakdown     -> monitored pages per page type: "reports_hub: 2" one per line
+    docs_by_year        -> non-discarded docs per resolved year, newest first, plus undated:
+                           "2026: 3 | 2025: 12 | 2024: 9 | undated: 7"
+    sust_years          -> years we hold a sustainability-family document for: "2021; 2023; 2024"
+    sust_cadence        -> publication rhythm estimated from sust_years: annual / biennial /
+                           ~every Ny / irregular / single / none, with the next expected year
     coverage_updated    -> date the stats last CHANGED (unchanged rows are not rewritten)
 
 Effective type = source_type_check (AI) when set, else source_type (keyword classifier).
@@ -43,7 +49,7 @@ Env: AIRTABLE_TOKEN, AIRTABLE_BASE,
      AIRTABLE_LIBRARY_TABLE   (default report_library),
      AIRTABLE_COMPANIES_TABLE (default companies)
 """
-import os, re, time, argparse
+import os, re, time, argparse, collections
 from datetime import date
 from urllib.parse import quote
 
@@ -68,7 +74,7 @@ F_FILE = "file"; F_DISCARD = "discard"
 C_WBA = "wba_id"
 STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
-               "missing_types"]
+               "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence"]
 C_UPDATED = "coverage_updated"
 
 # Effective-type families for recency flags. Names match source_type_check options verbatim.
@@ -77,7 +83,7 @@ SUST_FAMILY   = {"Sustainability Report", "ESG Report", "CSR Report",
 ANNUAL_FAMILY = {"Annual Report", "Integrated Report", "10K Form"}
 # Key source types the organisation expects from every company. The exact set is a
 # methodology decision; edit here and the missing_types field re-derives next run.
-IMPORTANT_EXACT = ("Code of Conduct", "Human Rights Policy", "Climate Report", "Policy Documents")
+IMPORTANT_EXACT = ("Code of Conduct", "Human Rights Policy", "Policy Documents")
 
 REPORT_TYPES  = SUST_FAMILY | ANNUAL_FAMILY | {
     "Climate Report", "Environmental Reports", "Social Reports", "Interim Reports",
@@ -121,8 +127,8 @@ def aggregate():
 
     def co(wba):
         return agg.setdefault(wba, {
-            "urls_total": 0, "urls_monitored": 0, "page_types": set(), "needs_browser": 0,
-            "docs_total": 0, "docs_with_file": 0, "docs_typed": 0,
+            "urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
+            "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(), "docs_with_file": 0, "docs_typed": 0,
             "type_counts": {}, "type_latest": {}, "latest_report_year": None})
 
     print(">>> sweeping monitored_links ...", flush=True)
@@ -142,7 +148,7 @@ def aggregate():
             c["needs_browser"] += 1
         pt = (f.get(F_PTYPE) or "").strip()
         if pt:
-            c["page_types"].add(pt)
+            c["page_types"][pt] += 1
 
     print(">>> sweeping report_library ...", flush=True)
     for rec in sweep(LIB, [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_FILE, F_DISCARD], "report_library"):
@@ -160,14 +166,41 @@ def aggregate():
             if t != "UNKNOWN":
                 c["docs_typed"] += 1
         y = f.get(F_YEAR)
-        if isinstance(y, (int, float)) and YEAR_OK.match(str(int(y))):
+        if not (isinstance(y, (int, float)) and YEAR_OK.match(str(int(y)))):
+            c["year_counts"]["undated"] += 1
+            y = None
+        else:
             y = int(y)
+            c["year_counts"][y] += 1
+            if t in SUST_FAMILY:
+                c["sust_years"].add(y)
+        if y is not None:
             if t:
                 if y > c["type_latest"].get(t, 0):
                     c["type_latest"][t] = y
                 if t in REPORT_TYPES and y > (c["latest_report_year"] or 0):
                     c["latest_report_year"] = y
     return agg
+
+
+def sust_cadence(years):
+    """Publication rhythm of the sustainability family, from the years we actually hold.
+    Estimation quality follows library completeness: missing historical documents make a
+    rhythm look sparser than it is, so this improves as backfill grows."""
+    ys = sorted(years)
+    if not ys:
+        return "none"
+    if len(ys) == 1:
+        return f"single ({ys[0]})"
+    gaps = [b - a for a, b in zip(ys, ys[1:])]
+    modal = collections.Counter(gaps).most_common(1)[0]
+    if all(g == 1 for g in gaps):
+        return f"annual (next ~{ys[-1] + 1})"
+    if all(g == 2 for g in gaps):
+        return f"biennial (next ~{ys[-1] + 2})"
+    if modal[1] / len(gaps) >= 0.6 and modal[0] > 0:
+        return f"~every {modal[0]}y (next ~{ys[-1] + modal[0]})"
+    return f"irregular (last {ys[-1]})"
 
 
 def compose(c, year_min):
@@ -215,15 +248,27 @@ def compose(c, year_min):
         if not c["type_counts"].get(t):
             missing.append(t)
 
+    pages = "\n".join(f"{t}: {n}" for t, n in sorted(c["page_types"].items(), key=lambda kv: (-kv[1], kv[0])))
+    yc = c["year_counts"]
+    year_keys = sorted((k for k in yc if k != "undated"), reverse=True)
+    parts = [f"{k}: {yc[k]}" for k in year_keys]
+    if yc.get("undated"):
+        parts.append(f"undated: {yc['undated']}")
+    docs_by_year = " | ".join(parts)
+    s_years = "; ".join(str(y) for y in sorted(c["sust_years"]))
+
     return {"urls_total": c["urls_total"], "urls_monitored": c["urls_monitored"],
             "docs_total": c["docs_total"], "docs_with_file": c["docs_with_file"],
             "docs_typed": c["docs_typed"], "latest_report_year": c["latest_report_year"],
             "coverage_breakdown": breakdown, "coverage_flags": "; ".join(flags),
-            "missing_types": "; ".join(missing)}
+            "missing_types": "; ".join(missing),
+            "pages_breakdown": pages, "docs_by_year": docs_by_year,
+            "sust_years": s_years, "sust_cadence": sust_cadence(c["sust_years"])}
 
 
 def empty_stats():
-    return {"urls_total": 0, "urls_monitored": 0, "page_types": set(), "needs_browser": 0, "docs_total": 0,
+    return {"urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
+            "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(),
             "docs_with_file": 0, "docs_typed": 0, "type_counts": {}, "type_latest": {},
             "latest_report_year": None}
 
