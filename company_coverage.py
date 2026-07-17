@@ -21,6 +21,9 @@ Fields written on `companies` (create them first; see company_coverage.yml heade
                            browser_dependent marks zero-doc companies whose pages sit in the
                            browser lane (needs_browser OR dead/error): JS-rendered, CDN-walled or
                            bot-blocked sites. A tech case, not a silent company
+    missing_types       -> key source types the company has NO document of, any year:
+                           the two report families plus IMPORTANT_EXACT. Analyst-facing:
+                           "which important sources are we missing per company"
     coverage_updated    -> date the stats last CHANGED (unchanged rows are not rewritten)
 
 Effective type = source_type_check (AI) when set, else source_type (keyword classifier).
@@ -64,13 +67,18 @@ F_FILE = "file"; F_DISCARD = "discard"
 # companies fields (the 9 stat fields this script owns)
 C_WBA = "wba_id"
 STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
-               "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags"]
+               "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
+               "missing_types"]
 C_UPDATED = "coverage_updated"
 
 # Effective-type families for recency flags. Names match source_type_check options verbatim.
 SUST_FAMILY   = {"Sustainability Report", "ESG Report", "CSR Report",
                  "Integrated Report", "Impact Report"}
 ANNUAL_FAMILY = {"Annual Report", "Integrated Report", "10K Form"}
+# Key source types the organisation expects from every company. The exact set is a
+# methodology decision; edit here and the missing_types field re-derives next run.
+IMPORTANT_EXACT = ("Code of Conduct", "Human Rights Policy", "Climate Report", "Policy Documents")
+
 REPORT_TYPES  = SUST_FAMILY | ANNUAL_FAMILY | {
     "Climate Report", "Environmental Reports", "Social Reports", "Interim Reports",
     "Financial Statement", "Registration Document", "CDP Report", "GRI",
@@ -198,10 +206,20 @@ def compose(c, year_min):
     if not family_current(ANNUAL_FAMILY):
         flags.append(f"no_annual_report_{year_min}+")
 
+    missing = []
+    if not any(t in c["type_counts"] for t in SUST_FAMILY):
+        missing.append("Sustainability report (any)")
+    if not any(t in c["type_counts"] for t in ANNUAL_FAMILY):
+        missing.append("Annual report (any)")
+    for t in IMPORTANT_EXACT:
+        if not c["type_counts"].get(t):
+            missing.append(t)
+
     return {"urls_total": c["urls_total"], "urls_monitored": c["urls_monitored"],
             "docs_total": c["docs_total"], "docs_with_file": c["docs_with_file"],
             "docs_typed": c["docs_typed"], "latest_report_year": c["latest_report_year"],
-            "coverage_breakdown": breakdown, "coverage_flags": "; ".join(flags)}
+            "coverage_breakdown": breakdown, "coverage_flags": "; ".join(flags),
+            "missing_types": "; ".join(missing)}
 
 
 def empty_stats():
