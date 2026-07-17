@@ -1,7 +1,8 @@
-# Rotating-queue browser monitor, DAILY with a batch cap. Each run takes the ~2,000 stalest
-# pages (oldest-first by last_checked, never-visited first), finishes in ~75 min, and the next
-# day continues the rotation — the full needs_browser queue is covered every ~3-4 days without
-# any single run approaching GitHub's 6h kill. It runs at 00:03 UTC ON PURPOSE: it lands before
+# Rotating-queue browser monitor, DAILY. Each run takes up to MAX_PAGES of the stalest
+# pages, productive (needs_browser) first with dead/error rescues capped at RESCUE_SHARE, always
+# finishing cleanly inside RUN_BUDGET_MIN wall-clock minutes; the rotation continues next run.
+# Sized 2026-07-17 for a queue of ~15.7k productive + ~6.7k rescue pages: 4000/day at 5 workers
+# cycles the productive pool in ~5 days. It runs at 00:03 UTC ON PURPOSE: it lands before
 # the 02:23 daily monitor, so the harvest that chains after the monitor ingests the browser's
 # findings the SAME night instead of a day later.
 #
@@ -24,10 +25,10 @@ on:
         default: ""
       max_pages:
         description: "Cap pages this run (queue mode only; 0 = no cap)"
-        default: "2000"
+        default: "4000"
       workers:
         description: "Parallel browser workers"
-        default: "4"
+        default: "5"
 
 jobs:
   browser:
@@ -47,5 +48,7 @@ jobs:
           AIRTABLE_TABLE: monitored_links
           PW_WBA: ${{ inputs.wba_id }}
           PW_CONTAINS: ${{ inputs.url_contains }}
-          MAX_PAGES: ${{ inputs.max_pages || '2000' }}
-          PW_WORKERS: ${{ inputs.workers || '4' }}
+          MAX_PAGES: ${{ inputs.max_pages || '4000' }}
+          PW_WORKERS: ${{ inputs.workers || '5' }}
+          RUN_BUDGET_MIN: '180'
+          RESCUE_SHARE: '0.25'
