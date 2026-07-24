@@ -1,47 +1,45 @@
 #!/usr/bin/env python3
-"""One-time backfill: populate the report_library -> companies record link.
+"""One-time backfill + daily top-up: populate the report_library -> companies record link.
 
 Why: the interfaces need the company card to embed its documents as a linked list,
 and that requires a real record link, not a text wba_id. This script resolves each
 document's wba_id to the companies record id and writes the link field.
 
-Safety contract (same as link_documents.py):
+Safety contract (same as link_documents.py, whose call pattern this mirrors verbatim):
   - record ids are resolved from companies first; nothing is ever written with
     typecast, so a wba_id that does not exist in companies is LOGGED and skipped,
     never fabricated (the phantom-rows lesson).
   - idempotent: only rows whose link field is empty are touched; re-runs converge.
   - dry-run by default; --commit writes.
 
-Usage:
-  python link_companies.py                # dry-run: counts and samples only
-  python link_companies.py --commit
-  COMPANY_LINK_FIELD=company python link_companies.py --commit
+Env: AIRTABLE_TOKEN, AIRTABLE_BASE, COMPANY_LINK_FIELD (default "company").
 """
-import os, sys, time, argparse
-from monitor_core import API, airtable_request
+import argparse, os, time
+from urllib.parse import quote
+from monitor_core import airtable_request   # retrying Airtable helper
 
-BASE = os.environ["AIRTABLE_BASE"]
+API = "https://api.airtable.com/v0"
 COMPANIES = "companies"
 LIBRARY = "report_library"
 F_WBA = "wba_id"
 F_LINK = os.environ.get("COMPANY_LINK_FIELD", "company")
 
 
-def sweep(table, fields, formula=None):
-    params = {"pageSize": 100, "fields[]": fields}
+def sweep(base, token, table, fields, formula=None):
+    url = f"{API}/{base}/{quote(table)}"
+    headers = {"Authorization": f"Bearer {token}"}
+    params = [("pageSize", "100")] + [("fields[]", f) for f in fields]
     if formula:
-        params["filterByFormula"] = formula
+        params.append(("filterByFormula", formula))
     offset = None
     while True:
-        p = dict(params)
-        if offset:
-            p["offset"] = offset
-        data = airtable_request("GET", f"{API}/{BASE}/{table}", params=p)
-        yield from data.get("records", [])
-        offset = data.get("offset")
+        p = list(params) + ([("offset", offset)] if offset else [])
+        j = airtable_request("GET", url, headers, params=p).json()
+        yield from j.get("records", [])
+        offset = j.get("offset")
         if not offset:
             return
-        time.sleep(0.22)
+        time.sleep(0.18)
 
 
 def build_batches(rows, id_map, link_field):
@@ -62,17 +60,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     args = ap.parse_args()
+    base = os.environ["AIRTABLE_BASE"]
+    token = os.environ["AIRTABLE_TOKEN"]
 
     id_map = {}
-    for r in sweep(COMPANIES, [F_WBA]):
+    for r in sweep(base, token, COMPANIES, [F_WBA]):
         w = (r.get("fields", {}).get(F_WBA) or "").strip()
         if w:
             id_map[w] = r["id"]
     print(f"companies: {len(id_map)} wba_ids mapped")
 
     # Only rows with the link still empty: idempotent by construction.
-    formula = f"{{{F_LINK}}} = BLANK()"
-    rows = list(sweep(LIBRARY, [F_WBA], formula))
+    rows = list(sweep(base, token, LIBRARY, [F_WBA], formula=f"{{{F_LINK}}} = BLANK()"))
     print(f"report_library rows missing the link: {len(rows)}")
 
     batches, orphans = build_batches(rows, id_map, F_LINK)
@@ -85,9 +84,11 @@ def main():
         print("DRY-RUN: nothing written. Re-run with --commit.")
         return
 
+    url = f"{API}/{base}/{quote(LIBRARY)}"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     done = 0
     for b in batches:
-        airtable_request("PATCH", f"{API}/{BASE}/{LIBRARY}", json={"records": b})
+        airtable_request("PATCH", url, headers, {"records": b})
         done += len(b)
         if done % 1000 < 10:
             print(f"  linked {done}/{total}", flush=True)
