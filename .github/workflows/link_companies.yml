@@ -1,0 +1,31 @@
+# Backfill + daily top-up: report_library -> companies record links (see link_companies.py).
+# The first --commit run links the whole historical corpus (~75-90 min); after that the
+# daily schedule links only the rows harvested overnight (link = BLANK() filter), a
+# couple of minutes. Runs at 07:03 UTC, after the nightly cascade has finished.
+name: Link documents to companies
+
+on:
+  schedule:
+    - cron: "3 7 * * *"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Write changes (unchecked = dry-run)"
+        type: boolean
+        default: false
+
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Link documents to companies
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+        run: python link_companies.py ${{ (github.event_name == 'schedule' || inputs.commit) && '--commit' || '' }}
