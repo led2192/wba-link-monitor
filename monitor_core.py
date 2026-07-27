@@ -71,6 +71,21 @@ DOC_ID_Q = re.compile(r"\b(document|edition|asset|media|file)[-_]?id=", re.I)
 # risk (an unknown shared third-party PDF linked by many companies) is handled downstream by the
 # shared-document threshold in harvest_reports (SHARED_DOC_MIN), mirroring unmonitor_shared's
 # page-level logic at document level. Suffix-matched on the hostname.
+# Extensionless document endpoints (2026-07-27, Abercrombie/Q4 case): several corporate
+# platforms serve every document from an opaque path with no .pdf extension and no
+# documentId query. Q4 Inc ("/static-files/{uuid}") powers thousands of listed companies'
+# IR sites; Kentico uses "/getattachment/". These paths ARE the document: they count as
+# doc-shaped in both extraction passes and the harvester accepts them. Add a segment here
+# when a new platform shows the Abercrombie signature: page renders fine, anchors visible,
+# zero doc links extracted.
+DOC_ENDPOINTS = ("/static-files/", "/getattachment/")
+
+
+def is_doc_endpoint(path):
+    p = (path or "").lower()
+    return any(seg in p for seg in DOC_ENDPOINTS)
+
+
 FRAMEWORK_SUFFIXES = (
     "sciencebasedtargets.org", "globalreporting.org", "weps.org", "unglobalcompact.org",
     "cdp.net", "sasb.org", "ifrs.org", "integratedreporting.org", "wbcsd.org",
@@ -131,6 +146,8 @@ def doc_links(html, base):
     documentId/editionId query (the company's own CMS content on a sibling domain), OR when they are
     a .pdf: a PDF linked from the company's own monitored page is treated as the company's document
     wherever it is stored (CDNs, IR providers like Q4 or MZiq, group domains, exchange hosts).
+    Extensionless platform endpoints (DOC_ENDPOINTS: Q4 /static-files/, Kentico /getattachment/)
+    are documents too, same-domain and cross-domain alike.
     Only branded framework/standard-setter/ratings publishers (FRAMEWORK_SUFFIXES) stay excluded,
     and mass-shared documents are additionally filtered at harvest by the SHARED_DOC_MIN
     threshold. Page discovery (DOCISH paths) remains same-domain only: third-party PAGES never
@@ -146,10 +163,10 @@ def doc_links(html, base):
             s = urlsplit(absu)
             path = (s.path or "").lower()
             is_doc_q = bool(DOC_ID_Q.search(s.query or ""))      # /docs?documentId=... CMS endpoint
-            is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q
+            is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q or is_doc_endpoint(path)
             if not is_document:
                 continue
-            xdom_pdf = path.endswith(".pdf") and not is_framework_host(s.hostname)
+            xdom_pdf = (path.endswith(".pdf") or is_doc_endpoint(path)) and not is_framework_host(s.hostname)
             if reg_domain(absu) != rdom and not (is_doc_q or xdom_pdf):  # cross-domain: CMS docs + any non-framework PDF
                 continue
             n = normalize(absu)
@@ -172,9 +189,9 @@ def doc_links(html, base):
             if ASSET_EXT.search(path):
                 continue
             is_doc_q = bool(DOC_ID_Q.search(s.query or ""))
-            if not (path.endswith(".pdf") or PDF_SEG.search(path) or is_doc_q):
+            if not (path.endswith(".pdf") or PDF_SEG.search(path) or is_doc_q or is_doc_endpoint(path)):
                 continue
-            if reg_domain(absu) != rdom and not (is_doc_q or (path.endswith(".pdf") and not is_framework_host(s.hostname))):
+            if reg_domain(absu) != rdom and not (is_doc_q or ((path.endswith(".pdf") or is_doc_endpoint(path)) and not is_framework_host(s.hostname))):
                 continue
             n = normalize(absu)
         except Exception:
