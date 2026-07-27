@@ -12,7 +12,13 @@ Safety contract (same as link_documents.py, whose call pattern this mirrors verb
   - idempotent: only rows whose link field is empty are touched; re-runs converge.
   - dry-run by default; --commit writes.
 
-Env: AIRTABLE_TOKEN, AIRTABLE_BASE, COMPANY_LINK_FIELD (default "company").
+Covers BOTH record links out of companies:
+  report_library.company     (documents  -> companies), field env LIBRARY_LINK_FIELD
+  monitored_links.companies  (pages      -> companies), field env PAGES_LINK_FIELD
+The June build created the pages link FIELD but never populated it (verified empty on
+2026-07-22), so both sides go through the same backfill + daily top-up.
+
+Env: AIRTABLE_TOKEN, AIRTABLE_BASE, LIBRARY_LINK_FIELD, PAGES_LINK_FIELD.
 """
 import argparse, os, time
 from urllib.parse import quote
@@ -20,9 +26,12 @@ from monitor_core import airtable_request   # retrying Airtable helper
 
 API = "https://api.airtable.com/v0"
 COMPANIES = "companies"
-LIBRARY = "report_library"
 F_WBA = "wba_id"
-F_LINK = os.environ.get("COMPANY_LINK_FIELD", "company")
+# (table, link field on that table pointing at companies)
+TARGETS = [
+    ("report_library", os.environ.get("LIBRARY_LINK_FIELD", "company")),
+    ("monitored_links", os.environ.get("PAGES_LINK_FIELD", "companies")),
+]
 
 
 def sweep(base, token, table, fields, formula=None):
@@ -70,30 +79,31 @@ def main():
             id_map[w] = r["id"]
     print(f"companies: {len(id_map)} wba_ids mapped")
 
-    # Only rows with the link still empty: idempotent by construction.
-    rows = list(sweep(base, token, LIBRARY, [F_WBA], formula=f"{{{F_LINK}}} = BLANK()"))
-    print(f"report_library rows missing the link: {len(rows)}")
+    for table, link_field in TARGETS:
+        # Only rows with the link still empty: idempotent by construction.
+        rows = list(sweep(base, token, table, [F_WBA], formula=f"{{{link_field}}} = BLANK()"))
+        print(f"{table}: rows missing the link: {len(rows)}")
 
-    batches, orphans = build_batches(rows, id_map, F_LINK)
-    total = sum(len(b) for b in batches)
-    print(f"to write: {total} rows in {len(batches)} batches; orphan wba_ids: {len(orphans)}")
-    for w in sorted(orphans)[:10]:
-        print("  orphan:", w)
+        batches, orphans = build_batches(rows, id_map, link_field)
+        total = sum(len(b) for b in batches)
+        print(f"{table}: to write {total} rows in {len(batches)} batches; orphan wba_ids: {len(orphans)}")
+        for w in sorted(orphans)[:10]:
+            print("  orphan:", w)
 
-    if not args.commit:
-        print("DRY-RUN: nothing written. Re-run with --commit.")
-        return
+        if not args.commit:
+            print(f"{table}: DRY-RUN, nothing written.")
+            continue
 
-    url = f"{API}/{base}/{quote(LIBRARY)}"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    done = 0
-    for b in batches:
-        airtable_request("PATCH", url, headers, {"records": b})
-        done += len(b)
-        if done % 1000 < 10:
-            print(f"  linked {done}/{total}", flush=True)
-        time.sleep(0.21)
-    print(f"DONE: linked {done} documents to their company records.")
+        url = f"{API}/{base}/{quote(table)}"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        done = 0
+        for b in batches:
+            airtable_request("PATCH", url, headers, {"records": b})
+            done += len(b)
+            if done % 1000 < 10:
+                print(f"  {table}: linked {done}/{total}", flush=True)
+            time.sleep(0.21)
+        print(f"{table}: DONE, linked {done} rows to their company records.")
 
 
 if __name__ == "__main__":
