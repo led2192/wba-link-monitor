@@ -27,6 +27,7 @@ Fields written on `companies` (create them first; see company_coverage.yml heade
     pages_breakdown     -> monitored pages per page type: "reports_hub: 2" one per line
     docs_by_year        -> non-discarded docs per resolved year, newest first, plus undated:
                            "2026: 3 | 2025: 12 | 2024: 9 | undated: 7"
+    sust_reports_total  -> count of sustainability-family documents held, any year
     sust_years          -> years we hold a sustainability-family document for: "2021; 2023; 2024"
     sust_cadence        -> publication rhythm estimated from sust_years: annual / biennial /
                            ~every Ny / irregular / single / none, with the next expected year
@@ -74,7 +75,8 @@ F_FILE = "file"; F_DISCARD = "discard"
 C_WBA = "wba_id"
 STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
-               "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence"]
+               "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
+               "sust_reports_total"]
 C_UPDATED = "coverage_updated"
 
 # Effective-type families for recency flags. Names match source_type_check options verbatim.
@@ -262,6 +264,7 @@ def compose(c, year_min):
             "docs_typed": c["docs_typed"], "latest_report_year": c["latest_report_year"],
             "coverage_breakdown": breakdown, "coverage_flags": "; ".join(flags),
             "missing_types": "; ".join(missing),
+            "sust_reports_total": sum(c["type_counts"].get(t, 0) for t in SUST_FAMILY),
             "pages_breakdown": pages, "docs_by_year": docs_by_year,
             "sust_years": s_years, "sust_cadence": sust_cadence(c["sust_years"])}
 
