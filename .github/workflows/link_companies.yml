@@ -2,7 +2,7 @@
 # The first --commit run links the whole historical corpus (~75-90 min); after that the
 # daily schedule links only the rows harvested overnight (link = BLANK() filter), a
 # couple of minutes. Runs at 07:03 UTC, after the nightly cascade has finished.
-name: Link records to companies
+name: Link and assign
 
 on:
   schedule:
@@ -29,3 +29,8 @@ jobs:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
         run: python link_companies.py ${{ (github.event_name == 'schedule' || inputs.commit) && '--commit' || '' }}
+      - name: Reconcile analyst assignment
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+        run: python assign_analysts.py ${{ (github.event_name == 'schedule' || inputs.commit) && '--commit' || '' }}
