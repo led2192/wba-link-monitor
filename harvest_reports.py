@@ -36,6 +36,8 @@ Env (airtable source): AIRTABLE_TOKEN, AIRTABLE_BASE,
 import argparse, os, re, sys, time, collections, hashlib, datetime as dt
 from urllib.parse import quote, urlsplit
 
+from monitor_core import is_doc_endpoint   # single source of truth for platform doc endpoints
+
 API = "https://api.airtable.com/v0"
 TODAY_ISO = dt.date.today().isoformat()
 ALL_TYPES = ["reports_hub", "sustainability_page", "sustainability_report",
@@ -49,7 +51,8 @@ REPORT_NAME = re.compile(r"annual|sustainab|integrated|\besg\b|\bcsr\b|report|me
 
 
 def is_pdf_url(u):
-    return urlsplit(u.split("?", 1)[0]).path.lower().endswith(".pdf")
+    path = urlsplit(u.split("?", 1)[0]).path.lower()
+    return path.endswith(".pdf") or is_doc_endpoint(path)
 
 
 def fetchable(u):
