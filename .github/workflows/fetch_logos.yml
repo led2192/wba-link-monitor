@@ -1,0 +1,26 @@
+# One-time (re-runnable) company logo fetch into companies.logo (see fetch_logos.py).
+name: Fetch company logos
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Write changes (unchecked = dry-run)"
+        type: boolean
+        default: false
+
+jobs:
+  logos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Fetch company logos
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+        run: python fetch_logos.py ${{ inputs.commit && '--commit' || '' }}
