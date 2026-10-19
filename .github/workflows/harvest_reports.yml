@@ -31,6 +31,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      # doc_probe cache: which "not file-looking" links were already opened and whether they are
+      # PDFs. Kept between runs with actions/cache (a new key each run, restored from the latest).
+      - name: Restore doc probe cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state/probe_cache.tsv.gz
+          key: probe-cache-${{ github.run_id }}
+          restore-keys: probe-cache-
       - name: Run harvester
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -40,7 +48,7 @@ jobs:
             TYPES="reports_hub,sustainability_page,sustainability_report,investor_relations,policies"
             RO="false"; DO_COMMIT="true"
           fi
-          ARGS="--types $TYPES"
+          ARGS="--types $TYPES --probe"
           [ "$RO" = "true" ] && ARGS="$ARGS --reports-only"
           [ "$DO_COMMIT" = "true" ] && ARGS="$ARGS --commit"
           echo ">>> python harvest_reports.py $ARGS"
@@ -50,3 +58,9 @@ jobs:
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_TABLE: monitored_links
           AIRTABLE_LIBRARY_TABLE: report_library
+      - name: Save doc probe cache
+        if: always() && hashFiles('state/probe_cache.tsv.gz') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: state/probe_cache.tsv.gz
+          key: probe-cache-${{ github.run_id }}

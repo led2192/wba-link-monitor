@@ -359,6 +359,9 @@ def main():
                     help="comma-separated page types to include")
     ap.add_argument("--reports-only", action="store_true")
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--probe", action="store_true",
+                    help="open links that do not look like files and harvest the ones serving a PDF "
+                         "(doc_probe.py; results cached, capped per run)")
     ap.add_argument("--full", action="store_true",
                     help="re-upsert every row; default only writes new/changed rows")
     args = ap.parse_args()
@@ -375,6 +378,16 @@ def main():
         if not (token and base):
             sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
         records, id_by_url = from_airtable(base, token, table, types)
+
+    if args.probe:
+        import doc_probe
+        links = (fetchable(l) for f in records if str(f.get(F_TYPE, "")).strip().lower() in types
+                 for l in (f.get(F_SEEN) or "").split("\n") if l.strip())
+        pdfs, summary = doc_probe.nightly(
+            links, max_new=int(os.environ.get("PROBE_MAX_NEW") or 15000),
+            budget_s=int(os.environ.get("PROBE_BUDGET_S") or 1500))
+        CONFIRMED_DOCS.update(pdfs)
+        print(">>> " + summary, flush=True)
 
     rows, per_company, per_type = build(records, types, args.reports_only)
     ok, bare = scheme_stats(records, types, args.reports_only)
