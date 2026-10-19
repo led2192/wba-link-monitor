@@ -106,6 +106,21 @@ def read_page(rec, sess):
     return upd, how
 
 
+PROBE_MAX = int(os.environ.get("SCAN_PROBE_MAX") or 60)
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+
+def probe_docs(seen, sess):
+    """Report-ish links on the page that are not PDF-shaped (no .pdf, no known document endpoint):
+    open the first bytes of each and keep the ones that really are PDFs. This is how a site with a
+    new address scheme still gets harvested on demand. Returns the normalized keys confirmed."""
+    import harvest_reports as HR, doc_probe as DP
+    todo = [u for u in seen if not HR.is_pdf_url(u) and DP.priority(u) is not None][:PROBE_MAX]
+    res = DP.probe(todo, workers=8, session=sess)
+    return {k for k, v in res.items() if v == "pdf"}, len(todo)
+
+
 def wait_for_files(ids):
     """Airtable fetches attachments in the background. Poll until every row has a file or gave up."""
     deadline = time.time() + ATTACH_WAIT_S
@@ -164,6 +179,12 @@ def main():
         if not f.get("wba_id"):
             notes[rec["id"]].append("No company on this row: link it to a company and tick scan_now again.")
             continue
+        seen = [l.strip() for l in (merged.get(F_SEEN) or "").split("\n") if l.strip()]
+        confirmed, probed = probe_docs(seen, sess)
+        if confirmed:
+            HR.CONFIRMED_DOCS |= confirmed
+            notes[rec["id"]].append(f"{len(confirmed)} of {probed} links without a .pdf ending turned "
+                                    "out to be PDFs when opened, and are harvested too.")
         by_company[f["wba_id"]].append((rec, merged))
     patch(LINKS, page_updates)
 
