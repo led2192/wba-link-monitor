@@ -1,0 +1,50 @@
+name: Base health
+
+# Writes today's row in the base_health table: how full the base is, what arrived and what was
+# discarded, failed jobs in the last 24h, and company completeness. Read-only on all other data.
+# Runs after Company coverage (so completeness is fresh) and also on a fixed daily schedule, so a
+# broken nightly chain still gets reported. Re-runs the same day update the same row.
+
+on:
+  workflow_run:
+    workflows: ["Company coverage"]
+    types: [completed]
+  schedule:
+    - cron: "17 12 * * *"      # 12:17 UTC daily, independent of the chain
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Write the row (off = print only)."
+        type: boolean
+        default: true
+
+concurrency:
+  group: base-health
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Snapshot
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then
+            python base_health.py
+          else
+            python base_health.py --commit
+          fi
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          RECORD_LIMIT: "500000"
+          GITHUB_TOKEN: ${{ github.token }}
