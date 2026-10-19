@@ -2,7 +2,8 @@ name: Dedupe report library
 
 # Second line of defence against duplicate documents in report_library (the first is the doc_id
 # guard inside harvest_reports.py). Runs after cover text is built, because the content signal
-# needs page_count. It only ticks discard with reason "Duplicate of another document"; it never
+# needs page_count. It ticks discard with reason "Duplicate of another document" or, for SEC insider
+# filings and call transcripts, "Not a disclosure"; it never
 # deletes, and it never touches a verified row. The full list of what it discarded, with the row
 # it kept, is uploaded as the dedupe_log artifact of each run.
 
