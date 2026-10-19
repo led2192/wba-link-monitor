@@ -79,11 +79,17 @@ DOC_ID_Q = re.compile(r"\b(document|edition|asset|media|file)[-_]?id=", re.I)
 # when a new platform shows the Abercrombie signature: page renders fine, anchors visible,
 # zero doc links extracted.
 DOC_ENDPOINTS = ("/static-files/", "/getattachment/")
+# Extensionless "/files/<slug>" (2026-10-19, Aldi Sud case): the sustainability site serves every
+# report as /files/2022-climate-protection-progress-report with no extension. The monitor kept
+# them (report-ish path) but the harvester rejected them as not PDF-shaped, so 13 reports sat in
+# seen_links for months. A last segment WITHOUT a dot under /files/ is treated as a document;
+# /files/x.jpg or /files/x.docx keep their own extension rules.
+_FILES_SLUG = re.compile(r"/files/[^/.]+/?$")
 
 
 def is_doc_endpoint(path):
     p = (path or "").lower()
-    return any(seg in p for seg in DOC_ENDPOINTS)
+    return any(seg in p for seg in DOC_ENDPOINTS) or bool(_FILES_SLUG.search(p))
 
 
 FRAMEWORK_SUFFIXES = (
