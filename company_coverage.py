@@ -79,7 +79,8 @@ C_WBA = "wba_id"
 STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
                "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
-               "sust_reports_total", "completeness", "gaps", "gap_pages"]
+               "sust_reports_total", "completeness", "gaps", "gap_pages",
+               "overdue_reports", "overdue_note"]
 C_UPDATED = "coverage_updated"
 
 # Effective-type families for recency flags. Names match source_type_check options verbatim.
@@ -148,7 +149,8 @@ def aggregate(wbas=None):
         return agg.setdefault(wba, {
             "urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(), "docs_with_file": 0, "docs_typed": 0,
-            "type_counts": {}, "type_latest": {}, "latest_report_year": None})
+            "type_counts": {}, "type_latest": {}, "latest_report_year": None,
+            "ann_years": set()})
 
     print(">>> sweeping monitored_links ...", flush=True)
     for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST], "monitored_links", wba_formula(wbas)):
@@ -194,6 +196,8 @@ def aggregate(wbas=None):
             c["year_counts"][y] += 1
             if t in SUST_FAMILY:
                 c["sust_years"].add(y)
+            if t in ANNUAL_FAMILY:
+                c["ann_years"].add(y)
         if y is not None:
             if t:
                 if y > c["type_latest"].get(t, 0):
@@ -221,6 +225,40 @@ def sust_cadence(years):
     if modal[1] / len(gaps) >= 0.6 and modal[0] > 0:
         return f"~every {modal[0]}y (next ~{ys[-1] + modal[0]})"
     return f"irregular (last {ys[-1]})"
+
+
+def expected_year(today=None):
+    """Latest report year that should be out by now: a year's reports are expected from July of
+    the following year (most companies publish within six months of year end)."""
+    today = today or date.today()
+    return today.year - 1 if today.month >= 7 else today.year - 2
+
+
+def _step(years):
+    ys = sorted(years)
+    gaps = [b - a for a, b in zip(ys, ys[1:]) if b > a]
+    if not gaps:
+        return 1
+    g, n = collections.Counter(gaps).most_common(1)[0]
+    return g if n / len(gaps) >= 0.6 else 1
+
+
+def overdue(years, label, target, annual=False):
+    """'' or a plain-words note when, by the company's own rhythm, the report for `target` (or
+    later) should be out and is not held. Only for companies that published recently (latest held
+    within 3 years of target): an older last report reads as stopped or moved, not as overdue."""
+    if not years:
+        return ""
+    last = max(years)
+    if last >= target or last < target - 3:
+        return ""
+    step = 1 if annual else _step(years)
+    if last + step > target:
+        return ""
+    held = ", ".join(str(y) for y in sorted(years)[-4:])
+    rhythm = "every year" if step == 1 else f"every {step} years"
+    return (f"{label} {last + step} expected: published {rhythm} (held: {held}); "
+            f"latest held is {last}.")
 
 
 def compose(c, year_min):
@@ -309,14 +347,27 @@ def compose(c, year_min):
             "sust_reports_total": sum(c["type_counts"].get(t, 0) for t in SUST_FAMILY),
             "pages_breakdown": pages, "docs_by_year": docs_by_year,
             "sust_years": s_years, "sust_cadence": sust_cadence(c["sust_years"]),
-            "completeness": completeness, "gaps": gaps, "gap_pages": failed}
+            "completeness": completeness, "gaps": gaps, "gap_pages": failed,
+            **_overdue(c)}
+
+
+def _overdue(c):
+    target = expected_year()
+    notes, tags = [], []
+    s = overdue(c["sust_years"], "Sustainability report", target)
+    if s:
+        tags.append("Sustainability report"); notes.append(s)
+    a = overdue(c.get("ann_years") or set(), "Annual report", target, annual=True)
+    if a:
+        tags.append("Annual report"); notes.append(a)
+    return {"overdue_reports": tags, "overdue_note": "\n".join(notes)}
 
 
 def empty_stats():
     return {"urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(),
             "docs_with_file": 0, "docs_typed": 0, "type_counts": {}, "type_latest": {},
-            "latest_report_year": None}
+            "latest_report_year": None, "ann_years": set()}
 
 
 def companies_index(wbas=None):
@@ -402,6 +453,9 @@ def main():
         miss = collections.Counter(t for v in vals for t in v["gap_pages"])
         print(f">>> completeness: average {avg:.1%} | at 100%: {full:.1%} | missing: "
               + ", ".join(f"{k} {miss[k]}" for k in COMPLETENESS), flush=True)
+        od = collections.Counter(t for v in vals for t in v["overdue_reports"])
+        print(f">>> overdue (expected by now, not held; target year {expected_year()}): "
+              + ", ".join(f"{k} {n}" for k, n in od.items()), flush=True)
 
     if not args.commit:
         for r in to_write[:5]:
