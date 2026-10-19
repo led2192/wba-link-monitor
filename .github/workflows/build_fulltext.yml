@@ -1,0 +1,132 @@
+# Full text of the attached PDFs, page by page, into the private text store. See build_fulltext.py
+# for what is read and TEXT_SEARCH.md for the set-up. "Mention search" runs on what this stores.
+#
+# Two jobs. `plan` sweeps report_library once, publishes the queue and the metadata snapshot to
+# the store and sizes the work; `extract` then runs that queue as parallel shards. Everything is
+# append-only and resumable: a shard that hits the time budget or dies loses only its unflushed
+# tail, and the next run picks up what is left.
+#
+# Needs, under Settings > Secrets and variables > Actions:
+#   Variables tab   TEXT_STORE_REPO    owner/name of a PRIVATE repository used as a file locker
+#                                      (it must hold at least one commit: create it with a README)
+#   Secrets tab     TEXT_STORE_TOKEN   fine-grained personal access token limited to that one
+#                                      repository, permission "Contents: Read and write"
+# Until TEXT_STORE_REPO exists the nightly run is skipped (grey, not red). A manual dry run works
+# without either: it prints the plan and extracts a small sample, and stores nothing.
+#
+# Full text never goes into this repository: it is public, and so are its artifacts and logs.
+name: Build full text
+
+on:
+  schedule:
+    - cron: "37 21 * * *"      # daily 21:37 UTC: after the 19:00 attachment recovery and the
+                               # cover-text run chained to it, so today's PDFs are read today
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run"
+        type: choice
+        default: "dry-run"
+        options:
+          - dry-run
+          - commit
+      types:
+        description: 'Types to read: blank = report and policy families, "all" = every attached PDF, or a comma-separated list'
+        default: ""
+      year_min:
+        description: "Leave out documents dated before this year (undated ones are kept)"
+        default: "2021"
+      limit:
+        description: "Cap documents this run (0 = no cap). Use 50 for a first test."
+        default: "0"
+      max_shards:
+        description: "Most parallel jobs to use"
+        default: "8"
+      retry_failed:
+        description: "Also retry documents recorded as parse_fail / timeout / crash"
+        type: boolean
+        default: false
+
+env:
+  # What the NIGHTLY run reads. Blank = report and policy families. If you ever backfill with
+  # types = all, set this to "all" as well so the nightly run keeps that wider scope current.
+  NIGHTLY_TYPES: ""
+  NIGHTLY_YEAR_MIN: "2021"
+
+concurrency:
+  group: build-full-text
+  cancel-in-progress: false    # a manual run queues behind the nightly one instead of racing it
+
+jobs:
+  plan:
+    if: github.event_name == 'workflow_dispatch' || vars.TEXT_STORE_REPO != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      nshards: ${{ steps.plan.outputs.nshards }}
+      queue: ${{ steps.plan.outputs.queue }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Plan
+        id: plan
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+          IN_MODE: ${{ inputs.mode }}
+          IN_TYPES: ${{ inputs.types }}
+          IN_YEAR_MIN: ${{ inputs.year_min }}
+          IN_LIMIT: ${{ inputs.limit }}
+          IN_MAX_SHARDS: ${{ inputs.max_shards }}
+          IN_RETRY: ${{ inputs.retry_failed }}
+        run: |
+          # inputs arrive through the environment and are passed as quoted array items, never
+          # pasted into the command line: a type name contains spaces and commas
+          ARGS=()
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            ARGS+=(--plan --commit --year-min "$NIGHTLY_YEAR_MIN")
+            [ -n "$NIGHTLY_TYPES" ] && ARGS+=(--types "$NIGHTLY_TYPES")
+          else
+            ARGS+=(--year-min "${IN_YEAR_MIN:-2021}" --limit "${IN_LIMIT:-0}" --max-shards "${IN_MAX_SHARDS:-8}")
+            [ -n "$IN_TYPES" ] && ARGS+=(--types "$IN_TYPES")
+            [ "$IN_RETRY" = "true" ] && ARGS+=(--retry-failed)
+            [ "$IN_MODE" = "commit" ] && ARGS+=(--plan --commit)
+          fi
+          echo ">>> python build_fulltext.py ${ARGS[*]}"
+          python build_fulltext.py "${ARGS[@]}"
+
+  extract:
+    needs: plan
+    if: needs.plan.outputs.nshards != '' && needs.plan.outputs.nshards != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false         # one bad shard must not cancel the others; what it leaves is retried next run
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Extract shard ${{ matrix.shard }} of ${{ needs.plan.outputs.nshards }}
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+          IN_RETRY: ${{ inputs.retry_failed }}
+        run: |
+          ARGS=(--commit --shard "${{ matrix.shard }}/${{ needs.plan.outputs.nshards }}" --queue "${{ needs.plan.outputs.queue }}")
+          [ "$IN_RETRY" = "true" ] && ARGS+=(--retry-failed)
+          echo ">>> python build_fulltext.py ${ARGS[*]}"
+          python build_fulltext.py "${ARGS[@]}"

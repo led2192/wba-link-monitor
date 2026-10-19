@@ -1,0 +1,130 @@
+# Which companies mention X in their documents, with the evidence. See mention_search.py for the
+# rules and TEXT_SEARCH.md for how to define a search.
+#
+# Searches are rows of `mention_searches`. This workflow runs them over the full-text store that
+# "Build full text" maintains and writes one row per matching document into `mention_hits`, plus
+# the headline (companies found / searched / share) on the search row.
+#
+# Runs by itself every night after "Build full text", for every search ticked `active`, so a
+# search defined in Airtable during the day is answered by the next morning and stays current as
+# new reports arrive. Run it by hand to get an answer in a few minutes.
+#
+# Tables it expects (exact field names):
+#   mention_searches   search, find, short_names, confirming_words, near, distance, doc_types,
+#                      year_from, year_to, companies, look_in, active                 <- people
+#                      status, last_run, result, companies_found, companies_searched,
+#                      docs_found, docs_searched                                      <- this workflow
+#   mention_hits       hit_id, search (link to mention_searches), company_name, wba_id, library_id,
+#                      document, year, doc_type, pages, mentions, distance, evidence (rich text),
+#                      open, stale                                                    <- this workflow
+#                      review, notes                                                  <- people, never written
+#
+# The run log and summary of a public repository are public. The summary carries the headline and
+# the company names of each search; the log adds one short passage for each of the twelve closest
+# companies. Full text itself never leaves the private store and Airtable.
+name: Mention search
+
+on:
+  workflow_run:
+    workflows: ["Build full text"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run prints the answer here; commit also writes the hits to Airtable"
+        type: choice
+        default: "dry-run"
+        options:
+          - dry-run
+          - commit
+      search:
+        description: "Name of ONE saved search (blank = every search ticked active)"
+        default: ""
+      look_in:
+        description: "Where to look"
+        type: choice
+        default: "as saved"
+        options:
+          - as saved
+          - full text
+          - first pages
+      find:
+        description: "Ad hoc search instead: names to look for, separated by ;"
+        default: ""
+      short_names:
+        description: "Ad hoc: acronyms, separated by ;  (count only once confirmed)"
+        default: ""
+      confirming_words:
+        description: "Ad hoc: words that confirm an acronym next to it, separated by ;"
+        default: ""
+      near:
+        description: "Ad hoc: count a mention only with one of these words nearby, separated by ;"
+        default: ""
+      distance:
+        description: "Ad hoc: words allowed in between (blank = 25)"
+        default: ""
+      name:
+        description: "Ad hoc: name to save the search under (needed for commit)"
+        default: ""
+
+concurrency:
+  group: mention-search
+  cancel-in-progress: false
+
+jobs:
+  search:
+    # after the nightly build: run whether its shards all succeeded or not (the store is
+    # append-only, so a failed shard leaves it consistent), but not when the build was skipped
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run searches
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_SEARCHES_TABLE: mention_searches
+          AIRTABLE_HITS_TABLE: mention_hits
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_COMPANIES_TABLE: companies
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+          IN_MODE: ${{ inputs.mode }}
+          IN_SEARCH: ${{ inputs.search }}
+          IN_LOOK: ${{ inputs.look_in }}
+          IN_FIND: ${{ inputs.find }}
+          IN_SHORT: ${{ inputs.short_names }}
+          IN_CONFIRM: ${{ inputs.confirming_words }}
+          IN_NEAR: ${{ inputs.near }}
+          IN_DISTANCE: ${{ inputs.distance }}
+          IN_NAME: ${{ inputs.name }}
+        run: |
+          # inputs arrive through the environment and are passed as quoted array items, never
+          # pasted into the command line: search terms contain spaces, quotes and asterisks
+          ARGS=()
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            ARGS+=(--commit)                        # nightly: every active search, written to Airtable
+          else
+            [ "$IN_MODE" = "commit" ] && ARGS+=(--commit)
+            [ -n "$IN_SEARCH" ] && ARGS+=(--search "$IN_SEARCH")
+            [ "$IN_LOOK" = "full text" ] && ARGS+=(--look-in text)
+            [ "$IN_LOOK" = "first pages" ] && ARGS+=(--look-in cover)
+            if [ -n "$IN_FIND" ]; then
+              ARGS+=(--find "$IN_FIND")
+              [ -n "$IN_SHORT" ] && ARGS+=(--short "$IN_SHORT")
+              [ -n "$IN_CONFIRM" ] && ARGS+=(--confirm "$IN_CONFIRM")
+              [ -n "$IN_NEAR" ] && ARGS+=(--near "$IN_NEAR")
+              [ -n "$IN_DISTANCE" ] && ARGS+=(--distance "$IN_DISTANCE")
+              [ -n "$IN_NAME" ] && ARGS+=(--name "$IN_NAME")
+            fi
+          fi
+          echo ">>> python mention_search.py ${ARGS[*]}"
+          python mention_search.py "${ARGS[@]}"
