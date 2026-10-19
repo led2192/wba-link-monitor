@@ -101,6 +101,20 @@ FRAMEWORK_SUFFIXES = (
 )
 
 
+# Digital-asset-management platforms (2026-10-20, McCormick case): companies host their reports on
+# a DAM under the vendor's domain, e.g. mccormick.widen.net/s/<id>/2025_plp_report_final. Those
+# links are cross-domain and have no .pdf, so they were dropped before harvest ever saw them. A
+# report-ish link to one of these hosts is kept; doc_probe then opens it and only real PDFs are
+# harvested.
+DAM_SUFFIXES = ("widen.net", "widencdn.net", "bynder.com", "brandfolder.com", "brandfolder.io",
+                "frontify.com", "canto.com", "ctfassets.net")
+
+
+def is_dam_host(host):
+    host = (host or "").lower()
+    return any(host == s or host.endswith("." + s) for s in DAM_SUFFIXES)
+
+
 def is_framework_host(host):
     host = (host or "").lower()
     return any(host == s or host.endswith("." + s) for s in FRAMEWORK_SUFFIXES)
@@ -173,7 +187,7 @@ def doc_links(html, base):
             if not is_document:
                 continue
             xdom_pdf = (path.endswith(".pdf") or is_doc_endpoint(path)) and not is_framework_host(s.hostname)
-            if reg_domain(absu) != rdom and not (is_doc_q or xdom_pdf):  # cross-domain: CMS docs + any non-framework PDF
+            if reg_domain(absu) != rdom and not (is_doc_q or xdom_pdf or is_dam_host(s.hostname)):  # cross-domain: CMS docs, non-framework PDFs, DAM-hosted docs
                 continue
             n = normalize(absu)
         except ValueError:
