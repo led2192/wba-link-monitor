@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dedupe_library.py — discard duplicate documents in report_library (never deletes).
+dedupe_library.py — discard duplicate documents and non-disclosures in report_library (never deletes).
 
 Why it exists: the harvester's library_id is keyed on the URL, but the same file often reaches the
 library under several URLs (per-visit tokens on IR platforms, mirror hosts, the same PDF in two CMS
@@ -23,6 +23,16 @@ others get discard = true and discard_reason = "Duplicate of another document". 
 human work: a verified row is never discarded; a cluster with two verified rows is skipped; rows
 already discarded are not touched (and still count as "seen" for the keeper choice).
 
+Second pass, non-disclosures (reason "Not a disclosure"): documents that are never ESG evidence,
+recognised by their title (doc_label, which comes from the document cover). Agreed with Edi in
+October 2026, ~14k rows at the time:
+  - SEC insider filings: Forms 3/4/5 (statement of beneficial ownership), Form 144, Schedule 13D/13G
+  - earnings and results call transcripts (a transcript whose title mentions sustainability, ESG,
+    climate, responsibility, impact or human rights is kept)
+A title is the only evidence used, so a row with no title yet waits for the next night. Verified
+rows and rows with a curated title are never touched. Add a family by adding one entry to
+NON_DISCLOSURES; the dry run prints how many rows each rule would hit.
+
 Every discard is logged to dedupe_log.csv (discarded record, keeper record, signal) so any of them
 can be reverted by unticking discard.
 
@@ -41,6 +51,19 @@ from ids import doc_id
 
 API = "https://api.airtable.com/v0"
 REASON = "Duplicate of another document"
+REASON_JUNK = "Not a disclosure"
+
+# (rule name, pattern that must match the title, pattern that vetoes it). Titles only.
+_ESG_VETO = r"sustainab|\besg\b|climate|responsib|impact|human rights|csr|environment"
+NON_DISCLOSURES = [
+    ("sec_insider_form_3_4_5",
+     r"statement of changes in beneficial ownership|initial statement of beneficial ownership|"
+     r"\bform [345]\b.*beneficial ownership", None),
+    ("sec_form_144", r"\bform 144\b|notice of proposed sale of securities", None),
+    ("sec_schedule_13d_13g", r"schedule 13[dg]\b|\bsc 13[dg]\b", None),
+    ("call_transcript", r"transcript", _ESG_VETO),
+]
+_JUNK = [(n, re.compile(p, re.I), re.compile(v, re.I) if v else None) for n, p, v in NON_DISCLOSURES]
 FIELDS = ["library_id", "wba_id", "document_url", "page_count", "doc_label", "discard",
           "verified", "curated_doc_title", "source_type_check", "file", "created_time"]
 
@@ -181,8 +204,20 @@ def plan(rows):
                                             not r["typed"], r["ct"], r["id"]))[0]
         for r in grp:
             if r is keeper or r["discard"] or r["verified"]: continue
-            out.append((r, keeper, signal.get(r["id"], "url")))
+            out.append((r, keeper, signal.get(r["id"], "url"), REASON))
     return out, skipped
+
+
+def plan_junk(rows, already):
+    """Rows whose title marks them as a non-disclosure. Returns [(row, None, rule, reason)]."""
+    out = []
+    for r in rows:
+        if r["discard"] or r["verified"] or r["curated"] or r["id"] in already or not r["label"]:
+            continue
+        for name, pat, veto in _JUNK:
+            if pat.search(r["label"]) and not (veto and veto.search(r["label"])):
+                out.append((r, None, name, REASON_JUNK)); break
+    return out
 
 
 # ---------------------------------------------------------------- output
@@ -190,17 +225,18 @@ def write_plan(items, path):
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["record_id", "library_id", "wba_id", "keeper_record_id", "keeper_library_id",
-                    "signal", "document_url", "keeper_url"])
-        for r, k, s in items:
-            w.writerow([r["id"], r["lid"], r["wba"], k["id"], k["lid"], s, r["url"], k["url"]])
+                    "signal", "reason", "document_url", "keeper_url", "title"])
+        for r, k, s, why in items:
+            w.writerow([r["id"], r["lid"], r["wba"], k["id"] if k else "", k["lid"] if k else "", s,
+                        why, r["url"], k["url"] if k else "", r["label"]])
 
 
 def commit(base, token, table, items):
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     for i in range(0, len(items), 10):
-        recs = [{"id": r["id"], "fields": {"discard": True, "discard_reason": REASON}}
-                for r, _, _ in items[i:i + 10]]
+        recs = [{"id": r["id"], "fields": {"discard": True, "discard_reason": why}}
+                for r, _, _, why in items[i:i + 10]]
         _request("PATCH", url, headers, payload={"records": recs, "typecast": True})
         time.sleep(0.22)
         if (i // 10) % 200 == 0:
@@ -222,18 +258,22 @@ def main():
         if not (base and token): sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
         rows = from_airtable(base, token, os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library"))
 
-    items, skipped = plan(rows)
+    dups, skipped = plan(rows)
+    junk = plan_junk(rows, {r["id"] for r, _, _, _ in dups})
+    items = dups + junk
     write_plan(items, a.plan_out)
-    by_sig = collections.Counter(s for _, _, s in items)
     live = sum(1 for r in rows if not r["discard"])
-    print(f"{len(rows)} rows read, {live} live. Duplicates to discard: {len(items)} "
-          f"({100 * len(items) / max(live, 1):.1f}% of live) | by signal: {dict(by_sig)} | "
-          f"clusters skipped (two verified rows): {skipped}. Plan: {a.plan_out}")
+    print(f"{len(rows)} rows read, {live} live. Duplicates to discard: {len(dups)} "
+          f"| by signal: {dict(collections.Counter(s for _, _, s, _ in dups))} | "
+          f"clusters skipped (two verified rows): {skipped}.")
+    print(f"Non-disclosures to discard: {len(junk)} | by rule: "
+          f"{dict(collections.Counter(s for _, _, s, _ in junk))}.")
+    print(f"Total {len(items)} ({100 * len(items) / max(live, 1):.1f}% of live). Plan: {a.plan_out}")
 
     if a.commit and a.source == "airtable":
         commit(os.environ["AIRTABLE_BASE"], os.environ["AIRTABLE_TOKEN"],
                os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library"), items)
-        print(f"Discarded {len(items)} rows (reason: {REASON}).")
+        print(f"Discarded {len(dups)} duplicates and {len(junk)} non-disclosures.")
     elif a.source == "airtable":
         print("DRY-RUN. Re-run with --commit to write the discards.")
 
