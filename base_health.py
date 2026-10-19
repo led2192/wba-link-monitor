@@ -113,14 +113,16 @@ def count_rows(table, field=None):
 
 
 def company_stats():
-    vals, miss = [], collections.Counter()
-    for rec in sweep("companies", ["completeness", "gap_pages"]):
+    vals, miss, over = [], collections.Counter(), collections.Counter()
+    for rec in sweep("companies", ["completeness", "gap_pages", "overdue_reports"]):
         f = rec.get("fields", {})
         vals.append(float(f.get("completeness") or 0))
         miss.update(f.get("gap_pages") or [])
+        over.update(f.get("overdue_reports") or [])
     n = len(vals)
     return {"companies": n, "avg": (sum(vals) / n) if n else 0,
-            "complete": (sum(1 for v in vals if v >= 0.9999) / n) if n else 0, "miss": miss}
+            "complete": (sum(1 for v in vals if v >= 0.9999) / n) if n else 0, "miss": miss,
+            "over": over}
 
 
 def failed_jobs(now):
@@ -159,6 +161,8 @@ def main():
         if t != "report_library":
             counts[t] = count_rows(t)
     pages_mon = sum(1 for _ in sweep("monitored_links", ["monitor"], formula="{monitor}"))
+    pages_check = sum(1 for _ in sweep("monitored_links", ["monitor"],
+                                       formula="{possible_issue}='Document links not in the library'"))
     print(">>> companies ...", flush=True)
     co = company_stats()
     fails = failed_jobs(now)
@@ -198,7 +202,10 @@ def main():
            "discarded_24h_by_reason": "\n".join(f"{k}: {v:,}" for k, v in lib["disc_24h"].most_common()),
            "failed_jobs_24h": len(fails or []), "failed_jobs": "\n".join(fails or []),
            "companies": co["companies"], "completeness_avg": round(co["avg"], 4),
-           "companies_complete": round(co["complete"], 4)}
+           "companies_complete": round(co["complete"], 4),
+           "overdue_sust_reports": co["over"].get("Sustainability report", 0),
+           "overdue_annual_reports": co["over"].get("Annual report", 0),
+           "pages_to_check": pages_check}
     for tag, field in CHECKS:
         row[field] = co["miss"].get(tag, 0)
 
