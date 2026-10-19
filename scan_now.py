@@ -115,21 +115,10 @@ def probe_docs(seen, sess):
     """Report-ish links on the page that are not PDF-shaped (no .pdf, no known document endpoint):
     open the first bytes of each and keep the ones that really are PDFs. This is how a site with a
     new address scheme still gets harvested on demand. Returns the normalized keys confirmed."""
-    import harvest_reports as HR
-    todo = [u for u in seen if not HR.is_pdf_url(u)][:PROBE_MAX]
-    ok = set()
-    for u in todo:
-        try:
-            r = sess.get(u, headers={**UA, "Range": "bytes=0-1023"}, timeout=20, stream=True,
-                         allow_redirects=True)
-            head = next(r.iter_content(1024), b"")
-            ctype = r.headers.get("Content-Type", "").lower()
-            r.close()
-            if r.status_code < 400 and ("pdf" in ctype or head.startswith(b"%PDF")):
-                ok.add(normalize(u))
-        except Exception:
-            continue
-    return ok, len(todo)
+    import harvest_reports as HR, doc_probe as DP
+    todo = [u for u in seen if not HR.is_pdf_url(u) and DP.priority(u) is not None][:PROBE_MAX]
+    res = DP.probe(todo, workers=8, session=sess)
+    return {k for k, v in res.items() if v == "pdf"}, len(todo)
 
 
 def wait_for_files(ids):
