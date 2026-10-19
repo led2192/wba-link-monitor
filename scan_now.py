@@ -106,6 +106,32 @@ def read_page(rec, sess):
     return upd, how
 
 
+PROBE_MAX = int(os.environ.get("SCAN_PROBE_MAX") or 60)
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+
+def probe_docs(seen, sess):
+    """Report-ish links on the page that are not PDF-shaped (no .pdf, no known document endpoint):
+    open the first bytes of each and keep the ones that really are PDFs. This is how a site with a
+    new address scheme still gets harvested on demand. Returns the normalized keys confirmed."""
+    import harvest_reports as HR
+    todo = [u for u in seen if not HR.is_pdf_url(u)][:PROBE_MAX]
+    ok = set()
+    for u in todo:
+        try:
+            r = sess.get(u, headers={**UA, "Range": "bytes=0-1023"}, timeout=20, stream=True,
+                         allow_redirects=True)
+            head = next(r.iter_content(1024), b"")
+            ctype = r.headers.get("Content-Type", "").lower()
+            r.close()
+            if r.status_code < 400 and ("pdf" in ctype or head.startswith(b"%PDF")):
+                ok.add(normalize(u))
+        except Exception:
+            continue
+    return ok, len(todo)
+
+
 def wait_for_files(ids):
     """Airtable fetches attachments in the background. Poll until every row has a file or gave up."""
     deadline = time.time() + ATTACH_WAIT_S
@@ -164,6 +190,12 @@ def main():
         if not f.get("wba_id"):
             notes[rec["id"]].append("No company on this row: link it to a company and tick scan_now again.")
             continue
+        seen = [l.strip() for l in (merged.get(F_SEEN) or "").split("\n") if l.strip()]
+        confirmed, probed = probe_docs(seen, sess)
+        if confirmed:
+            HR.CONFIRMED_DOCS |= confirmed
+            notes[rec["id"]].append(f"{len(confirmed)} of {probed} links without a .pdf ending turned "
+                                    "out to be PDFs when opened, and are harvested too.")
         by_company[f["wba_id"]].append((rec, merged))
     patch(LINKS, page_updates)
 

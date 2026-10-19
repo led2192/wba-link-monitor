@@ -50,9 +50,19 @@ REPORT_NAME = re.compile(r"annual|sustainab|integrated|\besg\b|\bcsr\b|report|me
                          r"rapport|informe|bericht|disclosure|statement|20[12]\d", re.I)
 
 
+# Document URLs confirmed by probing (scan_now.py opens report-ish links that are not PDF-shaped
+# and adds the ones that really serve a PDF here, as normalized keys).
+CONFIRMED_DOCS = set()
+
+
 def is_pdf_url(u):
     path = urlsplit(u.split("?", 1)[0]).path.lower()
-    return path.endswith(".pdf") or is_doc_endpoint(path)
+    if path.endswith(".pdf") or is_doc_endpoint(path):
+        return True
+    if CONFIRMED_DOCS:
+        from ids import normalize
+        return normalize(u) in CONFIRMED_DOCS
+    return False
 
 
 def fetchable(u):
