@@ -1,0 +1,58 @@
+name: Scan now
+
+# On-demand scans. Every 10 minutes a tiny check asks Airtable whether any monitored_links row is
+# waiting (scan_now ticked, or a new monitored page added in the last 2 days that was never read).
+# Only if one is waiting does the scan job start: it installs the browser, scans those pages and
+# takes their documents through harvest, attach, cover text, clean-up and company coverage
+# (scan_now.py). Idle checks cost a few seconds. GitHub may start scheduled runs a few minutes late.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: scan-now
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      waiting: ${{ steps.q.outputs.waiting }}
+    steps:
+      - id: q
+        name: Anything waiting?
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, urllib.parse, urllib.request
+          f = ("OR({scan_now}, AND({monitor}, {last_checked}=BLANK(), "
+               "IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -2, 'days'))))")
+          url = (f"https://api.airtable.com/v0/{os.environ['AIRTABLE_BASE']}/monitored_links?pageSize=1"
+                 f"&fields%5B%5D=url&filterByFormula={urllib.parse.quote(f)}")
+          req = urllib.request.Request(url, headers={"Authorization": f"Bearer {os.environ['AIRTABLE_TOKEN']}"})
+          n = len(json.load(urllib.request.urlopen(req, timeout=30)).get("records", []))
+          print(f"waiting={'true' if n else 'false'}")
+          PY
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+
+  scan:
+    needs: check
+    if: needs.check.outputs.waiting == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt playwright
+      - run: playwright install --with-deps chromium
+      - name: Scan
+        run: python scan_now.py
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}

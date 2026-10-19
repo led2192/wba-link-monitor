@@ -103,10 +103,12 @@ REPORT_TYPES  = SUST_FAMILY | ANNUAL_FAMILY | {
 YEAR_OK = re.compile(r"^20[0-3][0-9]$")   # sanity guard on the {year} formula output
 
 
-def sweep(table, fields, label):
+def sweep(table, fields, label, formula=None):
     """Yield the fields dict of every row in a table, requesting only what we aggregate."""
     url = f"{API}/{BASE}/{quote(table)}"
     params = [("pageSize", "100")] + [("fields[]", f) for f in fields]
+    if formula:
+        params.append(("filterByFormula", formula))
     offset = None; n = 0
     while True:
         p = list(params) + ([("offset", offset)] if offset else [])
@@ -131,7 +133,14 @@ def eff_type(f):
     return t
 
 
-def aggregate():
+def wba_formula(wbas):
+    """Airtable formula selecting rows of these companies (None = all)."""
+    if not wbas:
+        return None
+    return "OR(" + ",".join("{wba_id}='%s'" % w.replace("'", "") for w in wbas) + ")"
+
+
+def aggregate(wbas=None):
     """One pass over each big table -> {wba_id: stats dict}."""
     agg = {}
 
@@ -142,7 +151,7 @@ def aggregate():
             "type_counts": {}, "type_latest": {}, "latest_report_year": None})
 
     print(">>> sweeping monitored_links ...", flush=True)
-    for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST], "monitored_links"):
+    for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST], "monitored_links", wba_formula(wbas)):
         f = rec.get("fields", {})
         wba = (f.get(F_WBA) or "").strip()
         if not wba:
@@ -161,7 +170,8 @@ def aggregate():
             c["page_types"][pt] += 1
 
     print(">>> sweeping report_library ...", flush=True)
-    for rec in sweep(LIB, [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_FILE, F_DISCARD], "report_library"):
+    for rec in sweep(LIB, [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_FILE, F_DISCARD], "report_library",
+                     wba_formula(wbas)):
         f = rec.get("fields", {})
         wba = (f.get(F_WBA) or "").strip()
         if not wba or f.get(F_DISCARD):
@@ -309,10 +319,10 @@ def empty_stats():
             "latest_report_year": None}
 
 
-def companies_index():
+def companies_index(wbas=None):
     """{wba_id: (record_id, current stat field values)} for the diff."""
     out = {}
-    for rec in sweep(COMP, [C_WBA] + STAT_FIELDS, "companies"):
+    for rec in sweep(COMP, [C_WBA] + STAT_FIELDS, "companies", wba_formula(wbas)):
         f = rec.get("fields", {})
         wba = (f.get(C_WBA) or "").strip()
         if wba:
@@ -345,7 +355,10 @@ def main():
     ap.add_argument("--commit", action="store_true", help="write changed rows to companies")
     ap.add_argument("--year-min", type=int, default=2024,
                     help="a report family counts as current when its latest year >= this")
+    ap.add_argument("--wba", default="", help="only these companies (comma-separated wba_ids); "
+                    "used by scan_now.py to refresh one company right after a scan")
     args = ap.parse_args()
+    wbas = [w.strip() for w in args.wba.split(",") if w.strip()]
 
     # companies goes FIRST: it is the cheapest sweep (~2k rows) and the only one whose
     # fields might not exist yet. A missing stat field 422s here in seconds instead of
@@ -353,13 +366,13 @@ def main():
     # the first live run, which died on UNKNOWN_FIELD_NAME at minute 17).
     print(">>> sweeping companies ...", flush=True)
     try:
-        comp = companies_index()
+        comp = companies_index(wbas)
     except Exception:
         print(">>> companies needs these fields (exact names): "
               + ", ".join([C_WBA] + STAT_FIELDS + [C_UPDATED]), flush=True)
         raise
 
-    agg = aggregate()
+    agg = aggregate(wbas)
 
     orphans = sorted((w for w in agg if w not in comp),
                      key=lambda w: -agg[w]["docs_total"])

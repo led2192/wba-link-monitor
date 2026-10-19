@@ -210,7 +210,7 @@ def from_airtable(base, token, table, types):
     return out, id_by_url
 
 
-def existing_library(base, token, table):
+def existing_library(base, token, table, formula=None):
     """{library_id: {"url": document_url, "first_seen": first_seen, "id": record_id, "wba": wba_id}}
     already in the library, so a re-run writes only new/changed rows (by record id) and preserves
     first_seen. Discarded rows are included on purpose: their doc_id still blocks re-creation."""
@@ -218,6 +218,8 @@ def existing_library(base, token, table):
     headers = {"Authorization": f"Bearer {token}"}
     base_params = [("pageSize", "100"), ("fields[]", "library_id"),
                    ("fields[]", "document_url"), ("fields[]", "first_seen"), ("fields[]", "wba_id")]
+    if formula:
+        base_params.append(("filterByFormula", formula))
     out = {}; offset = None
     while True:
         p = list(base_params) + ([("offset", offset)] if offset else [])
@@ -264,18 +266,80 @@ def write_records(base, token, table, records, method):
     """method='PATCH' updates existing rows (records carry 'id'); method='POST' creates new ones.
     These are DIRECT record-id writes, not performUpsert, so each call is fast regardless of how
     big the table is (no server-side match against the whole table)."""
+    out = []
     if not records:
-        return
+        return out
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     verb = "updating" if method == "PATCH" else "creating"
     print(f"{verb} {len(records)} rows in '{table}' ...")
     for i in range(0, len(records), 10):
-        _request(method, url, headers, {"records": records[i:i + 10], "typecast": True})
+        r = _request(method, url, headers, {"records": records[i:i + 10], "typecast": True})
+        try:
+            out.extend(r.json().get("records", []))
+        except Exception:
+            pass
         time.sleep(0.2)
         if i and i % 2000 == 0:
             print(f"  {i}/{len(records)}")
+    return out
 
+
+def upsert(rows, id_by_url, base, token, lib_table, full=False, existing=None):
+    """Write harvested rows: link each to its source page, skip known documents (doc_id guard and
+    purge tombstones), create the new ones and update changed ones. `existing` may be passed
+    pre-filtered (e.g. one company, for scan_now.py). Returns (created_records, n_updated, n_blocked)."""
+    from ids import normalize
+    # Resolve each document's source page to a REAL monitored_links record id, matched on the
+    # page's normalized URL. No string ever enters the source_page link field, so typecast can
+    # never fabricate a page. A document whose page is not in the table is left unlinked
+    # (source_page absent) rather than pointed at a fabricated row.
+    linked = unlinked = 0
+    for r in rows:
+        rid = id_by_url.get(normalize(r.get("found_on", "")))
+        if rid:
+            r["source_page"] = [rid]; linked += 1
+        else:
+            unlinked += 1
+    print(f"source_page resolved by URL: {linked} linked, {unlinked} with no matching page "
+          f"(left unlinked).")
+
+    if existing is None:
+        existing = existing_library(base, token, lib_table)
+    # Document-level guard. library_id is keyed on the URL, so a document served under a new URL
+    # (per-visit token, cache-buster, mirror shard) used to come in as a new row on every run.
+    # doc_id strips those parts (ids.doc_key); a harvested URL whose doc_id is already in the
+    # library, discarded rows included, is not created again. dedupe_library.py catches what
+    # this cannot see (same file under a genuinely different URL) after the files are attached.
+    from ids import doc_id
+    known_docs = {doc_id(v["wba"], v["url"]) for v in existing.values() if v.get("url")}
+    # Documents deleted by purge_discarded.py are gone from the table but must not come back:
+    # their tombstones (state/tombstones_report_library.tsv.gz) block them like a live row.
+    from purge_discarded import load_tombstones
+    tomb = load_tombstones()
+    known_docs |= tomb
+    print(f"doc_id guard: {len(known_docs):,} known documents ({len(tomb):,} from purge tombstones).")
+    to_update = []; to_create = []; blocked = 0
+    for r in rows:
+        prev = existing.get(r["library_id"])
+        if prev:
+            r["first_seen"] = prev.get("first_seen") or TODAY_ISO   # keep original date
+            if full or prev.get("url") != r["document_url"]:
+                to_update.append({"id": prev["id"], "fields": r})
+        else:
+            did = doc_id(r["wba_id"], r["document_url"])
+            if did in known_docs:
+                blocked += 1
+                continue
+            known_docs.add(did)               # also stops two new URLs of one document in a run
+            r["first_seen"] = TODAY_ISO
+            to_create.append({"fields": r})
+    print(f"{len(rows)} harvested; {len(existing)} already in '{lib_table}'. "
+          f"writing {len(to_create)} new + {len(to_update)} changed (direct record writes); "
+          f"{blocked} new URLs skipped as known documents (doc_id guard).")
+    created = write_records(base, token, lib_table, to_create, "POST")
+    write_records(base, token, lib_table, to_update, "PATCH")
+    return created, len(to_update), blocked
 
 def main():
     ap = argparse.ArgumentParser()
@@ -311,54 +375,7 @@ def main():
         base = os.environ["AIRTABLE_BASE"]; token = os.environ["AIRTABLE_TOKEN"]
         lib_table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
 
-        # Resolve each document's source page to a REAL monitored_links record id, matched on the
-        # page's normalized URL. No string ever enters the source_page link field, so typecast can
-        # never fabricate a page. A document whose page is not in the table is left unlinked
-        # (source_page absent) rather than pointed at a fabricated row.
-        linked = unlinked = 0
-        for r in rows:
-            rid = id_by_url.get(normalize(r.get("found_on", "")))
-            if rid:
-                r["source_page"] = [rid]; linked += 1
-            else:
-                unlinked += 1
-        print(f"source_page resolved by URL: {linked} linked, {unlinked} with no matching page "
-              f"(left unlinked).")
-
-        existing = existing_library(base, token, lib_table)
-        # Document-level guard. library_id is keyed on the URL, so a document served under a new URL
-        # (per-visit token, cache-buster, mirror shard) used to come in as a new row on every run.
-        # doc_id strips those parts (ids.doc_key); a harvested URL whose doc_id is already in the
-        # library, discarded rows included, is not created again. dedupe_library.py catches what
-        # this cannot see (same file under a genuinely different URL) after the files are attached.
-        from ids import doc_id
-        known_docs = {doc_id(v["wba"], v["url"]) for v in existing.values() if v.get("url")}
-        # Documents deleted by purge_discarded.py are gone from the table but must not come back:
-        # their tombstones (state/tombstones_report_library.tsv.gz) block them like a live row.
-        from purge_discarded import load_tombstones
-        tomb = load_tombstones()
-        known_docs |= tomb
-        print(f"doc_id guard: {len(known_docs):,} known documents ({len(tomb):,} from purge tombstones).")
-        to_update = []; to_create = []; blocked = 0
-        for r in rows:
-            prev = existing.get(r["library_id"])
-            if prev:
-                r["first_seen"] = prev.get("first_seen") or TODAY_ISO   # keep original date
-                if args.full or prev.get("url") != r["document_url"]:
-                    to_update.append({"id": prev["id"], "fields": r})
-            else:
-                did = doc_id(r["wba_id"], r["document_url"])
-                if did in known_docs:
-                    blocked += 1
-                    continue
-                known_docs.add(did)               # also stops two new URLs of one document in a run
-                r["first_seen"] = TODAY_ISO
-                to_create.append({"fields": r})
-        print(f"{len(rows)} harvested; {len(existing)} already in '{lib_table}'. "
-              f"writing {len(to_create)} new + {len(to_update)} changed (direct record writes); "
-              f"{blocked} new URLs skipped as known documents (doc_id guard).")
-        write_records(base, token, lib_table, to_create, "POST")
-        write_records(base, token, lib_table, to_update, "PATCH")
+        upsert(rows, id_by_url, base, token, lib_table, full=args.full)
     elif args.source == "airtable":
         print("\nDRY-RUN. Re-run with --commit to write into the library table.")
 

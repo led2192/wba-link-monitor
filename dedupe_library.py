@@ -112,10 +112,12 @@ def _request(method, url, headers, payload=None, params=None, tries=6):
         return r
 
 
-def from_airtable(base, token, table):
+def from_airtable(base, token, table, formula=None):
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
     params = [("pageSize", "100")] + [("fields[]", f) for f in FIELDS]
+    if formula:
+        params.append(("filterByFormula", formula))
     out = []; offset = None
     while True:
         p = list(params) + ([("offset", offset)] if offset else [])
