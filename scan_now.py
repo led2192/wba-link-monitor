@@ -158,6 +158,11 @@ def main():
 
     import harvest_reports as HR, classify_library as CL
     sess = requests.Session()
+    # A tick on scan_now by a person (not the automatic scan of a new page) is a suspicion that
+    # something is wrong with the page: record it, so the weekly missed-reports audit reviews
+    # manual scans that found nothing first (last_manual_scan + scan_outcome + scan_concern).
+    manual = {r["id"] for r in pages if r["fields"].get("scan_now")}
+    outcome = {}
     notes = {}; by_company = defaultdict(list); page_updates = []
     for rec in pages:
         f = rec["fields"]
@@ -166,17 +171,20 @@ def main():
         page_updates.append({"id": rec["id"], "fields": upd})
         merged = {**f, **upd}
         if upd.get(F_STATUS) in ("dead", "error"):
+            outcome[rec["id"]] = "Page failed"
             notes[rec["id"]] = [f"The page could not be opened ({upd.get(F_HTTP) or 'no response'}). "
                                 "Check the URL, or untick monitor if it is gone."]
             continue
         notes[rec["id"]] = [f"{n_docs(upd)} document link(s) on the page (read with a {how})."]
         typ = (f.get("type") or "").strip().lower()
         if typ not in HR.ALL_TYPES:
+            outcome[rec["id"]] = "Row needs a fix"
             notes[rec["id"]].append(f"Page type '{typ or 'blank'}' is not harvested for documents. "
                                     "Set the type to reports_hub, sustainability_page, sustainability_report, "
                                     "investor_relations or policies and tick scan_now again.")
             continue
         if not f.get("wba_id"):
+            outcome[rec["id"]] = "Row needs a fix"
             notes[rec["id"]].append("No company on this row: link it to a company and tick scan_now again.")
             continue
         seen = [l.strip() for l in (merged.get(F_SEEN) or "").split("\n") if l.strip()]
@@ -200,6 +208,7 @@ def main():
             per_page[normalize(c["fields"].get("found_on", ""))] += 1
         for rec, m in items:
             n_new = per_page.get(normalize(m.get("url", "")), 0)
+            outcome[rec["id"]] = "Found new documents" if n_new else "Nothing new"
             notes[rec["id"]].append(f"{n_new} new document(s) added to the library"
                                     + (f"; {blocked} skipped for the company as already held under "
                                        "another address" if blocked else "") + ".")
@@ -254,7 +263,15 @@ def main():
             if comp is not None:
                 msg.append(f"Company completeness now {float(comp):.0%}"
                            + (f". Next gap: {first_gap}" if first_gap else ". Nothing missing.") )
-        final.append({"id": rec["id"], "fields": {"scan_status": " ".join(msg), "scan_now": False}})
+        fields = {"scan_status": " ".join(msg), "scan_now": False,
+                  "scan_outcome": outcome.get(rec["id"], "Nothing new")}
+        if rec["id"] in manual:
+            fields["last_manual_scan"] = stamp[:10]
+            if fields["scan_outcome"] != "Found new documents":
+                msg.append("Marked for the weekly missed-reports audit; add what looks wrong in "
+                           "scan_concern if you can.")
+                fields["scan_status"] = " ".join(msg)
+        final.append({"id": rec["id"], "fields": fields})
     patch(LINKS, final)
     print(">>> done.", flush=True)
 
