@@ -333,6 +333,12 @@ def main():
         # this cannot see (same file under a genuinely different URL) after the files are attached.
         from ids import doc_id
         known_docs = {doc_id(v["wba"], v["url"]) for v in existing.values() if v.get("url")}
+        # Documents deleted by purge_discarded.py are gone from the table but must not come back:
+        # their tombstones (state/tombstones_report_library.tsv.gz) block them like a live row.
+        from purge_discarded import load_tombstones
+        tomb = load_tombstones()
+        known_docs |= tomb
+        print(f"doc_id guard: {len(known_docs):,} known documents ({len(tomb):,} from purge tombstones).")
         to_update = []; to_create = []; blocked = 0
         for r in rows:
             prev = existing.get(r["library_id"])

@@ -1,0 +1,82 @@
+name: Purge discarded rows
+
+# Permanently deletes report_library rows that were discarded more than N days ago (default 30).
+# MANUAL ONLY, never scheduled. Run it with mode = dry-run first: it lists what would go and
+# uploads the archive as an artifact, deleting nothing. To delete, run again with mode = delete
+# AND type DELETE in the confirm box. Before anything is deleted the job (1) commits the tombstone
+# list so the harvester never re-creates these documents, and (2) attaches the full archive to a
+# GitHub Release named purge-YYYY-MM-DD-<run>, so every deleted row can still be looked up.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run = list and archive only. delete = really delete."
+        type: choice
+        default: dry-run
+        options: [dry-run, delete]
+      confirm:
+        description: "Type DELETE to allow mode = delete."
+        type: string
+        default: ""
+      days:
+        description: "Only rows discarded more than this many days ago (minimum 7)."
+        type: string
+        default: "30"
+      limit:
+        description: "Max rows this run (0 = no cap)."
+        type: string
+        default: "0"
+
+concurrency:
+  group: purge-discarded
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Select, archive and tombstone
+        run: python purge_discarded.py --prepare --days "${{ inputs.days }}" --limit "${{ inputs.limit }}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: purge_archive
+          path: report_library_purge_*.jsonl.gz
+      - name: Stop here unless confirmed
+        if: ${{ inputs.mode != 'delete' || inputs.confirm != 'DELETE' }}
+        run: echo "Dry run (or DELETE not typed). Nothing was deleted. The archive artifact shows what would go."
+      - name: Save tombstones to the repository
+        if: ${{ inputs.mode == 'delete' && inputs.confirm == 'DELETE' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/tombstones_report_library.tsv.gz
+          git commit -m "Purge tombstones $(date -u +%F) (run ${{ github.run_id }})" || echo "no new tombstones"
+          git push
+      - name: Attach the archive to a Release
+        if: ${{ inputs.mode == 'delete' && inputs.confirm == 'DELETE' }}
+        run: |
+          TAG="purge-$(date -u +%F)-${{ github.run_id }}"
+          gh release create "$TAG" report_library_purge_*.jsonl.gz \
+            --title "report_library purge $(date -u +%F)" \
+            --notes "Rows deleted from report_library by the Purge discarded rows workflow. One JSON object per line, every field."
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Delete
+        if: ${{ inputs.mode == 'delete' && inputs.confirm == 'DELETE' }}
+        run: python purge_discarded.py --delete --days "${{ inputs.days }}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}

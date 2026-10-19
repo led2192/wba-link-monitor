@@ -31,6 +31,9 @@ Fields written on `companies` (create them first; see company_coverage.yml heade
     sust_years          -> years we hold a sustainability-family document for: "2021; 2023; 2024"
     sust_cadence        -> publication rhythm estimated from sust_years: annual / biennial /
                            ~every Ny / irregular / single / none, with the next expected year
+    completeness        -> share of the six COMPLETENESS checks passed (0..1, shown as %)
+    gaps                -> the failed checks in plain words, one per line, pages first
+    gap_pages           -> the failed checks as tags (multiple select), for filtering
     coverage_updated    -> date the stats last CHANGED (unchanged rows are not rewritten)
 
 Effective type = source_type_check (AI) when set, else source_type (keyword classifier).
@@ -76,7 +79,7 @@ C_WBA = "wba_id"
 STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
                "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
-               "sust_reports_total"]
+               "sust_reports_total", "completeness", "gaps", "gap_pages"]
 C_UPDATED = "coverage_updated"
 
 # Effective-type families for recency flags. Names match source_type_check options verbatim.
@@ -86,6 +89,11 @@ ANNUAL_FAMILY = {"Annual Report", "Integrated Report", "10K Form"}
 # Key source types the organisation expects from every company. The exact set is a
 # methodology decision; edit here and the missing_types field re-derives next run.
 IMPORTANT_EXACT = ("Code of Conduct", "Human Rights Policy", "Policy Documents")
+
+# Completeness: the six things every company should have. Order = fix order (pages first,
+# because documents are harvested from pages). Tag names match the gap_pages options.
+COMPLETENESS = ["Report hub page", "Sustainability page", "Sustainability report (recent)",
+                "Annual report (recent)", "Code of Conduct", "Human Rights Policy"]
 
 REPORT_TYPES  = SUST_FAMILY | ANNUAL_FAMILY | {
     "Climate Report", "Environmental Reports", "Social Reports", "Interim Reports",
@@ -250,6 +258,30 @@ def compose(c, year_min):
         if not c["type_counts"].get(t):
             missing.append(t)
 
+    def latest(family):
+        ys = [c["type_latest"].get(t, 0) for t in family]
+        return max(ys) if any(ys) else None
+    sl, al = latest(SUST_FAMILY), latest(ANNUAL_FAMILY)
+    checks = {
+        "Report hub page": ("reports_hub" in c["page_types"],
+                            "No report hub page watched: find the company's reports/publications page and add it."),
+        "Sustainability page": ("sustainability_page" in c["page_types"],
+                                "No sustainability page watched: find the company's sustainability/ESG page and add it."),
+        "Sustainability report (recent)": (family_current(SUST_FAMILY),
+            f"No sustainability report from {year_min} or later"
+            + (f" (latest held: {sl})." if sl else " (none held at all).")),
+        "Annual report (recent)": (family_current(ANNUAL_FAMILY),
+            f"No annual report from {year_min} or later"
+            + (f" (latest held: {al})." if al else " (none held at all).")),
+        "Code of Conduct": (bool(c["type_counts"].get("Code of Conduct")), "No Code of Conduct."),
+        "Human Rights Policy": (bool(c["type_counts"].get("Human Rights Policy")), "No Human Rights Policy."),
+    }
+    failed = [k for k in COMPLETENESS if not checks[k][0]]
+    completeness = round(1 - len(failed) / len(COMPLETENESS), 4)
+    gaps = "\n".join(checks[k][1] for k in failed)
+    if failed and c["docs_total"] == 0 and c["needs_browser"] > 0:
+        gaps += "\nThe site blocks the normal monitor (browser lane): a technical wall, escalate rather than collect by hand."
+
     pages = "\n".join(f"{t}: {n}" for t, n in sorted(c["page_types"].items(), key=lambda kv: (-kv[1], kv[0])))
     yc = c["year_counts"]
     year_keys = sorted((k for k in yc if k != "undated"), reverse=True)
@@ -266,7 +298,8 @@ def compose(c, year_min):
             "missing_types": "; ".join(missing),
             "sust_reports_total": sum(c["type_counts"].get(t, 0) for t in SUST_FAMILY),
             "pages_breakdown": pages, "docs_by_year": docs_by_year,
-            "sust_years": s_years, "sust_cadence": sust_cadence(c["sust_years"])}
+            "sust_years": s_years, "sust_cadence": sust_cadence(c["sust_years"]),
+            "completeness": completeness, "gaps": gaps, "gap_pages": failed}
 
 
 def empty_stats():
@@ -292,6 +325,8 @@ def _norm(v):
     so a target of None vs a stored value correctly counts as a change."""
     if v is None:
         return None
+    if isinstance(v, (list, tuple)):
+        return tuple(sorted(v)) or None
     if isinstance(v, float) and v.is_integer():
         return int(v)
     if isinstance(v, str):
@@ -346,6 +381,14 @@ def main():
 
     print(f">>> companies: {len(comp):,} | changed: {len(to_write):,} | unchanged: {unchanged:,} "
           f"| with gap flags: {gap_count:,}", flush=True)
+
+    vals = [compose(agg.get(w) or empty_stats(), args.year_min) for w in comp]
+    if vals:
+        avg = sum(v["completeness"] for v in vals) / len(vals)
+        full = sum(1 for v in vals if v["completeness"] == 1) / len(vals)
+        miss = collections.Counter(t for v in vals for t in v["gap_pages"])
+        print(f">>> completeness: average {avg:.1%} | at 100%: {full:.1%} | missing: "
+              + ", ".join(f"{k} {miss[k]}" for k in COMPLETENESS), flush=True)
 
     if not args.commit:
         for r in to_write[:5]:
