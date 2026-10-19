@@ -305,7 +305,8 @@ def write_records(base, token, table, records, method):
 def upsert(rows, id_by_url, base, token, lib_table, full=False, existing=None):
     """Write harvested rows: link each to its source page, skip known documents (doc_id guard and
     purge tombstones), create the new ones and update changed ones. `existing` may be passed
-    pre-filtered (e.g. one company, for scan_now.py). Returns (created_records, n_updated, n_blocked)."""
+    pre-filtered (e.g. one company, for scan_now.py). Returns (created_records, n_updated, n_blocked,
+    known_docs), known_docs being every doc_id now held (discarded and tombstoned included)."""
     from ids import normalize
     # Resolve each document's source page to a REAL monitored_links record id, matched on the
     # page's normalized URL. No string ever enters the source_page link field, so typecast can
@@ -356,7 +357,51 @@ def upsert(rows, id_by_url, base, token, lib_table, full=False, existing=None):
           f"{blocked} new URLs skipped as known documents (doc_id guard).")
     created = write_records(base, token, lib_table, to_create, "POST")
     write_records(base, token, lib_table, to_update, "PATCH")
-    return created, len(to_update), blocked
+    return created, len(to_update), blocked, known_docs
+
+
+def page_health(records, types, known_docs, id_by_url, base, token, links_table):
+    """Write, on each monitored page, how many of its document links are NOT in the library under
+    any page of the company (unharvested_links) and up to 5 of them (unharvested_sample). Counts:
+    harvestable links (PDF-shaped or probe-confirmed) whose document is not held, plus links on
+    document-server addresses the probe has not yet ruled out. A shared PDF credited to another
+    page of the company counts as held, so this is a real "the site offers it, we do not have it"
+    signal, unlike counting library rows per page. Only changed rows are written."""
+    import doc_probe
+    from ids import doc_id, normalize
+    cache = doc_probe.load_cache()
+    updates = []; flagged = 0
+    for f in records:
+        if str(f.get(F_TYPE, "")).strip().lower() not in types:
+            continue
+        rid = id_by_url.get(normalize(f.get(F_URL, "")))
+        if not rid:
+            continue
+        wba = f.get(F_WBA, "")
+        missing = []
+        for line in (f.get(F_SEEN) or "").split("\n"):
+            u = fetchable(line)
+            if not u:
+                continue
+            k = normalize(u)
+            if is_pdf_url(u):
+                target = (CONFIRMED_DOCS.get(k) if CONFIRMED_DOCS else None) or u
+            elif doc_probe.priority(u) == 0 and cache.get(k, ("",))[0] != "not":
+                target = u
+            else:
+                continue
+            if doc_id(wba, target) not in known_docs:
+                missing.append(u)
+        n = len(missing); sample = "\n".join(missing[:5])
+        if n >= 3:
+            flagged += 1
+        cur_n = f.get("unharvested_links")
+        if cur_n != n or (f.get("unharvested_sample") or "") != sample:
+            updates.append({"id": rid, "fields": {"unharvested_links": n, "unharvested_sample": sample}})
+    print(f">>> page health: {flagged:,} pages with 3+ document links not in the library; "
+          f"writing {len(updates):,} changed pages.", flush=True)
+    write_records(base, token, links_table, updates, "PATCH")
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -405,7 +450,9 @@ def main():
         base = os.environ["AIRTABLE_BASE"]; token = os.environ["AIRTABLE_TOKEN"]
         lib_table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
 
-        upsert(rows, id_by_url, base, token, lib_table, full=args.full)
+        _, _, _, known_docs = upsert(rows, id_by_url, base, token, lib_table, full=args.full)
+        page_health(records, types, known_docs, id_by_url, base, token,
+                    os.environ.get("AIRTABLE_TABLE", "monitored_links"))
     elif args.source == "airtable":
         print("\nDRY-RUN. Re-run with --commit to write into the library table.")
 

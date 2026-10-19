@@ -201,7 +201,7 @@ def main():
         rows, _, _ = HR.build([m for _, m in items], set(HR.ALL_TYPES), False)
         id_by_url = {normalize(m.get("url", "")): rec["id"] for rec, m in items}
         existing = HR.existing_library(BASE, TOKEN, LIB, formula=f"{{wba_id}}='{wba}'")
-        created, n_upd, blocked = HR.upsert(rows, id_by_url, BASE, TOKEN, LIB, existing=existing)
+        created, n_upd, blocked, _ = HR.upsert(rows, id_by_url, BASE, TOKEN, LIB, existing=existing)
         created_all.extend(created)
         per_page = defaultdict(int)
         for c in created:
