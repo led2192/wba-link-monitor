@@ -211,12 +211,13 @@ def from_airtable(base, token, table, types):
 
 
 def existing_library(base, token, table):
-    """{library_id: {"url": document_url, "first_seen": first_seen, "id": record_id}} already in
-    the library, so a re-run writes only new/changed rows (by record id) and preserves first_seen."""
+    """{library_id: {"url": document_url, "first_seen": first_seen, "id": record_id, "wba": wba_id}}
+    already in the library, so a re-run writes only new/changed rows (by record id) and preserves
+    first_seen. Discarded rows are included on purpose: their doc_id still blocks re-creation."""
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
     base_params = [("pageSize", "100"), ("fields[]", "library_id"),
-                   ("fields[]", "document_url"), ("fields[]", "first_seen")]
+                   ("fields[]", "document_url"), ("fields[]", "first_seen"), ("fields[]", "wba_id")]
     out = {}; offset = None
     while True:
         p = list(base_params) + ([("offset", offset)] if offset else [])
@@ -227,7 +228,8 @@ def existing_library(base, token, table):
             if f.get("library_id"):
                 out[f["library_id"]] = {"url": f.get("document_url", ""),
                                         "first_seen": f.get("first_seen", ""),
-                                        "id": rec["id"]}
+                                        "id": rec["id"],
+                                        "wba": f.get("wba_id") or f["library_id"].rsplit("-", 1)[0]}
         offset = j.get("offset"); time.sleep(0.22)
         if not offset: break
     return out
@@ -324,7 +326,14 @@ def main():
               f"(left unlinked).")
 
         existing = existing_library(base, token, lib_table)
-        to_update = []; to_create = []
+        # Document-level guard. library_id is keyed on the URL, so a document served under a new URL
+        # (per-visit token, cache-buster, mirror shard) used to come in as a new row on every run.
+        # doc_id strips those parts (ids.doc_key); a harvested URL whose doc_id is already in the
+        # library, discarded rows included, is not created again. dedupe_library.py catches what
+        # this cannot see (same file under a genuinely different URL) after the files are attached.
+        from ids import doc_id
+        known_docs = {doc_id(v["wba"], v["url"]) for v in existing.values() if v.get("url")}
+        to_update = []; to_create = []; blocked = 0
         for r in rows:
             prev = existing.get(r["library_id"])
             if prev:
@@ -332,10 +341,16 @@ def main():
                 if args.full or prev.get("url") != r["document_url"]:
                     to_update.append({"id": prev["id"], "fields": r})
             else:
+                did = doc_id(r["wba_id"], r["document_url"])
+                if did in known_docs:
+                    blocked += 1
+                    continue
+                known_docs.add(did)               # also stops two new URLs of one document in a run
                 r["first_seen"] = TODAY_ISO
                 to_create.append({"fields": r})
         print(f"{len(rows)} harvested; {len(existing)} already in '{lib_table}'. "
-              f"writing {len(to_create)} new + {len(to_update)} changed (direct record writes).")
+              f"writing {len(to_create)} new + {len(to_update)} changed (direct record writes); "
+              f"{blocked} new URLs skipped as known documents (doc_id guard).")
         write_records(base, token, lib_table, to_create, "POST")
         write_records(base, token, lib_table, to_update, "PATCH")
     elif args.source == "airtable":

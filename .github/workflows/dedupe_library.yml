@@ -1,0 +1,51 @@
+name: Dedupe report library
+
+# Second line of defence against duplicate documents in report_library (the first is the doc_id
+# guard inside harvest_reports.py). Runs after cover text is built, because the content signal
+# needs page_count. It only ticks discard with reason "Duplicate of another document"; it never
+# deletes, and it never touches a verified row. The full list of what it discarded, with the row
+# it kept, is uploaded as the dedupe_log artifact of each run.
+
+on:
+  workflow_run:
+    workflows: ["Build cover text"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "WRITE the discards. Leave OFF for a dry-run (plan only)."
+        type: boolean
+        default: false
+
+concurrency:
+  group: dedupe-library
+  cancel-in-progress: false
+
+jobs:
+  dedupe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run dedupe
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then
+            python dedupe_library.py
+          else
+            python dedupe_library.py --commit
+          fi
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dedupe_log
+          path: dedupe_log.csv
+          if-no-files-found: ignore
