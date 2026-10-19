@@ -50,9 +50,15 @@ REPORT_NAME = re.compile(r"annual|sustainab|integrated|\besg\b|\bcsr\b|report|me
                          r"rapport|informe|bericht|disclosure|statement|20[12]\d", re.I)
 
 
-# Document URLs confirmed by probing (scan_now.py opens report-ish links that are not PDF-shaped
-# and adds the ones that really serve a PDF here, as normalized keys).
-CONFIRMED_DOCS = set()
+# Document URLs confirmed by probing (doc_probe.py opens report-ish links that are not PDF-shaped):
+# normalized key -> URL to harvest ('' = the link itself; a direct file URL when the link is a
+# viewer page on an asset platform, e.g. Widen).
+CONFIRMED_DOCS = {}
+
+
+def _norm(u):
+    from ids import normalize
+    return normalize(u)
 
 
 def is_pdf_url(u):
@@ -92,7 +98,8 @@ def pdfs_from_row(fields, types):
     for line in (fields.get(F_SEEN) or "").split("\n"):
         u = fetchable(line)
         if u and is_pdf_url(u):
-            yield u, page
+            target = CONFIRMED_DOCS.get(_norm(u)) if CONFIRMED_DOCS else None
+            yield (target or u), page
     if str(fields.get(F_IS_PDF, "")).strip().lower() in ("checked", "true", "1", "yes") or is_pdf_url(page):
         yield fetchable(page), page
 

@@ -118,7 +118,7 @@ def probe_docs(seen, sess):
     import harvest_reports as HR, doc_probe as DP
     todo = [u for u in seen if not HR.is_pdf_url(u) and DP.priority(u) is not None][:PROBE_MAX]
     res = DP.probe(todo, workers=8, session=sess)
-    return {k for k, v in res.items() if v == "pdf"}, len(todo)
+    return {k: t for k, (v, t) in res.items() if v == "pdf"}, len(todo)
 
 
 def wait_for_files(ids):

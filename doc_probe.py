@@ -18,10 +18,10 @@ verdict 'pdf' as a document. scan_now.py uses probe() directly on the page it sc
 Cache: PROBE_CACHE (default state/probe_cache.tsv.gz). The nightly workflow keeps it between runs
 with actions/cache, so nothing is committed to the repository. Losing it only means re-checking.
 """
-import gzip, os, re, time
+import gzip, html, os, re, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from ids import normalize
 
@@ -71,14 +71,51 @@ def is_pdf(url, session=None, timeout=20):
     return "pdf" if ("pdf" in ctype or head.startswith(b"%PDF")) else "not"
 
 
+# Viewer pages on asset platforms (2026-10-20, McCormick case): a Widen share link
+# mccormick.widen.net/s/<id>/<name> answers with an HTML viewer, and the file itself sits behind a
+# link inside it: /content/<other-id>/original/<name>.pdf. When a DAM link is not a PDF, read the
+# viewer once, take that direct link, and harvest it instead of the viewer address.
+VIEWER_FILE = re.compile(r"""(?:href|src)=["']([^"']*/content/[^"']+?\.pdf[^"']*)["']""", re.I)
+
+
+def resolve_viewer(url, session=None, timeout=20):
+    import requests
+    s = session or requests
+    try:
+        r = s.get(url, headers=UA, timeout=timeout)
+        if r.status_code >= 400:
+            return ""
+        m = VIEWER_FILE.search(r.text[:2_000_000])
+        return urljoin(r.url or url, html.unescape(m.group(1))) if m else ""
+    except Exception:
+        return ""
+
+
+def check(url, session=None):
+    """(verdict, target). target is the URL to harvest when it differs from url (viewer pages)."""
+    v = is_pdf(url, session)
+    if v == "not":
+        from monitor_core import is_dam_host
+        try:
+            host = urlsplit(url).hostname
+        except ValueError:
+            host = ""
+        if is_dam_host(host):
+            direct = resolve_viewer(url, session)
+            if direct and is_pdf(direct, session) == "pdf":
+                return "pdf", direct
+    return v, ""
+
+
 def probe(urls, workers=12, budget_s=None, session=None):
-    """{normalized_key: verdict} for these URLs, checked in parallel, stopping at the time budget."""
+    """{normalized_key: (verdict, target)} for these URLs, checked in parallel, stopping at the
+    time budget. target is '' unless the PDF sits behind a viewer page (see check)."""
     out = {}
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {}
         for u in urls:
-            futs[ex.submit(is_pdf, u, session)] = u
+            futs[ex.submit(check, u, session)] = u
         for f, u in futs.items():
             if budget_s and time.time() - t0 > budget_s:
                 f.cancel()
@@ -86,7 +123,7 @@ def probe(urls, workers=12, budget_s=None, session=None):
             try:
                 out[normalize(u)] = f.result()
             except Exception:
-                out[normalize(u)] = "err"
+                out[normalize(u)] = ("err", "")
     return out
 
 
@@ -97,21 +134,23 @@ def load_cache(path=CACHE):
             for line in fh:
                 parts = line.rstrip("\n").split("\t")
                 if len(parts) >= 2:
-                    cache[parts[0]] = (parts[1], parts[2] if len(parts) > 2 else "")
+                    cache[parts[0]] = (parts[1], parts[2] if len(parts) > 2 else "",
+                                       parts[3] if len(parts) > 3 else "")
     return cache
 
 
 def save_cache(cache, path=CACHE):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with gzip.open(path, "wt", encoding="utf-8") as fh:
-        for k, (v, d) in cache.items():
-            fh.write(f"{k}\t{v}\t{d}\n")
+        for k, (v, d, t) in cache.items():
+            fh.write(f"{k}\t{v}\t{d}\t{t}\n")
 
 
 def nightly(links, max_new=15000, budget_s=1500, retry_err_days=30):
     """links: iterable of fetchable URLs from seen_links. Checks the ones never checked (and errors
     older than retry_err_days), document-server paths first. Returns the set of normalized keys
-    known to be PDFs (old and new) and a one-line summary."""
+    known to be PDFs (old and new) mapped to the URL to harvest ('' = the link itself), and a
+    one-line summary."""
     cache = load_cache()
     today = date.today().isoformat()
     todo = {}
@@ -128,11 +167,11 @@ def nightly(links, max_new=15000, budget_s=1500, retry_err_days=30):
             todo[k] = (p, u)
     queue = [u for _, (p, u) in sorted(todo.items(), key=lambda kv: kv[1][0])][:max_new]
     res = probe(queue, budget_s=budget_s) if queue else {}
-    for k, v in res.items():
-        cache[k] = (v, today)
+    for k, (v, t) in res.items():
+        cache[k] = (v, today, t)
     save_cache(cache)
-    pdfs = {k for k, (v, _) in cache.items() if v == "pdf"}
-    new_pdfs = sum(1 for v in res.values() if v == "pdf")
+    pdfs = {k: t for k, (v, _, t) in cache.items() if v == "pdf"}
+    new_pdfs = sum(1 for v, _ in res.values() if v == "pdf")
     summary = (f"doc probe: {len(todo):,} unchecked candidates, checked {len(res):,} this run "
                f"({new_pdfs:,} are PDFs); {len(todo) - len(res):,} left for later nights; "
                f"{len(pdfs):,} PDF links known in total.")
