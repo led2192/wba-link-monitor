@@ -18,6 +18,9 @@ on:
         description: "How long to keep watching (minutes). 0 = one pass."
         default: "330"
 
+permissions:
+  contents: write     # delete_now: the tombstone list is pushed before any row is deleted
+
 concurrency:
   group: scan-now
   cancel-in-progress: false

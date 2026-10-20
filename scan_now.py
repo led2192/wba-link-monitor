@@ -145,12 +145,63 @@ def company_completeness(wba):
     return f.get("completeness"), (f.get("gaps") or "").split("\n")[0]
 
 
+def finish_docs(created_all):
+    """New library rows: guess a type from the URL, attach the PDF, wait for Airtable to fetch it,
+    read the covers. Returns the rows that got their file. Shared with inbox.py."""
+    import classify_library as CL
+    print(f">>> {len(created_all)} new library rows: type guess + attach ...", flush=True)
+    upd = []
+    for c in created_all:
+        t, conf = CL.classify(c["fields"].get("document_url", "") or "")
+        fields = {}
+        if c["fields"].get("document_url") and not c["fields"].get("file"):
+            fields["file"] = [{"url": c["fields"]["document_url"]}]
+        if t:
+            fields.update({"source_type": t, "match_confidence": conf})
+        if fields:
+            upd.append({"id": c["id"], "fields": fields})
+    patch(LIB, upd)
+    with_file = wait_for_files([c["id"] for c in created_all])
+    print(f">>> {len(with_file)}/{len(created_all)} PDFs attached; reading covers ...", flush=True)
+    if with_file:
+        # Covers for up to COVER_MAX rows now; any beyond that (a big report hub) are left with
+        # cover_status blank and the nightly Build cover text job picks them up.
+        import build_cover_text as BC
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            results = list(ex.map(lambda r: BC.process_one(r, 6), with_file[:COVER_MAX]))
+        BC.write_batch(results)
+        # rows the URL could not label: label them from the file name / title page right away
+        try:
+            ids = [w["id"] for w in with_file]
+            rows = []
+            for k in range(0, len(ids), 40):
+                f = "OR(" + ",".join(f"RECORD_ID()='{i}'" for i in ids[k:k + 40]) + ")"
+                rows += get(LIB, [("pageSize", "100"), ("filterByFormula", f)] +
+                            [("fields[]", x) for x in ("file", "cover_text", "doc_year", "match_confidence",
+                                                       "source_type")])
+            rows = [r for r in rows if not r["fields"].get("source_type")
+                    or r["fields"].get("match_confidence") in (None, "", "unresolved")]
+            updates, _ = CL.label_from_file(rows)
+            if updates:
+                CL.commit(BASE, TOKEN, LIB, updates)
+        except Exception as e:
+            print(f"    label from file skipped: {e}", flush=True)
+    return with_file
+
+
 def run_once():
     if not (TOKEN and BASE):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
+    import inbox
+    did_inbox = False
+    try:
+        did_inbox = inbox.run()
+    except Exception as e:          # never let the inbox stop page scans
+        print(f">>> inbox pass failed ({type(e).__name__}: {e}).", flush=True)
     pages, waiting = queue()
     if not pages:
-        return False
+        return did_inbox
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f">>> scanning {len(pages)} page(s) ({waiting} waiting).", flush=True)
     patch(LINKS, [{"id": r["id"], "fields": {"scan_status": f"Scanning since {stamp} ..."}} for r in pages])
@@ -220,25 +271,7 @@ def run_once():
                                        "another address" if blocked else "") + ".")
 
     if created_all:
-        print(f">>> {len(created_all)} new library rows: type guess + attach ...", flush=True)
-        upd = []
-        for c in created_all:
-            t, conf = CL.classify(c["fields"].get("document_url", ""))
-            fields = {"file": [{"url": c["fields"].get("document_url", "")}]}
-            if t:
-                fields.update({"source_type": t, "match_confidence": conf})
-            upd.append({"id": c["id"], "fields": fields})
-        patch(LIB, upd)
-        with_file = wait_for_files([c["id"] for c in created_all])
-        print(f">>> {len(with_file)}/{len(created_all)} PDFs attached; reading covers ...", flush=True)
-        if with_file:
-            # Covers for up to COVER_MAX rows now; any beyond that (a big report hub) are left with
-            # cover_status blank and the nightly Build cover text job picks them up.
-            import build_cover_text as BC
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=6) as ex:
-                results = list(ex.map(lambda r: BC.process_one(r, 6), with_file[:COVER_MAX]))
-            BC.write_batch(results)
+        with_file = finish_docs(created_all)
         att = {normalize(c["fields"].get("found_on", "")) for c in created_all}
         for rec, _ in [i for v in by_company.values() for i in v]:
             if normalize(rec["fields"].get("url", "")) in att:

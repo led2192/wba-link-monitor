@@ -80,7 +80,10 @@ STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
                "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
                "sust_reports_total", "completeness", "gaps", "gap_pages",
-               "overdue_reports", "overdue_note"]
+               "overdue_reports", "overdue_note", "queue_score", "queue_item", "queue_action"]
+# companies fields this script READS for the queue but never writes (they belong to the person or
+# to discover_pages.py)
+QUEUE_INPUTS = ["website", "suggested_links", "queue_snooze_until"]
 C_UPDATED = "coverage_updated"
 
 # Effective-type families for recency flags. Names match source_type_check options verbatim.
@@ -150,7 +153,7 @@ def aggregate(wbas=None):
             "urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(), "docs_with_file": 0, "docs_typed": 0,
             "type_counts": {}, "type_latest": {}, "latest_report_year": None,
-            "ann_years": set()})
+            "ann_years": set(), "blocked": 0})
 
     print(">>> sweeping monitored_links ...", flush=True)
     for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST], "monitored_links", wba_formula(wbas)):
@@ -167,6 +170,8 @@ def aggregate(wbas=None):
         # (BMO case, 2026-07-16: every bmo.com row status=error, none flagged needs_browser).
         if f.get(F_NB) or f.get(F_ST) in ("dead", "error", "blocked"):
             c["needs_browser"] += 1
+        if f.get(F_MON) and f.get(F_ST) == "blocked":
+            c["blocked"] += 1
         pt = (f.get(F_PTYPE) or "").strip()
         if pt:
             c["page_types"][pt] += 1
@@ -259,6 +264,76 @@ def overdue(years, label, target, annual=False):
     rhythm = "every year" if step == 1 else f"every {step} years"
     return (f"{label} {last + step} expected: published {rhythm} (held: {held}); "
             f"latest held is {last}.")
+
+
+def queue(c, out, inputs, year_min, today=None):
+    """My queue: one score and one plain-words action per company. The score is what fixing the
+    company's problems is worth, dominated by the two disclosures that matter most for 2023-2026
+    (sustainability-family and annual report of year_min or later). 0 = nothing for the person:
+    the robots handle the rest, or the company is snoozed."""
+    today = today or date.today()
+    snooze = (inputs.get("queue_snooze_until") or "").strip()
+    if snooze and snooze >= today.isoformat():
+        return {"queue_score": 0, "queue_item": f"Snoozed until {snooze}.", "queue_action": None}
+    failed = set(out["gap_pages"])
+    no_sust = "Sustainability report (recent)" in failed
+    no_ann = "Annual report (recent)" in failed
+    no_hub = "Report hub page" in failed
+    over = set(out["overdue_reports"])
+    score = (50 if no_sust else 0) + (40 if no_ann else 0)
+    score += (10 if "Sustainability report" in over else 0) + (10 if "Annual report" in over else 0)
+    score += (10 if no_hub else 0) + (5 if "Sustainability page" in failed else 0)
+    score += (8 if "Code of Conduct" in failed else 0) + (8 if "Human Rights Policy" in failed else 0)
+    if not score:
+        return {"queue_score": 0, "queue_item": "", "queue_action": None}
+
+    def latest(family):
+        ys = [c["type_latest"].get(t, 0) for t in family]
+        return max(ys) if any(ys) else None
+    missing = []
+    if no_sust:
+        sl = latest(SUST_FAMILY)
+        missing.append(f"no {year_min}+ sustainability report ({f'latest held: {sl}' if sl else 'none held'})")
+    if no_ann:
+        al = latest(ANNUAL_FAMILY)
+        missing.append(f"no {year_min}+ annual report ({f'latest held: {al}' if al else 'none held'})")
+    what = "; ".join(missing)
+    what = (what[0].upper() + what[1:] + ".") if what else ""
+    suggested = bool((inputs.get("suggested_links") or "").strip())
+    has_site = bool((inputs.get("website") or "").strip()) or c["page_types"].get("homepage", 0) > 0 \
+        or c["urls_total"] > 0
+    snooze_tip = " If they really have not published it, set queue_snooze_until to a date to hide this until then."
+
+    if not has_site:
+        action = "Add the website"
+        item = ("New company with no pages yet: paste its main website in the website field. "
+                "The robot then searches it tonight and proposes the report pages for you to approve.")
+    elif suggested:
+        action = "Review suggested pages"
+        item = ((what + " ") if what else "") + ("The robot found pages that look like what is missing: check "
+                "suggested_links, delete any wrong line, and tick approve_suggestions.")
+    elif no_sust or no_ann:
+        if c["blocked"] and c["blocked"] >= max(1, c["urls_monitored"] // 2):
+            action = "Find the report (site blocks robot)"
+            item = (what + " Their website refuses our robot, so only you can get it: download the report "
+                    "and drop the PDF in add_file (or paste the PDF link in add_link)." + snooze_tip)
+        elif no_hub:
+            action = "Find the report page"
+            item = (what + " We do not watch their reports page yet: paste the reports/publications page "
+                    "link in add_link (or the report PDF itself). The robot is also searching their site.")
+        else:
+            action = "Find the report"
+            item = (what + " Their pages are watched but the report was not found there: if it exists, "
+                    "paste the PDF link in add_link (or drop the file in add_file)." + snooze_tip)
+    elif no_hub or "Sustainability page" in failed:
+        action = "Find the report page"
+        item = ("Reports are fine, but we do not watch their " + ("reports page" if no_hub else "sustainability page")
+                + ": paste its link in add_link.")
+    else:
+        pol = [p for p in ("Code of Conduct", "Human Rights Policy") if p in failed]
+        action = "Find the policy"
+        item = "No " + " and no ".join(pol) + ": if they publish one, paste the PDF link in add_link."
+    return {"queue_score": score, "queue_item": item, "queue_action": action}
 
 
 def compose(c, year_min):
@@ -367,13 +442,13 @@ def empty_stats():
     return {"urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(),
             "docs_with_file": 0, "docs_typed": 0, "type_counts": {}, "type_latest": {},
-            "latest_report_year": None, "ann_years": set()}
+            "latest_report_year": None, "ann_years": set(), "blocked": 0}
 
 
 def companies_index(wbas=None):
     """{wba_id: (record_id, current stat field values)} for the diff."""
     out = {}
-    for rec in sweep(COMP, [C_WBA] + STAT_FIELDS, "companies", wba_formula(wbas)):
+    for rec in sweep(COMP, [C_WBA] + STAT_FIELDS + QUEUE_INPUTS, "companies", wba_formula(wbas)):
         f = rec.get("fields", {})
         wba = (f.get(C_WBA) or "").strip()
         if wba:
@@ -435,7 +510,9 @@ def main():
     today = date.today().isoformat()
     to_write, unchanged, gap_count = [], 0, 0
     for wba, (rid, current) in comp.items():
-        target = compose(agg.get(wba) or empty_stats(), args.year_min)
+        st = agg.get(wba) or empty_stats()
+        target = compose(st, args.year_min)
+        target.update(queue(st, target, current, args.year_min))
         if target["coverage_flags"]:
             gap_count += 1
         if changed(current, target):
