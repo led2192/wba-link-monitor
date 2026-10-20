@@ -26,7 +26,7 @@ Every addition goes through the same duplicate guards as the nightly harvester, 
 never create a second copy of something we hold. Env: AIRTABLE_TOKEN, AIRTABLE_BASE.
 """
 import gzip, hashlib, json, os, re, subprocess, time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlsplit
 
 import requests
@@ -476,6 +476,53 @@ def run_searches():
     return True
 
 
+# ---------------------------------------------------------------------------------------------
+# live coverage: recompute a company's coverage within minutes of any change that affects it
+# ---------------------------------------------------------------------------------------------
+_LAST_COVERAGE_CHECK = None
+WATCH = [   # (table, fields whose change matters for coverage / the queue)
+    (LIB, ["source_type_check", "source_type", "doc_year", "curated_doc_title", "discard", "file", "wba_id"]),
+    (LINKS, ["type", "monitor", "status", "wba_id"]),
+    (COMP, ["queue_snooze_until", "website", "suggested_links"]),
+]
+LIVE_MAX = 200     # more companies than this at once = a bulk job; the nightly run covers those
+
+
+def run_coverage_refresh():
+    """Companies whose documents, pages or queue inputs changed since the last check (by a person
+    or a robot) get their coverage, gaps and queue recomputed now. Only the fields that matter
+    are watched, so coverage writing to companies does not trigger itself."""
+    global _LAST_COVERAGE_CHECK
+    now = datetime.now(timezone.utc)
+    since = _LAST_COVERAGE_CHECK or (now - timedelta(minutes=15))
+    stamp_iso = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    wbas = set()
+    for table, fields in WATCH:
+        watched = ", ".join("{%s}" % x for x in fields if x != "wba_id")
+        formula = f"IS_AFTER(LAST_MODIFIED_TIME({watched}), '{stamp_iso}')"
+        try:
+            rows = get(table, [("pageSize", "100"), ("fields[]", "wba_id"), ("filterByFormula", formula)])
+        except Exception as e:
+            print(f">>> live coverage: could not read {table} ({e}).", flush=True)
+            return False
+        wbas |= {(r["fields"].get("wba_id") or "").strip() for r in rows}
+        if len(wbas) > LIVE_MAX:
+            break
+    _LAST_COVERAGE_CHECK = now
+    wbas.discard("")
+    if not wbas:
+        return False
+    if len(wbas) > LIVE_MAX:
+        print(f">>> live coverage: {len(wbas)}+ companies changed at once (a bulk job); "
+              "left to the nightly coverage run.", flush=True)
+        return False
+    print(f">>> live coverage: refreshing {len(wbas)} company(ies).", flush=True)
+    ws = sorted(wbas)
+    for i in range(0, len(ws), 40):
+        subprocess.run(["python", "company_coverage.py", "--commit", "--wba", ",".join(ws[i:i + 40])], check=False)
+    return True
+
+
 def run():
     a = run_deletes() | run_page_deletes()
     b = run_links()
@@ -484,6 +531,10 @@ def run():
         d = run_searches()
     except Exception as e:
         print(f">>> search start failed: {e}", flush=True); d = False
+    try:
+        run_coverage_refresh()      # never counts as "work done": it must not shorten the watch pause
+    except Exception as e:
+        print(f">>> live coverage failed: {e}", flush=True)
     return a or b or c or d
 
 
