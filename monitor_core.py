@@ -222,7 +222,22 @@ def doc_links(html, base):
             continue
         if n and n not in out:
             out[n] = (absu, "")
-    return out
+    return _drop_truncated(out)
+
+
+def _drop_truncated(out):
+    """The raw-HTML sweep stops at whitespace, so a file name with spaces ("Boparan Animal welfare
+    policy V8 2026.pdf", 2 Sisters Food Group, 2026-10-20) also yields a chopped copy
+    (.../Agriculture/Boparan) next to the full link found by the anchor pass. A link that is the
+    full link cut at a space is not an address: drop it."""
+    full = [v[0] for v in out.values()]
+    keep = {}
+    for k, v in out.items():
+        u = v[0]
+        if any(o != u and (o.startswith(u + " ") or o.startswith(u + "%20")) for o in full):
+            continue
+        keep[k] = v
+    return keep
 
 
 LANG_NAMES = {
