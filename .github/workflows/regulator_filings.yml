@@ -1,0 +1,47 @@
+name: Regulator filings (annual reports)
+
+# Weekly: for every company with an official identifier (LEI, ISIN), look up its annual filings in
+# the SEC (US) and ESEF (filings.xbrl.org, Europe and others) databases, and add the ones for fiscal
+# years we hold no annual report for. Gap filling only; see regulator_filings.py.
+on:
+  schedule:
+    - cron: "20 6 * * 1"        # Mondays 06:20 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run lists what would be added; commit adds it"
+        type: choice
+        default: "dry-run"
+        options: [dry-run, commit]
+      source:
+        description: "Which database"
+        type: choice
+        default: "all"
+        options: [all, sec, esef]
+      wba:
+        description: "Only these companies (comma-separated wba_ids). Blank = all."
+        default: ""
+
+concurrency:
+  group: regulator-filings
+  cancel-in-progress: false
+
+jobs:
+  filings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Look up and add annual filings
+        run: |
+          ARGS=(--source "${{ inputs.source || 'all' }}" --wba "${{ inputs.wba }}")
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then ARGS+=(--commit); fi
+          python regulator_filings.py "${ARGS[@]}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SEC_CONTACT: ${{ vars.SEC_CONTACT }}
