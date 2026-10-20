@@ -1,0 +1,44 @@
+name: Key figures (revenue, employees)
+
+# Weekly after the regulator filings run, and on demand: each company's latest revenue and number
+# of employees with the exact source (official filing data, or the page of the latest report).
+# See key_figures.py. Companies with key_figures_checked ticked are never overwritten.
+on:
+  schedule:
+    - cron: "20 9 * * 1"        # Mondays 09:20 UTC, after Regulator filings (06:20)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run prints what it found; commit writes it"
+        type: choice
+        default: "dry-run"
+        options: [dry-run, commit]
+      wba:
+        description: "Only these companies (comma-separated wba_ids). Blank = all."
+        default: ""
+
+concurrency:
+  group: key-figures
+  cancel-in-progress: false
+
+jobs:
+  figures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Find revenue and employees
+        run: |
+          ARGS=(--wba "${{ inputs.wba }}")
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then ARGS+=(--commit); fi
+          python key_figures.py "${ARGS[@]}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SEC_CONTACT: ${{ vars.SEC_CONTACT }}
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
