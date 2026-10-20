@@ -26,13 +26,27 @@ jobs:
         name: Anything waiting?
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os, urllib.parse, urllib.request
+          # Ask Airtable whether any page is waiting. The nightly jobs share Airtable's per-base
+          # rate limit, so a busy moment answers 429/5xx or times out: retry with backoff, and if
+          # Airtable stays busy say "nothing waiting" with a warning instead of failing the run
+          # (the next run, minutes later, asks again).
+          import json, os, sys, time, urllib.parse, urllib.request
           f = ("OR({scan_now}, AND({monitor}, {last_checked}=BLANK(), "
                "IS_AFTER(CREATED_TIME(), DATEADD(NOW(), -2, 'days'))))")
           url = (f"https://api.airtable.com/v0/{os.environ['AIRTABLE_BASE']}/monitored_links?pageSize=1"
                  f"&fields%5B%5D=url&filterByFormula={urllib.parse.quote(f)}")
           req = urllib.request.Request(url, headers={"Authorization": f"Bearer {os.environ['AIRTABLE_TOKEN']}"})
-          n = len(json.load(urllib.request.urlopen(req, timeout=30)).get("records", []))
+          n, last = None, ""
+          for wait in (0, 5, 15, 30, 60):
+              time.sleep(wait)
+              try:
+                  n = len(json.load(urllib.request.urlopen(req, timeout=30)).get("records", []))
+                  break
+              except Exception as e:
+                  last = str(e)
+          if n is None:
+              print(f"::warning::Airtable did not answer the check ({last}); trying again next run.", file=sys.stderr)
+              n = 0
           print(f"waiting={'true' if n else 'false'}")
           PY
         env:
