@@ -127,13 +127,17 @@ def due_today(freq):
 
 def fetch(session, url, timeout=20):
     UA = "Mozilla/5.0 (compatible; WBA-LinkMonitor/1.0)"
+    # The ordinary headers every browser sends. Without them some sites refuse the request
+    # outright (diagnose_blocked.py, Oct 2026: 65 refused pages opened once these were sent).
+    H = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+         "Accept-Language": "en-US,en;q=0.9"}
     try:
-        return session.get(url, allow_redirects=True, timeout=timeout, headers={"User-Agent": UA}), None
+        return session.get(url, allow_redirects=True, timeout=timeout, headers=H), None
     except requests.exceptions.SSLError:
         try:
             import urllib3; urllib3.disable_warnings()
             return session.get(url, allow_redirects=True, timeout=timeout,
-                               headers={"User-Agent": UA}, verify=False), None
+                               headers=H, verify=False), None
         except Exception:
             return None, "ssl"
     except requests.exceptions.Timeout: return None, "timeout"
