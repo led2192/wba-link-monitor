@@ -1,0 +1,37 @@
+name: Suggest missing report pages
+
+# Nightly: for companies missing a report hub or sustainability page (new companies first, then by
+# queue_score), search their website and PROPOSE pages in companies.suggested_links. Nothing is
+# added until the person ticks approve_suggestions. Read-only on monitored_links.
+on:
+  schedule:
+    - cron: "40 4 * * *"
+  workflow_dispatch:
+    inputs:
+      max:
+        description: "Max companies this run."
+        default: "150"
+      wba:
+        description: "Only these companies (comma-separated wba_ids). Blank = the usual queue."
+        default: ""
+
+concurrency:
+  group: discover-pages
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Search websites and write suggestions
+        run: python discover_pages.py --commit --max "${{ inputs.max || '150' }}" --wba "${{ inputs.wba }}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_TABLE: monitored_links

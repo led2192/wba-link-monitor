@@ -1,8 +1,9 @@
 name: Active search (monthly)
 
+# The monthly schedule is off (Oct 2026): it added up to 10 pages per company without review, which
+# grew the base. Missing report pages are now PROPOSED nightly by discover_pages.py and added only
+# on approval. Run this by hand only for a deliberate full sweep.
 on:
-  schedule:
-    - cron: "0 3 1 * *"        # 03:00 UTC on the 1st of each month
   workflow_dispatch: {}
 
 jobs:
