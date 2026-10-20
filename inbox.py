@@ -181,6 +181,7 @@ def handle_company(rec, sess, tombs):
     known_files = {((a.get("filename") or "").lower(), a.get("size")) for d in docs
                    for a in (d["fields"].get("file") or [])[:1]}
 
+    blocked_links = []    # links the site refused; a file dropped in the same go is that document
     todo = [(None, u) for u in links_in(f.get("add_link"))]   # None = decide by opening it
     if f.get("approve_suggestions"):
         todo += suggested_in(f.get("suggested_links"))
@@ -220,8 +221,11 @@ def handle_company(rec, sess, tombs):
             new_pages += [o["id"] for o in out]; page_keys[k] = typ
             lines.append(f"Page added as {typ} and being scanned now: {short}")
         elif kind == "blocked":
-            lines.append(f"The site refused our robot ({info}), nothing added. Open it yourself, "
-                         f"download the PDF and drop it in add_file: {short}")
+            if f.get("add_file"):
+                blocked_links.append(url)        # paired with a dropped file below
+            else:
+                lines.append(f"The site refused our robot ({info}), nothing added. Open it yourself, "
+                             f"download the PDF and drop it in add_file together with this link: {short}")
         elif kind == "gone":
             lines.append(f"This address does not open ({info}), nothing added: {short}")
         else:
@@ -232,14 +236,22 @@ def handle_company(rec, sess, tombs):
         if (fname.lower(), att.get("size")) in known_files:
             lines.append(f"File already in the library: {fname}")
             continue
-        key = f"upload:{wba}:{fname.lower()}:{att.get('size')}"
+        # A file dropped together with a link the site refused IS that document: keep the real
+        # address, so the duplicate guards and the harvester recognise it later.
+        src = blocked_links.pop(0) if blocked_links else ""
+        key = (normalize(src) or src.lower()) if src else f"upload:{wba}:{fname.lower()}:{att.get('size')}"
         row = {"library_id": f"{wba}-{hashlib.sha1(key.encode()).hexdigest()[:10]}", "wba_id": wba,
                "company_name": name, "file": [{"url": att["url"], "filename": fname}],
-               "doc_year": HR.year_of(fname), "first_seen": datetime.now(timezone.utc).date().isoformat(),
-               "Reviewer notes": f"Uploaded by hand ({fname})."}
+               "doc_year": HR.year_of(src or fname) or HR.year_of(fname),
+               "first_seen": datetime.now(timezone.utc).date().isoformat(),
+               "Reviewer notes": f"Uploaded by hand ({fname})" + (f", downloaded from {src}." if src else ".")}
+        if src:
+            row["document_url"] = src
         out = write(LIB, "POST", [{"fields": row}])
         created_docs += out; known_files.add((fname.lower(), att.get("size")))
-        lines.append(f"File added and being read: {fname}")
+        lines.append(f"File added and being read: {fname}" + (f" (as the document at {src[:80]})" if src else ""))
+    for u in blocked_links:
+        lines.append(f"The site refused our robot, and no file was left to pair with this link: {u[:90]}")
     return lines, created_docs, new_pages
 
 

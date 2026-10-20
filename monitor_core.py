@@ -85,11 +85,18 @@ DOC_ENDPOINTS = ("/static-files/", "/getattachment/")
 # seen_links for months. A last segment WITHOUT a dot under /files/ is treated as a document;
 # /files/x.jpg or /files/x.docx keep their own extension rules.
 _FILES_SLUG = re.compile(r"/files/[^/.]+/?$")
+# Liferay document library (2026-10-20, Asia Pulp & Paper case): files are served as
+# /documents/<group>/<folder>/<File Name>.pdf/<uuid>, so the path ends in the uuid, not ".pdf".
+# Only the ones whose name happened to contain a report word were caught; APP's 2021-2025
+# sustainability reports ("SR_PT_APP_..._2025_ENGLISH.pdf/adff5ea3-...") were never seen.
+# A ".pdf/" segment followed by one last segment is the document itself.
+_PDF_THEN_ID = re.compile(r"\.pdf/[^/]+/?$")
 
 
 def is_doc_endpoint(path):
     p = (path or "").lower()
-    return any(seg in p for seg in DOC_ENDPOINTS) or bool(_FILES_SLUG.search(p))
+    return (any(seg in p for seg in DOC_ENDPOINTS) or bool(_FILES_SLUG.search(p))
+            or bool(_PDF_THEN_ID.search(p)))
 
 
 FRAMEWORK_SUFFIXES = (
