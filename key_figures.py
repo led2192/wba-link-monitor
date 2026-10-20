@@ -148,28 +148,62 @@ def esef_figures(lei, sess):
 
 
 # ----------------------------------------------------------------------------------- report pages
-NUM = r"(\d{1,3}(?:[,.\s]\d{3})+|\d{2,7})(?:\.\d+)?"
+NUM = r"(\d{1,3}(?:[,.\s]\d{3})+|\d{2,7})(?:[.,]\d+)?"
+CUR = r"(?-i:[A-Z]{3}|US\$|[$€£¥₹]|RMB|Rp\.?|R\$|NT\$|HK\$|S\$|A\$|C\$|¥|R(?=\s?\d))"
+SCALE = r"(?:\s?(?:million|billion|bn|mn|thousand|trillion|crore|lakh|m\b))"
 EMP_STRONG = re.compile(r"\b(number of employees|total (?:number of )?employees|total workforce|total headcount|"
-                        r"employees at (?:the )?(?:end of|year[- ]end)|full[- ]time employees|headcount)\b", re.I)
-EMP_VALUE = re.compile(r"(?:(?:approximately|approx\.|about|around|over|more than|nearly|some|total of)\s+)?"
+                        r"employees at (?:the )?(?:end of|year[- ]end)|full[- ]time employees|employee headcount)\b", re.I)
+EMP_VALUE = re.compile(r"(?:(?:approximately|approx\.|about|around|over|more than|nearly|some|total of|c\.)\s*)?"
                        + NUM + r"\s+(?:full[- ]time\s+)?(?:employees|people|staff|team members|associates|colleagues|workers)\b"
-                       r"|(?:employees|headcount|workforce)\b[^.\d]{0,40}?" + NUM, re.I)
+                       r"|(?:number of employees|total (?:number of )?employees|total workforce|(?:employee )?headcount|"
+                       r"group employees|employees \(total\))\b[^.\d%]{0,40}?" + NUM + r"(?!\s?%)", re.I)
 REV_STRONG = re.compile(r"\b(total revenues?|net revenues?|net sales|revenues? for the year|consolidated revenues?|"
-                        r"total income|turnover|sales revenue|operating revenues?)\b", re.I)
-REV_VALUE = re.compile(r"\b(?:total revenues?|net revenues?|net sales|revenues?|turnover|consolidated revenues?|sales)\b"
-                       r"[^.]{0,60}?((?:[A-Z]{3}|US\$|[$€£¥₹]|RMB|Rp\.?|IDR|R\$)\s?" + NUM +
-                       r"(?:\s?(?:million|billion|bn|mn|m|thousand|trillion|crore|lakh))?)", re.I)
+                        r"total income|sales revenue|operating revenues?|group revenue)\b", re.I)
+REV_VALUE = re.compile(r"\b(?:total revenues?|net revenues?|net sales|revenues?|consolidated revenues?|sales|turnover)\b"
+                       r"[^.]{0,60}?(" + CUR + r"\s?" + NUM + SCALE + r"?|" + NUM + SCALE + r")", re.I)
 HILITE = re.compile(r"\b(key figures|highlights|at a glance|in brief|key facts|financial summary|"
                     r"performance overview|company profile|about (?:us|this report))\b", re.I)
+JUNK_PAGE = re.compile(r"\.{5,}|\bGRI \d{3}\b|\btable of contents\b|\bcontents\b", re.I)
+NOT_REV = re.compile(r"\b(per|intensity|ratio|growth|increase|decrease|% of|share of|from these products|"
+                     r"turnover rate|employee turnover)\b", re.I)
+
+
+def _number(txt):
+    m = re.search(r"\d[\d,.\s]*\d|\d", txt)
+    if not m:
+        return None
+    raw = re.sub(r"[,\s]", "", m.group(0))
+    if raw.count(".") > 1:
+        raw = raw.replace(".", "")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _plausible(kind, txt):
+    n = _number(txt)
+    if n is None:
+        return False
+    if kind == "employees":
+        if 1990 <= n <= 2035 or n < 50:          # a year, a page number or a footnote, not a headcount
+            return False
+        return not re.search(r"(supported|insured|customers|members|clients|at the companies)", txt, re.I)
+    return not NOT_REV.search(txt)
 
 
 def score_page(text, page, kind):
     strong, value = (EMP_STRONG, EMP_VALUE) if kind == "employees" else (REV_STRONG, REV_VALUE)
-    s = len(strong.findall(text)) * 3
-    vals = [m.group(0).strip() for m in value.finditer(text)]
+    if len(JUNK_PAGE.findall(text)) >= 3:        # tables of contents and GRI indexes name everything
+        return 0, ""
+    vals = []
+    for m in value.finditer(text):
+        ctx = text[max(0, m.start() - 40):m.end() + 40] if kind == "revenue" else text[m.start():m.end() + 40]
+        if _plausible(kind, m.group(0)) and _plausible(kind, ctx):
+            vals.append(m.group(0).strip())
     if not vals:
         return 0, ""
-    s += 2 + min(len(vals), 3)
+    s = len(strong.findall(text)) * 3 + 2 + min(len(vals), 3)
     if HILITE.search(text):
         s += 3
     if page <= 15:
@@ -288,17 +322,20 @@ def main():
     print(f">>> {dict(stats)}", flush=True)
     today = date.today().isoformat()
     upd = []
-    for w, kinds in found.items():
-        if not kinds:
-            continue
+    for w, c in comps.items():
+        kinds = found.get(w, {})
         fields, notes = {}, []
         for k in ("revenue", "employees"):
             if k in kinds:
                 val, src, note = kinds[k]
                 fields[k] = val[:250]; fields[f"{k}_source"] = src or None
                 notes.append(f"{k}: {note}")
-        fields["key_figures_note"] = f"{today}\n" + "\n".join(notes)
-        upd.append({"id": comps[w]["id"], "fields": fields})
+            elif "(candidate" in (c["fields"].get(k) or ""):
+                fields[k] = ""; fields[f"{k}_source"] = None      # an older, rejected candidate
+        if not fields:
+            continue
+        fields["key_figures_note"] = (f"{today}\n" + "\n".join(notes)) if notes else ""
+        upd.append({"id": c["id"], "fields": fields})
     for u in upd[:6]:
         print(f"    {u['fields'].get('revenue')} | {u['fields'].get('employees')}", flush=True)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
