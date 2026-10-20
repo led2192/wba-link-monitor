@@ -290,10 +290,28 @@ def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True)
 
 
-def save_state(new_tomb_lines, archive_lines, msg):
-    """Only inside GitHub Actions (it resets the checkout to the latest main).
-    Append to the tombstone list and the archive on top of the latest main, push. True when
-    pushed: only then may rows be deleted. Retries when another job pushed in between."""
+PAGE_TOMBSTONES = "state/tombstones_monitored_links.tsv.gz"
+PAGE_ARCHIVE = "state/deleted_pages.jsonl.gz"
+
+
+def page_key(wba, url):
+    return f"{wba}|{normalize(url) or url.strip().lower()}"
+
+
+def load_page_tombstones(path=PAGE_TOMBSTONES):
+    """{wba|normalized url: url} of every page deleted by hand. discover_pages.py and
+    active_search.py never propose or add these again."""
+    if not os.path.exists(path):
+        return {}
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        return {p[0]: (p[1] if len(p) > 1 else "") for p in (l.rstrip("\n").split("\t") for l in fh if l.strip())}
+
+
+def save_state(tombs, archives, msg):
+    """tombs: {tombstone file: new lines (key first)}, archives: {archive file: json lines}.
+    Appends them on top of the latest main and pushes. True when pushed: only then may rows be
+    deleted. Retries when another job pushed in between. Only inside GitHub Actions (it resets the
+    checkout to the latest main)."""
     if not os.environ.get("GITHUB_ACTIONS"):
         print("    save_state runs only inside GitHub Actions; nothing saved.", flush=True)
         return False
@@ -303,18 +321,20 @@ def save_state(new_tomb_lines, archive_lines, msg):
         git("fetch", "-q", "origin", "main")
         git("reset", "-q", "--hard", "origin/main")
         os.makedirs("state", exist_ok=True)
-        old = []
-        if os.path.exists(TOMBSTONES):
-            with gzip.open(TOMBSTONES, "rt", encoding="utf-8") as fh:
-                old = [l.rstrip("\n") for l in fh if l.strip()]
-        have = {l.split("\t", 1)[0] for l in old}
-        add = [l for l in new_tomb_lines if l.split("\t", 1)[0] not in have]
-        with gzip.open(TOMBSTONES, "wt", encoding="utf-8") as fh:
-            fh.write("\n".join(old + add) + "\n")
-        with gzip.open(ARCHIVE, "at", encoding="utf-8") as fh:   # gzip members append safely
-            for a in archive_lines:
-                fh.write(a + "\n")
-        git("add", TOMBSTONES, ARCHIVE)
+        for path, new_lines in tombs.items():
+            old = []
+            if os.path.exists(path):
+                with gzip.open(path, "rt", encoding="utf-8") as fh:
+                    old = [l.rstrip("\n") for l in fh if l.strip()]
+            have = {l.split("\t", 1)[0] for l in old}
+            add = [l for l in new_lines if l.split("\t", 1)[0] not in have]
+            with gzip.open(path, "wt", encoding="utf-8") as fh:
+                fh.write("\n".join(old + add) + "\n")
+        for path, lines in archives.items():
+            with gzip.open(path, "at", encoding="utf-8") as fh:   # gzip members append safely
+                for a in lines:
+                    fh.write(a + "\n")
+        git("add", *tombs.keys(), *archives.keys())
         c = git("commit", "-q", "-m", msg)
         if c.returncode != 0 and "nothing to commit" not in (c.stdout + c.stderr):
             print(f"    commit failed: {c.stderr.strip()}", flush=True)
@@ -324,6 +344,42 @@ def save_state(new_tomb_lines, archive_lines, msg):
         print(f"    push rejected (attempt {attempt + 1}): {p.stderr.strip()[:200]}", flush=True)
         time.sleep(5 + 5 * attempt)
     return False
+
+
+def run_page_deletes():
+    """monitored_links.delete_now: archive, tombstone (pushed first), then delete. The documents
+    found on the page stay. Certified pages are refused."""
+    recs = get(LINKS, [("pageSize", "100"), ("filterByFormula", "{delete_now}")] +
+               [("fields[]", x) for x in ("link_id", "wba_id", "company_name", "url", "type", "certified",
+                                           "notes", "monitor", "source", "status")])
+    if not recs:
+        return False
+    keep = [r for r in recs if r["fields"].get("certified")]
+    go = [r for r in recs if not r["fields"].get("certified")]
+    if keep:
+        write(LINKS, "PATCH", [{"id": r["id"], "fields": {"delete_now": False, "notes": (
+            "Not deleted: this page is certified. Untick certified first if it really should go.\n"
+            + (r["fields"].get("notes") or ""))}} for r in keep])
+    if not go:
+        return True
+    today = datetime.now(timezone.utc).date().isoformat()
+    tomb = [f"{page_key(r['fields'].get('wba_id', ''), r['fields'].get('url', ''))}\t{r['fields'].get('url', '')}"
+            f"\t{today}\tDeleted by hand" for r in go if r["fields"].get("url")]
+    arch = [json.dumps({"record_id": r["id"], "deleted_on": today, "fields": r["fields"]}, ensure_ascii=False)
+            for r in go]
+    if not save_state({PAGE_TOMBSTONES: tomb}, {PAGE_ARCHIVE: arch},
+                      f"Pages deleted by hand: {len(go)} monitored_links row(s) ({today})"):
+        print(">>> could not save the page tombstones; nothing deleted, will retry.", flush=True)
+        return True
+    url = f"{API}/{BASE}/{quote(LINKS)}"
+    for i in range(0, len(go), 10):
+        airtable_request("DELETE", url, H, params=[("records[]", r["id"]) for r in go[i:i + 10]])
+        time.sleep(0.22)
+    print(f">>> deleted {len(go)} page(s) by hand.", flush=True)
+    wbas = sorted({r["fields"].get("wba_id") for r in go if r["fields"].get("wba_id")})
+    if wbas:
+        subprocess.run(["python", "company_coverage.py", "--commit", "--wba", ",".join(wbas[:40])], check=False)
+    return True
 
 
 def run_deletes():
@@ -350,7 +406,8 @@ def run_deletes():
         wba = r["fields"].get("wba_id") or ""
         if url and wba:
             tomb.append(f"{doc_id(wba, url)}\t{r['fields'].get('library_id', '')}\t{today}\tDeleted by hand")
-    if not save_state(tomb, arch, f"Deleted by hand: {len(go)} report_library row(s) ({today})"):
+    if not save_state({TOMBSTONES: tomb}, {ARCHIVE: arch},
+                      f"Deleted by hand: {len(go)} report_library row(s) ({today})"):
         print(">>> could not save the tombstones; nothing deleted, will retry.", flush=True)
         return True
     url = f"{API}/{BASE}/{quote(LIB)}"
@@ -408,7 +465,7 @@ def run_searches():
 
 
 def run():
-    a = run_deletes()
+    a = run_deletes() | run_page_deletes()
     b = run_links()
     c = run_new_companies()
     try:
