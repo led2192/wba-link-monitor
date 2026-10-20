@@ -215,6 +215,17 @@ def main():
         if f.get(F_TYPE)=="homepage" and u: homepage[wba]=u
         d=reg_domain(u)
         if d: domains[wba][d]+=1
+    # pages deleted by hand (inbox.py delete_now) are never added again
+    try:
+        import gzip as _gz
+        with _gz.open("state/tombstones_monitored_links.tsv.gz","rt",encoding="utf-8") as fh:
+            for line in fh:
+                p=line.rstrip("\n").split("\t")
+                if len(p)>1 and "|" in p[0]:
+                    k,_=normalize(p[1])
+                    if k: have[p[0].split("|",1)[0]].add(k)
+    except FileNotFoundError:
+        pass
     companies=list(name.keys())
     for wba in companies:
         if wba not in homepage and domains[wba]:

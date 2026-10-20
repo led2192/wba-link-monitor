@@ -23,6 +23,10 @@ on:
         description: "Only rows discarded more than this many days ago (minimum 7)."
         type: string
         default: "30"
+      machine_only:
+        description: "Only robot discards (duplicates, non-disclosures). Allows days = 0."
+        type: boolean
+        default: false
       limit:
         description: "Max rows this run (0 = no cap)."
         type: string
@@ -46,7 +50,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - name: Select, archive and tombstone
-        run: python purge_discarded.py --prepare --days "${{ inputs.days }}" --limit "${{ inputs.limit }}"
+        run: python purge_discarded.py --prepare --days "${{ inputs.days }}" --limit "${{ inputs.limit }}" ${{ inputs.machine_only && '--machine-only' || '' }}
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
@@ -76,7 +80,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       - name: Delete
         if: ${{ inputs.mode == 'delete' && inputs.confirm == 'DELETE' }}
-        run: python purge_discarded.py --delete --days "${{ inputs.days }}"
+        run: python purge_discarded.py --delete --days "${{ inputs.days }}" ${{ inputs.machine_only && '--machine-only' || '' }}
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}

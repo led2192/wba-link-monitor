@@ -180,8 +180,7 @@ def finish_docs(created_all):
                 rows += get(LIB, [("pageSize", "100"), ("filterByFormula", f)] +
                             [("fields[]", x) for x in ("file", "cover_text", "doc_year", "match_confidence",
                                                        "source_type")])
-            rows = [r for r in rows if not r["fields"].get("source_type")
-                    or r["fields"].get("match_confidence") in (None, "", "unresolved")]
+            rows = [r for r in rows if r["fields"].get("cover_text")]
             updates, _ = CL.label_from_file(rows)
             if updates:
                 CL.commit(BASE, TOKEN, LIB, updates)

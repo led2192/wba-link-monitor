@@ -130,12 +130,16 @@ def main():
     wbas = [w.strip() for w in a.wba.split(",") if w.strip()]
     recs = candidates(a.max, wbas)
     print(f">>> {len(recs)} companies to search for missing report pages.", flush=True)
+    from inbox import load_page_tombstones
+    dead_pages = load_page_tombstones()
     sess = requests.Session(); updates = []; n_sugg = 0
     for rec in recs:
         f = rec["fields"]; wba = f.get("wba_id", "")
         pages = get("monitored_links", [("pageSize", "100"), ("filterByFormula", f"{{wba_id}}='{wba}'"),
                                         ("fields[]", "url"), ("fields[]", "type")])
         have = {AS.normalize(p["fields"].get("url", ""))[0] for p in pages}
+        # pages deleted by hand are never proposed again
+        have |= {AS.normalize(u)[0] for k, u in dead_pages.items() if k.startswith(wba + "|") and u}
         gaps = set(f.get("gap_pages") or [])
         want = [t for g, t in WANT.items() if g in gaps] or list(WANT.values())
         if not pages:

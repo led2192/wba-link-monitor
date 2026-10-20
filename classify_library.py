@@ -136,12 +136,53 @@ def classify_from_file(filename, cover):
     return (t, "cover") if t else ("", "unresolved")
 
 
-def from_file_rows(base, token, table):
+GENERIC = {"download", "downloads", "document", "documents", "file", "files", "view", "pdf", "attachment",
+           "media", "getfile", "index", "untitled", "doc", "final", "web", "print", "version", "copy",
+           "the", "and", "for", "eng", "english", "low", "res", "high", "online", "new"}
+JUNK_TOKEN = re.compile(r"^(?:(?=[0-9a-f]*\d)[0-9a-f]{8,}|[0-9a-f-]{20,}|\d{5,}|v\d+(?:\.\d+)*|\d|"
+                        r"en|eng|web|final|print|lowres|hires|copy)$", re.I)
+COVER_STOP = re.compile(r"\.{4,}|\s1\.\s+[A-Z]|\btable of contents\b|\bcontents\b|\binhalt\b|\bsommaire\b|\b[ií]ndice\b", re.I)
+
+
+def _meaningful(words):
+    return [w for w in words if len(re.sub(r"[^A-Za-z\u00C0-\u024F\u0400-\u04FF]", "", w)) >= 3
+            and w.lower() not in GENERIC]
+
+
+def title_from(filename, cover):
+    """A human-readable title: the file name when it says something ('AmRest Group_Condensed
+    consolidated interim report H1 2026.pdf'), else the start of the cover page, cut before the
+    table of contents. '' when neither says anything."""
+    from urllib.parse import unquote
+    stem = re.sub(r"\.pdf$", "", unquote(unquote(filename or "")), flags=re.I)
+    words = [w for w in re.sub(r"[_+\-.]+", " ", stem).split() if not JUNK_TOKEN.match(w)]
+    if len(_meaningful(words)) >= 2:
+        return " ".join(words)[:120].strip()
+    text = re.sub(r"\s+", " ", (cover or "")[:700])
+    m = COVER_STOP.search(text)
+    if m:
+        text = text[:m.start()]
+    out = []
+    for w in text.split()[:18]:
+        if not out or w.lower() != out[-1].lower():
+            out.append(w)
+    for k in range(6, 1, -1):          # a cover that repeats its title ("ANNUAL REPORT 2025 ANNUAL REPORT 2025")
+        if len(out) >= 2 * k and [w.lower() for w in out[:k]] == [w.lower() for w in out[k:2 * k]]:
+            out = out[:k] + out[2 * k:]
+            break
+    t = " ".join(out)
+    if len(t) > 110:
+        t = t[:110].rsplit(" ", 1)[0]
+    return t.strip(" -|:,;") if len(_meaningful(t.split())) >= 3 else ""
+
+
+def from_file_rows(base, token, table, limit=0):
+    """Rows with a read cover and no auto title yet (discarded rows skipped)."""
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
-    formula = (f"AND({{{F_CONF}}}='unresolved', {{{F_COVER}}}!='', NOT({{discard}}))")
+    formula = f"AND({{{F_COVER}}}!='', {{auto_title}}='', NOT({{discard}}))"
     params = [("pageSize", "100"), ("filterByFormula", formula)] + \
-             [("fields[]", x) for x in (F_ID, F_URL, F_FILE, F_COVER, F_YEAR)]
+             [("fields[]", x) for x in (F_ID, F_URL, F_FILE, F_COVER, F_YEAR, F_CONF, F_TYPE)]
     out = []; offset = None
     while True:
         p = list(params) + ([("offset", offset)] if offset else [])
@@ -149,27 +190,28 @@ def from_file_rows(base, token, table):
         j = r.json()
         out += j.get("records", [])
         offset = j.get("offset"); time.sleep(0.22)
-        if not offset: break
-    return out
+        if not offset or (limit and len(out) >= limit): break
+    return out[:limit] if limit else out
 
 
 def label_from_file(records):
-    """updates for the rows the file name or title page can label; counters for the log."""
+    """updates: auto_title on every row (Untitled when nothing readable), doc_year when blank, and
+    source_type for rows the URL pass left unresolved. Counters for the log."""
     updates, by = [], collections.Counter()
     for rec in records:
         f = rec.get("fields", {})
         name, cover = _name(f), f.get(F_COVER) or ""
-        t, c = classify_from_file(name, cover)
-        upd = {}
-        if t:
-            upd[F_TYPE] = t; upd[F_CONF] = c
+        upd = {"auto_title": title_from(name, cover) or "Untitled"}
+        by["titled" if upd["auto_title"] != "Untitled" else "untitled"] += 1
+        if not f.get(F_TYPE) or f.get(F_CONF) in (None, "", "unresolved"):
+            t, c = classify_from_file(name, cover)
+            if t:
+                upd[F_TYPE] = t; upd[F_CONF] = c; by["typed"] += 1
         if not (f.get(F_YEAR) or "").strip():
             y = year_from(name, cover)
             if y:
-                upd[F_YEAR] = y
-        by[c if t else ("year only" if upd else "still unresolved")] += 1
-        if upd:
-            updates.append({"id": rec["id"], "fields": upd})
+                upd[F_YEAR] = y; by["dated"] += 1
+        updates.append({"id": rec["id"], "fields": upd})
     return updates, by
 
 
@@ -193,16 +235,17 @@ def main():
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--force", action="store_true", help="re-classify rows that already have a type")
     ap.add_argument("--from-file", action="store_true",
-                    help="label 'unresolved' rows from their attached file name and cover text")
+                    help="title, date and (if unresolved) type rows from their file name and cover text")
+    ap.add_argument("--limit", type=int, default=0, help="--from-file: at most this many rows (0 = all)")
     args = ap.parse_args()
     if args.from_file:
         token = os.environ.get("AIRTABLE_TOKEN"); base = os.environ.get("AIRTABLE_BASE")
         table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
         if not (token and base):
             sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
-        recs = from_file_rows(base, token, table)
+        recs = from_file_rows(base, token, table, args.limit)
         updates, by = label_from_file(recs)
-        print(f"label from file: {len(recs)} unresolved rows with cover text; {dict(by)}; "
+        print(f"label from file: {len(recs)} rows with cover text and no auto title; {dict(by)}; "
               f"{len(updates)} rows to update.")
         if args.commit and updates:
             commit(base, token, table, updates)

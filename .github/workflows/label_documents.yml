@@ -1,0 +1,31 @@
+name: Title and date documents (backfill)
+
+# Gives every document with a read cover an auto_title (from its file name or cover page), a year
+# when it has none, and a type when its address said nothing. The nightly dedupe run does the same
+# for up to 20,000 new rows; this manual run catches up on the whole library at once.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "At most this many rows (0 = all)."
+        default: "0"
+
+concurrency:
+  group: label-documents
+  cancel-in-progress: false
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python classify_library.py --from-file --commit --limit "${{ inputs.limit }}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
