@@ -145,12 +145,12 @@ def company_completeness(wba):
     return f.get("completeness"), (f.get("gaps") or "").split("\n")[0]
 
 
-def main():
+def run_once():
     if not (TOKEN and BASE):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
     pages, waiting = queue()
     if not pages:
-        print("Nothing to scan."); return
+        return False
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f">>> scanning {len(pages)} page(s) ({waiting} waiting).", flush=True)
     patch(LINKS, [{"id": r["id"], "fields": {"scan_status": f"Scanning since {stamp} ..."}} for r in pages])
@@ -274,6 +274,38 @@ def main():
         final.append({"id": rec["id"], "fields": fields})
     patch(LINKS, final)
     print(">>> done.", flush=True)
+    return True
+
+
+def main():
+    """One pass by default. --watch MINUTES keeps checking every --every seconds for that long.
+    GitHub starts scheduled runs late (hours, in October 2026), so a 10-minute schedule fired a
+    few times a day; one long-running watcher per run, with the next run queued behind it, keeps
+    the wait between ticking scan_now and the scan at a few minutes."""
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--watch", type=float, default=0, help="keep watching for this many minutes")
+    ap.add_argument("--every", type=int, default=180, help="seconds between checks while watching")
+    a = ap.parse_args()
+    if not (TOKEN and BASE):
+        sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
+    if not a.watch:
+        if not run_once():
+            print("Nothing to scan.")
+        return
+    end = time.time() + a.watch * 60
+    checks = scans = errors = 0
+    while time.time() < end:
+        checks += 1
+        try:
+            if run_once():
+                scans += 1
+                continue                 # more may be waiting (SCAN_MAX per pass): check again now
+        except Exception as e:           # an Airtable or site hiccup must not end the watch
+            errors += 1
+            print(f">>> pass failed ({type(e).__name__}: {e}); retrying next check.", flush=True)
+        time.sleep(a.every)
+    print(f">>> watch over: {checks} checks, {scans} scan passes, {errors} failed passes.")
 
 
 if __name__ == "__main__":
