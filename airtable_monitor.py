@@ -26,7 +26,7 @@ try:
 except ImportError:
     sys.exit("pip install requests beautifulsoup4 tldextract")
 
-from monitor_core import (
+from monitor_core import (BLOCKED_CODES, 
     API, doc_links, detection_fields, airtable_request, page_language, DOC_ID_Q,
     F_WBA, F_NAME, F_URL, F_FREQ, F_MON, F_STATUS, F_TYPE,
     F_HTTP, F_CHECKED, F_HASH, F_SEEN, F_NEW, F_CHANGE, F_ALERT, F_LANG, F_BROWSER,
@@ -169,7 +169,7 @@ def process(rec, sess):
     r, err = fetch(sess, u)
     upd = {F_CHECKED: TODAY.isoformat()}
     if r is None or r.status_code >= 400:
-        upd[F_STATUS] = "dead" if r is not None else "error"
+        upd[F_STATUS] = ("error" if r is None else "blocked" if r.status_code in BLOCKED_CODES else "dead")
         upd[F_HTTP] = str(r.status_code) if r is not None else ""
         return rec["id"], upd, False, False, []
     upd[F_STATUS] = "redirected" if r.history else "ok"
@@ -212,7 +212,7 @@ def main():
                 print(f">>> WARN: page processing failed ({type(e).__name__}: {e}); row skipped.",
                       flush=True)
                 continue
-            if upd.get(F_STATUS) in ("dead", "error"): failed += 1
+            if upd.get(F_STATUS) in ("dead", "error", "blocked"): failed += 1
             if upd.get(F_BROWSER): promoted += 1
             if ch: changed += 1
             if high: alerted += 1
