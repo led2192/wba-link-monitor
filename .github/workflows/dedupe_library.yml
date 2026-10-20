@@ -33,6 +33,15 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - name: Label documents from their file name and title page
+        # Rows whose address says nothing (…/media/download/3162) were left 'unresolved' by the URL
+        # classifier. Now that the file and cover text exist, label them from those.
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.commit }}
+        run: python classify_library.py --from-file --commit
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
       - name: Run dedupe
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then

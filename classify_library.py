@@ -90,6 +90,89 @@ def from_airtable(base, token, table, force):
     return out
 
 
+# ---- Level 1b: label from the downloaded file -------------------------------------------------
+# Many sites serve PDFs from addresses with no words in them (AmRest /en/media/download/3162,
+# Sitecore .ashx, /document/<id>). The URL pass above leaves those 'unresolved' and without a year,
+# so they show as "Company | Document" and company coverage does not count them (AmRest, Oct 2026:
+# ~80 reports downloaded, 2025 annual report still "missing"). Once the file is attached and its
+# cover text is read, the file name and the title page usually say exactly what the document is:
+# "AmRest Group_Condensed consolidated interim report H1 2026.pdf". --from-file classifies those
+# rows again from that text. Runs nightly after Build cover text (dedupe workflow).
+F_FILE = "file"; F_COVER = "cover_text"; F_YEAR = "doc_year"
+YEAR = re.compile(r"(?<!\d)(20[0-3]\d)(?!\d)")
+YEAR_PHRASE = re.compile(r"(?:year|period|months|financial year|fiscal year|fy)\s+(?:ended|ending)?\s*"
+                         r"(?:on\s+)?(?:\d{1,2}\s+)?(?:[a-z]+\s+)?(?:\d{1,2},?\s+)?(20[0-3]\d)", re.I)
+
+
+def _name(f):
+    from urllib.parse import unquote
+    a = (f.get(F_FILE) or [{}])[0]
+    return unquote(a.get("filename") or "")
+
+
+def year_from(filename, cover, this_year=None):
+    """Reporting year: from the file name first, else a 'year ended ... 2025' phrase in the cover,
+    else the latest plausible year on the title page. '' when nothing credible is found."""
+    import datetime as _dt
+    this_year = this_year or _dt.date.today().year
+    ok = lambda y: 2000 <= y <= this_year + 1
+    ys = [int(y) for y in YEAR.findall(filename) if ok(int(y))]
+    if ys:
+        return str(max(ys))
+    m = YEAR_PHRASE.search(cover[:3000])
+    if m and ok(int(m.group(1))):
+        return m.group(1)
+    ys = [int(y) for y in YEAR.findall(cover[:400]) if ok(int(y))]
+    return str(max(ys)) if ys else ""
+
+
+def classify_from_file(filename, cover):
+    """(source_type, confidence) from the file name, else from the title page (first 400 chars)."""
+    t, c = classify("/" + filename.replace(" ", "-")) if filename else ("", "unresolved")
+    if t:
+        return t, "file name"
+    head = re.sub(r"[^\w]+", "-", cover[:400].lower())
+    t, c = classify("/" + head)
+    return (t, "cover") if t else ("", "unresolved")
+
+
+def from_file_rows(base, token, table):
+    url = f"{API}/{base}/{quote(table)}"
+    headers = {"Authorization": f"Bearer {token}"}
+    formula = (f"AND({{{F_CONF}}}='unresolved', {{{F_COVER}}}!='', NOT({{discard}}))")
+    params = [("pageSize", "100"), ("filterByFormula", formula)] + \
+             [("fields[]", x) for x in (F_ID, F_URL, F_FILE, F_COVER, F_YEAR)]
+    out = []; offset = None
+    while True:
+        p = list(params) + ([("offset", offset)] if offset else [])
+        r = airtable_request("GET", url, headers, params=p); r.raise_for_status()
+        j = r.json()
+        out += j.get("records", [])
+        offset = j.get("offset"); time.sleep(0.22)
+        if not offset: break
+    return out
+
+
+def label_from_file(records):
+    """updates for the rows the file name or title page can label; counters for the log."""
+    updates, by = [], collections.Counter()
+    for rec in records:
+        f = rec.get("fields", {})
+        name, cover = _name(f), f.get(F_COVER) or ""
+        t, c = classify_from_file(name, cover)
+        upd = {}
+        if t:
+            upd[F_TYPE] = t; upd[F_CONF] = c
+        if not (f.get(F_YEAR) or "").strip():
+            y = year_from(name, cover)
+            if y:
+                upd[F_YEAR] = y
+        by[c if t else ("year only" if upd else "still unresolved")] += 1
+        if upd:
+            updates.append({"id": rec["id"], "fields": upd})
+    return updates, by
+
+
 def commit(base, token, table, updates):
     import requests
     url = f"{API}/{base}/{quote(table)}"
@@ -109,7 +192,23 @@ def main():
     ap.add_argument("--csv")
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--force", action="store_true", help="re-classify rows that already have a type")
+    ap.add_argument("--from-file", action="store_true",
+                    help="label 'unresolved' rows from their attached file name and cover text")
     args = ap.parse_args()
+    if args.from_file:
+        token = os.environ.get("AIRTABLE_TOKEN"); base = os.environ.get("AIRTABLE_BASE")
+        table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
+        if not (token and base):
+            sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
+        recs = from_file_rows(base, token, table)
+        updates, by = label_from_file(recs)
+        print(f"label from file: {len(recs)} unresolved rows with cover text; {dict(by)}; "
+              f"{len(updates)} rows to update.")
+        if args.commit and updates:
+            commit(base, token, table, updates)
+        elif not args.commit:
+            print("DRY-RUN. Re-run with --commit to write the labels.")
+        return
     force = args.force or os.environ.get("CLASSIFY_FORCE", "").lower() in ("true", "1", "yes")
 
     by_type = collections.Counter(); by_conf = collections.Counter(); updates = []
