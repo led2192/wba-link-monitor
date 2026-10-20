@@ -41,7 +41,7 @@ try:
 except ImportError:
     sys.exit("pip install playwright  &&  playwright install --with-deps chromium")
 
-from monitor_core import (
+from monitor_core import (BLOCKED_CODES, 
     API, normalize, doc_links, detection_fields, airtable_request, reg_domain,
     F_WBA, F_NAME, F_URL, F_TYPE, F_STATUS, F_HTTP, F_FINAL,
     F_CHECKED, F_HASH, F_SEEN, F_NEW, F_CHANGE, F_ALERT, F_BROWSER,
@@ -77,7 +77,7 @@ def build_formula(wba_csv, contains):
         needle = contains.strip().lower().replace("'", "")
         clauses.append(f"FIND('{needle}', LOWER({{url}}))")
     if not (wbas or contains):
-        clauses.append("OR({status}='dead', {status}='error', {%s}=TRUE())" % F_BROWSER)
+        clauses.append("OR({status}='dead', {status}='error', {status}='blocked', {%s}=TRUE())" % F_BROWSER)
     return clauses[0] if len(clauses) == 1 else "AND(" + ", ".join(clauses) + ")"
 
 
@@ -113,7 +113,7 @@ def order_targets(recs, max_pages):
     possible pages; now rescues are capped at RESCUE_SHARE of the batch and productive pages
     fill the rest, so JS companies get guaranteed daily throughput whatever the wall pool does.
     Returns (batch, remaining)."""
-    rescue = [r for r in recs if (r.get("fields", {}).get(F_STATUS)) in ("dead", "error")]
+    rescue = [r for r in recs if (r.get("fields", {}).get(F_STATUS)) in ("dead", "error", "blocked")]
     productive = [r for r in recs if r not in rescue] if len(recs) < 5000 else None
     if productive is None:   # avoid O(n^2) membership on big queues
         rescue_ids = {r["id"] for r in rescue}
@@ -175,7 +175,7 @@ def process(rec):
         page.wait_for_timeout(SETTLE_MS)
         code = resp.status if resp else None
         if code and code >= 400:
-            upd[F_STATUS] = "dead"; upd[F_HTTP] = str(code)
+            upd[F_STATUS] = "blocked" if code in BLOCKED_CODES else "dead"; upd[F_HTTP] = str(code)
             return rec["id"], upd, False, False, [], False, time.time() - t0
         final = page.url
         upd[F_HTTP] = str(code or "")
@@ -235,7 +235,7 @@ def main():
             for fut in as_completed([ex.submit(process, r) for r in chunk]):
                 rid, upd, ch, high, _docs, ok, secs = fut.result()
                 if ok: rescued += 1
-                elif upd.get(F_STATUS) in ("dead", "error"): still_dead += 1
+                elif upd.get(F_STATUS) in ("dead", "error", "blocked"): still_dead += 1
                 if ch: changed += 1
                 if high: alerted += 1
                 if secs > 30:

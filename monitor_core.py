@@ -106,6 +106,11 @@ FRAMEWORK_SUFFIXES = (
 # links are cross-domain and have no .pdf, so they were dropped before harvest ever saw them. A
 # report-ish link to one of these hosts is kept; doc_probe then opens it and only real PDFs are
 # harvested.
+# Status codes that mean "the site refuses robots", not "the page is gone" (ADB, ASML, Air Products,
+# ~2,000 monitored pages in Oct 2026, all labelled dead while working fine in a normal browser).
+# Those pages get status 'blocked'. We do not try to get around the block.
+BLOCKED_CODES = {401, 403, 429}
+
 DAM_SUFFIXES = ("widen.net", "widencdn.net", "bynder.com", "brandfolder.com", "brandfolder.io",
                 "frontify.com", "canto.com", "ctfassets.net")
 

@@ -165,7 +165,7 @@ def aggregate(wbas=None):
         # browser-lane rows: explicitly claimed (needs_browser) OR dead/error, which the
         # browser queue also owns. Counting only needs_browser hid hard bot-walled domains
         # (BMO case, 2026-07-16: every bmo.com row status=error, none flagged needs_browser).
-        if f.get(F_NB) or f.get(F_ST) in ("dead", "error"):
+        if f.get(F_NB) or f.get(F_ST) in ("dead", "error", "blocked"):
             c["needs_browser"] += 1
         pt = (f.get(F_PTYPE) or "").strip()
         if pt:

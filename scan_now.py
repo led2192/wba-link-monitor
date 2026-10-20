@@ -93,13 +93,13 @@ def read_page(rec, sess):
     import airtable_monitor as AM
     _, upd, *_ = AM.process(rec, sess)
     how = "plain request"
-    weak = upd.get(F_STATUS) in ("dead", "error") or n_docs(upd) == 0 or rec["fields"].get(F_BROWSER)
+    weak = upd.get(F_STATUS) in ("dead", "error", "blocked") or n_docs(upd) == 0 or rec["fields"].get(F_BROWSER)
     if weak:
         try:
             import playwright_monitor as PM
             _, bupd, *_ = PM.process(rec)
-            if n_docs(bupd) > n_docs(upd) or (upd.get(F_STATUS) in ("dead", "error")
-                                             and bupd.get(F_STATUS) not in ("dead", "error")):
+            if n_docs(bupd) > n_docs(upd) or (upd.get(F_STATUS) in ("dead", "error", "blocked")
+                                             and bupd.get(F_STATUS) not in ("dead", "error", "blocked")):
                 upd, how = bupd, "browser"
         except (Exception, SystemExit) as e:     # playwright missing exits at import
             print(f"    browser read failed for {rec['fields'].get('url')}: {e}", flush=True)
@@ -170,6 +170,12 @@ def run_once():
         upd["scan_now"] = False
         page_updates.append({"id": rec["id"], "fields": upd})
         merged = {**f, **upd}
+        if upd.get(F_STATUS) == "blocked":
+            outcome[rec["id"]] = "Page failed"
+            notes[rec["id"]] = [f"The site refused our robot ({upd.get(F_HTTP)}). The page is probably fine "
+                                "in a normal browser: the site blocks automated visitors. Keep monitor "
+                                "ticked; add the key reports to report_library by hand."]
+            continue
         if upd.get(F_STATUS) in ("dead", "error"):
             outcome[rec["id"]] = "Page failed"
             notes[rec["id"]] = [f"The page could not be opened ({upd.get(F_HTTP) or 'no response'}). "
