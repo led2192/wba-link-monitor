@@ -1,0 +1,33 @@
+name: Diagnose refused pages (manual)
+
+# Read-only. Sorts the monitored pages that answer 401/403/429 into: fixable on our side, page
+# gone, wrong address, or a real bot wall (not bypassed), and checks robots.txt and sitemaps.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max pages to check (0 = all)."
+        type: string
+        default: "0"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run diagnosis
+        run: python diagnose_blocked.py --limit "${{ inputs.limit }}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blocked_diagnosis
+          path: blocked_diagnosis.csv
+          if-no-files-found: ignore
