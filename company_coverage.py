@@ -156,7 +156,8 @@ def aggregate(wbas=None):
             "ann_years": set(), "blocked": 0})
 
     print(">>> sweeping monitored_links ...", flush=True)
-    for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST], "monitored_links", wba_formula(wbas)):
+    for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST, "http_status"], "monitored_links",
+                     wba_formula(wbas)):
         f = rec.get("fields", {})
         wba = (f.get(F_WBA) or "").strip()
         if not wba:
@@ -170,7 +171,9 @@ def aggregate(wbas=None):
         # (BMO case, 2026-07-16: every bmo.com row status=error, none flagged needs_browser).
         if f.get(F_NB) or f.get(F_ST) in ("dead", "error", "blocked"):
             c["needs_browser"] += 1
-        if f.get(F_MON) and f.get(F_ST) == "blocked":
+        # 'blocked' is set by the monitors since Oct 2026; older rows still say 'dead' with the code
+        if f.get(F_MON) and (f.get(F_ST) == "blocked" or
+                             (f.get(F_ST) == "dead" and str(f.get("http_status") or "") in ("401", "403", "429"))):
             c["blocked"] += 1
         pt = (f.get(F_PTYPE) or "").strip()
         if pt:
