@@ -51,9 +51,19 @@ def req(method, url, **kw):
         return r
 
 
-def candidates(days):
+# Reasons written by the robots (dedupe_library.py). Rows discarded for these reasons may be purged
+# without the 7-day wait (--machine-only): the duplicate keeps its twin in the library, the archive
+# keeps every field, and a row can be restored from the archive if a rule was wrong.
+MACHINE_REASONS = ("Duplicate of another document", "Not a disclosure")
+
+
+def candidates(days, machine_only=False):
     formula = (f"AND({{discard}}, NOT({{verified}}), "
                f"IS_BEFORE({{discarded_on}}, DATEADD(NOW(), -{int(days)}, 'days')))")
+    if machine_only:
+        reasons = ", ".join(f"{{discard_reason}}='{r}'" for r in MACHINE_REASONS)
+        formula = (f"AND({{discard}}, NOT({{verified}}), OR({reasons}), "
+                   f"IS_BEFORE({{discarded_on}}, DATEADD(NOW(), -{int(days)}, 'days')))")
     url = f"{API}/{BASE}/{quote(TABLE)}"
     offset = None
     while True:
@@ -73,10 +83,10 @@ def load_tombstones(path=TOMBSTONES):
         return {line.split("\t", 1)[0] for line in fh if line.strip()}
 
 
-def prepare(days, limit):
+def prepare(days, limit, machine_only=False):
     today = date.today().isoformat()
     rows = []
-    for rec in candidates(days):
+    for rec in candidates(days, machine_only):
         rows.append(rec)
         if limit and len(rows) >= limit:
             break
@@ -135,13 +145,16 @@ def main():
     ap.add_argument("--delete", action="store_true")
     ap.add_argument("--days", type=int, default=30)
     ap.add_argument("--limit", type=int, default=0, help="cap rows per run (0 = no cap)")
+    ap.add_argument("--machine-only", action="store_true",
+                    help="only rows the robots discarded as duplicates / non-disclosures; no minimum wait")
     a = ap.parse_args()
     if not (TOKEN and BASE):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
-    if a.days < 7:
-        sys.exit("--days below 7 is refused: the wait is the undo window.")
+    if a.days < 7 and not a.machine_only:
+        sys.exit("--days below 7 is refused: the wait is the undo window "
+                 "(except --machine-only, robot duplicates and non-disclosures).")
     if a.prepare:
-        prepare(a.days, a.limit)
+        prepare(a.days, a.limit, a.machine_only)
     if a.delete:
         delete()
     if not (a.prepare or a.delete):
