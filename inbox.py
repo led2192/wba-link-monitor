@@ -378,11 +378,44 @@ def run_new_companies():
     return True
 
 
+def run_searches():
+    """mention_searches: a new search (never run, words filled in, untouched for 2 minutes so it is
+    not caught half-typed) or one with run_now ticked starts the Mention search workflow at once
+    for that search only. The answer lands on the row in ~10 minutes."""
+    tok, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
+    if not (tok and repo):
+        return False
+    formula = ("AND({search}!='', {find}!='', "
+               "IS_BEFORE(LAST_MODIFIED_TIME(), DATEADD(NOW(), -2, 'minutes')), "
+               "OR({run_now}, AND({last_run}=BLANK(), {status}='')))")
+    recs = get("mention_searches", [("pageSize", "100"), ("filterByFormula", formula),
+                                    ("fields[]", "search")])
+    if not recs:
+        return False
+    done = []
+    for r in recs[:10]:
+        name = r["fields"].get("search", "")
+        resp = requests.post(f"https://api.github.com/repos/{repo}/actions/workflows/mention_search.yml/dispatches",
+                             headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"},
+                             json={"ref": "main", "inputs": {"mode": "commit", "search": name}}, timeout=30)
+        ok = resp.status_code in (200, 204)
+        print(f">>> search '{name}': {'started' if ok else 'could not start: ' + resp.text[:200]}", flush=True)
+        done.append({"id": r["id"], "fields": {"run_now": False, "status": (
+            f"Running since {stamp()}: the answer arrives here in about 10 minutes." if ok else
+            "Could not start the search; tick run_now to try again.")}})
+    write("mention_searches", "PATCH", done)
+    return True
+
+
 def run():
     a = run_deletes()
     b = run_links()
     c = run_new_companies()
-    return a or b or c
+    try:
+        d = run_searches()
+    except Exception as e:
+        print(f">>> search start failed: {e}", flush=True); d = False
+    return a or b or c or d
 
 
 if __name__ == "__main__":

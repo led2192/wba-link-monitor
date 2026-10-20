@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: write     # delete_now: the tombstone list is pushed before any row is deleted
+  actions: write      # a new mention search starts the Mention search workflow at once
 
 concurrency:
   group: scan-now
@@ -41,3 +42,4 @@ jobs:
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          GITHUB_TOKEN: ${{ github.token }}
