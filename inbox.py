@@ -177,6 +177,7 @@ def handle_company(rec, sess, tombs):
         return ["This company has no wba_id: nothing could be added."], [], []
     pages, docs = company_state(wba)
     page_keys = {normalize(p["fields"].get("url", "")): p["fields"].get("type") or "page" for p in pages}
+    page_ids = {normalize(p["fields"].get("url", "")): p.get("id") for p in pages}
     known = {doc_id(wba, d["fields"].get("document_url", "")) for d in docs if d["fields"].get("document_url")}
     known_files = {((a.get("filename") or "").lower(), a.get("size")) for d in docs
                    for a in (d["fields"].get("file") or [])[:1]}
@@ -189,7 +190,18 @@ def handle_company(rec, sess, tombs):
         short = url if len(url) < 90 else url[:87] + "..."
         k = normalize(url)
         if k in page_keys:
-            lines.append(f"Already watched as {page_keys[k]}: {short}")
+            # A page you paste is a page you want harvested. Pages typed news / other / homepage
+            # are watched but never harvested for documents (the Woodbois /investors/ and BCEG
+            # report-list cases, Oct 2026): give such a page a harvested type and scan it now.
+            if page_keys[k] not in HR.ALL_TYPES:
+                typ = forced_type or guess_type(url)
+                write(LINKS, "PATCH", [{"id": page_ids[k], "fields": {"type": typ, "monitor": True,
+                                                                        "scan_now": True}}])
+                lines.append(f"Already watched, but as {page_keys[k]} (not harvested): changed to {typ} "
+                             f"and being scanned now: {short}")
+                page_keys[k] = typ
+            else:
+                lines.append(f"Already watched as {page_keys[k]}: {short}")
             continue
         did = doc_id(wba, url)
         if did in known:
