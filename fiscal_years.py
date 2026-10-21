@@ -21,10 +21,15 @@ The period can never end after the document was published: the latest of the upl
 date in the file name, and the month the row was first seen, cap the evidence.
 
 Queue: rows with year_basis blank (never read). --all re-reads everything (after a rule change).
+
+AI CHECK. The ai_fiscal_year field (an Airtable AI field) answers "YEAR | PERIOD_END | CONFIDENCE |
+EVIDENCE". Its year is used only if the evidence is real: this script ticks ai_year_verified when one
+of the quoted passages (15+ characters, containing the year) appears in the document's own text,
+first pages or full text. Unverified answers stay unticked, so {year} ignores them.
 Modes: dry run by default (prints the distribution and a sample); --commit writes.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, TEXT_STORE_REPO + TEXT_STORE_TOKEN (or TEXT_STORE_DIR)
 """
-import argparse, collections, gzip, json, os, sys, tempfile, time
+import argparse, collections, gzip, json, os, re, sys, tempfile, time, unicodedata
 from concurrent.futures import ProcessPoolExecutor
 from urllib.parse import quote
 
@@ -55,6 +60,25 @@ def airtable_rows(token, base, everything):
         time.sleep(0.21)
 
 
+def airtable_ai_rows(token, base):
+    """Rows with an AI year answer not yet verified."""
+    from monitor_core import airtable_request
+    H = {"Authorization": f"Bearer {token}"}
+    params = [("pageSize", "100"), ("filterByFormula", "AND({ai_year}, NOT({ai_year_verified}), NOT({discard}))")] + \
+             [("fields[]", f) for f in ("library_id", "ai_fiscal_year", "cover_text")]
+    out, offset = {}, None
+    while True:
+        p = list(params) + ([("offset", offset)] if offset else [])
+        j = airtable_request("GET", f"{API}/{base}/report_library", H, params=p).json()
+        for r in j.get("records", []):
+            if r["fields"].get("library_id"):
+                out[r["fields"]["library_id"]] = r
+        offset = j.get("offset")
+        if not offset:
+            return out
+        time.sleep(0.21)
+
+
 def cap_for(fields):
     """Latest (year, month) the period can end in: publication evidence in the link, first seen."""
     import date_documents as D
@@ -67,6 +91,34 @@ def cap_for(fields):
     if len(fs) == 7 and fs[4] == "-":
         caps.append((int(fs[:4]), int(fs[5:7])))
     return min(caps) if caps else None
+
+
+def _norm(t):
+    return re.sub(r"[^0-9a-z]+", "", unicodedata.normalize("NFKC", t or "").lower())
+
+
+def ai_quotes(answer):
+    """(year, [passages]) from 'YEAR | PERIOD_END | CONFIDENCE | EVIDENCE'."""
+    parts = [x.strip() for x in (answer or "").split("|", 3)]
+    if not parts or not re.fullmatch(r"20[0-3]\d", parts[0]):
+        return None, []
+    ev = parts[3] if len(parts) > 3 else ""
+    quoted = re.findall(r"[\"\u201c\u201d]([^\"\u201c\u201d]{15,})[\"\u201c\u201d]", ev) or [ev]
+    return parts[0], [q for q in quoted if len(_norm(q)) >= 15]
+
+
+def ai_verified(answer, text):
+    """True when a quoted passage that contains the AI's year is in the document text (ellipses
+    split a passage: every piece must be there)."""
+    y, quotes = ai_quotes(answer)
+    if not y:
+        return False
+    doc = _norm(text)
+    for q in quotes:
+        pieces = [_norm(p) for p in re.split(r"\.\.\.|\u2026", q) if len(_norm(p)) >= 8]
+        if pieces and y in _norm(q) and all(p in doc for p in pieces):
+            return True
+    return False
 
 
 def read_part(args):
@@ -134,6 +186,32 @@ def main():
             results.update(out)
             if i % 20 == 0:
                 print(f"  {i}/{len(jobs)} parts, {len(results)} documents", flush=True)
+    # AI answers to check: against the first pages first, then the full text when we have it
+    ai_rows = airtable_ai_rows(token, base)
+    ai_ok, ai_need_text = [], {}
+    for lid, r in ai_rows.items():
+        f = r["fields"]
+        ans = f.get("ai_fiscal_year")
+        ans = ans.get("value") if isinstance(ans, dict) else ans
+        if ai_verified(ans, f.get("cover_text") or ""):
+            ai_ok.append(r["id"])
+        elif index.get(lid, {}).get("status") == "ok":
+            ai_need_text[lid] = (r["id"], ans)
+    if ai_need_text:
+        parts = {index[lid]["part"] for lid in ai_need_text}
+        tc.sync_down(store, [f"pages-{p}.jsonl.gz" for p in parts], folder)
+        for p in parts:
+            texts = collections.defaultdict(list)
+            with gzip.open(os.path.join(folder, f"pages-{p}.jsonl.gz"), "rt") as fh:
+                for line in fh:
+                    r = json.loads(line)
+                    if r["id"] in ai_need_text and index[r["id"]]["part"] == p:
+                        texts[r["id"]].append(r.get("t") or "")
+            for lid, pages in texts.items():
+                rid, ans = ai_need_text[lid]
+                if ai_verified(ans, " ".join(pages)):
+                    ai_ok.append(rid)
+    print(f">>> AI years: {len(ai_rows)} to check, {len(ai_ok)} verified.", flush=True)
     # a document in the queue with no readable pages gets basis "none" so it leaves the queue
     for ids in want.values():
         for lid in ids:
@@ -174,6 +252,11 @@ def main():
         if done and done % 5000 == 0:
             print(f"  {done} written", flush=True)
     print(f">>> wrote {done} rows.")
+    for i in range(0, len(ai_ok), 10):
+        airtable_request("PATCH", f"{API}/{base}/report_library", H,
+                         {"records": [{"id": x, "fields": {"ai_year_verified": True}} for x in ai_ok[i:i + 10]]})
+        time.sleep(0.22)
+    print(f">>> ticked ai_year_verified on {len(ai_ok)} rows.")
 
 
 if __name__ == "__main__":
