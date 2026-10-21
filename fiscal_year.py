@@ -84,14 +84,16 @@ _PERIOD_WORD = (r"(?:year|period|twelve\s+months|12\s+months|six\s+months|6\s+mo
                 r"quarter|half[- ]year|ejercicio|período|periodo|exercício|exercice|année|geschäftsjahr|esercizio|boekjaar|tahun\s+buku)")
 PATTERNS = [
     # scope: what the report covers
-    ("scope", 5, re.compile(r"(?:report(?:ing)?\s+period|this\s+report\s+(?:covers|relates\s+to|refers\s+to)|"
+    ("scope", 5, re.compile(r"(?:report(?:ing)?\s+period|(?:this|the)\s+report\s+(?:covers|relates\s+to|refers\s+to)|"
+                            r"(?:information|data)\s+in\s+this\s+report\s+(?:refers|relates)\s+to|"
+                            r"(?:reported|presented)\s+[^.;]{0,60}?for\s+the\s+period|"
                             r"período\s+(?:de\s+)?(?:reporte|informe)|periodo\s+(?:de\s+)?(?:reporte|informe)|"
                             r"período\s+(?:do\s+)?relat[oó]rio|报告期|報告期間|보고\s*기간)"
                             r"[^.;。]{0,120}?(?:to|until|through|–|—|-|a|al|até|au|bis|至|~|～)\s*" + DATE, re.I)),
     ("scope", 5, re.compile(r"(?:report(?:ing)?\s+period|this\s+report\s+(?:covers|relates\s+to))[^.;]{0,60}?"
                             r"(?:financial|fiscal|calendar)?\s*(?:year|fy)\s*" + _Y, re.I)),
     # period: "year ended 31 December 2021"
-    ("period", 3, re.compile(_PERIOD_WORD + r"\s+" + _ENDED + r"\s+(?:on\s+|el\s+|em\s+|le\s+|am\s+|il\s+|op\s+|pada\s+)?" + DATE, re.I)),
+    ("period", 3, re.compile(_PERIOD_WORD + r"\s+(?:that\s+|which\s+)?" + _ENDED + r"\s+(?:on\s+|el\s+|em\s+|le\s+|am\s+|il\s+|op\s+|pada\s+)?" + DATE, re.I)),
     ("period", 3, re.compile(r"截至\s*" + _Y + r"\s*年\s*(1[0-2]|0?[1-9])\s*月\s*[0-3]?\d\s*日\s*止")),
     # balance sheet date
     ("balance", 1, re.compile(r"(?:as\s+(?:at|of)|al|em|au|zum|per)\s+" + DATE, re.I)),
