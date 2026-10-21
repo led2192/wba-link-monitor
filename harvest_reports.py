@@ -370,13 +370,16 @@ def page_health(records, types, known_docs, id_by_url, base, token, links_table)
     import doc_probe
     from ids import doc_id, normalize
     cache = doc_probe.load_cache()
-    updates = []; flagged = 0
+    updates = []; flagged = 0; done_ids = set()
     for f in records:
         if str(f.get(F_TYPE, "")).strip().lower() not in types:
             continue
         rid = id_by_url.get(normalize(f.get(F_URL, "")))
-        if not rid:
+        # two page rows with the same address resolve to one record id; Airtable refuses a batch
+        # that updates the same record twice (422), which once failed the whole harvest run
+        if not rid or rid in done_ids:
             continue
+        done_ids.add(rid)
         wba = f.get(F_WBA, "")
         missing = []
         for line in (f.get(F_SEEN) or "").split("\n"):
