@@ -21,6 +21,7 @@ on:
           - commit
           - reclaim
           - hash-backfill
+          - size-backfill
       pages:
         description: "First N pages to read"
         default: "6"
@@ -54,6 +55,7 @@ jobs:
           AIRTABLE_PAGECOUNT_FIELD: page_count
           AIRTABLE_DOCLANG_FIELD: doc_language
           AIRTABLE_HASH_FIELD: content_hash
+          AIRTABLE_SIZE_FIELD: file_size_mb
         run: |
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             ARGS="--pages 6 --limit 0 --commit"     # chained daily run: incremental queue, commit
@@ -62,6 +64,7 @@ jobs:
             [ "${{ inputs.mode }}" = "commit" ]  && ARGS="$ARGS --commit"
             [ "${{ inputs.mode }}" = "reclaim" ]  && ARGS="$ARGS --reclaim"
             [ "${{ inputs.mode }}" = "diagnose" ] && ARGS="$ARGS --diagnose 30"
+            [ "${{ inputs.mode }}" = "size-backfill" ] && ARGS="--size-backfill --limit ${{ inputs.limit }} --commit"
             [ "${{ inputs.mode }}" = "hash-backfill" ] && ARGS="--hash-backfill --limit ${{ inputs.limit }} --commit"
           fi
           echo ">>> python build_cover_text.py $ARGS"
@@ -78,3 +81,14 @@ jobs:
           AIRTABLE_COVER_STATUS: cover_status
           AIRTABLE_HASH_FIELD: content_hash
         run: python build_cover_text.py --hash-backfill --limit 3000 --commit
+      - name: File size for older files (a slice per run)
+        # Reads the size Airtable already stores on each attachment (no download): 30,000 rows per
+        # chained run, so the whole library has file_size_mb within about two weeks.
+        if: github.event_name == 'workflow_run'
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_FILE_FIELD: file
+          AIRTABLE_SIZE_FIELD: file_size_mb
+        run: python build_cover_text.py --size-backfill --limit 30000 --commit
