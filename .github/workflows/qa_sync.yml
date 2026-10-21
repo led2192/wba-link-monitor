@@ -7,6 +7,8 @@ on:
   workflow_run:
     workflows: ["Company coverage"]
     types: [completed]
+  pull_request:
+    paths: [qa_sync.py, qa.py, .github/workflows/qa_sync.yml]   # a PR that touches the sync shows its dry-run counts
   workflow_dispatch:
     inputs:
       mode:
@@ -27,7 +29,7 @@ concurrency:
 
 jobs:
   sync:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:
@@ -42,6 +44,8 @@ jobs:
             ARGS="--snapshot-limit ${{ inputs.snapshot_limit }}"
             [ -n "${{ inputs.skip }}" ] && ARGS="$ARGS --skip ${{ inputs.skip }}"
             [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            ARGS="--snapshot-limit 0"              # dry run: the first picture, nothing written
           else
             ARGS="--snapshot-limit 20000 --commit"
           fi
