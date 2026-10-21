@@ -16,6 +16,10 @@ Two rows of the same company are the same document when EITHER:
      same file name in the URL or the same doc_label (the generic "| Document" fallback label does
      not count). Different file name AND different label is left alone: too weak to act on
      without a person.
+  C. same file (only with --hash-signal): identical content_hash, the SHA-256 of the file bytes
+     written by build_cover_text.py. Exact by construction: two rows of the same company with the
+     same hash hold the same file, whatever their URLs or titles say. Off by default until Edi has
+     checked a dry run (signal "same file" in dedupe_log.csv).
 
 Within each cluster one row is kept, chosen in this order: verified, curated title, has a file,
 classified (source_type_check set), oldest created_time (which keeps the original first_seen). The
@@ -41,6 +45,7 @@ Modes:
   --source jsonl PATH    plan from a local export (no writes); used for the October backlog
   --commit               write the discards
   --plan-out PATH        write the plan as CSV (default dedupe_log.csv)
+  --hash-signal          also cluster rows of the same company with identical content_hash
 
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, AIRTABLE_LIBRARY_TABLE (default report_library)
 """
@@ -65,7 +70,8 @@ NON_DISCLOSURES = [
 ]
 _JUNK = [(n, re.compile(p, re.I), re.compile(v, re.I) if v else None) for n, p, v in NON_DISCLOSURES]
 FIELDS = ["library_id", "wba_id", "document_url", "page_count", "doc_label", "discard",
-          "verified", "curated_doc_title", "source_type_check", "file", "created_time"]
+          "verified", "curated_doc_title", "source_type_check", "file", "created_time", "content_hash"]
+_SHA = re.compile(r"^[0-9a-f]{64}$")
 
 
 # ---------------------------------------------------------------- input
@@ -79,7 +85,8 @@ def _row(rec_id, f, created):
             "label": (f.get("doc_label") or "").strip().lower(), "size": size,
             "discard": bool(f.get("discard")), "verified": bool(f.get("verified")),
             "curated": bool(f.get("curated_doc_title")), "typed": bool(stc),
-            "ct": f.get("created_time") or created or ""}
+            "ct": f.get("created_time") or created or "",
+            "sha": (f.get("content_hash") or "").strip().lower()}
 
 
 def from_jsonl(path):
@@ -149,7 +156,7 @@ def _fname(u):
     return urlsplit(u.split("?", 1)[0]).path.rstrip("/").rsplit("/", 1)[-1].lower()
 
 
-def plan(rows):
+def plan(rows, hash_signal=False):
     """Returns list of (discard_row, keeper_row, signal)."""
     by_id = {r["id"]: r for r in rows}
     dsu = DSU(); signal = {}
@@ -192,6 +199,20 @@ def plan(rows):
                     dsu.union(a["id"], b["id"])
                     signal[a["id"]] = signal.get(a["id"], "content")
                     signal[b["id"]] = signal.get(b["id"], "content")
+
+    # C. same file bytes (exact). Same company only: a parent and a subsidiary may legitimately
+    # both hold the group report.
+    if hash_signal:
+        by_sha = collections.defaultdict(list)
+        for r in rows:
+            if _SHA.match(r.get("sha") or ""):
+                by_sha[(r["wba"], r["sha"])].append(r)
+        for grp in by_sha.values():
+            for b in grp[1:]:
+                if dsu.find(grp[0]["id"]) != dsu.find(b["id"]):
+                    dsu.union(b["id"], grp[0]["id"])
+                    for x in (grp[0], b):
+                        signal.setdefault(x["id"], "same file")
 
     clusters = collections.defaultdict(list)
     for r in rows:
@@ -251,6 +272,7 @@ def main():
     ap.add_argument("--jsonl")
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--plan-out", default="dedupe_log.csv")
+    ap.add_argument("--hash-signal", action="store_true")
     a = ap.parse_args()
 
     if a.source == "jsonl":
@@ -260,7 +282,7 @@ def main():
         if not (base and token): sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
         rows = from_airtable(base, token, os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library"))
 
-    dups, skipped = plan(rows)
+    dups, skipped = plan(rows, hash_signal=a.hash_signal)
     junk = plan_junk(rows, {r["id"] for r, _, _, _ in dups})
     items = dups + junk
     write_plan(items, a.plan_out)

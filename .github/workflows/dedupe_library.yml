@@ -17,6 +17,10 @@ on:
         description: "WRITE the discards. Leave OFF for a dry-run (plan only)."
         type: boolean
         default: false
+      hash_signal:
+        description: "Also treat rows with the same content_hash (identical file) as duplicates."
+        type: boolean
+        default: false
 
 concurrency:
   group: dedupe-library
@@ -44,10 +48,12 @@ jobs:
           AIRTABLE_LIBRARY_TABLE: report_library
       - name: Run dedupe
         run: |
+          HASH=""
+          [ "${{ inputs.hash_signal }}" = "true" ] && HASH="--hash-signal"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then
-            python dedupe_library.py
+            python dedupe_library.py $HASH
           else
-            python dedupe_library.py --commit
+            python dedupe_library.py --commit $HASH
           fi
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}

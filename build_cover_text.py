@@ -7,6 +7,9 @@ For every report_library row that has a file attachment, open the PDF and write:
     page_count   -> total number of pages in the PDF
     doc_language -> ISO language code detected from the cover text (en, de, ja, ...)
     cover_status -> outcome (the real reason)
+    content_hash -> SHA-256 of the file's bytes, whenever the download arrived complete. Two rows
+                    with the same content_hash hold the exact same file, whatever their URLs say;
+                    dedupe_library.py can use it (--hash-signal). 'unavailable' = not a PDF.
 
 cover_status values:
     ok            -> text extracted; cover_text + page_count + doc_language written
@@ -29,6 +32,8 @@ permanent failure). This also avoids handing pypdf broken files, whose recovery 
 Modes:
     (no flag)   dry run: download a small sample and print what would be extracted (no writes)
     --commit    run the backfill (queue = rows with a file and empty cover_status)
+    --hash-backfill  (with --commit) fill content_hash on rows read before the field existed:
+                download only, no text extraction. Use --limit to spread it over nights.
     --reclaim   clear page_count + cover_status on rows previously marked as a (possibly transient)
                 failure, so a later --commit reprocesses them with the hardened downloader
 
@@ -38,11 +43,12 @@ Env: AIRTABLE_TOKEN, AIRTABLE_BASE,
      AIRTABLE_COVER_FIELD     (default cover_text),
      AIRTABLE_COVER_STATUS    (default cover_status),
      AIRTABLE_PAGECOUNT_FIELD (default page_count),
-     AIRTABLE_DOCLANG_FIELD   (default doc_language)
+     AIRTABLE_DOCLANG_FIELD   (default doc_language),
+     AIRTABLE_HASH_FIELD      (default content_hash)
 
 requirements.txt must include: pypdf, langdetect
 """
-import os, io, re, time, argparse
+import os, io, re, time, argparse, hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -65,6 +71,8 @@ TEXT_F = os.environ.get("AIRTABLE_COVER_FIELD", "cover_text")
 STAT_F = os.environ.get("AIRTABLE_COVER_STATUS", "cover_status")
 PAGE_F = os.environ.get("AIRTABLE_PAGECOUNT_FIELD", "page_count")
 LANG_F = os.environ.get("AIRTABLE_DOCLANG_FIELD", "doc_language")
+HASH_F = os.environ.get("AIRTABLE_HASH_FIELD", "content_hash")
+NO_HASH = "unavailable"   # written when the attachment is not a PDF, so the backfill skips it
 
 API = f"https://api.airtable.com/v0/{BASE}/{LIB}"
 H   = {"Authorization": f"Bearer {TOKEN}"}
@@ -141,11 +149,24 @@ def download_pdf(url):
     return last, b""
 
 
+def content_hash(data):
+    """SHA-256 hex of the file bytes; only called on a complete download."""
+    return hashlib.sha256(data).hexdigest()
+
+
+# sha256 of the last complete download per attachment URL, so extract_cover keeps its old return
+# shape (status, text, page_count) for any caller while process_one can still pick up the hash.
+_LAST_HASH = {}
+
+
 def extract_cover(url, pages):
     """Return (status, text, page_count). page_count is None unless the PDF parsed."""
     kind, data = download_pdf(url)
     if kind != "ok":
+        if kind == "not_pdf":
+            _LAST_HASH[url] = NO_HASH
         return kind, "", None                # not_pdf / truncated / download_fail
+    _LAST_HASH[url] = content_hash(data)
     try:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
@@ -173,12 +194,13 @@ def extract_cover(url, pages):
 
 
 def process_one(rec, pages):
+    """(record id, status, text, page_count, language, content_hash or None)."""
     url = attachment_url(rec)
     if not url:
-        return rec["id"], "download_fail", "", None, None
+        return rec["id"], "download_fail", "", None, None, None
     status, text, n_pages = extract_cover(url, pages)
     lang = detect_lang(text) if status == "ok" else None
-    return rec["id"], status, text, n_pages, lang
+    return rec["id"], status, text, n_pages, lang, _LAST_HASH.pop(url, None)
 
 
 def write_batch(updates):
@@ -192,12 +214,16 @@ def write_batch(updates):
     for i in range(0, len(updates), WRITE_BATCH):
         chunk = updates[i:i + WRITE_BATCH]
         records = []
-        for rid, status, text, n_pages, lang in chunk:
+        for res in chunk:
+            rid, status, text, n_pages, lang = res[:5]
+            sha = res[5] if len(res) > 5 else None
             # cover_status is written on EVERY row -> it is what the queue keys off (see fetch_todo).
             # page_count is written only when we actually read the PDF; failures leave it blank so
             # page_count never holds 0 (Airtable treats a 0 in a number field as equal to BLANK(),
             # which previously kept every failure row in the queue forever).
             fields = {STAT_F: status}
+            if sha:
+                fields[HASH_F] = sha
             if n_pages is not None:
                 fields[PAGE_F] = n_pages
             if status == "ok":
@@ -222,11 +248,12 @@ def run_dry(sample, pages):
     print(f"    langdetect available: {_HAVE_LD}\n")
     counts = {}
     for rec in rows:
-        rid, status, text, n_pages, lang = process_one(rec, pages)
+        rid, status, text, n_pages, lang, sha = process_one(rec, pages)
         counts[status] = counts.get(status, 0) + 1
         preview = text[:600].replace("\n", " ")
         pg = n_pages if n_pages is not None else "-"
-        print(f"[{status:13}] {rid}  pages={pg!s:>4}  lang={lang or '-':<6}  chars={len(text):>6}  {preview}")
+        print(f"[{status:13}] {rid}  pages={pg!s:>4}  lang={lang or '-':<6}  chars={len(text):>6}  "
+              f"sha={(sha or '-')[:12]}  {preview}")
     print("\nsummary:", counts)
     print("\nIf the [ok] previews look right, point the AI fields at @cover_text and run with --commit.")
 
@@ -262,7 +289,8 @@ def run_commit(pages, limit):
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             results = list(ex.map(lambda r: process_one(r, pages), rows))
         write_fail += write_batch(results)
-        for _, status, _, _, _ in results:
+        for res in results:
+            status = res[1]
             counts[status] = counts.get(status, 0) + 1
         done += len(results)
         print(f"  processed {done} so far  {counts}", flush=True)
@@ -270,6 +298,52 @@ def run_commit(pages, limit):
             break
     tail = f"  ({write_fail} rows could not be written and remain queued)" if write_fail else ""
     print(f">>> DONE. processed {done} rows. {counts}{tail}")
+
+
+def hash_one(rec):
+    """(record id, content_hash or None). Download only; None = transient failure, retried later."""
+    url = attachment_url(rec)
+    if not url:
+        return rec["id"], None
+    kind, data = download_pdf(url)
+    if kind == "ok":
+        return rec["id"], content_hash(data)
+    return rec["id"], NO_HASH if kind == "not_pdf" else None
+
+
+def run_hash_backfill(limit, commit):
+    """Fill content_hash on rows whose file was already read before the field existed. Walks the
+    queue page by page (offset), so rows that fail for a transient reason (left blank, retried on a
+    later run) can never block the rows behind them."""
+    formula = f"AND({{{FILE_F}}}, {{{HASH_F}}} = BLANK(), {{{STAT_F}}} != BLANK())"
+    done, counts, offset = 0, {"hashed": 0, "not_pdf": 0, "failed": 0}, None
+    while not limit or done < limit:
+        params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", FILE_F)]
+        if offset:
+            params.append(("offset", offset))
+        j = airtable_request("GET", API, H, params=params).json()
+        rows, offset = j.get("records", []), j.get("offset")
+        if limit:
+            rows = rows[:limit - done]
+        if not rows:
+            break
+        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            res = list(ex.map(hash_one, rows))
+        ups = [{"id": rid, "fields": {HASH_F: sha}} for rid, sha in res if sha]
+        for _, sha in res:
+            counts["failed" if not sha else "not_pdf" if sha == NO_HASH else "hashed"] += 1
+        if commit:
+            for i in range(0, len(ups), WRITE_BATCH):
+                try:
+                    airtable_request("PATCH", API, H, {"records": ups[i:i + WRITE_BATCH]})
+                except Exception as e:
+                    print(f">>> WARN: hash write failed ({e}); rows stay queued.", flush=True)
+                time.sleep(WRITE_PAUSE)
+        done += len(rows)
+        print(f"  hashed {done} so far  {counts}", flush=True)
+        if not commit or not offset:
+            break                       # dry run: one page is enough to show it works
+    print(f">>> HASH BACKFILL {'done' if commit else 'dry run (no writes)'}: {done} rows. {counts}")
 
 
 def run_reclaim():
@@ -364,9 +438,13 @@ def main():
     ap.add_argument("--sample", type=int, default=20, help="dry-run sample size")
     ap.add_argument("--commit", action="store_true", help="write to Airtable")
     ap.add_argument("--reclaim", action="store_true", help="requeue previously-failed rows, then exit")
+    ap.add_argument("--hash-backfill", action="store_true",
+                    help="fill content_hash on already-read rows (download only)")
     ap.add_argument("--diagnose", type=int, default=0, metavar="N", help="inspect N queue rows verbosely, then exit")
     args = ap.parse_args()
-    if args.diagnose:
+    if args.hash_backfill:
+        run_hash_backfill(args.limit, args.commit)
+    elif args.diagnose:
         run_diagnose(args.diagnose, args.pages)
     elif args.reclaim:
         run_reclaim()
