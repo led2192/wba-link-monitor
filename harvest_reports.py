@@ -81,7 +81,14 @@ def fetchable(u):
 
 
 def year_of(u):
-    ys = [int(y) for y in YEAR.findall(u or "") if 2010 <= int(y) <= 2027]
+    """doc_year from an address alone (no file yet): a year in the file name beats the upload
+    folder ('/uploads/2022/09/Board-changes-6-December-2021.pdf' -> 2021). date_documents.py
+    refines it later from the cover page."""
+    from date_documents import decide
+    y, _ = decide(u or "", "", "")
+    if y and 2010 <= int(y) <= 2027:
+        return y
+    ys = [int(y) for y in YEAR.findall(u or "") if 2010 <= int(y) <= 2027]   # e.g. filing hosts
     return str(max(ys)) if ys else ""
 
 
