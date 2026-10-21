@@ -10,6 +10,7 @@ For every report_library row that has a file attachment, open the PDF and write:
     content_hash -> SHA-256 of the file's bytes, whenever the download arrived complete. Two rows
                     with the same content_hash hold the exact same file, whatever their URLs say;
                     dedupe_library.py can use it (--hash-signal). 'unavailable' = not a PDF.
+    file_size_mb -> size of the attached file in MB, from the attachment itself (no download).
 
 cover_status values:
     ok            -> text extracted; cover_text + page_count + doc_language written
@@ -34,6 +35,8 @@ Modes:
     --commit    run the backfill (queue = rows with a file and empty cover_status)
     --hash-backfill  (with --commit) fill content_hash on rows read before the field existed:
                 download only, no text extraction. Use --limit to spread it over nights.
+    --size-backfill  (with --commit) fill file_size_mb on rows that have a file: reads the size
+                Airtable already stores on the attachment, so no download. Use --limit per run.
     --reclaim   clear page_count + cover_status on rows previously marked as a (possibly transient)
                 failure, so a later --commit reprocesses them with the hardened downloader
 
@@ -44,7 +47,8 @@ Env: AIRTABLE_TOKEN, AIRTABLE_BASE,
      AIRTABLE_COVER_STATUS    (default cover_status),
      AIRTABLE_PAGECOUNT_FIELD (default page_count),
      AIRTABLE_DOCLANG_FIELD   (default doc_language),
-     AIRTABLE_HASH_FIELD      (default content_hash)
+     AIRTABLE_HASH_FIELD      (default content_hash),
+     AIRTABLE_SIZE_FIELD      (default file_size_mb)
 
 requirements.txt must include: pypdf, langdetect
 """
@@ -72,6 +76,7 @@ STAT_F = os.environ.get("AIRTABLE_COVER_STATUS", "cover_status")
 PAGE_F = os.environ.get("AIRTABLE_PAGECOUNT_FIELD", "page_count")
 LANG_F = os.environ.get("AIRTABLE_DOCLANG_FIELD", "doc_language")
 HASH_F = os.environ.get("AIRTABLE_HASH_FIELD", "content_hash")
+SIZE_F = os.environ.get("AIRTABLE_SIZE_FIELD", "file_size_mb")
 NO_HASH = "unavailable"   # written when the attachment is not a PDF, so the backfill skips it
 
 API = f"https://api.airtable.com/v0/{BASE}/{LIB}"
@@ -118,6 +123,16 @@ def fetch_sample(n):
     params = [("pageSize", min(n, 100)), ("filterByFormula", f"{{{FILE_F}}}"), ("fields[]", FILE_F)]
     r = airtable_request("GET", API, H, params=params)
     return r.json().get("records", [])[:n]
+
+
+def size_mb(rec):
+    """Attachment size in MB (1 MB = 1,048,576 bytes), or None if Airtable has not sized it yet.
+    Never 0: Airtable treats a 0 in a number field as blank, which would keep tiny files queued."""
+    cell = rec.get("fields", {}).get(FILE_F) or []
+    b = cell[0].get("size") if cell else None
+    if not isinstance(b, (int, float)) or b <= 0:
+        return None
+    return max(round(b / 1048576, 2), 0.01)
 
 
 def attachment_url(rec):
@@ -194,13 +209,13 @@ def extract_cover(url, pages):
 
 
 def process_one(rec, pages):
-    """(record id, status, text, page_count, language, content_hash or None)."""
+    """(record id, status, text, page_count, language, content_hash or None, size in MB or None)."""
     url = attachment_url(rec)
     if not url:
-        return rec["id"], "download_fail", "", None, None, None
+        return rec["id"], "download_fail", "", None, None, None, None
     status, text, n_pages = extract_cover(url, pages)
     lang = detect_lang(text) if status == "ok" else None
-    return rec["id"], status, text, n_pages, lang, _LAST_HASH.pop(url, None)
+    return rec["id"], status, text, n_pages, lang, _LAST_HASH.pop(url, None), size_mb(rec)
 
 
 def write_batch(updates):
@@ -217,6 +232,7 @@ def write_batch(updates):
         for res in chunk:
             rid, status, text, n_pages, lang = res[:5]
             sha = res[5] if len(res) > 5 else None
+            mb = res[6] if len(res) > 6 else None
             # cover_status is written on EVERY row -> it is what the queue keys off (see fetch_todo).
             # page_count is written only when we actually read the PDF; failures leave it blank so
             # page_count never holds 0 (Airtable treats a 0 in a number field as equal to BLANK(),
@@ -224,6 +240,8 @@ def write_batch(updates):
             fields = {STAT_F: status}
             if sha:
                 fields[HASH_F] = sha
+            if mb:
+                fields[SIZE_F] = mb
             if n_pages is not None:
                 fields[PAGE_F] = n_pages
             if status == "ok":
@@ -248,7 +266,7 @@ def run_dry(sample, pages):
     print(f"    langdetect available: {_HAVE_LD}\n")
     counts = {}
     for rec in rows:
-        rid, status, text, n_pages, lang, sha = process_one(rec, pages)
+        rid, status, text, n_pages, lang, sha, _ = process_one(rec, pages)
         counts[status] = counts.get(status, 0) + 1
         preview = text[:600].replace("\n", " ")
         pg = n_pages if n_pages is not None else "-"
@@ -309,6 +327,38 @@ def hash_one(rec):
     if kind == "ok":
         return rec["id"], content_hash(data)
     return rec["id"], NO_HASH if kind == "not_pdf" else None
+
+
+def run_size_backfill(limit, commit):
+    """Fill file_size_mb from the attachment metadata Airtable already holds (no download). Walks
+    the queue with offsets; rows Airtable has not sized yet are skipped and picked up later."""
+    formula = f"AND({{{FILE_F}}}, {{{SIZE_F}}} = BLANK())"
+    done, wrote, offset = 0, 0, None
+    while not limit or done < limit:
+        params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", FILE_F)]
+        if offset:
+            params.append(("offset", offset))
+        j = airtable_request("GET", API, H, params=params).json()
+        rows, offset = j.get("records", []), j.get("offset")
+        if limit:
+            rows = rows[:limit - done]
+        if not rows:
+            break
+        ups = [{"id": r["id"], "fields": {SIZE_F: mb}} for r in rows if (mb := size_mb(r))]
+        if commit:
+            for i in range(0, len(ups), WRITE_BATCH):
+                try:
+                    airtable_request("PATCH", API, H, {"records": ups[i:i + WRITE_BATCH]})
+                    wrote += len(ups[i:i + WRITE_BATCH])
+                except Exception as e:
+                    print(f">>> WARN: size write failed ({e}); rows stay queued.", flush=True)
+                time.sleep(WRITE_PAUSE)
+        done += len(rows)
+        if done % 2000 < 100:
+            print(f"  sized {done} rows so far ({wrote} written)", flush=True)
+        if not commit or not offset:
+            break
+    print(f">>> SIZE BACKFILL {'done' if commit else 'dry run (no writes)'}: {done} rows read, {wrote} written.")
 
 
 def run_hash_backfill(limit, commit):
@@ -440,9 +490,13 @@ def main():
     ap.add_argument("--reclaim", action="store_true", help="requeue previously-failed rows, then exit")
     ap.add_argument("--hash-backfill", action="store_true",
                     help="fill content_hash on already-read rows (download only)")
+    ap.add_argument("--size-backfill", action="store_true",
+                    help="fill file_size_mb from attachment metadata (no download)")
     ap.add_argument("--diagnose", type=int, default=0, metavar="N", help="inspect N queue rows verbosely, then exit")
     args = ap.parse_args()
-    if args.hash_backfill:
+    if args.size_backfill:
+        run_size_backfill(args.limit, args.commit)
+    elif args.hash_backfill:
         run_hash_backfill(args.limit, args.commit)
     elif args.diagnose:
         run_diagnose(args.diagnose, args.pages)
