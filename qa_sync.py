@@ -197,9 +197,13 @@ def derive_doc(f, today):
     if str(f.get("type_mismatch") or "").strip() == "1" and kw and ai:
         st = stakes(kw, ai)
         counts[f"disagree_{st}"] += 1
-        if st == "high_stakes":
+        # a high-stakes disagreement is a row only on a report-shaped document (2023+ or undated):
+        # older ones only move the any-year checks and are counted, not written
+        if st == "high_stakes" and shaped:
             failures.append(("TYPE_DISAGREE", "high_stakes", lid, "High",
                              dict(ctx, stage="classify", message=f"URL says {kw}; AI says {ai}")))
+        elif st == "high_stakes":
+            counts["disagree_high_stakes_old"] += 1
     if not eff:
         age = days_since(f.get("created_time"), today)
         if age is not None and age >= PENDING_DAYS:
@@ -317,7 +321,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true", help="write QA rows and robot_* snapshots")
     ap.add_argument("--max-per-code", type=int, default=15000, help="cap rows written per code (overflow counted)")
-    ap.add_argument("--snapshot-limit", type=int, default=20000, help="robot_* rows patched per run (0 = all)")
+    ap.add_argument("--snapshot-limit", type=int, default=40000, help="robot_* rows patched per run (0 = all)")
     ap.add_argument("--skip", default="", help="comma-separated sweeps to skip: pages,docs,companies")
     ap.add_argument("--summary-out", default="qa_sync_summary.md", help="markdown summary file (also GITHUB_STEP_SUMMARY)")
     args = ap.parse_args()

@@ -18,7 +18,7 @@ on:
         default: dry-run
       snapshot_limit:
         description: "robot_* rows patched per run (0 = all)"
-        default: "20000"
+        default: "40000"
       skip:
         description: "sweeps to skip, comma-separated: pages,docs,companies"
         default: ""
@@ -50,7 +50,7 @@ jobs:
           elif [ "${{ github.event_name }}" = "pull_request" ]; then
             ARGS="--snapshot-limit 0"              # dry run: the first picture, nothing written
           else
-            ARGS="--snapshot-limit 20000 --commit"
+            ARGS="--snapshot-limit 40000 --commit"
           fi
           echo ">>> python qa_sync.py $ARGS"
           python qa_sync.py $ARGS
