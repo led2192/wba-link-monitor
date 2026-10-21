@@ -10,7 +10,8 @@ publication date too: an annual report published in April 2025 covers 2024.
 
 What decides the year, strongest first (decide()):
   1. file name    a year in the file name that is not part of a date: "Sustainability-Report-2024.pdf"
-  2. cover        a reporting-period phrase on the first pages: "for the year ended 31 December
+  2. cover        a year in the title line at the top of the cover that is not a date
+                  ("2026 Remuneration policy"), else a reporting-period phrase on the first pages: "for the year ended 31 December
                   2017", "six months ended 30 June 2011", "Annual Report 2024", "FY2024",
                   "2024年年度报告". Never later than the upload folder or a date in the file name.
   3. file name    a date in the file name: "Board-changes-6-December-2021.pdf" -> 2021
@@ -54,6 +55,11 @@ STRONG = [re.compile(p, re.I) for p in (
     r"(20[0-3]\d)\s*年\s*(?:度)?\s*(?:年度)?[^\d]{0,12}?(?:报告|報告|보고서)",
     r"(20[0-3]\d)\s*(?:지속가능|사업보고서|통합보고서)",
 )]
+# a date written out in text ("June 9, 2026", "13 May 2014", "2025-04-10", "2024年3月"): the day a
+# release was issued, not what it reports on
+TEXT_DATE = re.compile(r"(?:\d{1,2}(?:st|nd|rd|th)?\s+)?" + _MON + r"\.?\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?20[0-3]\d"
+                       r"|\d{1,2}[/.-]\d{1,2}[/.-]20[0-3]\d|20[0-3]\d[/.-]\d{1,2}[/.-]\d{1,2}|20[0-3]\d\s*年\s*\d{1,2}\s*月",
+                       re.I)
 # maturity / due dates are not the document's year ("Notes due 28 June 2028")
 DUE = re.compile(r"(?:due|matur[a-z]*|redeem[a-z]*|redemption|expir[a-z]*|until|callable)[^|;\n]{0,30}?20[0-3]\d", re.I)
 
@@ -91,6 +97,13 @@ def decide(url, filename, cover, this_year=None):
         return str(max(plain)), "file name"
     cap = min([this_year + 1] + ([max(folder)] if folder else []) + ([max(dated)] if dated else []))
     text = (cover or "")[:3000]
+    # the title line: a year at the very top of the cover that is not a date ("2026 Remuneration
+    # policy", "Annual Report 2024") names the document; later phrases may quote other years
+    head = TEXT_DATE.sub(" ", DUE.sub(" ", text[:100]))
+    for m in YEAR.finditer(head):
+        y = int(m.group(1))
+        if _ok(y, this_year) and y <= cap:
+            return str(y), "cover"
     for pat in STRONG:
         for m in pat.finditer(text):
             y = int(m.group(1))
@@ -124,7 +137,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--sample", type=int, default=60, help="changes to print in the dry run")
+    ap.add_argument("--sample", type=int, default=120, help="changes to print in the dry run")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
     if not (token and base):
