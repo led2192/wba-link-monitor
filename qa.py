@@ -372,6 +372,39 @@ class Run:
         return len(ups)
 
     # ---- reporting ----------------------------------------------------------------------------
+    def summary_markdown(self, status="ok", counters=None, title=None):
+        """The run's picture as markdown: rows per code and severity, labels, counters.
+        Written to GITHUB_STEP_SUMMARY and posted on pull requests by the workflows."""
+        by = collections.defaultdict(collections.Counter)
+        for r in self._failures.values():
+            by[r["code"]][r["severity"]] += 1
+        lines = [f"## {title or self.script}: {status}, {'dry run' if not self.do_commit else 'committed'}",
+                 "", f"Run `{self.run_key}`, commit `{self.commit_sha or '?'}`, "
+                 f"{len(self._failures):,} distinct failures, {len(self._labels):,} labels.", "",
+                 "| code | High | Medium | Low | total |", "| --- | ---: | ---: | ---: | ---: |"]
+        for code in sorted(by, key=lambda c: -sum(by[c].values())):
+            c = by[code]
+            lines.append(f"| {code} | {c['High']:,} | {c['Medium']:,} | {c['Low']:,} | {sum(c.values()):,} |")
+        tot = collections.Counter()
+        for c in by.values():
+            tot.update(c)
+        lines.append(f"| **total** | {tot['High']:,} | {tot['Medium']:,} | {tot['Low']:,} | {sum(tot.values()):,} |")
+        if counters:
+            lines += ["", "Counters:", "", "```", json.dumps(counters, ensure_ascii=False, indent=1, default=str)[:6000], "```"]
+        return "\n".join(lines)
+
+    def write_step_summary(self, status="ok", counters=None, title=None, path=None):
+        """Append the markdown summary to GITHUB_STEP_SUMMARY (when set) and to `path` (when given)."""
+        md = self.summary_markdown(status, counters, title)
+        for target in (_env("GITHUB_STEP_SUMMARY"), path or ""):
+            if target:
+                try:
+                    with open(target, "a", encoding="utf-8") as fh:
+                        fh.write(md + "\n")
+                except Exception as e:
+                    print(f">>> qa: could not write the summary to {target} ({e})", flush=True)
+        return md
+
     def _print_summary(self, status, counters):
         by_sev = collections.Counter(r["severity"] for r in self._failures.values())
         print(f">>> qa: {self.script} [{self.run_key}] {status}; {len(self._failures)} distinct failures "

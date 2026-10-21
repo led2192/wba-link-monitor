@@ -319,6 +319,7 @@ def main():
     ap.add_argument("--max-per-code", type=int, default=15000, help="cap rows written per code (overflow counted)")
     ap.add_argument("--snapshot-limit", type=int, default=20000, help="robot_* rows patched per run (0 = all)")
     ap.add_argument("--skip", default="", help="comma-separated sweeps to skip: pages,docs,companies")
+    ap.add_argument("--summary-out", default="qa_sync_summary.md", help="markdown summary file (also GITHUB_STEP_SUMMARY)")
     args = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
     if not (token and base):
@@ -379,7 +380,6 @@ def main():
                 run.label(**lab)
             if patch:
                 patches.append({"id": f["_id"], "fields": patch})
-        counters["snapshot_candidates"] = len(patches)
 
     if "companies" not in skip:
         print(">>> companies ...", flush=True)
@@ -392,8 +392,12 @@ def main():
 
     counters["rows_by_code"] = dict(per_code)
     counters["swept"] = dict(swept)
+    counters["labels"] = len(run._labels)
+    counters["snapshot_candidates"] = len(patches)
     run.finish("ok", rows_in=sum(swept.values()), rows_out=len(run._failures), counters=dict(counters))
     run.close_silent(days=30, script="qa_sync.py")
+    # the picture of this run, for the job summary and the pull-request comment
+    run.write_step_summary("ok", dict(counters), title="QA sync", path=args.summary_out)
 
     if patches:
         if args.commit:

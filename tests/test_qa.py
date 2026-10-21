@@ -174,6 +174,24 @@ class QaTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["fields"]["verdict"], "AI is right")   # untouched
 
+    def test_summary_markdown_counts_by_code_and_severity(self):
+        os.environ["QA_COMMIT"] = "false"
+        run = qa.Run("qa_sync.py")
+        run.failure("PAGE_GONE", "404", key="a", page_url="https://a", severity="High")
+        run.failure("PAGE_GONE", "404", key="b", page_url="https://b", severity="Medium")
+        run.failure("CO_GAP", "no_hub", key="PT_1", wba_id="PT_1")
+        md = run.summary_markdown("ok", {"swept": {"pages": 2}}, title="QA sync")
+        self.assertIn("## QA sync: ok, dry run", md)
+        self.assertIn("| PAGE_GONE | 1 | 1 | 0 | 2 |", md)
+        self.assertIn("| CO_GAP | 0 | 1 | 0 | 1 |", md)
+        self.assertIn("| **total** | 1 | 2 | 0 | 3 |", md)
+        self.assertIn('"pages": 2', md)
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "s.md")
+            run.write_step_summary("ok", None, title="QA sync", path=path)
+            self.assertIn("PAGE_GONE", open(path, encoding="utf-8").read())
+
     def test_write_failure_does_not_raise_outside_strict(self):
         os.environ["QA_STRICT"] = "false"
         qa.STRICT = False

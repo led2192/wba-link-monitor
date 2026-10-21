@@ -32,6 +32,9 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    permissions:
+      contents: read
+      pull-requests: write          # the dry-run picture is posted on the pull request
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,3 +59,13 @@ jobs:
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+      - name: Post the picture on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s qa_sync_summary.md ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body-file qa_sync_summary.md
+          else
+            gh pr comment ${{ github.event.pull_request.number }} --body "QA sync dry run produced no summary (the run failed before the end; see the job log)."
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
