@@ -20,6 +20,7 @@ on:
           - diagnose
           - commit
           - reclaim
+          - hash-backfill
       pages:
         description: "First N pages to read"
         default: "6"
@@ -52,6 +53,7 @@ jobs:
           AIRTABLE_COVER_STATUS: cover_status
           AIRTABLE_PAGECOUNT_FIELD: page_count
           AIRTABLE_DOCLANG_FIELD: doc_language
+          AIRTABLE_HASH_FIELD: content_hash
         run: |
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             ARGS="--pages 6 --limit 0 --commit"     # chained daily run: incremental queue, commit
@@ -60,6 +62,19 @@ jobs:
             [ "${{ inputs.mode }}" = "commit" ]  && ARGS="$ARGS --commit"
             [ "${{ inputs.mode }}" = "reclaim" ]  && ARGS="$ARGS --reclaim"
             [ "${{ inputs.mode }}" = "diagnose" ] && ARGS="$ARGS --diagnose 30"
+            [ "${{ inputs.mode }}" = "hash-backfill" ] && ARGS="--hash-backfill --limit ${{ inputs.limit }} --commit"
           fi
           echo ">>> python build_cover_text.py $ARGS"
           python build_cover_text.py $ARGS
+      - name: Content hash for older files (a slice per run)
+        # Rows read before content_hash existed get it here, 3,000 per chained run (download only,
+        # no text extraction), so the backlog fills over a few weeks without a long job.
+        if: github.event_name == 'workflow_run'
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          AIRTABLE_FILE_FIELD: file
+          AIRTABLE_COVER_STATUS: cover_status
+          AIRTABLE_HASH_FIELD: content_hash
+        run: python build_cover_text.py --hash-backfill --limit 3000 --commit
