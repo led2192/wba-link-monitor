@@ -30,7 +30,12 @@ Each new report_library row is an upload (same identity rule as inbox.py's add_f
 
 Modes: dry run by default (prints the plan and a summary); --commit creates the rows.
 Options: --bases 2025,2024  --min-year 2023  --limit N (rows to create)  --plan-out PATH
-Env: AIRTABLE_TOKEN (needs read access to the Source Library bases), AIRTABLE_BASE (Disclosure Library)
+Safety: the Source Library bases are only ever READ, and that is guaranteed twice:
+  - they are read with a separate token, SOURCE_LIBRARY_TOKEN, that should have ONLY the
+    data.records:read scope and ONLY the Source Library bases: Airtable itself then refuses any write;
+  - the only function that touches them (get_all with sl=True) refuses anything but GET, and the one
+    write in this script goes to AIRTABLE_BASE, which must not be a Source Library base.
+Env: AIRTABLE_TOKEN + AIRTABLE_BASE (Disclosure Library), SOURCE_LIBRARY_TOKEN (read-only, Source Library bases)
 """
 import argparse, collections, csv, gzip, hashlib, json, os, sys, time
 from datetime import date
@@ -58,7 +63,11 @@ HELD_BY = {"SUST": {"Sustainability Report", "ESG Report", "CSR Report", "Impact
 REPORTS = {"SUST", "INT", "ANN"}
 
 
+SL_BASES = {c["base"] for c in SOURCE_LIBRARIES.values()}
+
+
 def get_all(token, base, table, fields, formula=None):
+    """GET only. This is the only function that ever addresses a Source Library base."""
     from monitor_core import airtable_request
     H = {"Authorization": f"Bearer {token}"}
     params = [("pageSize", "100")] + [("fields[]", f) for f in fields]
@@ -80,6 +89,7 @@ def fname_of(u):
 
 
 def read_sources(token, tag, min_year):
+    """Reads one Source Library base (GET requests only, with the read-only token)."""
     c = SOURCE_LIBRARIES[tag]
     cos = get_all(token, c["base"], c["companies"], [c["co_id"]])
     wba_of = {r["id"]: (r["fields"].get(c["co_id"]) or "").strip() for r in cos}
@@ -213,13 +223,16 @@ def main():
     ap.add_argument("--plan-out", default="source_library_plan.csv")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
-    if not (token and base):
-        sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
+    sl_token = os.environ.get("SOURCE_LIBRARY_TOKEN")
+    if not (token and base and sl_token):
+        sys.exit("Set AIRTABLE_TOKEN, AIRTABLE_BASE and SOURCE_LIBRARY_TOKEN (read-only).")
+    if base in SL_BASES:
+        sys.exit("AIRTABLE_BASE is a Source Library base: refusing to run (this script never writes there).")
     order = [b.strip() for b in a.bases.split(",") if b.strip()]
     sources = []
     for tag in order:
         try:
-            got = read_sources(token, tag, a.min_year)
+            got = read_sources(sl_token, tag, a.min_year)
         except Exception as e:
             sys.exit(f"Cannot read Source Library {tag} ({e}). The token needs read access to that base.")
         print(f">>> Source Library {tag}: {len(got)} documents in scope.", flush=True)
@@ -255,6 +268,7 @@ def main():
     names = {r["fields"].get("wba_id"): r["fields"].get("company_name", "")
              for r in get_all(token, base, "companies", ["wba_id", "company_name"])}
     url = f"{API}/{base}/report_library"
+    assert base not in SL_BASES and "report_library" in url    # the one write: Disclosure Library only
     H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     made = 0
     for i in range(0, len(adds), 10):

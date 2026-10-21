@@ -39,6 +39,7 @@ jobs:
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SOURCE_LIBRARY_TOKEN: ${{ secrets.SOURCE_LIBRARY_TOKEN }}   # read-only, Source Library bases only
         run: |
           ARGS="--bases ${{ inputs.bases }} --min-year ${{ inputs.min_year }} --limit ${{ inputs.limit }}"
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
