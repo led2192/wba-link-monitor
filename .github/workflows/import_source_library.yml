@@ -1,0 +1,51 @@
+name: Import Source Library
+
+# Brings the reports analysts collected in the Source Library bases into report_library, skipping
+# anything already held (same file, same name, same report type and year, deleted by hand).
+# Manual only. Dry run by default: the summary and source_library_plan.csv show what would be added.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "CREATE the rows. Leave OFF for a dry run (plan only)."
+        type: boolean
+        default: false
+      bases:
+        description: "Source Library bases, preferred first"
+        default: "2025,2024"
+      min_year:
+        description: "Oldest report year to import"
+        default: "2023"
+      limit:
+        description: "At most this many rows (0 = all)"
+        default: "0"
+
+concurrency:
+  group: import-source-library
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Import
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SOURCE_LIBRARY_TOKEN: ${{ secrets.SOURCE_LIBRARY_TOKEN }}   # read-only, Source Library bases only
+        run: |
+          ARGS="--bases ${{ inputs.bases }} --min-year ${{ inputs.min_year }} --limit ${{ inputs.limit }}"
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          python import_source_library.py $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source_library_plan
+          path: source_library_plan.csv
