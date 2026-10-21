@@ -1,0 +1,54 @@
+name: QA sync
+
+# Nightly, right after Company coverage: turns the Disclosure Library's status fields into Pipeline QA
+# failure rows, takes the robot_* snapshots, captures corrections as labels, and closes failures
+# silent for 30 days. The chained run commits; a manual dispatch is a dry run unless mode=commit.
+on:
+  workflow_run:
+    workflows: ["Company coverage"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run prints the counts and writes nothing; commit writes QA rows and snapshots"
+        type: choice
+        options: [dry-run, commit]
+        default: dry-run
+      snapshot_limit:
+        description: "robot_* rows patched per run (0 = all)"
+        default: "20000"
+      skip:
+        description: "sweeps to skip, comma-separated: pages,docs,companies"
+        default: ""
+
+concurrency:
+  group: qa-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run qa_sync
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ARGS="--snapshot-limit ${{ inputs.snapshot_limit }}"
+            [ -n "${{ inputs.skip }}" ] && ARGS="$ARGS --skip ${{ inputs.skip }}"
+            [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"
+          else
+            ARGS="--snapshot-limit 20000 --commit"
+          fi
+          echo ">>> python qa_sync.py $ARGS"
+          python qa_sync.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

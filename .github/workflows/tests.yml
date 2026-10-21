@@ -1,0 +1,22 @@
+name: Tests
+
+# Offline regression tests (stubbed network and Airtable): run on every pull request and on
+# every push to main. A fix for one site must never undo the fix for another; this is where
+# labelled cases from Pipeline QA become permanent checks.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: QA_STRICT=true python -m unittest discover -s tests -v
