@@ -30,51 +30,19 @@ jobs:
   dedupe:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Title, date and label documents from their file name and cover page
-        # Rows whose address says nothing (…/media/download/3162) were left 'unresolved' by the URL
-        # classifier. Now that the file and cover text exist, label them from those.
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.commit }}
-        run: python classify_library.py --from-file --commit --limit 20000
+      - name: Source Library import dry run (test branch only)
+        run: python import_source_library.py --bases 2025,2024 --min-year 2023
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
-          AIRTABLE_LIBRARY_TABLE: report_library
-      - name: Document years from file name and cover page
-        # Fixes doc_year where it came from an upload folder or a publication date, and records
-        # the rule in doc_year_from. A slice per night; manual dry runs print a sample instead.
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then
-            python date_documents.py --limit 4000
-          else
-            python date_documents.py --commit --limit 30000
-          fi
-        env:
-          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
-          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
-          AIRTABLE_LIBRARY_TABLE: report_library
-      - name: Run dedupe
-        run: |
-          HASH=""
-          [ "${{ inputs.hash_signal }}" = "true" ] && HASH="--hash-signal"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then
-            python dedupe_library.py $HASH
-          else
-            python dedupe_library.py --commit $HASH
-          fi
-        env:
-          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
-          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
-          AIRTABLE_LIBRARY_TABLE: report_library
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: dedupe_log
-          path: dedupe_log.csv
-          if-no-files-found: ignore
+          name: source_library_plan
+          path: source_library_plan.csv
