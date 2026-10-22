@@ -21,9 +21,10 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | `date_documents.py` | inside Dedupe (30,000 a night); Document years (rules), manual, whole backlog | doc_year from file name, cover, filing or address | doc_year, doc_year_from |
 | `doc_scope.py` | Document scope, after Cover text; manual | Whole report, part of a report, or summary or short document, by rules (file name, title, page count, first pages); report families only | scope, scope_reason |
 | `company_coverage.py` | Company coverage, after Cover text; per company from scan_now and inbox | Completeness, gaps, overdue reports, cadence, work queue | 22 fields on `companies` |
-| `base_health.py` | Base health, after Coverage and 12:17 | The day's health row | `base_health` |
+| `base_health.py` | Base health, after Coverage and 12:17 | The day's health row, including Pipeline QA size, open failures and reviewed labels | `base_health` |
 | `qa_sync.py` | QA sync, after Coverage | Status fields into failure rows; robot_* snapshots (40,000 a night); corrections into labels; closes failures silent 30 days | Pipeline QA `runs`, `failures`, `labels`; `report_library` robot_type, robot_year, robot_title |
 | `qa_sample.py` | QA sample, weekdays 04:31 | The day's ~15 review cards: 5 high-stakes disagreements (least-labelled pair first), 3 non-English, 3 blind agreement controls, 2 new arrivals, 2 reserved; housekeeping of reviewed and stale cards | Pipeline QA `labels` |
+| `qa_archive.py` | QA archive, monthly on the 1st | Closed failures last seen 90+ days ago: archived to the private text-store repository (release qa-archive), verified, then deleted from Pipeline QA | Pipeline QA `failures` (deletes); archive file |
 | `qa.py` | library | The quality log: `Run`, `failure()`, `label()`, `finish()`, `close_silent()` | Pipeline QA |
 
 ## Full text

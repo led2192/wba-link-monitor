@@ -125,6 +125,38 @@ def company_stats():
             "over": over}
 
 
+QA_TABLES = ("runs", "failures", "labels", "evals")
+
+
+def qa_stats():
+    """Rows in the Pipeline QA base (its own 500,000 cap), open failures, reviewed labels.
+    None when AIRTABLE_QA_TOKEN is not set. Read-only."""
+    tok = os.environ.get("AIRTABLE_QA_TOKEN"); base = os.environ.get("AIRTABLE_QA_BASE") or "appJQ2mRtjHjzLq9E"
+    if not tok:
+        return None
+    h = {"Authorization": f"Bearer {tok}"}
+    def count(table, formula=None):
+        n, offset = 0, None
+        params = [("pageSize", "100"), ("fields[]", "")]
+        if formula:
+            params.append(("filterByFormula", formula))
+        while True:
+            p = [x for x in params if x[1] != ""] + ([("offset", offset)] if offset else [])
+            r = requests.get(f"{API}/{base}/{quote(table)}", headers=h, params=p, timeout=60)
+            r.raise_for_status(); j = r.json()
+            n += len(j.get("records", [])); offset = j.get("offset"); time.sleep(0.12)
+            if not offset:
+                return n
+    try:
+        per = {t: count(t) for t in QA_TABLES}
+        return {"total": sum(per.values()), "per": per,
+                "open": count("failures", "{status}='open'"),
+                "reviewed": count("labels", "AND({reviewed}, {sure})")}
+    except requests.RequestException as e:
+        print(f"    could not read Pipeline QA: {e}", flush=True)
+        return None
+
+
 def failed_jobs(now):
     tok, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     if not (tok and repo):
@@ -167,6 +199,7 @@ def main():
     co = company_stats()
     fails = failed_jobs(now)
     prev = previous_avg(today)
+    qs = qa_stats()
 
     total = sum(counts.values())
     full = total / RECORD_LIMIT
@@ -193,6 +226,14 @@ def main():
                          "Look at which gap counts went up.")
     if fails is None:
         attention.append("Failed-job check skipped (no GitHub token in this run).")
+    if qs:
+        qfull = qs["total"] / RECORD_LIMIT
+        if qfull >= 0.9:
+            status = "Problem"
+            attention.append(f"Pipeline QA is {qfull:.0%} full. Run 'QA archive' now.")
+        elif qfull >= 0.8:
+            status = "Check" if status == "OK" else status
+            attention.append(f"Pipeline QA is {qfull:.0%} full. Run 'QA archive' (commit) this week.")
 
     row = {"date": today, "status": status, "attention": "\n".join(attention) or "Nothing needs you.",
            "records_total": total, "record_limit": RECORD_LIMIT, "base_full": round(full, 4),
@@ -206,6 +247,9 @@ def main():
            "overdue_sust_reports": co["over"].get("Sustainability report", 0),
            "overdue_annual_reports": co["over"].get("Annual report", 0),
            "pages_to_check": pages_check}
+    if qs:
+        row.update({"qa_records_total": qs["total"], "qa_base_full": round(qs["total"] / RECORD_LIMIT, 4),
+                    "qa_open_failures": qs["open"], "qa_labels_reviewed": qs["reviewed"]})
     for tag, field in CHECKS:
         row[field] = co["miss"].get(tag, 0)
 

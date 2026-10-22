@@ -17,6 +17,12 @@ Interface "Pipeline QA": **Today's cases** (the daily batch, one card per case),
 
 Every field carries a description in Airtable. Rules: a failure key that does not recur for 30 days is closed as `resolved_silently` with the last commit seen; a failure marked `fixed` that recurs reopens itself with a note; a label a person wrote is never overwritten.
 
+## Size and archive
+Pipeline QA has its own 500,000-record cap. Failures are keyed, so a recurring failure updates its row instead of adding one; growth comes from new failures (a few hundred a day) and labels (about 15 a day). `base_health` reports `qa_records_total` and `qa_base_full` daily and turns Check at 80%. On the 1st of each month `qa_archive.py` moves closed failures (fixed, resolved_silently, wontfix) last seen 90+ days ago into a gzipped JSONL file in the private text-store repository (release `qa-archive`), verifies the upload, then deletes them from the base. Labels, evals, runs and open or expected failures are never archived.
+
+## Who acts on a failure
+Each failure row carries `who_fixes` and `open_in_library` (a link to the page, document or company to fix in the Disclosure Library). Most codes are fixed in code by the weekly review. A person acts only on PAGE_BLOCKED (download and add_file, when the report matters), PAGE_GONE (paste the new address in add_link), PAGE_WRONG_TYPE, and CO_GAP when research could not close it. Fixes are always made in the Disclosure Library; Pipeline QA is never edited by hand except labels and review notes. The next qa_sync sees the fix and closes the row.
+
 ## Failure codes (closed list, v1)
 
 | Code | Means | Main source |

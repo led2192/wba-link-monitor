@@ -1,0 +1,39 @@
+name: QA archive
+
+# Monthly (the 1st, 05:13 UTC): closed Pipeline QA failures last seen 90+ days ago are archived to the
+# private text-store repository (release qa-archive) and, once the upload is verified, deleted from the
+# base. Labels, evals, runs and open failures are never touched. Manual runs are dry unless mode=commit.
+on:
+  schedule:
+    - cron: "13 5 1 * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [dry-run, commit]
+        default: dry-run
+      days:
+        description: "archive closed failures last seen more than this many days ago"
+        default: "90"
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run qa_archive
+        run: |
+          ARGS="--days ${{ inputs.days || '90' }}"
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then ARGS="$ARGS --commit"; fi
+          echo ">>> python qa_archive.py $ARGS"
+          python qa_archive.py $ARGS
+        env:
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
