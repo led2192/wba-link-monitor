@@ -8,6 +8,9 @@ One entry per choice between options: what was decided, why, and what was reject
 ### 2026-10-22: Years from the first pages when there is no full text
 The full-text store holds about 42,000 documents (the report families); the other ~230,000 rows got their year only from the title or the link. The same reader now runs on `cover_text` (the first six pages) for those rows. Checked on 1,351 documents with an analyst fiscal-year-end date, using the first pages alone: score 60-79 was 96% right and 80+ was 99%, the same calibration as the full text, so the same threshold (60) applies. Evidence from the first pages is prefixed "first pages:" and the document is read again from its full text once that exists. Rejected: extending the full-text store to every document first (weeks of extraction and gigabytes for documents whose first pages already state the period).
 
+### 2026-10-22: The Source Library is the first ground truth, with doubt flags
+The analysts' reviewed 2025 base gives type and year for thousands of documents the pipeline also holds; it is used as evaluation labels before any daily label exists. Analyst labels are not assumed perfect: where the pipeline has strong contrary evidence the label is kept out of the evaluation and shown to a person. Rejected: importing more Source Library documents (webpage captures and secondary types do not move completeness; the measurement does).
+
 ### 2026-10-22: Claude reviews a daily sample; Sonnet daily, Opus weekly
 Claude pre-labels the 15 daily cases (type, year, title, with a reason) and the owner adjudicates; a weekly Opus review turns patterns into pull requests. Both run on the owner's Claude plan, not the API. Rejected: Claude reviewing every new document (cost, and it would replace measurement with a second unmeasured classifier); no human labels at all (nothing to measure against). Agreement-control cases are shown without a suggestion so the accuracy measurement is not anchored.
 

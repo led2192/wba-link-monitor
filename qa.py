@@ -37,7 +37,7 @@ from urllib.parse import quote
 
 API = "https://api.airtable.com/v0"
 QA_BASE_DEFAULT = "appJQ2mRtjHjzLq9E"
-T_RUNS, T_FAILURES, T_LABELS = "runs", "failures", "labels"
+T_RUNS, T_FAILURES, T_LABELS, T_EVALS = "runs", "failures", "labels", "evals"
 
 CODES = (
     "PAGE_UNREACHABLE", "PAGE_GONE", "PAGE_BLOCKED", "PAGE_EMPTY", "PAGE_UNHARVESTED", "PAGE_WRONG_TYPE",
