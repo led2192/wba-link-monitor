@@ -21,6 +21,9 @@ Rules, first match wins (decide()):
   4. the cover starts on a printed page number well past the start (page 38) and the file is short
      for that ("starts at page 38, has 12 pages")                                     -> Part of a report
   (a table-of-contents rule was tried and dropped: figures on contents pages read as page numbers)
+  Exception to 1: a file named after one section ("consolidated-financial-statements.pdf") whose
+  contents page lists both a management report and the financial statements, with page numbers
+  running to within 70-105% of the file's length, is a whole statutory annual report -> Full document
   5. very short for its type: fewer than 12 pages for an annual, integrated, sustainability or ESG
      report, or a 10-K (a chapter, a press release, a data sheet, a cover)            -> Summary or short document
   6. otherwise                                                                        -> Full document
@@ -67,7 +70,9 @@ WHOLE_REPORT_NAME = re.compile(r"(?:annual|integrated|sustainability|esg)[-_ ]?r
                                r"environmental[-_ ]social|sustainability[-_ ]and[-_ ]governance", re.I)
 # "Appendix 4E" is the Australian full-year report form, not an appendix of something else
 # "SEC Form 17-A" is the Philippine annual report
-NOT_A_PIECE = re.compile(r"appendix[-_ ]?4[de]|sec[-_ ]*(?:form[-_ ]*)?17", re.I)
+# "Annual report pursuant to Section 13" and "SEC_10-K" name a whole Form 10-K
+NOT_A_PIECE = re.compile(r"appendix[-_ ]?4[de]|sec[-_ ]*(?:form[-_ ]*)?17|pursuant[-_ +]+to[-_ +]+sec|"
+                         r"sec[-_ +]*10[-_]?[kq](?![a-z])", re.I)
 # a page range at the end of the name ("DBS-AR17-92-96"), but not a date ("2025-03-19", "4-11-24")
 # or a fiscal span ("FY-24-25"): the token before it must not be a number
 PAGE_PAIR = re.compile(r"(?:^|[-_ ])([^-_ ]*)[-_](\d{1,3})[-_](\d{1,3})$")
@@ -77,6 +82,14 @@ TITLE_PART = re.compile(r"(?<![a-z])(?:(?<!pursuant to )section(?!\s*\d)(?!\s+1[
 SUMMARY_WORDS = re.compile(r"(?<![a-z])(?:executive\s+summary|highlights|at\s+a\s+glance|summary\s+(?:report|version)|"
                            r"fact\s*sheet|in\s+brief|overview\s+brochure|summary)(?![a-z])", re.I)
 LEAD_PAGE = re.compile(r"^\s*(\d{1,3})\s+[A-Za-z]")
+# the parts a whole statutory annual report lists on its contents page (Italy's "Annual Financial
+# Report", Germany's "Annual Financial Statements and Management Report", the Nordic "Board of
+# Directors' report and financial statements"): such a file is often named after its financial
+# statements although it holds the management report, and since 2025 the sustainability statement
+MANAGEMENT_PART = re.compile(r"report on operations|management(?:'s)? report|directors'? report|report of the (?:board of )?"
+                             r"directors|board of directors'? report|strategic report|management(?:'s)? discussion and "
+                             r"analysis|operating and financial review", re.I)
+FINANCIALS_PART = re.compile(r"financial statements", re.I)
 TOC = re.compile(r"\b(?:contents|table of contents|índice|indice|sommaire|inhalt)\b", re.I)
 
 
@@ -100,6 +113,16 @@ def toc_last_page(cover):
     return run[-1] if len(run) >= 4 else None
 
 
+def whole_statutory_report(cover, pages):
+    """True when the contents page on the first pages lists both a management report and the financial
+    statements, and its page numbers run to (nearly) the end of this file. Sections of a split report
+    fail the page test: their navigation lists the whole report's pages, far past their own length."""
+    head = (cover or "")[:6000]
+    last = toc_last_page(head)
+    return bool(pages and last and 0.7 * pages <= last <= 1.05 * pages
+                and MANAGEMENT_PART.search(head) and FINANCIALS_PART.search(head))
+
+
 def decide(url, filename, title, pages, cover, doc_type=""):
     """(scope, reason)."""
     pages = int(pages or 0)
@@ -110,6 +133,9 @@ def decide(url, filename, title, pages, cover, doc_type=""):
             m = rx.search(stem)
             if m and not ("chapter number" in why and pages >= 150) \
                     and not (why.startswith("one section") and WHOLE_REPORT_NAME.search(stem)):
+                if why.startswith(("one section", "one topic")) and whole_statutory_report(cover, pages):
+                    return FULL, (f"{pages} pages; the contents page lists the management report and the "
+                                  f"financial statements up to page {toc_last_page((cover or "")[:6000])}")
                 return PART, f"{why}: {m.group(0).strip('-_. ')}"
     m = PAGE_PAIR.search(stem)
     if (m and not m.group(1).isdigit() and int(m.group(2)) >= 2
