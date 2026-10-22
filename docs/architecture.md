@@ -30,6 +30,7 @@ flowchart LR
   CC --> BH[Base health]
   CC --> QS[QA sync]
   FT[21:37 Build full text] --> FY[Fiscal years]
+  FT --> SC[Sustainability class]
   FT --> MS[Mention search]
 ```
 
@@ -40,7 +41,7 @@ flowchart LR
 5. **Clean and date.** `dedupe_library.py` discards duplicates and non-disclosures; `classify_library.py --from-file` titles and types from the file name and cover; `date_documents.py` sets `doc_year`.
 6. **Measure.** `company_coverage.py` writes each company's completeness (six checks: report hub page, sustainability page, sustainability report 2024+, annual report 2024+, Code of Conduct, Human Rights Policy), its gaps, overdue reports and the work queue. `base_health.py` writes the day's row.
 7. **Quality.** `qa_sync.py` turns the status fields into Pipeline QA failure rows and captures corrections.
-8. **Full text** (separate chain, 21:37): `build_fulltext.py` reads every page of every report into the text store; `fiscal_years.py` reads the reporting year from it with a confidence score; `mention_search.py` answers the saved "which companies mention X" questions.
+8. **Full text** (separate chain, 21:37): `build_fulltext.py` reads every page of every report into the text store; `fiscal_years.py` reads the reporting year from it with a confidence score; `sustainability_class.py` reads where the sustainability disclosure lives (a dedicated report, embedded in the annual report, a specialized document, or financial only), the standards named and the assurance; `mention_search.py` answers the saved "which companies mention X" questions.
 
 ## The on-demand paths
 - **Scan now** (`scan_now.py`, every 30 minutes, watching for 5.5 hours): ticking `scan_now` on a page runs the whole chain for that page in about 10 to 15 minutes. It also runs `inbox.py`, which handles `add_link`, `add_file`, `approve_suggestions`, `delete_now` and new mention searches.

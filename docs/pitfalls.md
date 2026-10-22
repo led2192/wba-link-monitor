@@ -29,6 +29,8 @@ Lessons that cost time to learn. Read before changing the area they name.
 - **AI cost scales with input length.** The cover_text cap (`COVER_CHARS`) is the lever; whitespace collapsing barely matters.
 
 - **The sections of a split report carry the whole report's contents.** UK and South African report sections repeat the full navigation bar ("Strategic report | Governance | Financial statements") on their first pages, so the parts named there say nothing about the file in hand. Compare the contents page numbers with the file's own page count.
+- **"Reasonable assurance" appears in every limited-assurance report.** The ISAE 3000 boilerplate says the procedures are "less in extent than for a reasonable assurance engagement", and every financial audit opinion obtains "reasonable assurance" about the financial statements. Read the level only near sustainability words, away from the audit and internal-control wording, and never from a sentence that compares the two levels.
+- **Some PDFs give text shifted by one character.** Tokio Marine's integrated report reads "DPNQBSFEXJUI" for "compared with" (a font with an off-by-one encoding). Such pages carry no terms and no years; a fix belongs in the text extraction, not in the readers.
 
 ## Strategy
 - **Sitemaps add junk, not reports** (37,000 bad rows in one run). Page monitoring plus search is the reliable pair.
