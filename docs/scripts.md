@@ -30,7 +30,7 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | Script | Workflow, trigger | What it does | Writes |
 | --- | --- | --- | --- |
 | `build_fulltext.py`, `text_core.py` | Build full text, 21:37 | Every page of every attached report (2021+) into the text store, sharded | text store |
-| `fiscal_year.py`, `fiscal_years.py` | Fiscal years, after Full text | Reporting year from the full text, with score and evidence; verifies the AI year's quote | fiscal_year, period_end, year_score, year_basis, year_evidence, ai_year_verified |
+| `fiscal_year.py`, `fiscal_years.py` | Fiscal years, after Full text | Reporting year with score and evidence: from the full text when the document is in the text store, else from its first pages (`cover_text`, up to 60,000 a run); verifies the AI year's quote | fiscal_year, period_end, year_score, year_basis, year_evidence, ai_year_verified |
 | `mention_search.py` | Mention search, after Full text; on demand | Saved "which companies mention X" searches | `mention_searches`, `mention_hits` |
 | `key_figures.py` | Key figures, Monday 09:20 | Revenue and employees from SEC and ESEF data, else a candidate from the latest report | revenue, employees and their sources on `companies` |
 
