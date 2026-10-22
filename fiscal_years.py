@@ -20,7 +20,13 @@ otherwise. Policies (Code of Conduct, Human Rights Policy, Policy Documents) are
 The period can never end after the document was published: the latest of the upload folder or a
 date in the file name, and the month the row was first seen, cap the evidence.
 
-Queue: rows with year_basis blank (never read). --all re-reads everything (after a rule change).
+Documents not in the full-text store are read from their first pages (cover_text, six pages), at
+most --cover-limit a run; their evidence starts with "first pages:" and they are read again from the
+full text once it exists. On the first pages alone the score means the same (checked against the
+analysts: 60-79 was 96% right, 80+ 99%).
+
+Queue: rows with year_basis blank (never read), plus first-pages rows whose full text has since
+arrived. --all re-reads everything (after a rule change).
 
 AI CHECK. The ai_fiscal_year field (an Airtable AI field) answers "YEAR | PERIOD_END | CONFIDENCE |
 EVIDENCE". Its year is used only if the evidence is real: this script ticks ai_year_verified when one
@@ -44,7 +50,8 @@ FIELDS = ["library_id", "document_url", "file", "first_seen", "source_type_check
 def airtable_rows(token, base, everything):
     from monitor_core import airtable_request
     H = {"Authorization": f"Bearer {token}"}
-    formula = "NOT({discard})" if everything else "AND(NOT({discard}), {year_basis}='')"
+    formula = ("NOT({discard})" if everything else
+               "AND(NOT({discard}), OR({year_basis}='', LEFT({year_evidence}&'', 12)='first pages:'))")
     params = [("pageSize", "100"), ("filterByFormula", formula)] + [("fields[]", f) for f in FIELDS]
     out, offset = {}, None
     while True:
@@ -76,6 +83,25 @@ def airtable_ai_rows(token, base):
         offset = j.get("offset")
         if not offset:
             return out
+        time.sleep(0.21)
+
+
+def cover_rows(token, base, everything):
+    """Stream rows with cover text and no year yet (one page of 100 at a time: cover_text is up to
+    10,000 characters, so the whole table never sits in memory)."""
+    from monitor_core import airtable_request
+    H = {"Authorization": f"Bearer {token}"}
+    formula = ("AND(NOT({discard}), {cover_text}!='')" if everything else
+               "AND(NOT({discard}), {cover_text}!='', {year_basis}='')")
+    params = [("pageSize", "100"), ("filterByFormula", formula), ("fields[]", "library_id"), ("fields[]", "cover_text")]
+    offset = None
+    while True:
+        p = list(params) + ([("offset", offset)] if offset else [])
+        j = airtable_request("GET", f"{API}/{base}/report_library", H, params=p).json()
+        yield from j.get("records", [])
+        offset = j.get("offset")
+        if not offset:
+            return
         time.sleep(0.21)
 
 
@@ -151,6 +177,8 @@ def main():
     ap.add_argument("--all", action="store_true", help="re-read every document, not only new ones")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--cover-limit", type=int, default=60000,
+                    help="at most this many documents read from their first pages per run (0 = all)")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
     if not (token and base):
@@ -164,6 +192,7 @@ def main():
     tc.sync_down(store, [n for n in names if n.startswith("docs-")], folder)
     index = tc.load_docs_index(folder, names)
     want = collections.defaultdict(dict)          # part -> {library_id: cap}
+    cover_ids = set()                             # no full text: read the first pages (cover_text)
     skipped = collections.Counter()
     for lid, r in rows.items():
         d = index.get(lid)
@@ -172,7 +201,10 @@ def main():
         if t in POLICIES:
             skipped["policy"] += 1; continue
         if not d or d.get("status") != "ok":
-            skipped["no text yet"] += 1; continue
+            if (f.get("year_evidence") or "").startswith("first pages:") and not a.all:
+                skipped["first pages already read"] += 1; continue
+            cover_ids.add(lid)
+            skipped["no full text: first pages"] += 1; continue
         want[d["part"]][lid] = cap_for(f)
         if a.limit and sum(len(v) for v in want.values()) >= a.limit:
             break
@@ -186,6 +218,22 @@ def main():
             results.update(out)
             if i % 20 == 0:
                 print(f"  {i}/{len(jobs)} parts, {len(results)} documents", flush=True)
+    # documents without full text: the first pages (cover_text, six pages) give a year almost as
+    # reliable at the same score (checked against the analysts: 60+ was 97% right on first pages alone)
+    if cover_ids:
+        n_cover = 0
+        for r in cover_rows(token, base, a.all):
+            lid = r["fields"].get("library_id")
+            if lid not in cover_ids or lid in results:
+                continue
+            cap = cap_for(rows[lid]["fields"])
+            y, end, score, quote, det = FY.decide([(1, r["fields"].get("cover_text") or "")], cap)
+            results[lid] = (y, end, score, det.get("tier") or "none",
+                            ("first pages: " + quote[quote.find(":") + 1:].strip()) if quote else "first pages: no period stated")
+            n_cover += 1
+            if a.cover_limit and n_cover >= a.cover_limit:
+                break
+        print(f">>> {n_cover} documents read from their first pages.", flush=True)
     # AI answers to check: against the first pages first, then the full text when we have it
     ai_rows = airtable_ai_rows(token, base)
     ai_ok, ai_need_text = [], {}
