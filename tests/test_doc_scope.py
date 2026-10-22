@@ -8,6 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import doc_scope as D  # noqa: E402
 
 F, P, S = D.FULL, D.PART, D.SUMMARY
+ACEA = 'CONSOLIDATED FINANCIAL STATEMENTS ACEA GROUP 2025 The Annual Financial Report has been translated into English Letter to Shareholders 4 1. REPORT ON OPERATIONS 7 Corporate bodies 9 Financial highlights 10 Summary of results 15 Main risks and uncertainties 63 2. SEPARATE FINANCIAL STATEMENTS 180 Income statement 188 Notes to the income statement 192 Table of contents SUSTAINABILITY REPORT 74 1. General information 76 1.2 Governance 76 2. Environmental information 99 2.2 Climate change 106 3. Social information 133 4. Governance information 153 5. Annex 157 Business outlook 177 3. CONSOLIDATED FINANCIAL STATEMENTS 256 Consolidated income statement 268 Annexes 353 4. REPORT ON CORPORATE GOVERNANCE AND OWNERSHIP STRUCTURE 385 Board of Directors 395 Tables 443 Letter to Shareholders Dear Shareholders'
+UK_NAV = "Strategic report Governance Financial statements Contents Strategic report 2 Chair's statement 4 Chief Executive's review 8 Directors' report 120 Governance report 98 Remuneration report 130 Financial statements 160 Independent auditor's report 162 Consolidated income statement 172 Notes 180 Shareholder information 250"
 CASES = [
     # (file name, title, pages, cover, type, expected)
     ("SCSR25e_p108-162.pdf", "Sumitomo Chemical Sustainability Report 2025", 55, "", "Sustainability Report", P),
@@ -36,6 +38,16 @@ CASES = [
     ("DE000A1ML7J1-JA-2013-EQ-E-01.pdf", "Annual Report 2013", 217, "", "Annual Report", F),
     ("25_E_00_1.pdf", "Integrated Report 2025", 128, "", "Integrated Report", F),
     ("2019-Verizon-Annual-Report.pdf", "Verizon 2019 Annual Report", 96, "", "Annual Report", F),
+    # a whole statutory annual report named after its financial statements: the contents page lists the
+    # management report and the financial statements, and its page numbers reach the end of the file
+    ("2025-consolidated-financial-statements.pdf", "CONSOLIDATED FINANCIAL STATEMENTS ACEA GROUP 2025", 452, ACEA, "Annual Report", F),
+    # ...but a governance section of a split UK report lists the whole report's pages, far past its own 62
+    ("centrica-ar2025-governance.pdf", "Centrica plc Annual Report and Accounts 2025", 62, UK_NAV, "Annual Report", P),
+    # a standalone financial statements volume with no management report stays a part
+    ("Investec-Annual-financial-statements-2024.pdf", "Investec annual report 2024", 196, "", "Annual Report", P),
+    # Form 10-K file names
+    ("MRNA_(Moderna_Inc.)_Annual_report_pursuant_to_Section_13_or_15(d).pdf", "Moderna, Inc. Form 10-K", 161, "", "10K Form", F),
+    ("SEC_10-K_2010.pdf", "EQT CORPORATION FORM 10-K", 155, "", "10K Form", F),
     # the cover starts on a printed page well past the start
     ("Business_Responsibility_and_Sustainability.pdf", "BRSR", 38, "104 Business Responsibility and Sustainability Report", "Sustainability Report", P),
 ]
