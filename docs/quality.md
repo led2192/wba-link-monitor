@@ -66,6 +66,9 @@ Writes only with `QA_COMMIT=true` and `AIRTABLE_QA_TOKEN` set; never raises into
 - **Daily Claude review** (Sonnet): reads each case's cover and first pages, the fiscal-year evidence and the address; writes a suggested value and a one-line reason for type, year and title; notes recurring patterns. The owner adjudicates in Today's cases instead of classifying from scratch.
 - **Weekly Claude review** (Opus): reads open failures, the week's labels and evals; turns patterns into pull requests (each with a regression test); answers the owner's `scan_concern` notes; writes what it did to `review_note` and to the changelog.
 
+## Source Library as ground truth
+`sl_labels.py` matches every Source Library record to the Disclosure Library row holding the same file (same company and byte size, or same specific file name; rows imported from the Source Library are skipped) and writes the analyst's type and year as a label. The 2025 base was reviewed, so its labels count as sure; 2024 labels are written not sure. Analysts can still be wrong, so a label is also marked not sure when the pipeline has strong contrary evidence: a full-text year with score 80+ that differs, or URL and AI agreeing on a type that satisfies a different completeness check. Those doubtful cases are worth a person's look. The sure labels give the baseline evals: exact accuracy, and check-level accuracy (does the prediction satisfy the same completeness check as the truth).
+
 ## The ship rule
 A change to a rule or a prompt merges only when, on the evaluation labels, overall accuracy does not fall, accuracy on the classes that move a completeness check does not fall, and no regression case flips from right to wrong. `eval.py` records the verdict with the commit in `evals`.
 

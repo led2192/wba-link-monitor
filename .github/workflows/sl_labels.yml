@@ -1,0 +1,51 @@
+name: Source Library labels
+
+# Measures the pipeline's type and year against the analysts' (Source Library, read only) on every
+# document both hold; writes labels and baseline evals to Pipeline QA. Manual: dry run unless
+# mode=commit. A pull request touching the script runs it dry and posts the scores on the PR.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run prints the matching and the scores; commit writes labels and evals"
+        type: choice
+        options: [dry-run, commit]
+        default: dry-run
+      bases:
+        description: "Source Library bases, preferred first"
+        default: "2025,2024"
+  pull_request:
+    paths: [sl_labels.py, .github/workflows/sl_labels.yml]
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run sl_labels
+        run: |
+          ARGS="--bases ${{ inputs.bases || '2025,2024' }}"
+          [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"
+          echo ">>> python sl_labels.py $ARGS"
+          python sl_labels.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SOURCE_LIBRARY_TOKEN: ${{ secrets.SOURCE_LIBRARY_TOKEN }}   # read-only, Source Library bases only
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+      - name: Post the scores on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s sl_labels_summary.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file sl_labels_summary.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Source Library labels: no summary (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
