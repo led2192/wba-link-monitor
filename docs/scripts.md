@@ -18,7 +18,8 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | `recover_attach.py` | Recover missing attachments, 19:00 | Downloads what Airtable could not, uploads it (5 MB limit), records why not | file, file_status (blocked, gone, too_big, not_pdf) |
 | `build_cover_text.py` | Build cover text, after Attach or Recover | First six pages: text, language, page count, SHA-256, size | cover_text, cover_status, page_count, doc_language, content_hash, file_size_mb |
 | `dedupe_library.py` | Dedupe report library, after Cover text | Discards duplicates (same stripped URL, same size and pages and name, same hash) and non-disclosures (SEC insider forms, call transcripts) | discard, discard_reason; `dedupe_log.csv` artifact |
-| `date_documents.py` | inside Dedupe | doc_year from file name, cover, filing or address | doc_year, doc_year_from |
+| `date_documents.py` | inside Dedupe (30,000 a night); Document years (rules), manual, whole backlog | doc_year from file name, cover, filing or address | doc_year, doc_year_from |
+| `doc_scope.py` | Document scope, after Cover text; manual | Whole report, part of a report, or summary or short document, by rules (file name, title, page count, first pages); report families only | scope, scope_reason |
 | `company_coverage.py` | Company coverage, after Cover text; per company from scan_now and inbox | Completeness, gaps, overdue reports, cadence, work queue | 22 fields on `companies` |
 | `base_health.py` | Base health, after Coverage and 12:17 | The day's health row | `base_health` |
 | `qa_sync.py` | QA sync, after Coverage | Status fields into failure rows; robot_* snapshots (40,000 a night); corrections into labels; closes failures silent 30 days | Pipeline QA `runs`, `failures`, `labels`; `report_library` robot_type, robot_year, robot_title |

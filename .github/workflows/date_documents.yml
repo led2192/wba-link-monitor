@@ -1,0 +1,40 @@
+name: Document years (rules)
+
+# Runs date_documents.py on demand: corrects doc_year from the file name and the first pages
+# instead of the upload folder, and records the rule in doc_year_from. The nightly Dedupe run does
+# 30,000 rows a night; this runs the whole backlog at once. Dry run by default.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "WRITE doc_year. Leave OFF for a dry run."
+        type: boolean
+        default: false
+      limit:
+        description: "At most this many rows (0 = all)"
+        default: "0"
+
+concurrency:
+  group: date-documents
+  cancel-in-progress: false
+
+jobs:
+  years:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Correct doc_year
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+        run: |
+          ARGS="--limit ${{ inputs.limit }}"
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          python date_documents.py $ARGS
