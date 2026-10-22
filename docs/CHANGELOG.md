@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-22 QA archive (monthly, closed failures 90+ days to the private store) and Pipeline QA size in base_health; who_fixes and open_in_library on failures (#37)
 - 2026-10-22 Document scope by rules instead of the AI field (`scope`, `scope_reason`); manual workflow to run the doc_year rules over the whole backlog (#38)
 - 2026-10-22 Fiscal years: documents without full text are read from their first pages (cover_text); first full run read 41,697 documents (#36)
 - 2026-10-22 QA sample: the daily review cards (type, year and title on one card; blind controls), weekdays 04:31 UTC (#34)

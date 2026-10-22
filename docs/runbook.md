@@ -19,6 +19,14 @@ Day-to-day operation through the Airtable interfaces, and what to do when someth
 - **Delete for good:** tick `delete_now` (archived and blocked forever; verified rows are never deleted).
 - **Company really has not published:** set `queue_snooze_until`.
 
+## Pipeline QA failures: find there, fix in the Disclosure Library
+Pipeline QA is where problems are found and counted; the Disclosure Library is where they are fixed. Never fix by editing a failure row.
+1. Open Pipeline QA, Open failures (once or twice a week, not daily). Sort by severity. Read `who_fixes`.
+2. If it says "Nobody" or "Weekly review", leave it. Those are fixed in code; the weekly review reads them by the hundred, and one code fix closes thousands of rows.
+3. If it names you (mainly PAGE_BLOCKED, PAGE_GONE, PAGE_WRONG_TYPE, and a 2023+ report you need now), click `open_in_library`. It opens the page, document or company in the Disclosure Library. Fix it there with the usual tools under "Add things" and "Fix things".
+4. Do nothing else. The next sync sees the fix and closes the failure itself (`fixed`, or `resolved_silently` after 30 days without recurring). A type you change in the library becomes a label automatically.
+5. Only status is yours to set on a failure: `expected` when the behaviour is correct (a page that legitimately has no report), `wontfix` when it is not worth fixing. Both stop it counting as open.
+
 ## When something breaks
 - **A GitHub job failed:** `base_health.failed_jobs` links it. Re-run it from the Actions tab; scripts are idempotent, a re-run never duplicates.
 - **A page "does not open" but works in your browser:** the site blocks robots. Download the report yourself and use `add_file`.
