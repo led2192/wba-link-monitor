@@ -1,0 +1,50 @@
+name: Document scope
+
+# Decides, by rules, whether each report file is a whole report, a part of one, or a summary or
+# short document (doc_scope.py), and writes scope and scope_reason. Chained after "Build cover
+# text" (page counts and first pages are fresh), so new documents are done the same day.
+# Manual runs: dry run by default; "all" redoes every row after a rule change.
+
+on:
+  workflow_run:
+    workflows: ["Build cover text"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "WRITE scope. Leave OFF for a dry run."
+        type: boolean
+        default: false
+      all:
+        description: "Redo every report row, not only new ones"
+        type: boolean
+        default: false
+
+concurrency:
+  group: doc-scope
+  cancel-in-progress: false
+
+jobs:
+  scope:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Decide scope
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            python doc_scope.py --commit
+          else
+            ARGS=""
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+            [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"
+            python doc_scope.py $ARGS
+          fi

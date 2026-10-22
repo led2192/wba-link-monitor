@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-10-22: Document scope by rules, not the AI field
+`scope` (Full document / Part of a report / Summary or short document) is decided by `doc_scope.py` from the file name (page ranges, chapter numbers, section words), the title, the page count and the first page, with the rule written in `scope_reason`. On 60 random report documents judged by hand the rules were right on 50 of 54 and the AI field `doc_scope` on 48 of 52; the AI field also leaves every non-English document blank and gives no reason. Rejected: keeping the AI field (no reason to check, English only, its 41+ page "sections" were often whole reports); a table-of-contents rule (figures on contents pages read as page numbers, tested and dropped).
+
 ### 2026-10-22: Years from the first pages when there is no full text
 The full-text store holds about 42,000 documents (the report families); the other ~230,000 rows got their year only from the title or the link. The same reader now runs on `cover_text` (the first six pages) for those rows. Checked on 1,351 documents with an analyst fiscal-year-end date, using the first pages alone: score 60-79 was 96% right and 80+ was 99%, the same calibration as the full text, so the same threshold (60) applies. Evidence from the first pages is prefixed "first pages:" and the document is read again from its full text once that exists. Rejected: extending the full-text store to every document first (weeks of extraction and gigabytes for documents whose first pages already state the period).
 
