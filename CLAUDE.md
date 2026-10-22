@@ -7,7 +7,7 @@ Read `docs/README.md` first. It indexes everything else.
 ## House rules for code
 - Dry run by default. A script writes only with `--commit` (or `QA_COMMIT=true` for the quality log).
 - Deterministic ids, idempotent upserts. Re-running a script must never duplicate a row.
-- Never delete. Discard with a reason, or tombstone. Deletions happen only through `inbox.py` (`delete_now`) and `purge_discarded.py`, both archived first.
+- Never delete. Discard with a reason, or tombstone. Deletions happen only through `inbox.py` (`delete_now`), `purge_discarded.py` and `qa_archive.py` (closed Pipeline QA failures), all archived first.
 - Orphans are logged, never fabricated. Never send a string into a link field with `typecast`.
 - Offline tests with stubbed network and Airtable for every fix (`tests/`, run by the Tests workflow on every pull request). A bug found in a real site becomes a regression case.
 - Complete files, one branch per change, one pull request. Never merge: the owner merges.
