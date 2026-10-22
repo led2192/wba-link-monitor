@@ -1,0 +1,58 @@
+name: Sustainability class
+
+# Reads each report document (full text from the text store, else its first pages) and writes
+# sustainability_class, class_reason, sustainability_share, frameworks and assurance on
+# report_library. Chained after the nightly full-text build, so only new documents are processed.
+# Manual runs: dry run by default; "all" redoes every row (after a rule change).
+
+on:
+  workflow_run:
+    workflows: ["Build full text"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "WRITE the fields. Leave OFF for a dry run."
+        type: boolean
+        default: false
+      all:
+        description: "Redo every row, not only new ones"
+        type: boolean
+        default: false
+      limit:
+        description: "At most this many full-text documents (0 = all)"
+        default: "0"
+
+concurrency:
+  group: sustainability-class
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Classify sustainability disclosure
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            python sustainability_class.py --commit
+          else
+            ARGS="--limit ${{ inputs.limit }}"
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+            [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"
+            python sustainability_class.py $ARGS
+          fi

@@ -34,6 +34,7 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | --- | --- | --- | --- |
 | `build_fulltext.py`, `text_core.py` | Build full text, 21:37 | Every page of every attached report (2021+) into the text store, sharded | text store |
 | `fiscal_year.py`, `fiscal_years.py` | Fiscal years, after Full text | Reporting year with score and evidence: from the full text when the document is in the text store, else from its first pages (`cover_text`, up to 60,000 a run); verifies the AI year's quote | fiscal_year, period_end, year_score, year_basis, year_evidence, ai_year_verified |
+| `sustainability_class.py` | Sustainability class, after Full text; manual | Where the sustainability disclosure lives (D dedicated, E embedded, S specialized, F financial only) by type and by the pages; the standards named (ESRS, GRI, SASB, ISSB, TCFD, TNFD, SDGs...); external assurance of the sustainability information; from the full text, else the first pages (up to 60,000 a run) | sustainability_class, class_reason, sustainability_share, frameworks, assurance |
 | `mention_search.py` | Mention search, after Full text; on demand | Saved "which companies mention X" searches | `mention_searches`, `mention_hits` |
 | `key_figures.py` | Key figures, Monday 09:20 | Revenue and employees from SEC and ESEF data, else a candidate from the latest report | revenue, employees and their sources on `companies` |
 
