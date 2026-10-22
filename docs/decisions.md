@@ -1,0 +1,36 @@
+# Decisions
+
+One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
+
+### 2026-10-22: Claude reviews a daily sample; Sonnet daily, Opus weekly
+Claude pre-labels the 15 daily cases (type, year, title, with a reason) and the owner adjudicates; a weekly Opus review turns patterns into pull requests. Both run on the owner's Claude plan, not the API. Rejected: Claude reviewing every new document (cost, and it would replace measurement with a second unmeasured classifier); no human labels at all (nothing to measure against). Agreement-control cases are shown without a suggestion so the accuracy measurement is not anchored.
+
+### 2026-10-22: Separate Pipeline QA base
+Failures, runs, labels and evals live in their own base, keyed so a recurring failure is one row. Rejected: logging inside the Disclosure Library (500,000-record cap, and the log would grow with every run); GitHub logs (expire after 90 days, cannot be compared across commits).
+
+### 2026-10-22: Disagreements matter only when they move a completeness check
+URL type and AI type disagree on half the English corpus. A disagreement is a failure only when choosing one type over the other changes a completeness check (sustainability family, annual family, Code of Conduct, Human Rights Policy), and a written row only for report-shaped 2023+ documents. Rejected: treating every disagreement as a failure (40,000 low-stakes ones, such as Financial Statement vs Interim Reports, change nothing).
+
+### 2026-10-21: One year field, fiscal-year convention
+`year` is the year in which the reporting period ends (the Source Library convention, 97% of analyst records), read from the full text with a confidence score; the AI year counts only when its quoted evidence is found in the document. Rejected: the year in the file name or upload folder (systematically off by one for reports published the following year).
+
+### 2026-10-21: Import from the Source Library, never write to it
+Analyst-curated reports 2023+ and missing policies are copied into the Disclosure Library with duplicate guards; the Source Library is read with a separate read-only token. Rejected: syncing both ways.
+
+### 2026-10-20: The owner adds, the robot files
+`add_link`, `add_file` and `approve_suggestions` need no other field and check duplicates themselves. Robot-found pages are proposed, not added. Rejected: forms with required fields; auto-adding discovered pages (the 37,000-junk-row sitemap experience).
+
+### 2026-10-19: Never delete without archive and tombstone
+Rows are discarded with a reason; deletion is a separate, archived step, and a deleted document is blocked from coming back. Rejected: deleting discarded rows directly.
+
+### 2026-07-17: Cross-domain PDFs admitted by default
+A PDF linked from the company's own monitored page is the company's document wherever it is hosted (Q4, Sitecore, mziq, HKEX, group domains); only standard-setter and rating hosts are excluded, and documents linked by 5+ companies are dropped at harvest. Rejected: blocking cross-domain PDFs (silently lost whole document estates) and an allowlist of CDNs (whack-a-mole).
+
+### 2026-07-15: Browser lane as a rotating queue
+Pages that need a browser are rendered oldest first, a fixed number a night, inside a time budget. Rejected: rendering everything each run (killed by GitHub's 6-hour limit, coverage became a lottery).
+
+### 2026-07-01: Queues key off text status fields
+Every queue selects on a text status (`cover_status`, `file_status`), never a number. Airtable treats 0 as blank, which kept failed rows in the queue forever.
+
+### 2026-06: Documents first, GPT-4o mini for classification
+About 88% of analyst citations come from documents, so the pipeline is built around documents, with web pages captured only when they are disclosures themselves. GPT-4o mini runs the Airtable AI fields for cost; Claude Haiku was considered.
