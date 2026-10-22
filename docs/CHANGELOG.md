@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-22 QA sample: the daily review cards (type, year and title on one card; blind controls), weekdays 04:31 UTC (#34)
 - 2026-10-22 Documentation: `CLAUDE.md` and `docs/` (architecture, scripts, quality, runbook, decisions, pitfalls, this changelog); documentation duty for every PR (#33)
 - 2026-10-22 Pipeline QA: `qa.py` quality log, `qa_sync.py` nightly sync of status fields into failure rows, robot_* snapshots and correction capture, offline tests and the Tests workflow (#32)
 - 2026-10-22 One year to use: more reader phrasings; the AI year counts only when its quote is found in the document (#31)
