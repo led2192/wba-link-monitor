@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""
+qa_sample.py — puts the day's review cases in Pipeline QA (labels, in_review ticked), so a person
+spends ten minutes where a label buys the most information.
+
+One card per document, judging three facts at once: type, year and title. The batch (default 15):
+  high_stakes_disagreement  5  open TYPE_DISAGREE failures; the URL/AI type pair with the fewest
+                               labels so far goes first, so every confusion pair gets measured
+  non_english               3  open TYPE_MISSING failures with detail non_english
+  agreement_control         3  documents whose two opinions do not conflict, drawn at random from
+                               report-family 2023+ rows; shown BLIND (no robot or AI type on the card;
+                               the pipeline's values go to hidden_values) so accuracy is not anchored
+  new_arrival               2  typed documents first seen in the last 7 days
+  unnamed                   2  reserved for cases the scripts cannot code; filled with extra
+                               disagreements while there are none
+A document already labelled is never picked again. The draw is seeded by the date, so a re-run on
+the same day picks the same cases (and the label_id upsert makes it a no-op).
+
+Housekeeping on every run: a card with a verdict, true_type, true_year or title_wrong gets
+reviewed ticked; reviewed cards and cards older than 7 days leave the queue (in_review unticked).
+
+Each new card gets a split: 70% eval, 15% fewshot, 15% regression (by hash of the label_id).
+Modes: dry run by default (prints the batch); --commit writes.
+Env: AIRTABLE_TOKEN, AIRTABLE_BASE (Disclosure Library, read only here), AIRTABLE_QA_TOKEN, AIRTABLE_QA_BASE.
+"""
+import argparse, collections, datetime as dt, hashlib, json, os, random, sys, time
+from urllib.parse import quote
+
+import qa
+from monitor_core import airtable_request
+
+API = "https://api.airtable.com/v0"
+LIB = "report_library"
+REPORT_FAMILY = ("Sustainability Report", "ESG Report", "CSR Report", "Integrated Report", "Impact Report",
+                 "Annual Report", "10K Form")
+QUOTA = (("high_stakes_disagreement", 5), ("non_english", 3), ("agreement_control", 3),
+         ("new_arrival", 2), ("unnamed", 2))
+DOC_FIELDS = ["library_id", "wba_id", "company_name", "doc_label", "document_url", "found_on", "cover_text",
+              "source_type", "source_type_check", "doc_language", "year", "year_source", "year_score",
+              "year_evidence", "source_title", "auto_title", "discard"]
+STALE_DAYS = 7
+
+
+# ---- pure helpers ----------------------------------------------------------------------------------
+def split_for(label_id):
+    h = int(hashlib.sha1(label_id.encode()).hexdigest()[:8], 16) % 100
+    return "eval" if h < 70 else ("fewshot" if h < 85 else "regression")
+
+
+def pair_of(message):
+    """'URL says A; AI says B' -> (A, B)."""
+    try:
+        a, b = message.split(";", 1)
+        return a.replace("URL says", "").strip(), b.replace("AI says", "").strip()
+    except Exception:
+        return ("", "")
+
+
+def pick_disagreements(failures, labelled_pairs, n, rng, exclude):
+    """Round-robin over pairs, least-labelled pair first, so every confusion gets measured."""
+    by_pair = collections.defaultdict(list)
+    for f in failures:
+        if f.get("library_id") in exclude:
+            continue
+        by_pair[pair_of(f.get("message") or "")].append(f)
+    for rows in by_pair.values():
+        rng.shuffle(rows)
+    order = sorted(by_pair, key=lambda p: (labelled_pairs.get(p, 0), -len(by_pair[p]), p))
+    out = []
+    while len(out) < n and any(by_pair[p] for p in order):
+        for p in order:
+            if by_pair[p] and len(out) < n:
+                out.append(by_pair[p].pop())
+    return out
+
+
+def ai_text(v):
+    if isinstance(v, dict):
+        return (v.get("value") or "").strip()
+    return (v or "").strip() if isinstance(v, str) else ""
+
+
+def card(doc, stratum, today):
+    """A labels row for one Disclosure Library document."""
+    lid = doc.get("library_id") or doc["_id"]
+    label_id = f"{lid}|document|{today}"
+    kw, ai = (doc.get("source_type") or "").strip(), (doc.get("source_type_check") or "").strip()
+    y = doc.get("year")
+    ys = doc.get("year_source")
+    sc = doc.get("year_score")
+    year_value = ""
+    if isinstance(y, (int, float)):
+        year_value = str(int(y)) + (f" (source {ys}" + (f", score {int(sc)}" if isinstance(sc, (int, float)) else "") + ")"
+                                    if ys not in (None, "") else "")
+    row = {"target": "document", "field": "document", "stratum": stratum, "company_name": doc.get("company_name"),
+           "wba_id": doc.get("wba_id"), "doc_label": (doc.get("doc_label") or "")[:250],
+           "document_url": doc.get("document_url"), "page_url": doc.get("found_on"), "library_id": lid,
+           "record_id": doc["_id"], "cover_snippet": (doc.get("cover_text") or "")[:400],
+           "doc_language": doc.get("doc_language"), "year_value": year_value,
+           "year_evidence": (doc.get("year_evidence") or "")[:1000],
+           "title_value": (ai_text(doc.get("source_title")) or doc.get("auto_title") or "")[:250],
+           "batch_date": today, "in_review": True, "sure": True, "split": split_for(label_id)}
+    if stratum == "agreement_control":
+        row["hidden_values"] = json.dumps({"source_type": kw, "source_type_check": ai, "effective": ai or kw})
+    else:
+        row["robot_value"] = kw
+        row["ai_value"] = ai
+    return label_id, row
+
+
+# ---- Airtable -----------------------------------------------------------------------------------------
+def get(token, base, table, fields, formula=None, max_rows=None, sort=None):
+    url = f"{API}/{base}/{quote(table)}"
+    headers = {"Authorization": f"Bearer {token}"}
+    params = [("pageSize", "100")] + [("fields[]", f) for f in fields]
+    if formula:
+        params.append(("filterByFormula", formula))
+    if sort:
+        params += [("sort[0][field]", sort[0]), ("sort[0][direction]", sort[1])]
+    out, offset = [], None
+    while True:
+        p = list(params) + ([("offset", offset)] if offset else [])
+        j = airtable_request("GET", url, headers, params=p).json()
+        for rec in j.get("records", []):
+            f = rec.get("fields", {}); f["_id"] = rec["id"]; out.append(f)
+        offset = j.get("offset")
+        if not offset or (max_rows and len(out) >= max_rows):
+            break
+        time.sleep(0.12)
+    return out[:max_rows] if max_rows else out
+
+
+def get_docs(token, base, record_ids):
+    if not record_ids:
+        return []
+    out = []
+    for i in range(0, len(record_ids), 40):
+        chunk = record_ids[i:i + 40]
+        formula = "OR(" + ",".join(f"RECORD_ID()='{r}'" for r in chunk) + ")"
+        out += get(token, base, LIB, DOC_FIELDS, formula)
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--date", default=dt.date.today().isoformat(), help="batch date (seeds the draw)")
+    args = ap.parse_args()
+    tok, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
+    qtok = os.environ.get("AIRTABLE_QA_TOKEN"); qbase = os.environ.get("AIRTABLE_QA_BASE", qa.QA_BASE_DEFAULT)
+    if not (tok and base and qtok):
+        sys.exit("Set AIRTABLE_TOKEN, AIRTABLE_BASE and AIRTABLE_QA_TOKEN.")
+    if args.commit:
+        os.environ["QA_COMMIT"] = "true"
+    today = args.date
+    run = qa.Run("qa_sample.py", token=qtok, base=qbase)
+
+    # what is already labelled, and how often each pair has been judged
+    labels = get(qtok, qbase, qa.T_LABELS, ["label_id", "library_id", "robot_value", "ai_value", "verdict",
+                                            "true_type", "true_year", "title_wrong", "reviewed", "in_review",
+                                            "batch_date"])
+    exclude = {l.get("library_id") for l in labels if l.get("library_id")}
+    labelled_pairs = collections.Counter((l.get("robot_value") or "", l.get("ai_value") or "")
+                                         for l in labels if l.get("reviewed"))
+
+    # housekeeping
+    stale_cut = (dt.date.fromisoformat(today) - dt.timedelta(days=STALE_DAYS)).isoformat()
+    house = []
+    for l in labels:
+        upd = {}
+        decided = bool(l.get("verdict") or l.get("true_type") or l.get("true_year") or l.get("title_wrong"))
+        if decided and not l.get("reviewed"):
+            upd["reviewed"] = True
+            upd["labelled_on"] = today
+            upd["labelled_by"] = "Edi"
+        if l.get("in_review") and (decided or (l.get("batch_date") or today) < stale_cut):
+            upd["in_review"] = False
+        if upd:
+            house.append({"id": l["_id"], "fields": upd})
+
+    rng = random.Random(today)
+    picked = []   # (stratum, record_id)
+    # 1. disagreements (+ the unnamed slots while no unnamed cases exist)
+    dis = get(qtok, qbase, qa.T_FAILURES, ["library_id", "record_id", "message"],
+              "AND({code}='TYPE_DISAGREE', {status}='open', {severity}='High')")
+    n_dis = dict(QUOTA)["high_stakes_disagreement"] + dict(QUOTA)["unnamed"]
+    for f in pick_disagreements(dis, labelled_pairs, n_dis, rng, exclude):
+        picked.append(("high_stakes_disagreement", f.get("record_id")))
+    # 2. non-English untyped
+    ne = get(qtok, qbase, qa.T_FAILURES, ["library_id", "record_id"],
+             "AND({code}='TYPE_MISSING', {detail}='non_english', {status}='open')")
+    ne = [f for f in ne if f.get("library_id") not in exclude]
+    rng.shuffle(ne)
+    picked += [("non_english", f.get("record_id")) for f in ne[:dict(QUOTA)["non_english"]]]
+    # 3. agreement controls: a seeded slice of report-family rows that do not conflict
+    hexch = "0123456789abcdef"[rng.randrange(16)]
+    fam = "OR(" + ",".join(f"{{source_type_check}}='{t}'" for t in REPORT_FAMILY) + ")"
+    ctrl = get(tok, base, LIB, ["library_id"],
+               f"AND(NOT({{discard}}), {{type_mismatch}}='', {fam}, {{year}}>=2023, {{cover_status}}='ok', "
+               f"RIGHT({{library_id}},1)='{hexch}')", max_rows=300)
+    ctrl = [c for c in ctrl if c.get("library_id") not in exclude]
+    rng.shuffle(ctrl)
+    picked += [("agreement_control", c["_id"]) for c in ctrl[:dict(QUOTA)["agreement_control"]]]
+    # 4. new arrivals
+    new = get(tok, base, LIB, ["library_id"],
+              "AND(NOT({discard}), {source_type_check}!='', IS_AFTER({first_seen}, DATEADD(TODAY(), -7, 'days')))",
+              max_rows=300)
+    new = [c for c in new if c.get("library_id") not in exclude]
+    rng.shuffle(new)
+    picked += [("new_arrival", c["_id"]) for c in new[:dict(QUOTA)["new_arrival"]]]
+
+    picked = [(s, r) for s, r in picked if r]
+    docs = {d["_id"]: d for d in get_docs(tok, base, [r for _, r in picked])}
+    seen, n = set(), collections.Counter()
+    for stratum, rid in picked:
+        d = docs.get(rid)
+        if not d or d.get("discard") or rid in seen:
+            continue
+        seen.add(rid)
+        label_id, row = card(d, stratum, today)
+        run.label(label_id, **row)
+        n[stratum] += 1
+        print(f"  [{stratum:24}] {(row.get('doc_label') or '')[:80]}", flush=True)
+
+    counters = {"by_stratum": dict(n), "housekeeping": len(house), "labels_total": len(labels),
+                "reviewed_total": sum(1 for l in labels if l.get("reviewed"))}
+    if args.commit and house:
+        run._write(qa.T_LABELS, house, "PATCH")
+    run.finish("ok", rows_in=len(picked), rows_out=sum(n.values()), counters=counters)
+    run.write_step_summary("ok", counters, title="QA sample")
+
+
+if __name__ == "__main__":
+    main()
