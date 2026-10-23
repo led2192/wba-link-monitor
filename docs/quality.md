@@ -71,6 +71,8 @@ Writes only with `QA_COMMIT=true` and `AIRTABLE_QA_TOKEN` set; never raises into
 ## Source Library as ground truth
 `sl_labels.py` matches every Source Library record to the Disclosure Library row holding the same file (same company and byte size, or same specific file name; rows imported from the Source Library are skipped) and writes the analyst's type and year as a label. The 2025 base was reviewed, so its labels count as sure; 2024 labels are written not sure. Analysts can still be wrong, so a label is also marked not sure when the pipeline has strong contrary evidence: a full-text year with score 80+ that differs, or URL and AI agreeing on a type that satisfies a different completeness check. Those doubtful cases are worth a person's look. The sure labels give the baseline evals: exact accuracy, and check-level accuracy (does the prediction satisfy the same completeness check as the truth).
 
+Rule changes to the year (`fiscal_year.py`, `date_documents.py`) are gated by `year_eval.py`: on the pull request it recomputes the {year} formula for every document with a sure true year, once with the rules on main and once with the branch, and posts accuracy plus the documents that flip either way. Merge only when it fixes more than it breaks; run the bulk rewrite after the merge.
+
 ## The ship rule
 A change to a rule or a prompt merges only when, on the evaluation labels, overall accuracy does not fall, accuracy on the classes that move a completeness check does not fall, and no regression case flips from right to wrong. `eval.py` records the verdict with the commit in `evals`.
 

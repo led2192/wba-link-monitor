@@ -31,6 +31,9 @@ CONFIDENCE SCORE (0-100), from four things that each make a wrong answer less li
   kinds       how many DIFFERENT kinds of evidence agree (a period statement AND the title AND a
               scope sentence agreeing is much stronger than one kind repeated)  up to 20 points
   cover       the winner also appears on the first two pages                       10 points
+
+Comparison periods are not evidence ("the preceding quarter ended ..."). A title on the first pages two or more years away from the decided year costs 30
+points instead of 10: such a gap means the text is quoting an older period (October 2026 cases).
 The score is calibrated against the analysts' years in the Source Library (evaluate mode): the
 threshold for "high" is set where the high-scoring years are at least 95% right.
 
@@ -138,6 +141,19 @@ def _end_year(kind, rx_i, m):
     return None, None
 
 
+# "As compared with the preceding quarter ended 31 December 2023": a comparison period, not the
+# document's own. Periods quoted from another document ("our Annual Report on Form 10-K for the year
+# ended December 31, 2024") are NOT dropped: measured on 3,986 true years (23 Oct 2026), in US
+# sustainability reports, CDP answers and proxy statements that 10-K is the reporting year itself, and
+# dropping it broke 11 years for 3 fixed.
+REF_BEFORE = re.compile(r"(?:pre\s?ceding|previous|prior|corresponding|comparative)\s+$", re.I)
+
+
+def is_reference(before):
+    """True when the text just before a period statement makes it a comparison period."""
+    return bool(REF_BEFORE.search(before[-40:]))
+
+
 def evidence(pages, max_pages=400):
     """[(kind, weight, end_year, end_month, page, quote)] from a list of (page_no, text)."""
     out = []
@@ -153,6 +169,8 @@ def evidence(pages, max_pages=400):
                     continue
                 if kind == "title" and pno > 2:
                     continue                  # a report title quoted on page 40 is a reference
+                if kind in ("period", "balance", "label") and is_reference(t[:m.start()]):
+                    continue                  # another document's period ("Form 10-K for the year ended ...")
                 q = t[max(0, m.start() - 40): m.end() + 20].strip()
                 out.append((kind, w, y, mm, pno, q))
     return out
@@ -199,7 +217,14 @@ def decide(pages, latest_possible=None):
     score = TIER_BASE[chosen_tier] + 20 * share
     for t, (y, _) in winners.items():
         if t != chosen_tier:
-            score += 10 if y == best else -10
+            if y == best:
+                score += 10
+            elif t == "title" and abs(y - best) >= 2:
+                # the cover says "Annual Report 2024" and the text says 2022: a report is titled by its
+                # period or the year after, never two years apart, so the text is quoting something else
+                score -= 30
+            else:
+                score -= 10
     score = int(max(0, min(100, round(score))))
     mm = months[best].most_common(1)[0][0] if months[best] else None
     end = f"{best}-{mm:02d}" if mm else str(best)

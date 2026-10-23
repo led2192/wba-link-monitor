@@ -60,6 +60,9 @@ MIN_YEAR = 2023
 GAP_DETAIL = {"Report hub page": "no_hub", "Sustainability page": "no_sust_page",
               "Sustainability report (recent)": "no_sust_report", "Annual report (recent)": "no_annual_report",
               "Code of Conduct": "no_coc", "Human Rights Policy": "no_hrp"}
+GAP_LINE = {"Report hub page": "No report hub", "Sustainability page": "No sustainability page",
+            "Sustainability report (recent)": "No sustainability report", "Annual report (recent)": "No annual report",
+            "Code of Conduct": "No Code of Conduct", "Human Rights Policy": "No Human Rights Policy"}
 OVERDUE_DETAIL = {"Sustainability report": "overdue_sust", "Annual report": "overdue_annual"}
 HIGH_GAPS = {"no_sust_report", "no_annual_report", "overdue_sust", "overdue_annual"}
 DISCARD_DETAIL = {"Duplicate of another document": ("DOC_DUPLICATE", "discard"),
@@ -290,9 +293,13 @@ def derive_company(f):
         d = GAP_DETAIL.get(tag)
         if not d:
             continue
-        line = next((ln for ln in gaps_text.split("\n") if ln.strip()), "")
+        # the gaps line for THIS check (each check writes its own line), plus why it was lost if known
+        start = GAP_LINE.get(tag, "")
+        line = next((ln for ln in gaps_text.split("\n") if start and ln.strip().startswith(start)), "")
+        lost = next((ln for ln in (f.get("completeness_change") or "").split("\n") if f"lost {tag}:" in ln), "")
+        msg = " | ".join(x for x in (line or tag, lost.split(": ", 1)[-1] if lost else "") if x)
         out.append(("CO_GAP", d, wba, "High" if d in HIGH_GAPS else "Medium",
-                    dict(ctx, message=(f.get("overdue_note") or line or tag)[:qa.MESSAGE_CHARS])))
+                    dict(ctx, message=msg[:qa.MESSAGE_CHARS])))
     for tag in f.get("overdue_reports") or []:
         d = OVERDUE_DETAIL.get(tag)
         if d:
@@ -409,7 +416,7 @@ def main():
     if "companies" not in skip:
         print(">>> companies ...", flush=True)
         for f in sweep(token, base, "companies",
-                       ["wba_id", "company_name", "gap_pages", "overdue_reports", "gaps", "overdue_note"],
+                       ["wba_id", "company_name", "gap_pages", "overdue_reports", "gaps", "overdue_note", "completeness_change"],
                        None, "companies"):
             swept["companies"] += 1
             for code, detail, key, sev, fields in derive_company(f):

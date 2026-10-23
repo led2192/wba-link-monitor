@@ -10,7 +10,9 @@ publication date too: an annual report published in April 2025 covers 2024.
 
 What decides the year, strongest first (decide()):
   1. file name    a year in the file name that is not part of a date: "Sustainability-Report-2024.pdf"
-  2. cover        a year in the title line at the top of the cover that is not a date
+  2. cover        a year in the title line at the top of the cover that is not a date (three or
+                  more different years there are a table header, "Ten Year Summary 2015 2016 ...",
+                  and are skipped)
                   ("2026 Remuneration policy"), else a reporting-period phrase on the first pages: "for the year ended 31 December
                   2017", "six months ended 30 June 2011", "Annual Report 2024", "FY2024",
                   "2024年年度报告". Never later than the upload folder or a date in the file name.
@@ -115,6 +117,10 @@ def decide(url, filename, cover, this_year=None):
     # the title line: a year at the very top of the cover that is not a date ("2026 Remuneration
     # policy", "Annual Report 2024") names the document; later phrases may quote other years
     head = TEXT_DATE.sub(" ", NOT_DOC_YEAR.sub(" ", DUE.sub(" ", text[:100])))
+    # a run of years at the top is a table header ("Ten Year Summary 2015 2016 2017 ..."), not a title
+    head_years = {int(y) for y in YEAR.findall(head)}
+    if len(head_years) >= 3:
+        head = ""
     for m in YEAR.finditer(head):
         y = int(m.group(1))
         if _ok(y, this_year) and y <= cap:
