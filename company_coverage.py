@@ -182,6 +182,8 @@ def origin(f):
     note = (f.get("Reviewer notes") or "").strip()
     if note.startswith("Uploaded by hand"):
         return "added by hand (file)"
+    if note.startswith("Found by research"):
+        return "found by the daily research"
     if note.startswith("From Source Library"):
         return "imported from the Source Library"
     if note.startswith("Added from the"):
