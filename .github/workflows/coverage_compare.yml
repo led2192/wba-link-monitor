@@ -22,7 +22,9 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - name: Compare
-        run: python company_coverage.py --compare --compare-rules v2,v3
+        run: |
+          set -o pipefail
+          python company_coverage.py --compare --compare-rules v2,v3 2>&1 | tee compare.log
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
@@ -30,6 +32,6 @@ jobs:
         if: github.event_name == 'pull_request' && always()
         run: |
           if [ -s coverage_compare.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file coverage_compare.md
-          else gh pr comment ${{ github.event.pull_request.number }} --body "Coverage comparison: no result (the run failed; see the job log)."; fi
+          else { echo "Coverage comparison failed. Last lines of the run:"; echo; echo '```'; tail -25 compare.log; echo '```'; } > fail.md; gh pr comment ${{ github.event.pull_request.number }} --body-file fail.md; fi
         env:
           GH_TOKEN: ${{ github.token }}
