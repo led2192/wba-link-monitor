@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-23 Completeness rules v2 prepared, not active: universal registration documents count as annual reports, whole annual reports with an embedded sustainability section count for the sustainability check; `--compare` and the Coverage rules comparison workflow measure it (#49)
 - 2026-10-23 Completeness rules v2 prepared, not active: universal registration documents count as annual reports, whole annual reports with an embedded sustainability section count for the sustainability check; `--compare` and the Coverage rules comparison workflow measure it (#PR)
 - 2026-10-23 Blocked sites probe: read-only measure of which free route (full browser request, headless Chromium, Internet Archive, stock-exchange filings) reaches documents and pages whose site refuses our robot (#46)
 - 2026-10-23 Address classifier: human rights policies named with modern slavery or as statements stay Human Rights Policy (3 of the 20 cases #45 broke); "sec form" no longer means 10-K, Philippine 17-C and US 8-K current reports are Statutory Documents; house rules: modern slavery statements are Social Reports, human rights statements are Human Rights Policy (classifier and Source Library labels) (#48)
