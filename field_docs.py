@@ -36,7 +36,7 @@ HUMAN = {
                          "year_from", "year_to", "companies", "look_in", "active", "run_now"},
     "mention_hits": {"review", "notes"},
     "failures": {"status", "review_note"},
-    "labels": {"verdict", "true_type", "true_value", "true_year", "title_wrong", "sure", "reason"},
+    "labels": {"verdict", "true_type", "true_value", "true_year", "title_wrong", "sure", "reason", "your_call"},
 }
 # Short notes for fields that carry no description in Airtable.
 EXTRA = {
