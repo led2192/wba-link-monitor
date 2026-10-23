@@ -148,13 +148,24 @@ def is_urd(f, t):
     return pages >= 100 and bool(URD_TITLE.search(title)) and not DEBT_TITLE.search(title)
 
 
+BLOCK = re.compile(r"a block of (\d+) sustainability pages", re.I)
+STATEMENT_NAMED = re.compile(r"contents names \"[^\"]*(sustainability statement|sustainability report|brsr|"
+                             r"business responsibility and sustainability|esg report|non-financial statement)", re.I)
+MIN_BLOCK = 8     # owner's decision 23 Oct 2026: a few CSR pages are not reporting sustainability
+
+
 def is_embedded(f, t):
-    """A whole annual report / 10-K / URD whose pages hold a substantive sustainability section."""
+    """A whole annual report / 10-K / URD whose pages hold a substantive sustainability section: a run
+    of 8+ sustainability pages, or a contents entry naming a sustainability statement or BRSR."""
     if t not in EMBEDDED_TYPES or _name(f.get("sustainability_class")) != "E embedded":
         return False
     if _name(f.get("scope")) in PIECES:
         return False
-    return t != "Registration Document" or is_urd(f, t)
+    if t == "Registration Document" and not is_urd(f, t):
+        return False
+    why = f.get("class_reason") or ""
+    m = BLOCK.search(why)
+    return bool((m and int(m.group(1)) >= MIN_BLOCK) or STATEMENT_NAMED.search(why))
 
 
 def origin(f):

@@ -55,11 +55,16 @@ class RulesV2(unittest.TestCase):
         self.assertFalse(C.is_urd({"doc_label": "Final Terms dated 30 January 2020", "page_count": 10}, "Registration Document"))
 
     def test_embedded_needs_class_e_and_a_whole_report(self):
-        f = {"sustainability_class": {"name": "E embedded"}, "scope": {"name": "Full document"}}
+        f = {"sustainability_class": {"name": "E embedded"}, "scope": {"name": "Full document"},
+             "class_reason": "a block of 24 sustainability pages (110 of 344 pages with text)"}
         self.assertTrue(C.is_embedded(f, "Annual Report"))
         self.assertFalse(C.is_embedded(dict(f, scope={"name": "Part of a report"}), "Annual Report"))
         self.assertFalse(C.is_embedded(dict(f, sustainability_class={"name": "F financial only"}), "Annual Report"))
         self.assertFalse(C.is_embedded(f, "Statutory Documents"))
+        self.assertFalse(C.is_embedded(dict(f, class_reason="9 sustainability pages, a block of 3 (9 of 405 pages with text)"),
+                                       "Annual Report"))
+        self.assertTrue(C.is_embedded(dict(f, class_reason='first pages: the contents names "sustainability statement"'),
+                                      "Annual Report"))
 
     def test_v2_only_adds_ways_to_pass(self):
         c = C.empty_stats()
