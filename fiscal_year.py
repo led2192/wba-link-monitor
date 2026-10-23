@@ -32,9 +32,7 @@ CONFIDENCE SCORE (0-100), from four things that each make a wrong answer less li
               scope sentence agreeing is much stronger than one kind repeated)  up to 20 points
   cover       the winner also appears on the first two pages                       10 points
 
-References to another document's period are not evidence ("Annual Report on Form 10-K for the
-year ended December 31, 2023" quoted inside a 2024 quarterly release; "the preceding quarter
-ended ..."). A title on the first pages two or more years away from the decided year costs 30
+Comparison periods are not evidence ("the preceding quarter ended ..."). A title on the first pages two or more years away from the decided year costs 30
 points instead of 10: such a gap means the text is quoting an older period (October 2026 cases).
 The score is calibrated against the analysts' years in the Source Library (evaluate mode): the
 threshold for "high" is set where the high-scoring years are at least 95% right.
@@ -143,26 +141,17 @@ def _end_year(kind, rx_i, m):
     return None, None
 
 
-# A period named right after another document is that document's period, not this one's:
-# "...our Annual Report on Form 10-K for the year ended December 31, 2023" inside a 2024 quarterly
-# release, "the risks described in the 2023 Universal Registration Document for the year ended ...".
-# Also "the preceding quarter ended ...". Checked on the text just before the match; "this Annual
-# Report on Form 10-K" refers to itself and still counts.
-REF_BEFORE = re.compile(
-    r"(?:form\s*(?:10-?\s?k|20-?\s?f)\b[^.;]{0,30}"
-    r"|(?:in|see|refer\s+to|described\s+in|included\s+in|contained\s+in|incorporated\s+by\s+reference\s+(?:in|from)|"
-    r"set\s+out\s+in|disclosed\s+in)\s+(?:the\s+|our\s+|its\s+|[\w&.\'\u2019-]+(?:\'s|\u2019s)\s+)?(?:\d{4}\s+)?"
-    r"(?:annual\s+report|integrated\s+report|universal\s+registration\s+document|registration\s+document|"
-    r"annual\s+financial\s+report)[^.;]{0,40}"
-    r"|(?:pre\s?ceding|previous|prior|corresponding|comparative)\s+)$", re.I)
-SELF_REF = re.compile(r"\b(?:this|present|current)\s+(?:annual\s+report\s+on\s+)?(?:form|annual|integrated|"
-                      r"universal|registration|report)[^.;]{0,60}$", re.I)
+# "As compared with the preceding quarter ended 31 December 2023": a comparison period, not the
+# document's own. Periods quoted from another document ("our Annual Report on Form 10-K for the year
+# ended December 31, 2024") are NOT dropped: measured on 3,986 true years (23 Oct 2026), in US
+# sustainability reports, CDP answers and proxy statements that 10-K is the reporting year itself, and
+# dropping it broke 11 years for 3 fixed.
+REF_BEFORE = re.compile(r"(?:pre\s?ceding|previous|prior|corresponding|comparative)\s+$", re.I)
 
 
 def is_reference(before):
-    """True when the text just before a period statement names another document's period."""
-    tail = before[-110:]
-    return bool(REF_BEFORE.search(tail)) and not SELF_REF.search(tail)
+    """True when the text just before a period statement makes it a comparison period."""
+    return bool(REF_BEFORE.search(before[-40:]))
 
 
 def evidence(pages, max_pages=400):
