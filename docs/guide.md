@@ -68,7 +68,7 @@ The same journey runs on demand in 10 to 15 minutes when you tick `scan_now` on 
 4. Look at the week in `base_health` (completeness trend, failed jobs) and at the companies whose `completeness_change` is not empty: those lost a check during the week, and the field says which document used to pass it and what happened to it.
 
 ### When the Monday list has items for you
-At most 5 a week (section 7.2), plus any document an analyst flags in the Analysts interface (page Flagged documents).
+At most 5 a week (section 7.2), plus any document an analyst flags in the Analysts interface (page Flagged documents), if any do.
 
 ### Monthly
 Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipeline QA. When `base_health.base_full` passes 80%, run Purge discarded rows (dry run first).
@@ -97,7 +97,7 @@ Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipe
 | **Base health**, Scan pages | Pages waiting for an on-demand scan, and their results |
 | **Coverage**, Coverage dashboard, Missing key sources, Source gaps | Companies by gap type, for planning |
 | **Source Review**, My portfolio, Add URL | A portfolio view per analyst, and a form to add a page |
-| **Analysts**, Companies, Flagged documents | Shared with analysts (interface-only access). They see each company's documents and pages, add links and files, and flag documents that look wrong. A flag never changes a row; you decide |
+| **Analysts**, Companies, Flagged documents | Shared with analysts (interface-only access). They see each company's documents and pages, may add links and files, and may flag documents that look wrong. A bonus: nothing depends on analysts doing it. A flag never changes a row; you decide |
 | **Mentions**, Review, Searches | The mention searches and their hits, for review |
 
 ### 5.3 The few fields you edit
@@ -204,16 +204,24 @@ Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**,
 
 **Failure codes** (closed list, details in [quality.md](quality.md)): PAGE_UNREACHABLE, PAGE_GONE, PAGE_BLOCKED, PAGE_EMPTY, PAGE_UNHARVESTED, PAGE_WRONG_TYPE, DOC_FETCH_FAIL, DOC_UNREADABLE, DOC_DROPPED, DOC_DUPLICATE, DOC_WRONG_ROW, TYPE_DISAGREE, TYPE_MISSING, LABEL_CORRECTION, DOC_FLAGGED, CO_GAP, CO_MISSED_KNOWN, RUN_FAILED. `severity` High means the failure hides or costs a 2023+ sustainability or annual report, or blocks a whole domain.
 
-**Who acts on failures.** Not you, almost never. There are tens of thousands of failure rows; nobody works through them by hand. Each kind has an owner (`who_fixes` says it on every row):
+**Who acts on failures.** Not you, and not the analysts. There are tens of thousands of failure rows, one owner, and analysts who may or may not review. Every kind of failure has an automatic owner, a script or a scheduled Claude task (`who_fixes` says it on every row). Where that owner is not built yet, the failure stays open and counted until it is: a gap in the design, not a job for a person.
 
-| Code | Who acts |
-| --- | --- |
-| PAGE_GONE, PAGE_WRONG_TYPE | the weekly review: it finds the new address or fixes the page type itself |
-| PAGE_BLOCKED, DOC_FETCH_FAIL blocked | the robot: blocked-site retries and archive copies (being built); see section 11 |
-| CO_GAP | the daily gap research |
-| TYPE_DISAGREE, TYPE_MISSING, and every other code | the code, fixed by the weekly review as pull requests and measured with the labels |
-| LABEL_CORRECTION, DOC_DUPLICATE, DOC_WRONG_ROW | nobody: they record something already done |
-| DOC_FLAGGED | **you**: an analyst flagged a document. Rare. Fix it in the Disclosure Library (type, curated title, discard) and clear `analyst_flag` |
+| Code | Automatic owner | Built? |
+| --- | --- | --- |
+| PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
+| PAGE_GONE | the weekly review finds the new address and adds it; to build: a nightly job that searches the company's site for the replacement page and adds it when the match is unambiguous | weekly review only (needs the task update) |
+| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | monthly retry with browser headers and Internet Archive copies; later a runner on an office-network computer | to build |
+| PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
+| PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
+| DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
+| DOC_UNREADABLE | to build: text recognition (OCR) for scanned PDFs | to build |
+| DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
+| TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
+| TYPE_MISSING (non-English) | to build: typing of non-English documents | to build |
+| CO_GAP | the daily gap research (25 companies a day) | yes |
+| CO_MISSED_KNOWN | Source Library matching, the daily research | partly |
+| RUN_FAILED | base_health reports it; to build: automatic re-run of a failed job once | to build |
+| DOC_FLAGGED | the owner. A bonus signal: analysts may or may not flag, and nothing depends on it | yes |
 
 What reaches you is the "Para ti esta semana" list in the Monday notification: at most 5 items a week that only a person can do, typically a high-priority report on a site that blocks robots, with the link, for you to download and drop in `add_file`. Open failures is there to look at when you are curious, not a to-do list.
 

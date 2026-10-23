@@ -21,9 +21,9 @@ Day-to-day operation through the Airtable interfaces, and what to do when someth
 - **Company really has not published:** set `queue_snooze_until`.
 
 ## Pipeline QA failures: not a to-do list
-Pipeline QA is where problems are found and counted; the Disclosure Library is where they are fixed. You do not work through failure rows: there are tens of thousands, and each kind has an owner (`who_fixes`). The weekly review fixes gone and wrongly typed pages itself and fixes the rest in code; the daily research works on company gaps; the robot retries blocked sites.
+Pipeline QA is where problems are found and counted; the Disclosure Library is where they are fixed. You do not work through failure rows, and neither do analysts: there are tens of thousands, and each kind has an automatic owner (`who_fixes`; the table is in [quality.md](quality.md)). The weekly review fixes gone and wrongly typed pages itself and fixes the rest in code; the daily research works on company gaps; the robot retries blocked sites.
 1. What needs you arrives in the Monday notification, "Para ti esta semana": at most 5 items, each with the company and the link (typically a report only a person can download). Do them with the tools under "Add things" and "Fix things".
-2. Analyst flags (DOC_FLAGGED) are yours: Analysts interface, Flagged documents.
+2. Analyst flags (DOC_FLAGGED), when they come, are yours: Analysts interface, Flagged documents. Nothing depends on analysts flagging.
 3. Never fix anything by editing a failure row. The next sync sees the fix in the library and closes the failure itself (`fixed`, or `resolved_silently` after 30 days without recurring).
 4. Only status is yours to set on a failure, if you want: `expected` when the behaviour is correct, `wontfix` when it is not worth fixing.
 
