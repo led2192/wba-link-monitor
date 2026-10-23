@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-23 Gone report pages (404/410) are replaced nightly: the company's site is searched and a clear best match is added automatically, the gone page unticked with a dated note; clear matches for missing hubs and sustainability pages are added without waiting for approval (#54)
 - 2026-10-23 A scheduled or chained job that fails on its first attempt re-runs its failed jobs once, two minutes later (new workflow Re-run failed job once); RUN_FAILED now has an automatic owner (#52)
 - 2026-10-23 AI titles that are sentences instead of titles ("I don't have access to the document text...", over 100 rows) no longer show: new formula `report_library.ai_title`, used by `doc_label` (live in Airtable) and by the cards' `title_value` (#51)
 - 2026-10-23 Daily cards: Claude (Opus) labels every card with confidence and quoted evidence and leaves about 5 for the owner; `your_call` (Agree / Disagree / Can't tell) replaces classifying from scratch; `qa_sample.py` settles cards into labels (`settle()`), Claude's answer for cards it left out or unanswered for 3 days; interface page "Check Claude's answers" replaces Today's cases; new labels fields `your_call`, `claude_confidence`, `claude_evidence`, `check_reason` (#51)
