@@ -70,8 +70,10 @@ LIB = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
 # report_library fields
 F_ID = "library_id"; F_WBA = "wba_id"; F_NAME = "company_name"; F_FILE = "file"; F_DISCARD = "discard"
 F_TYPE_AI = "source_type_check"; F_TYPE_KW = "source_type"; F_YEAR = "year"; F_LANG = "doc_language"
-F_PAGES = "page_count"; F_LABEL = "doc_label"; F_URL = "document_url"
-SWEEP_FIELDS = [F_ID, F_WBA, F_NAME, F_FILE, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_LANG, F_PAGES, F_LABEL, F_URL]
+F_PAGES = "page_count"; F_LABEL = "doc_label"; F_URL = "document_url"; F_FSTATUS = "file_status"
+SWEEP_FIELDS = [F_ID, F_WBA, F_NAME, F_FILE, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_LANG, F_PAGES, F_LABEL, F_URL, F_FSTATUS]
+# a row whose PDF is over Airtable's 5 MB upload limit has no attachment: read it from its address
+HAS_PDF = f"OR({{{F_FILE}}}, AND({{{F_FSTATUS}}}='too_big', {{{F_URL}}}!=''))"
 
 # Types read in full by default. Names match the source_type_check options verbatim.
 CORE_TYPES = [
@@ -148,7 +150,12 @@ def row_doc(rec):
     f = rec.get("fields", {})
     lid = (f.get(F_ID) or "").strip()
     att = pick_attachment(f.get(F_FILE))
-    if not lid or not att:
+    fs = f.get(F_FSTATUS); fs = fs.get("name") if isinstance(fs, dict) else fs
+    if not att and fs == "too_big" and f.get(F_URL):
+        att = {}                                   # read from document_url (see HAS_PDF)
+    elif not lid or not att:
+        return None
+    if not lid:
         return None
     y = year_of(f)
     return {"id": lid, "rec": rec["id"], "wba": (f.get(F_WBA) or "").strip(), "co": f.get(F_NAME) or "",
@@ -183,7 +190,7 @@ def sweep_scope(types, year_min, keep_undated):
     The type filter runs server-side (it removes most of the 330k rows); the effective-type and
     year rules are applied here, where they can be read."""
     request, url, headers = _airtable()
-    conds = [f"{{{F_FILE}}}", f"NOT({{{F_DISCARD}}})"]
+    conds = [HAS_PDF, f"NOT({{{F_DISCARD}}})"]
     if types:
         ors = ["{%s}='%s'" % (fld, t.replace("'", "\\'")) for t in types for fld in (F_TYPE_AI, F_TYPE_KW)]
         conds.append("OR(" + ",".join(ors) + ")")
@@ -495,7 +502,8 @@ def tasks_for(batch, max_mb):
     for d in batch:
         a = pick_attachment(cells.get(d["rec"]), d.get("att"))
         out.append({"id": d["id"], "rec": d["rec"], "att": (a or {}).get("id") or d.get("att") or "",
-                    "url": (a or {}).get("url"), "timeout": doc_timeout(d.get("pages")), "max_mb": max_mb})
+                    "url": (a or {}).get("url") or (d.get("url") if not d.get("att") else None),
+                    "timeout": doc_timeout(d.get("pages")), "max_mb": max_mb})
     return out
 
 

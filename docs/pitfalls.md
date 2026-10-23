@@ -29,6 +29,7 @@ Lessons that cost time to learn. Read before changing the area they name.
 - **A cited 10-K is usually the right year.** US sustainability reports, CDP answers and proxy statements cite "our Annual Report on Form 10-K for the year ended ..." for the very period they report on. Ignoring such citations broke more years than it fixed (measured 23 Oct 2026). Measure a rule before believing an anecdote.
 - **The top of a cover can be a table.** "Ten Year Summary 2015 2016 ... 2024" starts with the oldest year. Three or more years in the title line are a header, not the document's year.
 - **Bulk rewrites move the completeness numbers.** Run a bulk year or type rewrite only after its pull request shows the measured effect (`year_eval.py`), and read the next morning's `completeness_change` on the companies that lost a check.
+- **The biggest file is usually the most important one.** Full annual and integrated reports run to 10-60 MB; Airtable's upload endpoint stops at 5 MB. Anything that needs the attachment silently skips them; read from the document's own address instead.
 - **AI cost scales with input length.** The cover_text cap (`COVER_CHARS`) is the lever; whitespace collapsing barely matters.
 
 - **The sections of a split report carry the whole report's contents.** UK and South African report sections repeat the full navigation bar ("Strategic report | Governance | Financial statements") on their first pages, so the parts named there say nothing about the file in hand. Compare the contents page numbers with the file's own page count.
