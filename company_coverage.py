@@ -93,7 +93,7 @@ STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
 C_CHANGE = "completeness_change"
 # companies fields this script READS for the queue but never writes (they belong to the person or
 # to discover_pages.py)
-QUEUE_INPUTS = ["website", "suggested_links", "queue_snooze_until", "completeness_change"]
+QUEUE_INPUTS = ["website", "suggested_links", "queue_snooze_until", "completeness_change", "company_name"]
 C_UPDATED = "coverage_updated"
 
 # Effective-type families for recency flags. Names match source_type_check options verbatim.
@@ -115,6 +115,46 @@ REPORT_TYPES  = SUST_FAMILY | ANNUAL_FAMILY | {
     "SASB Index", "Engagement Report"}
 
 YEAR_OK = re.compile(r"^20[0-3][0-9]$")   # sanity guard on the {year} formula output
+
+# Rules version. v1: the checks count by type only. v2 (proposed Oct 2026, measured with --compare
+# before it is switched on):
+#   annual report check  also passes on a universal registration document (France, Spain, Belgium:
+#                        the URD is the annual report), recognised by its title and 100+ pages; the
+#                        "Registration Document" type also holds bond prospectuses, final terms and
+#                        pricing supplements, which never count
+#   sustainability check also passes on a whole annual report, 10-K or URD whose pages hold a
+#                        substantive sustainability section (sustainability_class = E embedded):
+#                        CSRD sustainability statements, India's BRSR, Hong Kong ESG sections
+RULES = os.environ.get("COVERAGE_RULES", "v1")
+URD_TITLE = re.compile(r"universal\s+registration|registration\s+document|document\s+d.enregistrement|"
+                       r"annual\s+financial\s+report|rapport\s+financier\s+annuel|documento\s+de\s+registro|"
+                       r"annual\s+report|rapport\s+annuel", re.I)
+DEBT_TITLE = re.compile(r"prospectus|final\s+terms|pricing\s+supplement|supplement|offering|programme|"
+                        r"program\b|notes\s+due|debt\s+securities|memorandum|bonds?\b", re.I)
+PIECES = ("Part of a report", "Summary or short document")
+EMBEDDED_TYPES = {"Annual Report", "10K Form", "Registration Document"}
+
+
+def _name(v):
+    return v.get("name") if isinstance(v, dict) else v
+
+
+def is_urd(f, t):
+    """A universal registration document: the annual report in France, Spain, Belgium."""
+    if t != "Registration Document":
+        return False
+    pages = f.get("page_count") or 0
+    title = f.get("doc_label") or ""
+    return pages >= 100 and bool(URD_TITLE.search(title)) and not DEBT_TITLE.search(title)
+
+
+def is_embedded(f, t):
+    """A whole annual report / 10-K / URD whose pages hold a substantive sustainability section."""
+    if t not in EMBEDDED_TYPES or _name(f.get("sustainability_class")) != "E embedded":
+        return False
+    if _name(f.get("scope")) in PIECES:
+        return False
+    return t != "Registration Document" or is_urd(f, t)
 
 
 def origin(f):
@@ -187,7 +227,8 @@ def aggregate(wbas=None):
             "urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(), "docs_with_file": 0, "docs_typed": 0,
             "type_counts": {}, "type_latest": {}, "latest_report_year": None,
-            "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": "", "check_doc": {}, "fam_best": {}})
+            "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": "", "check_doc": {}, "fam_best": {},
+            "urd_best": (0, "", ""), "emb_best": (0, "", "")})
 
     print(">>> sweeping monitored_links ...", flush=True)
     for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST, "http_status"], "monitored_links",
@@ -215,7 +256,8 @@ def aggregate(wbas=None):
 
     print(">>> sweeping report_library ...", flush=True)
     for rec in sweep(LIB, [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_FILE, F_DISCARD, "created_time", "doc_label",
-                           "library_id", "document_url", "page_type", "Reviewer notes"], "report_library",
+                           "library_id", "document_url", "page_type", "Reviewer notes", "page_count",
+                           "sustainability_class", "scope", "class_reason"], "report_library",
                      wba_formula(wbas)):
         f = rec.get("fields", {})
         wba = (f.get(F_WBA) or "").strip()
@@ -252,6 +294,10 @@ def aggregate(wbas=None):
                 c["ann_years"].add(y)
                 if y > c["fam_best"].get("annual", (0, ""))[0]:
                     c["fam_best"]["annual"] = (y, rec.get("id"))
+        if y is not None and is_urd(f, t) and y > c["urd_best"][0]:
+            c["urd_best"] = (y, rec.get("id"), f.get("doc_label") or "")
+        if y is not None and is_embedded(f, t) and y > c["emb_best"][0]:
+            c["emb_best"] = (y, rec.get("id"), f"{f.get('doc_label') or ''} | {f.get('class_reason') or ''}")
         if y is not None:
             if t:
                 if y > c["type_latest"].get(t, 0):
@@ -385,7 +431,7 @@ def queue(c, out, inputs, year_min, today=None):
     return {"queue_score": score, "queue_item": item, "queue_action": action}
 
 
-def compose(c, year_min):
+def compose(c, year_min, rules=None):
     """Stats dict -> the field values to sit on the companies row."""
     lines = []
     for t, n in sorted(c["type_counts"].items(), key=lambda kv: (-kv[1], kv[0])):
@@ -393,8 +439,15 @@ def compose(c, year_min):
         lines.append(f"{t}: {n} (latest {y})" if y else f"{t}: {n}")
     breakdown = "\n".join(lines)
 
+    rules = rules or RULES
+
     def family_current(family):
-        return any(c["type_latest"].get(t, 0) >= year_min for t in family)
+        ok = any(c["type_latest"].get(t, 0) >= year_min for t in family)
+        if rules == "v2" and family is ANNUAL_FAMILY:
+            ok = ok or c.get("urd_best", (0,))[0] >= year_min
+        if rules == "v2" and family is SUST_FAMILY:
+            ok = ok or c.get("emb_best", (0,))[0] >= year_min
+        return ok
 
     flags = []
     if c["urls_total"] == 0:
@@ -552,7 +605,8 @@ def empty_stats():
     return {"urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(),
             "docs_with_file": 0, "docs_typed": 0, "type_counts": {}, "type_latest": {},
-            "latest_report_year": None, "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": "", "check_doc": {}, "fam_best": {}}
+            "latest_report_year": None, "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": "", "check_doc": {}, "fam_best": {},
+            "urd_best": (0, "", ""), "emb_best": (0, "", "")}
 
 
 def companies_index(wbas=None):
@@ -586,6 +640,51 @@ def changed(current, target):
     return any(_norm(current.get(k)) != _norm(target.get(k)) for k in STAT_FIELDS)
 
 
+def compare(comp, agg, year_min, out="coverage_compare.md"):
+    """Completeness per company under v1 and v2, the companies that change, and the documents that
+    make them change (for a hand check before v2 is switched on). Writes nothing to Airtable."""
+    import random
+    names = {w: (cur.get("company_name") or "") for w, (_, cur) in comp.items()}
+    rows, gains = [], {"Annual report (recent)": [], "Sustainability report (recent)": []}
+    for w in comp:
+        st = agg.get(w) or empty_stats()
+        a, b = compose(st, year_min, "v1"), compose(st, year_min, "v2")
+        rows.append((a["completeness"], b["completeness"]))
+        for check, key in (("Annual report (recent)", "urd_best"), ("Sustainability report (recent)", "emb_best")):
+            if check in a["gap_pages"] and check not in b["gap_pages"]:
+                y, rid, why = st[key]
+                gains[check].append((w, names.get(w, ""), y, why))
+    n = len(rows) or 1
+    v1 = sum(r[0] for r in rows) / n; v2 = sum(r[1] for r in rows) / n
+    full1 = sum(1 for r in rows if r[0] == 1) / n; full2 = sum(1 for r in rows if r[1] == 1) / n
+    L = ["## Completeness: current rules (v1) vs proposed (v2)", "",
+         "v2 = a universal registration document (title + 100 pages) counts as the annual report; a whole annual "
+         "report, 10-K or URD with an embedded sustainability section (sustainability_class E) counts for the "
+         "sustainability check. Read-only: nothing written.", "",
+         "| | v1 | v2 |", "|---|---:|---:|",
+         f"| average completeness | {v1:.1%} | {v2:.1%} |", f"| companies at 100% | {full1:.1%} | {full2:.1%} |",
+         f"| companies passing the annual check | {n - sum(1 for w in comp if 'Annual report (recent)' in compose(agg.get(w) or empty_stats(), year_min, 'v1')['gap_pages']):,} | "
+         f"{n - sum(1 for w in comp if 'Annual report (recent)' in compose(agg.get(w) or empty_stats(), year_min, 'v2')['gap_pages']):,} |",
+         f"| companies passing the sustainability check | {n - sum(1 for w in comp if 'Sustainability report (recent)' in compose(agg.get(w) or empty_stats(), year_min, 'v1')['gap_pages']):,} | "
+         f"{n - sum(1 for w in comp if 'Sustainability report (recent)' in compose(agg.get(w) or empty_stats(), year_min, 'v2')['gap_pages']):,} |",
+         "", "No company loses a check under v2 (the rules only add ways to pass).", ""]
+    rnd = random.Random(23)
+    for check, label in (("Annual report (recent)", "Annual check gained through a universal registration document"),
+                         ("Sustainability report (recent)", "Sustainability check gained through an embedded section (hand-check sample)")):
+        g = gains[check]
+        L += [f"### {label}: {len(g)} companies", ""]
+        sample = g if len(g) <= 40 else rnd.sample(g, 40)
+        if sample:
+            L += ["| company | year | document and evidence |", "|---|---:|---|"]
+            L += [f"| {nm[:30]} ({w}) | {y} | {why[:230].replace('|', '/')} |" for w, nm, y, why in sorted(sample, key=lambda x: x[1])]
+        L.append("")
+    text = "\n".join(L)
+    print(text, flush=True)
+    open(out, "w").write(text + "\n")
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(text + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true", help="write changed rows to companies")
@@ -593,6 +692,8 @@ def main():
                     help="a report family counts as current when its latest year >= this")
     ap.add_argument("--wba", default="", help="only these companies (comma-separated wba_ids); "
                     "used by scan_now.py to refresh one company right after a scan")
+    ap.add_argument("--compare", action="store_true",
+                    help="read-only: completeness under the v1 rules vs the proposed v2 rules (coverage_compare.md)")
     args = ap.parse_args()
     wbas = [w.strip() for w in args.wba.split(",") if w.strip()]
 
@@ -609,6 +710,9 @@ def main():
         raise
 
     agg = aggregate(wbas)
+    if args.compare:
+        compare(comp, agg, args.year_min)
+        return
 
     orphans = sorted((w for w in agg if w not in comp),
                      key=lambda w: -agg[w]["docs_total"])

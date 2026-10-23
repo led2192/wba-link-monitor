@@ -5,6 +5,7 @@ report_library_purge_*.jsonl.gz
 dedupe_log.csv
 qa_sync_summary.md
 sl_labels_summary.md
+coverage_compare.md
 blocked_probe.csv
 blocked_probe.md
 year_eval.md

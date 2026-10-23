@@ -1,0 +1,35 @@
+name: Coverage rules comparison
+
+# Read-only: average completeness and every company that changes under the current rules (v1) and
+# the proposed ones (v2: universal registration documents as annual reports, embedded sustainability
+# sections in whole annual reports). A pull request touching company_coverage.py posts the result.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: [company_coverage.py, .github/workflows/coverage_compare.yml]
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Compare
+        run: python company_coverage.py --compare
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+      - name: Post the comparison on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s coverage_compare.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file coverage_compare.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Coverage comparison: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
