@@ -1,8 +1,9 @@
 name: Suggest missing report pages
 
-# Nightly: for companies missing a report hub or sustainability page (new companies first, then by
-# queue_score), search their website and PROPOSE pages in companies.suggested_links. Nothing is
-# added until the person ticks approve_suggestions. Read-only on monitored_links.
+# Nightly: for companies with a gone report page (404/410) or missing a report hub or sustainability
+# page, search their website. A clear best match is added automatically (suggested_links with
+# approve_suggestions ticked; inbox.py adds it within 30 minutes); ambiguous candidates stay as
+# suggestions. Gone pages are unticked with a dated note. A pull request touching it runs a dry run.
 on:
   schedule:
     - cron: "40 4 * * *"
@@ -14,6 +15,8 @@ on:
       wba:
         description: "Only these companies (comma-separated wba_ids). Blank = the usual queue."
         default: ""
+  pull_request:
+    paths: [discover_pages.py, .github/workflows/discover_pages.yml]
 
 concurrency:
   group: discover-pages
@@ -23,15 +26,30 @@ jobs:
   discover:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Search websites and write suggestions
-        run: python discover_pages.py --commit --max "${{ inputs.max || '150' }}" --wba "${{ inputs.wba }}"
+      - name: Search websites, add clear matches, write suggestions
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python discover_pages.py --max 40 --max-gone 40
+          else
+            python discover_pages.py --commit --max "${{ inputs.max || '150' }}" --wba "${{ inputs.wba }}"
+          fi
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_TABLE: monitored_links
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s discover_pages.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file discover_pages.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Suggest missing report pages: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}

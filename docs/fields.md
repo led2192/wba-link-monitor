@@ -386,14 +386,14 @@ One row per distinct failure (code + deterministic key), never per occurrence. O
 
 ### labels
 
-The golden set: one row per judged document (type, year and title on one card), or one fact about a page or company. Rows are created by qa_sample.py (the daily batch, in_review ticked), qa_sync.py (corrections) and sl_labels.py (Source Library). A person fills true_type, true_year, title_wrong, sure and reason; verdict is optional. year_eval.py and sl_labels.py read rows with sure ticked. Never delete a label: an unsure one is still evidence.
+The golden set: one row per judged document (type, year and title on one card), or one fact about a page or company. Rows are created by qa_sample.py (the daily cards), qa_sync.py (corrections) and sl_labels.py (Source Library). On daily cards Claude (Opus) writes the answer with confidence and evidence; the owner checks about 5 a day with your_call; qa_sample.py settles every card into a label with labelled_by (Edi, Claude). Claude's labels never score the Airtable AI type. Never delete a label: an unsure one is still evidence.
 
 | Field | Kind | Who writes it | What it means |
 | --- | --- | --- | --- |
 | `label_id` | text | robot | library_id (or page URL key, or wba_id) + \| + field + \| + batch date. Unique. |
 | `target` | pick one | robot | Values: document, page, company. |
 | `field` | pick one | robot | The one fact being judged on this row Values: type, subtype, year, title, language, company, is_disclosure, is_duplicate, page_type, is_report_hub, missing_report, document. |
-| `stratum` | pick one | robot | Why the sampler picked this case. agreement_control rows are shown without any suggestion, to keep the measurement honest. Values: high_stakes_disagreement, non_english, agreement_control, new_arrival, unnamed, correction, source_library, audit. |
+| `stratum` | pick one | robot | Why the sampler picked this case. On agreement_control rows the pipeline's type is hidden (hidden_values), from Claude and from you, to keep the measurement honest. Values: high_stakes_disagreement, non_english, agreement_control, new_arrival, unnamed, correction, source_library, audit. |
 | `company_name` | text | robot |  |
 | `wba_id` | text | robot |  |
 | `doc_label` | text | robot | Year, company and title as the Disclosure Library shows them |
@@ -406,7 +406,7 @@ The golden set: one row per judged document (type, year and title on one card), 
 | `doc_language` | text | robot |  |
 | `robot_value` | text | robot | What the URL or rule-based pass said (source_type, doc_year, auto_title, ...) |
 | `ai_value` | text | robot | What the AI field said (source_type_check, source_title, ...). Blank on agreement_control rows until reviewed. |
-| `suggested_value` | text | robot | Claude's pre-label when pre-labelling is on; blank on control rows |
+| `suggested_value` | text | robot | Claude's answer for the type (daily labelling, Opus). Becomes true_type when you Agree, when you Disagree without correcting the type, or when the card settles with Claude's answer. |
 | `verdict` | pick one | you | Optional, and you can ignore it. Which of the two opinions shown was right; it only means something when the card shows both a robot_value and an ai_value. true_type and true_year are what the evaluations count. Values: AI is right, URL is right, Both are right, Neither, Cannot tell. |
 | `true_type` | pick one | you | Yours, on every card: the right type of the document, even when the robot or the AI already had it right. Same 24 options as source_type_check, plus Not a disclosure. What the type evaluations compare against. Values: Sustainability Report, ESG Report, CSR Report, Integrated Report, Impact Report, Annual Report, 10K Form, Financial Statement, Interim Reports, Registration Document, Statutory Documents, Company Presentations, Climate Report, Environmental Reports, Social Reports, CDP Report, GRI, SASB Index, Engagement Report, Certifications, Code of Conduct, Human Rights Policy, Policy Documents, UNKNOWN, Not a disclosure. |
 | `true_value` | text | you | The right value for any other field (a year, a title, a language, a company, yes or no) |
@@ -415,20 +415,24 @@ The golden set: one row per judged document (type, year and title on one card), 
 | `labelled_by` | pick one | robot | Values: Edi, Claude, correction, source_library, audit. |
 | `labelled_on` | date | robot |  |
 | `batch_date` | date | robot | The day this case was put in the review batch |
-| `in_review` | checkbox | robot | In today's batch. Cleared by the sampler once reviewed. |
-| `reviewed` | checkbox | robot | Ticked by the sampler once you have filled true_type, true_year or title_wrong (or a verdict); the card then leaves Today's cases on the next run. |
+| `in_review` | checkbox | robot | On the list in Check Claude's answers. Ticked by the sampler for each new card; unticked by the daily labelling (Claude) on cards that do not need a person, and by the sampler once a card is settled. |
+| `reviewed` | checkbox | robot | Ticked by the sampler when the card is settled into a label: you answered your_call (or filled true_type / true_year / title_wrong), or Claude's answer was taken because Claude left the card out or it went 3 days unanswered. labelled_by says whose label it is. |
 | `split` | pick one | robot | Assigned once at creation: 70% eval, 15% fewshot, 15% regression Values: eval, fewshot, regression. |
 | `failure` | link to rows | robot | The failure row this label came from, when there is one |
 | `resolved` | formula | formula | The true type this label settles on: true_type when you picked one, else what the verdict points to. What the type evaluations compare against. |
 | `modified` | last modified | formula | When the person last touched the verdict fields; the sampler uses it to clear in_review |
 | `year_value` | text | robot | The year the pipeline uses for this document (the year formula), with its source, e.g. '2024 (fiscal year, score 85)' |
 | `year_evidence` | long text | robot | The sentence that decided the pipeline's year (from report_library.year_evidence), so the year can be checked without opening the PDF |
-| `suggested_year` | number | robot | Claude's reading of the reporting year (year in which the period ENDS), from the daily review. Blank on agreement_control rows. |
+| `suggested_year` | number | robot | Claude's answer for the reporting year (the year in which the period ENDS), from the daily labelling. Becomes true_year the same way suggested_value becomes true_type. Blank for documents without a period. |
 | `true_year` | number | you | Yours, on every card: the right reporting year (the year in which the period the document covers ENDS), even when year_value is already right. Leave blank only for documents without a year (codes, policies). year_eval.py counts only cards where this is filled. |
 | `title_value` | text | robot | The title the pipeline shows for this document (AI title, else auto title) |
-| `suggested_title` | text | robot | Claude's reading of the real title on the cover, verbatim, from the daily review. Blank when title_value is right or on control rows. |
+| `suggested_title` | text | robot | Claude's reading of the real title on the cover, verbatim, from the daily labelling. Filled only when title_value is wrong; when you Agree it ticks title_wrong. |
 | `title_wrong` | checkbox | you | Yours: tick when title_value is not the document's real title (put the real one in true_value if you want). |
 | `hidden_values` | long text | robot | Robot-only: on agreement_control rows, the pipeline's type (JSON), kept out of sight so the card is blind. The evaluations read it. Do not show in the interface. |
+| `your_call` | pick one | you | Yours, the one click on a card: Agree = Claude's type, year and title are right; Disagree = something is wrong, correct only that (true_type, true_year or title_wrong) and the rest is taken from Claude's answer; Can't tell = you cannot judge it (the label is kept as not sure). The sampler settles the card on its next run. Values: Agree, Disagree, Can't tell. |
+| `claude_confidence` | pick one | robot | Written by the daily labelling (Opus): how sure Claude is of its answer. high = the cover or contents settle it; medium = one point needs judgement; low = guessing. Only low and medium cards, high-stakes ones and 2 random high ones a day stay in Check Claude's answers. Values: high, medium, low. |
+| `claude_evidence` | long text | robot | Written by the daily labelling: the decisive words quoted from the document with their page, and the type-guide rule applied. |
+| `check_reason` | text | robot | Written by the daily labelling on cards it leaves for you: why this one needs a person (low or medium confidence, high stakes, random audit of Claude). |
 
 ### evals
 
