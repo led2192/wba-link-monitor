@@ -1,0 +1,51 @@
+name: Blocked files retry
+
+# Monthly: for files the company's site refuses (file_status blocked), try a browser-like request and
+# Internet Archive copies (also at other addresses of the same file); attach what is found.
+# A pull request touching it runs a dry run on 200 files and posts the measurement.
+on:
+  schedule:
+    - cron: "13 5 2 * *"            # the 2nd of each month, 05:13 UTC, after the nightly chain
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "files to try (report families and 2023+ first, oldest retry first)"
+        default: "1500"
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+  pull_request:
+    paths: [blocked_retry.py, .github/workflows/blocked_retry.yml]
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Retry
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 200"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--limit 1500 --commit"
+          else ARGS="--limit ${{ inputs.limit }}"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; fi
+          echo ">>> python blocked_retry.py $ARGS"
+          python blocked_retry.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s blocked_retry.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file blocked_retry.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Blocked files retry: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -41,7 +41,7 @@ Take a 2024 sustainability report published on a company's "Reports" page.
 2. **The new link is seen.** The nightly monitor (02:23 UTC, plus a browser monitor at 00:03 for JavaScript sites) reads the page, adds the PDF link to `seen_links` and, because it is new, to `new_links`.
 3. **A document row is created.** The harvester turns the link into a `report_library` row with a stable `library_id`. It refuses links already held (same normalized address) and links on the deletion list (tombstones), so a re-run never duplicates.
 4. **First guess of the type, from the address.** `source_type` is guessed from the words in the link (for example `/sustainability-report-2024.pdf`). This is opinion number one. Never edit it.
-5. **The PDF is attached.** Airtable fetches the file into `file`. If the site refuses, a second job downloads it itself; if that fails too, `file_status` says why: `blocked` (the site refuses robots), `gone` (404), `not_pdf`, or `too_big` (over Airtable's 5 MB upload limit). Files too big to attach are still read from `document_url`; they just have no attachment.
+5. **The PDF is attached.** Airtable fetches the file into `file`. If the site refuses, a second job downloads it itself; if that fails too, `file_status` says why: `blocked` (the site refuses robots; retried every month, see section 11), `gone` (404), `not_pdf`, or `too_big` (over Airtable's 5 MB upload limit). Files too big to attach are still read from `document_url`; they just have no attachment.
 6. **The first six pages are read.** `cover_text`, `page_count`, `doc_language` and `content_hash` are written. Two Airtable AI fields then read `cover_text` (English documents only): `source_type_check` (opinion number two, the AI type) and `source_title`.
 7. **The effective type.** `effective_type` = the AI type when there is one, else the address type. This is the type every count and check uses. When you correct a type, you change `source_type_check`.
 8. **Clean-up.** Duplicates (same file, same address) and non-disclosures (insider-trading forms, call transcripts) are discarded with a `discard_reason`. Nothing is deleted at this stage.
@@ -210,7 +210,7 @@ Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**,
 | --- | --- | --- |
 | PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
 | PAGE_GONE | the weekly review finds the new address and adds it; to build: a nightly job that searches the company's site for the replacement page and adds it when the match is unambiguous | weekly review only (needs the task update) |
-| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | monthly retry with browser headers and Internet Archive copies; later a runner on an office-network computer | to build |
+| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | documents: monthly retry with a browser-like request and Internet Archive copies, also at other addresses of the same file (Blocked files retry); pages, and what stays refused: later a runner on an office-network computer | documents yes (#PR); pages to build |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
@@ -296,7 +296,7 @@ Every job, what it writes and how to run it by hand: [scripts.md](scripts.md).
 
 ## 11. Known limits
 
-- **Sites that block robots.** About 3,000 documents have no file because the site refuses robots by IP address; a probe in October 2026 found that free routes (browser headers, a headless browser, the Internet Archive) reach only about 17% of them. Planned: a monthly retry with browser headers and the Internet Archive, an archive search for report pages, and later a runner on a computer in the office network, attached only to the private text-store repository. Until then, `add_file` is the fallback for the reports that matter.
+- **Sites that block robots.** About 3,000 documents have no file because the site refuses robots by IP address; a probe in October 2026 found that free routes (browser headers, a headless browser, the Internet Archive) reach only about 17% of them. Every month (the 2nd) the robot retries them with a browser-like request and looks for Internet Archive copies, also of the same file at another address of the company; what it finds is attached, with the archive copy's address in `archive_url` and what happened in `retry_note`. Planned: a runner on a computer in an ordinary office network for what stays refused, attached only to the private text-store repository. The Monday list names the few high-priority reports only a person can download (`add_file`).
 - **Files over 5 MB** cannot be attached in Airtable. They are read from `document_url`, so they count, are typed and dated, but show no attachment.
 - **Non-English documents** are dated and scoped but not typed by the AI; they keep the address type.
 - **The base cap**: 500,000 records per base. `base_health` watches both bases.
