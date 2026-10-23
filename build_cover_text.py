@@ -2,7 +2,8 @@
 """
 build_cover_text.py  (one-off backfill, resumable)
 
-For every report_library row that has a file attachment, open the PDF and write:
+For every report_library row that has a file attachment, open the PDF and write (rows whose file is
+too big to attach, file_status = too_big, are read from their document_url instead):
     cover_text   -> text of the first N pages (cheap input for the AI fields)
     page_count   -> total number of pages in the PDF
     doc_language -> ISO language code detected from the cover text (en, de, ja, ...)
@@ -113,8 +114,14 @@ def fetch_todo(page_size):
     # with page_count = 0: they were re-selected forever and the job spun on the same 100 rows
     # until it timed out. cover_status is set on every processed row and blank on every
     # unprocessed one, so "empty" is unambiguous here.
-    formula = f"AND({{{FILE_F}}}, {{{STAT_F}}} = BLANK())"
-    params = [("pageSize", page_size), ("filterByFormula", formula), ("fields[]", FILE_F)]
+    # Files over Airtable's 5 MB upload limit that Airtable could not fetch itself (file_status
+    # too_big) have no attachment: read them straight from the company's address. They are the
+    # biggest documents, i.e. mostly full annual, integrated and sustainability reports (Oct 2026:
+    # 2,996 rows, 1,221 of them 2023+, untyped and unread for lack of a file).
+    formula = (f"OR(AND({{{FILE_F}}}, {{{STAT_F}}} = BLANK()), "
+               f"AND({{{FILE_F}}} = BLANK(), {{file_status}} = 'too_big', {{document_url}} != '', "
+               f"{{{STAT_F}}} = BLANK(), NOT({{discard}})))")
+    params = [("pageSize", page_size), ("filterByFormula", formula), ("fields[]", FILE_F), ("fields[]", "document_url")]
     r = airtable_request("GET", API, H, params=params)
     return r.json().get("records", [])
 
@@ -136,8 +143,9 @@ def size_mb(rec):
 
 
 def attachment_url(rec):
+    """The attached file, else (for a file too big to attach) the document's own address."""
     cell = rec.get("fields", {}).get(FILE_F) or []
-    return cell[0].get("url") if cell else None
+    return cell[0].get("url") if cell else (rec.get("fields", {}).get("document_url") or None)
 
 
 def download_pdf(url):
