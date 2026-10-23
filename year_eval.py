@@ -158,6 +158,61 @@ def type_section(qtok, qbase, baseline):
     return out
 
 
+def cover_section(qtok, qbase, tok, base, baseline):
+    """The file-name-and-cover classifier (what types untyped documents) of main vs this branch, on the
+    non-English documents with a sure true type: how many it types, and how many of those are right."""
+    import shutil
+    from qa_sync import checks_of
+    bdir = os.path.join(baseline, "classifier_cover")
+    if not os.path.exists(os.path.join(baseline, "classify_library.py")):
+        return ["(cover classifier: no baseline copy, skipped)"]
+    os.makedirs(bdir, exist_ok=True)
+    for n in ("classify_library.py", "source_type_terms.json", "cover_terms.json"):
+        if os.path.exists(os.path.join(baseline, n)):
+            shutil.copy(os.path.join(baseline, n), os.path.join(bdir, n))
+    old = load("clc_main", os.path.join(bdir, "classify_library.py"))
+    new = load("clc_branch", "classify_library.py")
+    labels = get(qtok, qbase, qa.T_LABELS, ["true_type", "record_id", "sure"],
+                 "AND({true_type}!='', {record_id}!='', {sure})")
+    truth = {}
+    for l in labels:
+        tt = l["true_type"]; truth[l["record_id"]] = tt.get("name") if isinstance(tt, dict) else tt
+    ids = sorted(truth)
+    docs = []
+    for i in range(0, len(ids), 40):
+        chunk = ids[i:i + 40]
+        docs += get(tok, base, "report_library", ["file", "cover_text", "doc_language", "company_name"],
+                    "AND({doc_language}!='English', {cover_text}!='', OR(" + ",".join(f"RECORD_ID()='{r}'" for r in chunk) + "))")
+    c = collections.Counter(); flips = {"fixed": [], "broken": []}
+    for d in docs:
+        tt = truth.get(d["_id"])
+        name = old._name(d); cover = d.get("cover_text") or ""
+        m, b = old.classify_from_file(name, cover)[0], new.classify_from_file(name, cover)[0]
+        for v, t in (("main", m), ("branch", b)):
+            c[v, "typed"] += bool(t)
+            c[v, "exact"] += bool(t) and t == tt
+            c[v, "check"] += bool(t) and checks_of(t) == checks_of(tt)
+        if (m == tt) != (b == tt) and (m or b):
+            flips["fixed" if b == tt else "broken"].append((d.get("company_name") or "", d.get("doc_language") or "",
+                                                           (cover[:60] or "").replace("|", " ").replace("\n", " "), tt, m, b))
+    n = len(docs) or 1
+    out = ["## Cover classifier on non-English documents: main vs this branch", "",
+           f"{len(docs):,} non-English documents with a sure true type and first pages read. 'Typed' = the "
+           "classifier gives a type at all; 'right' = of all documents, typed and exactly right (or right at check level).", "",
+           "| | typed | right (exact) | right (check-level) | precision when typed |", "|---|---:|---:|---:|---:|"]
+    for v in ("main", "branch"):
+        prec = c[v, "exact"] / c[v, "typed"] if c[v, "typed"] else 0
+        out.append(f"| {v} | {c[v, 'typed'] / n:.1%} | {c[v, 'exact'] / n:.1%} | {c[v, 'check'] / n:.1%} | {prec:.1%} |")
+    out += ["", f"**{len(flips['fixed'])} fixed, {len(flips['broken'])} broken.**", ""]
+    for kind in ("broken", "fixed"):
+        if flips[kind]:
+            out += [f"### {kind.capitalize()} (up to 25)", "", "| company | language | cover | true | main | branch |",
+                    "|---|---|---|---|---|---|"]
+            out += [f"| {co[:22]} | {lg} | {cv} | {t} | {m or '-'} | {b or '-'} |" for co, lg, cv, t, m, b in flips[kind][:25]]
+            out.append("")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--baseline", required=True, help="folder with the default branch's fiscal_year.py and date_documents.py")
@@ -172,6 +227,7 @@ def main():
                 "branch": (load("fy_branch", "fiscal_year.py"), load("dd_branch", "date_documents.py"))}
 
     type_lines = type_section(qtok, qbase, a.baseline)
+    type_lines += [""] + cover_section(qtok, qbase, tok, base, a.baseline)
     print("\n".join(type_lines), flush=True)
 
     labels = get(qtok, qbase, qa.T_LABELS, ["record_id", "true_year", "stratum", "sure", "library_id"],
