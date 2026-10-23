@@ -56,7 +56,7 @@ The same journey runs on demand in 10 to 15 minutes when you tick `scan_now` on 
 ## 4. Your routine
 
 ### Every weekday (about 15 minutes)
-1. **Base health** (Disclosure Library, interface "Base health", page Health, or the `base_health` table, top row). Read `status` and `attention`. OK = nothing to do. Check = the base is over 80% full or nothing new arrived. Problem = a job failed (`failed_jobs` links it) or the base is over 90% full. Average completeness is the headline number.
+1. **Base health** (Disclosure Library, interface "Base health", page Health, or the `base_health` table, top row). Read `status` and `attention`. OK = nothing to do. Check = the base is over 80% full or nothing new arrived. Problem = a job failed twice (it re-runs itself once first; `failed_jobs` links it) or the base is over 90% full. Nothing to do: the weekly review reads it. Average completeness is the headline number.
 2. **Today's cases** (Pipeline QA). The day's review cards land around 06:31 Madrid time and Claude pre-reads them at 12:46 Madrid. Fill them after 13:00. How to fill a card is in section 7.4.
 3. **Notifications from Claude.** The 06:46 gap research tells you which companies it researched and which links it pasted. The 12:46 pre-read tells you how many cards it read and any pattern it saw.
 4. **Optional:** My queue (interface "Base health", page My queue) when you have time to chase a missing report by hand.
@@ -220,7 +220,7 @@ Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**,
 | TYPE_MISSING (non-English) | to build: typing of non-English documents | to build |
 | CO_GAP | the daily gap research (25 companies a day) | yes |
 | CO_MISSED_KNOWN | Source Library matching, the daily research | partly |
-| RUN_FAILED | base_health reports it; to build: automatic re-run of a failed job once | to build |
+| RUN_FAILED | a failed scheduled or chained job re-runs itself once (Re-run failed job once); a second failure is listed by base_health and read by the weekly review | yes (#PR) |
 | DOC_FLAGGED | the owner. A bonus signal: analysts may or may not flag, and nothing depends on it | yes |
 
 What reaches you is the "Para ti esta semana" list in the Monday notification: at most 5 items a week that only a person can do, typically a high-priority report on a site that blocks robots, with the link, for you to download and drop in `add_file`. Open failures is there to look at when you are curious, not a to-do list.

@@ -28,7 +28,7 @@ Pipeline QA is where problems are found and counted; the Disclosure Library is w
 4. Only status is yours to set on a failure, if you want: `expected` when the behaviour is correct, `wontfix` when it is not worth fixing.
 
 ## When something breaks
-- **A GitHub job failed:** `base_health.failed_jobs` links it. Re-run it from the Actions tab; scripts are idempotent, a re-run never duplicates.
+- **A GitHub job failed:** it re-runs itself once automatically. If `base_health.failed_jobs` still lists it, it failed twice: the weekly review reads it. You may re-run it from the Actions tab; scripts are idempotent, a re-run never duplicates.
 - **A page "does not open" but works in your browser:** the site blocks robots. Download the report yourself and use `add_file`.
 - **The base is filling up:** run Purge discarded rows (dry run first, then `mode=delete` with `confirm=DELETE`).
 - **Numbers jumped overnight:** look at `docs/CHANGELOG.md` for what merged the day before, and at Pipeline QA `runs` for the counters of each job.
