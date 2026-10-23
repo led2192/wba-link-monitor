@@ -107,7 +107,7 @@ Everything else is written by the robot or computed. The full list, with who wri
 **On a company**
 - `add_link`: paste any link you found, one per line (a PDF or a page). Within minutes the robot checks that it is new and reachable, files it, scans it, and answers in `add_result` with its first guess of type and year. If the site refuses robots, nothing is added and `add_result` asks you for the file.
 - `add_file`: drop a PDF you downloaded yourself because the site blocks the robot. If the library already holds that document's link without a file, the file goes onto that row.
-- `website`: for a new company; the robot then proposes pages in `suggested_links`. Delete wrong lines, tick `approve_suggestions`.
+- `website`: for a new company. The robot searches the site: a clear best page (one candidate with 3+ document links, or twice the links of the next) is added automatically; ambiguous candidates wait in `suggested_links`, where you may delete wrong lines and tick `approve_suggestions` (optional; the weekly review also looks at them).
 - `queue_snooze_until`: the company really has not published; it leaves the queue until that date.
 - `analyst`, `adopted_on`, `Notes`, `key_figures_checked`.
 
@@ -209,7 +209,7 @@ Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**,
 | Code | Automatic owner | Built? |
 | --- | --- | --- |
 | PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
-| PAGE_GONE | the weekly review finds the new address and adds it; to build: a nightly job that searches the company's site for the replacement page and adds it when the match is unambiguous | weekly review only (needs the task update) |
+| PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#PR) |
 | PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | monthly retry with browser headers and Internet Archive copies; later a runner on an office-network computer | to build |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |

@@ -26,7 +26,7 @@ Nothing depends on a person working through failure rows: there are tens of thou
 | Code | Automatic owner | Built? |
 | --- | --- | --- |
 | PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
-| PAGE_GONE | the weekly review finds the new address and adds it; to build: a nightly job that searches the company's site for the replacement page and adds it when the match is unambiguous | weekly review only (needs the task update) |
+| PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#PR) |
 | PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | monthly retry with browser headers and Internet Archive copies; later a runner on an office-network computer | to build |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
