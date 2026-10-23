@@ -57,5 +57,23 @@ class SlTests(unittest.TestCase):
         self.assertEqual(table["Integrated Report"]["top_confusion"], "Annual Report")
 
 
+class HouseRules(unittest.TestCase):
+    def test_modern_slavery_statement_is_a_social_report(self):
+        import sl_labels as L
+        self.assertEqual(L.house_type("Policy Documents", "Takeda fy2024_human_rights_and_modern_slavery_statement.pdf")[0],
+                         "Social Reports")
+        self.assertEqual(L.house_type("Human Rights Policy", "Modern Slavery Act Statement 2024")[0], "Social Reports")
+
+    def test_modern_slavery_policy_stays_a_policy(self):
+        import sl_labels as L
+        self.assertEqual(L.house_type("Human Rights Policy", "human-rights-and-modern-slavery-policy.pdf")[0],
+                         "Human Rights Policy")
+
+    def test_human_rights_statement_is_the_policy(self):
+        import sl_labels as L
+        self.assertEqual(L.house_type("Policy Documents", "statement-human-rights.pdf")[0], "Human Rights Policy")
+        self.assertEqual(L.house_type("Policy Documents", "Anti-bribery policy")[0], "Policy Documents")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -74,5 +74,13 @@ class FileOntoExistingRow(unittest.TestCase):
         self.assertIn("existing row", lines[0])
 
 
+class HumanRightsAddresses(unittest.TestCase):
+    def test_human_rights_policies_stay_human_rights(self):
+        for u in ("https://x.com/files/policies/human-rights-and-modern-slavery-policy.pdf",
+                  "https://x.com/code-engagement/responsabilite-entreprise/statement-human-rights.pdf",
+                  "https://www.meiji.com/x/meiji_group_policy_on_human_rights/meiji_group_policy_on_human_rights.pdf"):
+            self.assertEqual(C.classify(u)[0], "Human Rights Policy", u)
+
+
 if __name__ == "__main__":
     unittest.main()

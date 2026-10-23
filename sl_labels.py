@@ -105,8 +105,30 @@ def doubt(s, r):
     return "; ".join(why)
 
 
+# House rules (decided by the owner, 23 Oct 2026) where WBA's own type differs from the analysts'
+# short type list. Applied to the label only; the Source Library is never written.
+MSA = re.compile(r"(modern|forced)[\s_-]*slavery|human[\s_-]*trafficking", re.I)
+STATEMENT = re.compile(r"statement", re.I)
+HR_STATEMENT = re.compile(r"human[\s_-]*rights[\s_-]*(statement|policy|commitment)|statement[\s_-]*(on[\s_-]*)?human[\s_-]*rights", re.I)
+
+
+def house_type(analyst_type, text):
+    """(type, rule or ''). A modern slavery statement is an annual report on forced-labour risks, not a
+    policy: Social Reports. A human rights statement or commitment without modern slavery is the
+    company's human rights policy under another name: Human Rights Policy."""
+    if analyst_type in ("Policy Documents", "Human Rights Policy") and MSA.search(text) and STATEMENT.search(text) \
+            and not re.search(r"slavery[\s_-]*policy|policy[\s_-]*on[\s_-]*(modern|forced)", text, re.I):
+        return "Social Reports", "house rule: a modern slavery statement is a report, not a policy"
+    if analyst_type == "Policy Documents" and HR_STATEMENT.search(text) and not MSA.search(text):
+        return "Human Rights Policy", "house rule: a human rights statement is the human rights policy"
+    return analyst_type, ""
+
+
 def label_row(s, r, today):
     lid = r.get("library_id") or r["_id"]
+    t_house, rule = house_type(s["type"], f"{r.get('doc_label') or ''} {r.get('document_url') or ''}")
+    if rule:
+        s = dict(s, type=t_house)
     why = doubt(s, r)
     sure = s["src"] in SURE_BASES and not why
     y = r.get("year")
@@ -119,7 +141,7 @@ def label_row(s, r, today):
            "true_type": s["type"], "sure": sure, "labelled_by": "source_library", "labelled_on": today,
            "reviewed": True, "split": "eval",
            "reason": (f"Source Library {s['src']} record {s['rec']}: {s['type']} {s['year'] or ''}".strip()
-                      + (f". Doubt: {why}" if why else ""))[:500]}
+                      + (f" ({rule})" if rule else "") + (f". Doubt: {why}" if why else ""))[:500]}
     if s["type"] not in POLICIES and s["year"]:
         row["true_year"] = s["year"]
     return f"{lid}|source_library|{s['src']}", row
