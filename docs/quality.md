@@ -27,7 +27,7 @@ Nothing depends on a person working through failure rows: there are tens of thou
 | --- | --- | --- |
 | PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
 | PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#54) |
-| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | documents: the office-network runner on the owner's computer, weekdays (pc_fetch.py, [pc_runner.md](pc_runner.md)); refused pages: to build on the same runner | documents yes (#PR, once set up); pages to build |
+| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | documents: the office-network runner on the owner's computer, weekdays (pc_fetch.py, [pc_runner.md](pc_runner.md)); refused pages: to build on the same runner | documents yes (#60, once set up); pages to build |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |

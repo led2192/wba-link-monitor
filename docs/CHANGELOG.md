@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
-- 2026-10-23 Office-network runner: `pc_fetch.py` fetches files that sites refuse to cloud servers from the owner's computer (self-hosted runner on the private repository wba-text-store only, weekdays); set-up guide in docs/pc_runner.md. The cloud retry (#53) was closed: 0 of 61 recovered (#PR)
+- 2026-10-23 Office-network runner: `pc_fetch.py` fetches files that sites refuse to cloud servers from the owner's computer (self-hosted runner on the private repository wba-text-store only, weekdays); set-up guide in docs/pc_runner.md. The cloud retry (#53) was closed: 0 of 61 recovered (#60)
 - 2026-10-23 Two completeness scores beside the combined one: `disclosure_completeness` (sustainability report, annual report, Code of Conduct, Human Rights Policy) and `page_completeness` (report hub, sustainability page) on companies, and their averages on base_health; the rules comparison shows both (#58)
 - 2026-10-23 Completeness rules v3, approved and switched on: the report hub and sustainability page checks count only pages still watched that have not gone (404/410); `--compare` takes any two rule versions (`--compare-rules v2,v3`) and lists checks gained and lost (#58)
 - 2026-10-23 Address classifier: prospectuses, base prospectuses, final terms, pricing supplements and offering circulars are Statutory Documents, not Registration Document (bond documents filed next to universal registration documents) (#56)
