@@ -121,7 +121,7 @@ def get_body(url, headers, sess=None, referer=None, cap=UPLOAD_MAX + 1):
 def cdx(params):
     lp = polite("archive.org", ARCHIVE_PAUSE)
     try:
-        r = requests.get(CDX, params=dict(params, output="json"), headers=PLAIN, timeout=60)
+        r = requests.get(CDX, params=dict(params, output="json"), headers=PLAIN, timeout=25)
         return parse_cdx(r.json()) if r.ok and r.text.strip() else []
     except (requests.RequestException, ValueError):
         return []
@@ -153,6 +153,7 @@ def try_headers(row):
 
 def try_archive(row):
     url = row["document_url"]
+    recent_report = row.get("effective_type") in FAMILY and (row.get("year") or 0) >= 2023
     p = urlsplit(url)
     path_key = f"{p.netloc}{p.path}"
     # exact address and its query/scheme variants
@@ -160,7 +161,7 @@ def try_archive(row):
                 "fl": "timestamp,original,length", "limit": "-5"})
     rows = [r for r in rows if basename(r[1]) == basename(url)]
     how = "Internet Archive copy"
-    if not rows and distinctive(basename(url)):
+    if not rows and recent_report and distinctive(basename(url)):     # domain search is slow: only where it matters
         name = re.escape(basename(url))
         rows = cdx({"url": registered_domain(p.netloc), "matchType": "domain",
                     "filter": ["statuscode:200", "mimetype:application/pdf", f"original:.*/{name}(\\?.*)?$"],
@@ -222,6 +223,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=1500)
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--minutes", type=float, default=300, help="stop starting new files after this long")
     ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     if not (TOKEN and BASE):
@@ -234,7 +236,11 @@ def main():
     print(f">>> {len(rows):,} refused files to retry", flush=True)
     results, counts = [], collections.Counter()
 
+    deadline = time.time() + a.minutes * 60
+
     def one(row):
+        if time.time() > deadline:
+            return row, ("skip", {"note": ""}, "not_tried")
         try:
             return row, decide(row, today)
         except Exception as e:                       # one bad row never stops the run
@@ -247,12 +253,13 @@ def main():
             if i % 100 == 0:
                 print(f"  {i}/{len(rows)}  {dict(counts)}", flush=True)
 
-    recent = [r for r, res in results if r.get("effective_type") in FAMILY and (r.get("year") or 0) >= 2023]
+    tried = [(r, res) for r, res in results if res[0] != "skip"]
+    recent = [r for r, res in tried if r.get("effective_type") in FAMILY and (r.get("year") or 0) >= 2023]
     got_recent = sum(1 for r, res in results if res[0] in ("upload", "attach_url")
                      and r.get("effective_type") in FAMILY and (r.get("year") or 0) >= 2023)
-    n = len(results) or 1
+    n = len(tried) or 1
     md = ["### Blocked files retry" + ("" if a.commit else " (dry run)"), "",
-          f"Refused files tried: {len(results):,}. Recovered: {counts['headers'] + counts['archive']:,} "
+          f"Refused files tried: {len(tried):,}. Recovered: {counts['headers'] + counts['archive']:,} "
           f"({(counts['headers'] + counts['archive']) / n:.0%}); of the {len(recent):,} 2023+ sustainability "
           f"and annual reports among them, {got_recent:,}.", "",
           "| Outcome | Files |", "| --- | --- |",
@@ -260,13 +267,16 @@ def main():
           f"| attached from an Internet Archive copy | {counts['archive']:,} |",
           f"| reachable but over 5 MB (not attached) | {counts['too_big_headers']:,} |",
           f"| still refused | {counts['still_refused']:,} |",
-          f"| retry error | {counts['error']:,} |", ""]
+          f"| retry error | {counts['error']:,} |",
+          f"| not tried (time budget) | {counts['not_tried']:,} |", ""]
     open("blocked_retry.md", "w").write("\n".join(md))
     print("\n".join(md), flush=True)
 
     if a.commit:
         updates = []
         for row, (action, f, _) in results:
+            if action == "skip":
+                continue
             fields = {"retried_on": today, "retry_note": f["note"][:250]}
             if action == "upload":
                 ok = upload(BASE, TOKEN, "file", row["_id"], basename(row["document_url"]) or "document.pdf", f["data"])

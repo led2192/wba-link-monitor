@@ -32,8 +32,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Retry
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 200"
-          elif [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--limit 1500 --commit"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 200 --minutes 40"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--limit 1500 --minutes 300 --commit"
           else ARGS="--limit ${{ inputs.limit }}"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; fi
           echo ">>> python blocked_retry.py $ARGS"
           python blocked_retry.py $ARGS

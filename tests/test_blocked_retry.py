@@ -5,7 +5,7 @@ import blocked_retry as br
 
 TODAY = "2026-11-02"
 ROW = {"_id": "rec1", "document_url": "https://www.clp.com.hk/reports/CLP_Sustainability_Report_2024_en.pdf",
-       "found_on": "https://www.clp.com.hk/reports"}
+       "found_on": "https://www.clp.com.hk/reports", "effective_type": "Sustainability Report", "year": 2024}
 
 
 class Helpers(unittest.TestCase):
@@ -65,6 +65,13 @@ class ArchiveRoute(unittest.TestCase):
         self.assertEqual(res["route"], "archive")
         self.assertIn("another address", res["detail"])
         self.assertEqual(calls[1]["url"], "clp.com.hk")
+
+    def test_no_domain_search_for_old_or_minor_documents(self):
+        calls = []
+        with mock.patch.object(br, "cdx", lambda p: calls.append(p) or []), \
+             mock.patch.object(br, "archive_pdf", lambda u: (True, 4096)):
+            br.try_archive(dict(ROW, year=2019))
+        self.assertEqual([c["matchType"] for c in calls], ["prefix"])
 
     def test_same_name_required_on_prefix_match(self):
         with mock.patch.object(br, "cdx", lambda p: [("20240101000000", "https://www.clp.com.hk/reports/other.pdf", 900000)]
