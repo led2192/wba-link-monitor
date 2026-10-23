@@ -13,7 +13,7 @@ WBA assesses about 2,000 companies (the SDG2000). Each company publishes reports
 | Place | What it is | Who uses it |
 | --- | --- | --- |
 | **Disclosure Library** (Airtable, `appXS0v6SnWdzAsY3`) | The working base: companies, watched pages, documents, daily health. This is where things are fixed. | The owner, analysts (through the Analysts interface), the robot |
-| **Pipeline QA** (Airtable, `appJQ2mRtjHjzLq9E`) | The quality log: every run, every failure, the labelled truth set, the scores. This is where problems are found and measured, never fixed. | The owner (Today's cases), Claude's daily and weekly reviews, the robot |
+| **Pipeline QA** (Airtable, `appJQ2mRtjHjzLq9E`) | The quality log: every run, every failure, the labelled truth set, the scores. This is where problems are found and measured, never fixed. | The owner (Check Claude's answers), Claude's daily and weekly reviews, the robot |
 | **Source Library 2024 / 2025** (Airtable) | The analysts' own curated sources from the assessment cycles. | Analysts. The pipeline only reads them, never writes. |
 | **GitHub repository** `led2192/wba-link-monitor` (public) | The code, the scheduled jobs (Actions), and these docs. | Claude writes, the owner merges |
 | **Text store** (a private GitHub repository) | The full text of every readable report since 2021, page by page, plus the monthly QA archive. | The robot (full-text jobs, mention search) |
@@ -57,8 +57,8 @@ The same journey runs on demand in 10 to 15 minutes when you tick `scan_now` on 
 
 ### Every weekday (about 15 minutes)
 1. **Base health** (Disclosure Library, interface "Base health", page Health, or the `base_health` table, top row). Read `status` and `attention`. OK = nothing to do. Check = the base is over 80% full or nothing new arrived. Problem = a job failed (`failed_jobs` links it) or the base is over 90% full. Average completeness is the headline number.
-2. **Today's cases** (Pipeline QA). The day's review cards land around 06:31 Madrid time and Claude pre-reads them at 12:46 Madrid. Fill them after 13:00. How to fill a card is in section 7.4.
-3. **Notifications from Claude.** The 06:46 gap research tells you which companies it researched and which links it pasted. The 12:46 pre-read tells you how many cards it read and any pattern it saw.
+2. **Check Claude's answers** (Pipeline QA), after 13:00 Madrid: about 5 cards, one click each (Agree, Disagree, Can't tell). Section 7.4.
+3. **Notifications from Claude.** The 06:46 gap research tells you which companies it researched and which links it pasted. The 12:46 labelling tells you how many cards it labelled, how many it left for you and any pattern it saw.
 4. **Optional:** My queue (interface "Base health", page My queue) when you have time to chase a missing report by hand.
 
 ### Every Monday
@@ -68,7 +68,7 @@ The same journey runs on demand in 10 to 15 minutes when you tick `scan_now` on 
 4. Look at the week in `base_health` (completeness trend, failed jobs) and at the companies whose `completeness_change` is not empty: those lost a check during the week, and the field says which document used to pass it and what happened to it.
 
 ### When the Monday list has items for you
-At most 5 a week (section 7.2), plus any document an analyst flags in the Analysts interface (page Flagged documents), if any do.
+At most 5 a week (section 7.2). Analyst flags, if any come, are checked by the weekly review first; it lists the ones it cannot settle.
 
 ### Monthly
 Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipeline QA. When `base_health.base_full` passes 80%, run Purge discarded rows (dry run first).
@@ -197,10 +197,10 @@ Rule of thumb: **find in Pipeline QA, fix in the Disclosure Library.** Never fix
 | --- | --- | --- |
 | `runs` | job run (written at the end of every script) | nothing; read `status` and `counters` when numbers jump |
 | `failures` | distinct failure (code + key); `occurrences` and `last_seen` move each time it recurs | only `status` (expected, wontfix) and `review_note` |
-| `labels` | review card: one document judged on type, year and title (or one fact about a page or company) | your answers on Today's cases |
+| `labels` | review card: one document judged on type, year and title (or one fact about a page or company) | your one click on the cards in Check Claude's answers |
 | `evals` | one scoring of a rule or prompt against the labels | nothing |
 
-Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**, **Runs**.
+Interface "Pipeline QA": **Check Claude's answers** (the day's cards that need you), **Open failures**, **Runs**.
 
 **Failure codes** (closed list, details in [quality.md](quality.md)): PAGE_UNREACHABLE, PAGE_GONE, PAGE_BLOCKED, PAGE_EMPTY, PAGE_UNHARVESTED, PAGE_WRONG_TYPE, DOC_FETCH_FAIL, DOC_UNREADABLE, DOC_DROPPED, DOC_DUPLICATE, DOC_WRONG_ROW, TYPE_DISAGREE, TYPE_MISSING, LABEL_CORRECTION, DOC_FLAGGED, CO_GAP, CO_MISSED_KNOWN, RUN_FAILED. `severity` High means the failure hides or costs a 2023+ sustainability or annual report, or blocks a whole domain.
 
@@ -221,30 +221,36 @@ Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**,
 | CO_GAP | the daily gap research (25 companies a day) | yes |
 | CO_MISSED_KNOWN | Source Library matching, the daily research | partly |
 | RUN_FAILED | base_health reports it; to build: automatic re-run of a failed job once | to build |
-| DOC_FLAGGED | the owner. A bonus signal: analysts may or may not flag, and nothing depends on it | yes |
+| DOC_FLAGGED | the weekly review checks each flag and fixes the row when the flag is clearly right; the owner only when it lists it. A bonus signal: analysts may or may not flag, and nothing depends on it | yes |
 
 What reaches you is the "Para ti esta semana" list in the Monday notification: at most 5 items a week that only a person can do, typically a high-priority report on a site that blocks robots, with the link, for you to download and drop in `add_file`. Open failures is there to look at when you are curious, not a to-do list.
 
 A failure closes by itself: `resolved_silently` when it has not recurred for 30 days, `fixed` when the weekly review links the merged PR. `expected` (the behaviour is correct) and `wontfix` stop it counting as open.
 
 ### 7.3 Where the labels come from
-- **Today's cases**: about 15 cards each weekday (`qa_sample.py`, 04:31 UTC): 5 high-stakes disagreements between the address and the AI, 3 non-English reports, 3 blind controls (shown without the pipeline's answer, so accuracy is measured honestly), 2 new arrivals, 2 reserved for odd cases. Claude reads each document at 12:46 Madrid and writes `suggested_value`, `suggested_year`, `suggested_title`, `cover_english` (for non-English documents) and a one-line `reason`. It skips the blind controls.
+- **Daily cards**: about 15 cards each weekday (`qa_sample.py`, 04:31 UTC): 5 high-stakes disagreements between the address and the AI, 3 non-English reports, 3 blind controls (the pipeline's answer is hidden, so accuracy is measured honestly), 2 new arrivals, 2 reserved for odd cases. Claude (Opus) labels all of them at 12:46 Madrid, reading blind controls without the pipeline's answer, and leaves about 5 for you (section 7.4).
 - **Corrections**: when you change a type or a title in the Disclosure Library, `qa_sync.py` records it as a label (`labelled_by` = correction).
 - **Source Library**: `sl_labels.py` matches the analysts' Source Library records to library rows holding the same file and writes the analyst's type and year as labels. 2025 labels count as sure (that cycle was reviewed); 2024 labels as not sure. A label is also marked not sure when the pipeline has strong contrary evidence. This is the largest source of truth: thousands of labels.
 
-### 7.4 How to fill a card (current process)
-Open the document (`document_url`), read `cover_snippet`, `year_value` with `year_evidence`, `title_value`, and Claude's suggestions with its reason. Then:
+### 7.4 Checking Claude's answers (from 26 Oct 2026)
+You are not asked to classify documents from scratch. Every weekday at 12:46 Madrid, Claude (Opus) reads each of the day's cards and decides the type, the year and, when the shown title is wrong, the real title. It writes its answer (`suggested_value`, `suggested_year`, `suggested_title`), how sure it is (`claude_confidence`: high, medium, low) and the evidence (`claude_evidence`: the decisive words quoted with their page, and the type-guide rule it applied). Then it keeps for you only the cards where a person adds something, about 5 a day, never more than 8:
+- its confidence is low or medium;
+- high stakes: its type differs from the pipeline's and one of the two moves a completeness check;
+- 2 high-confidence cards a day picked as an audit of Claude itself, so we keep measuring how often Claude is right.
 
-1. **`true_type`, always**, even when the robot or the AI was already right. Use the question order in 6.1.
-2. **`true_year`, always**, even when `year_value` is already right: the year in which the period ends. Leave it blank only for documents without a year (codes, policies). The year measurement counts only cards where this is filled.
-3. **`title_wrong`**: tick only when `title_value` is not the document's real title (you may put the real one in `true_value`).
-4. **`sure`**: ticked by default; untick when you are guessing. Unsure labels stay out of the scores and go to the weekly review.
-5. `reason`: optional, one line.
-6. **Ignore `verdict`.** It only means something when both a robot and an AI value are shown, and `true_type` already says it.
+`check_reason` says why each card is in your list. Every other card leaves the list, and its answer becomes a label marked as Claude's (`labelled_by` = Claude).
 
-The card leaves the list on the next sampler run (cards older than 7 days leave too). A document is never picked twice.
+On each card in **Pipeline QA, Check Claude's answers** (after 13:00 Madrid):
+1. Read Claude's answer and its evidence. Open `document_url` only if the evidence does not convince you.
+2. Click `your_call`:
+   - **Agree**: Claude's type, year and title are right. Nothing else to fill.
+   - **Disagree**: correct only what is wrong (`true_type`, `true_year`, or tick `title_wrong`); the rest is taken from Claude's answer.
+   - **Can't tell**: you cannot judge it. The label is kept, marked not sure.
+3. That is all. The next morning's sampler settles the card into a label (`labelled_by` = Edi) and removes it from the list.
 
-A redesign is under discussion (23 Oct 2026): Opus would propose type, year and title with a confidence level and the decisive quote, and you would only confirm or correct about 5 cards a day. This section will change when it is decided.
+If you skip a day, nothing is lost: a card unanswered for 3 days is settled with Claude's answer (sure only when its confidence was high).
+
+Why this is sound: your checks on the audit cards measure Claude; the Source Library 2025 labels (thousands, by analysts) are an independent truth; and Claude's own labels are never used to score the Airtable AI type (that would be one model grading another). They are used for the address rules and the year rules.
 
 ### 7.5 Scores and the ship rule
 A change to a rule or a prompt merges only when, on the sure labels, accuracy does not fall, accuracy on the classes that move a completeness check does not fall, and it fixes more cases than it breaks. In practice the measurement arrives as a comment on the pull request (section 8). `evals` holds the baseline scores written by `sl_labels.py`.
@@ -268,7 +274,7 @@ These run outside GitHub, as Claude sessions on a schedule, and notify you when 
 | Task | When (Madrid) | Model | What it does | What it may write |
 | --- | --- | --- | --- | --- |
 | Daily gap research | weekdays 06:46 | Sonnet | Searches the web for about 25 companies' missing reports and policies (official sources only) and pastes the links into `add_link` | `add_link`, `researched_on`, `research_note` |
-| Daily case pre-read | weekdays 12:46 | Sonnet | Reads each of Today's cases and writes suggestions and a reason; notes patterns | the suggestion fields on labels only |
+| Daily labelling | weekdays 12:46 | Opus | Labels each of the day's cards (type, year, title, confidence, quoted evidence) and leaves about 5 for you to check; notes patterns | its answer fields on labels, and unticks `in_review` on cards it settles |
 | Weekly review and fixes | Mondays 08:47 | Opus | Answers your `scan_concern` notes; fixes gone and wrongly typed pages itself; reads the week's failures, labels and runs; fixes the 2 or 3 most costly causes as pull requests with tests; updates the docs; lists at most 5 items for you | pull requests, page fixes (`add_link`, page `type`, `monitor`, `scan_now`), `audit_reply`, `review_note`, failure status |
 | Weekly missed-reports audit | paused since 20 Oct 2026 | | Its job moved into the weekly review | |
 
@@ -281,7 +287,7 @@ None of them merges anything, writes to the Source Library, or gets around a sit
 | 00:03 | Browser monitor (JavaScript pages, 4,000 a night) |
 | 02:03 | Assign join ids |
 | 02:23 | Monitor links, then in a chain: Harvest, Classify, Attach, Build cover text, then Dedupe and dates, Document scope, Company coverage, then Base health and QA sync |
-| 04:31 weekdays | QA sample (Today's cases) |
+| 04:31 weekdays | QA sample (the day's cards; settles yesterday's) |
 | 04:40 | Suggest missing report pages |
 | 07:03 | Link and assign |
 | 12:17 | Base health (second run) |

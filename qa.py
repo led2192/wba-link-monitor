@@ -65,7 +65,8 @@ LABEL_FIELDS = ("target", "field", "stratum", "company_name", "wba_id", "doc_lab
                 "robot_value", "ai_value", "suggested_value", "verdict", "true_type", "true_value",
                 "sure", "reason", "labelled_by", "labelled_on", "batch_date", "in_review", "reviewed",
                 "split", "failure", "year_value", "year_evidence", "suggested_year", "true_year",
-                "title_value", "suggested_title", "title_wrong", "hidden_values")
+                "title_value", "suggested_title", "title_wrong", "hidden_values", "your_call",
+                "claude_confidence", "claude_evidence", "check_reason")
 MESSAGE_CHARS = 500
 WRITE_BATCH = 10
 WRITE_PAUSE = 0.2
