@@ -11,6 +11,7 @@ The pipeline that keeps WBA's Disclosure Library current: company pages watched 
 | [architecture.md](architecture.md) | How the pieces fit: the nightly chain, the bases and tables, the on-demand paths |
 | [scripts.md](scripts.md) | Every script and workflow: what it does, when it runs, what it writes |
 | [quality.md](quality.md) | Pipeline QA: failure taxonomy, the QA base, golden set, daily and weekly review, the ship rule |
+| [pc_runner.md](pc_runner.md) | The robot on the owner's computer for sites that refuse cloud servers: how it works, how to set it up |
 | [runbook.md](runbook.md) | How to do common things, and what to do when something breaks |
 | [decisions.md](decisions.md) | Choices made, why, and what was rejected |
 | [pitfalls.md](pitfalls.md) | Lessons that were costly to learn |
