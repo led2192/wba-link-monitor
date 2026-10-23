@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-23 Scanned PDFs (no text in the file) get their first pages read by text recognition once a month (new `ocr_covers.py`); `cover_ocr` marks such rows; covers that still give no text become `no_text_ocr` and are not retried (#57)
 - 2026-10-23 Office-network runner, second pass: files and pages a plain request could not reach are tried again in Microsoft Edge without a window (up to 100 files a run), skipping paths robots.txt disallows and never solving captchas or logging in; the first test from the owner's computer reached 11 of 30 refused recent reports with plain requests (#62)
 - 2026-10-23 `doc_label` showed #ERROR! on rows whose AI title was never generated (the new `ai_title` formula failed on an empty AI field); `ai_title` now guards every case and `doc_label` was checked on the rows that failed
 - 2026-10-23 Office-network runner: `pc_fetch.py` fetches files that sites refuse to cloud servers from the owner's computer (self-hosted runner on the private repository wba-text-store only, weekdays); set-up guide in docs/pc_runner.md. The cloud retry (#53) was closed: 0 of 61 recovered (#60)
