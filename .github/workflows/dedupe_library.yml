@@ -46,6 +46,16 @@ jobs:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_LIBRARY_TABLE: report_library
+      - name: Type documents nothing else typed (non-English covers)
+        # Rows with no address type and no AI type (mostly non-English: the AI types English only)
+        # get a type from their file name and cover title, including cover-title phrases in other
+        # languages (cover_terms.json). Measured by year_eval.py on the pull request.
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.commit }}
+        run: python classify_library.py --retype-untyped --commit --limit 40000
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
       - name: Document years from file name and cover page
         # Fixes doc_year where it came from an upload folder or a publication date, and records
         # the rule in doc_year_from. A slice per night; manual dry runs print a sample instead.
