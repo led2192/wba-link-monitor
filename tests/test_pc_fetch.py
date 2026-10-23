@@ -54,5 +54,65 @@ class Pages(unittest.TestCase):
             self.assertEqual(P.read_page(rec)[1], "refused")
 
 
+class BrowserPass(unittest.TestCase):
+    def run_main(self, browser_cls, robots=True):
+        from unittest import mock
+        import os, tempfile
+        rows = [{"_id": "r1", "document_url": "https://a.com/x.pdf", "effective_type": "Annual Report", "year": 2024},
+                {"_id": "r2", "document_url": "https://b.com/y.pdf", "effective_type": "Annual Report", "year": 2024}]
+        pdf = b"%PDF" + b"x" * 30000
+        fetches = {"https://a.com/x.pdf": (200, pdf, True), "https://b.com/y.pdf": (403, b"", True)}
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.dict(os.environ, {"AIRTABLE_TOKEN": "t", "AIRTABLE_BASE": "b"}), \
+             mock.patch.object(P, "fetch_rows", lambda *a: rows), \
+             mock.patch.object(P, "fetch", lambda u, r=None: fetches[u]), \
+             mock.patch.object(P, "robots_allows", lambda u: robots), \
+             mock.patch.object(P, "Browser", browser_cls), \
+             mock.patch("sys.argv", ["pc_fetch.py", "--pages", "0"]):
+            os.chdir(d)
+            try:
+                P.main()
+                return open("pc_fetch.md", encoding="utf-8").read()
+            finally:
+                os.chdir(cwd)
+
+    class B:
+        def __enter__(self): return self
+        def __exit__(self, *e): pass
+        def fetch_pdf(self, url, referer=None): return 200, b"%PDF" + b"y" * 30000, True
+
+    def test_browser_reaches_what_requests_could_not(self):
+        md = self.run_main(self.B)
+        self.assertIn("| attached (5 MB or less) | 2 |", md)
+        self.assertIn("| of which reached only by the browser (Edge, no window) | 1 |", md)
+
+    def test_robots_txt_disallow_is_respected(self):
+        md = self.run_main(self.B, robots=False)
+        self.assertIn("| of which skipped because robots.txt disallows them | 1 |", md)
+        self.assertIn("| attached (5 MB or less) | 1 |", md)
+
+    def test_no_browser_on_the_computer_counts_as_refused(self):
+        class NoB:
+            def __enter__(self): raise RuntimeError("msedge not found")
+            def __exit__(self, *e): pass
+        md = self.run_main(NoB)
+        self.assertIn("| still refused | 1 |", md)
+        self.assertIn("not available (RuntimeError: msedge not found)", md)
+
+
+class Robots(unittest.TestCase):
+    def test_disallow_and_allow(self):
+        from unittest import mock
+
+        class R:
+            status_code = 200
+            text = "User-agent: *\nDisallow: /private/\n"
+        P._robots.clear()
+        with mock.patch.object(P.requests, "get", return_value=R()):
+            self.assertFalse(P.robots_allows("https://c.com/private/r.pdf"))
+            self.assertTrue(P.robots_allows("https://c.com/reports/r.pdf"))
+
+
 if __name__ == "__main__":
     unittest.main()
