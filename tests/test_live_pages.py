@@ -22,6 +22,14 @@ class LivePages(unittest.TestCase):
         self.assertNotIn("Sustainability page", v3["gap_pages"])
         self.assertLess(v3["completeness"], v2["completeness"])
 
+    def test_two_scores(self):
+        s = stats({"reports_hub": 1}, {"reports_hub": 1})
+        s["type_counts"] = {"Code of Conduct": 1}
+        r = CC.compose(s, 2024, "v2")
+        self.assertEqual(r["page_completeness"], 0.5)        # hub yes, sustainability page no
+        self.assertEqual(r["disclosure_completeness"], 0.25)  # Code of Conduct only
+        self.assertAlmostEqual(r["completeness"], 2 / 6, places=3)
+
     def test_compare_reports_losses(self):
         s = stats({"reports_hub": 1}, {})
         comp = {"PT_1": (None, {"company_name": "Acme"})}

@@ -113,14 +113,18 @@ def count_rows(table, field=None):
 
 
 def company_stats():
-    vals, miss, over = [], collections.Counter(), collections.Counter()
-    for rec in sweep("companies", ["completeness", "gap_pages", "overdue_reports"]):
+    vals, dis, pag, miss, over = [], [], [], collections.Counter(), collections.Counter()
+    for rec in sweep("companies", ["completeness", "disclosure_completeness", "page_completeness", "gap_pages",
+                                   "overdue_reports"]):
         f = rec.get("fields", {})
         vals.append(float(f.get("completeness") or 0))
+        dis.append(float(f.get("disclosure_completeness") or 0))
+        pag.append(float(f.get("page_completeness") or 0))
         miss.update(f.get("gap_pages") or [])
         over.update(f.get("overdue_reports") or [])
     n = len(vals)
     return {"companies": n, "avg": (sum(vals) / n) if n else 0,
+            "dis_avg": (sum(dis) / n) if n else 0, "page_avg": (sum(pag) / n) if n else 0,
             "complete": (sum(1 for v in vals if v >= 0.9999) / n) if n else 0, "miss": miss,
             "over": over}
 
@@ -243,6 +247,7 @@ def main():
            "discarded_24h_by_reason": "\n".join(f"{k}: {v:,}" for k, v in lib["disc_24h"].most_common()),
            "failed_jobs_24h": len(fails or []), "failed_jobs": "\n".join(fails or []),
            "companies": co["companies"], "completeness_avg": round(co["avg"], 4),
+           "disclosure_completeness_avg": round(co["dis_avg"], 4), "page_completeness_avg": round(co["page_avg"], 4),
            "companies_complete": round(co["complete"], 4),
            "overdue_sust_reports": co["over"].get("Sustainability report", 0),
            "overdue_annual_reports": co["over"].get("Annual report", 0),

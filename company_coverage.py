@@ -85,7 +85,7 @@ C_WBA = "wba_id"
 STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
                "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
-               "sust_reports_total", "completeness", "gaps", "gap_pages",
+               "sust_reports_total", "completeness", "disclosure_completeness", "page_completeness", "gaps", "gap_pages",
                "overdue_reports", "overdue_note", "queue_score", "queue_item", "queue_action",
                "latest_doc_added", "latest_doc", "check_docs", "sust_reporting"]
 # written only when a check flips from passing to failing: which document used to pass it and what
@@ -108,6 +108,11 @@ IMPORTANT_EXACT = ("Code of Conduct", "Human Rights Policy", "Policy Documents")
 # because documents are harvested from pages). Tag names match the gap_pages options.
 COMPLETENESS = ["Report hub page", "Sustainability page", "Sustainability report (recent)",
                 "Annual report (recent)", "Code of Conduct", "Human Rights Policy"]
+# Two views of the same six checks (owner's request, 23 Oct 2026): what the company discloses and we
+# hold, and whether we watch its pages (the health of our collection). completeness stays the six.
+DISCLOSURE_CHECKS = ["Sustainability report (recent)", "Annual report (recent)", "Code of Conduct",
+                     "Human Rights Policy"]
+PAGE_CHECKS = ["Report hub page", "Sustainability page"]
 
 REPORT_TYPES  = SUST_FAMILY | ANNUAL_FAMILY | {
     "Climate Report", "Environmental Reports", "Social Reports", "Interim Reports",
@@ -545,6 +550,8 @@ def compose(c, year_min, rules=None):
             "pages_breakdown": pages, "docs_by_year": docs_by_year,
             "sust_years": s_years, "sust_cadence": sust_cadence(c["sust_years"]),
             "completeness": completeness, "gaps": gaps, "gap_pages": failed,
+            "disclosure_completeness": round(1 - sum(k in failed for k in DISCLOSURE_CHECKS) / len(DISCLOSURE_CHECKS), 4),
+            "page_completeness": round(1 - sum(k in failed for k in PAGE_CHECKS) / len(PAGE_CHECKS), 4),
             "latest_doc_added": c["latest_added"][0][:10] if c.get("latest_added") else None,
             "latest_doc": c.get("latest_doc") or "",
             "check_docs": check_docs(c, year_min, failed),
@@ -698,7 +705,8 @@ def compare(comp, agg, year_min, out="coverage_compare.md", a="v1", b="v2"):
     for w in comp:
         st = agg.get(w) or empty_stats()
         x, y = compose(st, year_min, a), compose(st, year_min, b)
-        rows.append((x["completeness"], y["completeness"]))
+        rows.append((x["completeness"], y["completeness"], x["disclosure_completeness"], y["disclosure_completeness"],
+                     x["page_completeness"], y["page_completeness"]))
         gx, gy = set(x["gap_pages"] or []), set(y["gap_pages"] or [])
         for check in COMPLETENESS:
             passing[a, check] += check not in gx
@@ -716,10 +724,13 @@ def compare(comp, agg, year_min, out="coverage_compare.md", a="v1", b="v2"):
     n = len(rows) or 1
     va = sum(r[0] for r in rows) / n; vb = sum(r[1] for r in rows) / n
     fa = sum(1 for r in rows if r[0] == 1) / n; fb = sum(1 for r in rows if r[1] == 1) / n
+    da, db, pa, pb = (sum(r[i] for r in rows) / n for i in (2, 3, 4, 5))
     L = [f"## Completeness: rules {a} vs {b}", "",
          f"{a} = {DESCRIBE.get(a, a)}.", "", f"{b} = {DESCRIBE.get(b, b)}.", "", "Read-only: nothing written.", "",
          f"| | {a} | {b} |", "|---|---:|---:|",
-         f"| average completeness | {va:.1%} | {vb:.1%} |", f"| companies at 100% | {fa:.1%} | {fb:.1%} |"]
+         f"| average completeness | {va:.1%} | {vb:.1%} |", f"| companies at 100% | {fa:.1%} | {fb:.1%} |",
+         f"| average disclosure completeness | {da:.1%} | {db:.1%} |",
+         f"| average page completeness | {pa:.1%} | {pb:.1%} |"]
     for check in COMPLETENESS:
         L.append(f"| companies passing: {check} | {passing[a, check]:,} | {passing[b, check]:,} |")
     L.append("")

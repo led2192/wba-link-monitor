@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-10-23: Disclosure completeness and page completeness, separately
+The six completeness checks mix two different things: what the company discloses and we hold (four document checks) and whether we watch its report pages (two page checks, the health of our collection). A company can hold every report while we lose its page, and the other way round. Two scores now sit beside the combined one: `disclosure_completeness` and `page_completeness`, with daily averages in `base_health`. The combined `completeness` is kept unchanged so its history stays comparable. Suggested by the owner. Rejected: replacing `completeness` with the disclosure score (breaks the trend line and every view built on it).
+
 ### 2026-10-23 (proposed): Page checks count only live pages (completeness rules v3)
 Under v2 the report hub and sustainability page checks pass when the company has any page of that type, even one unticked (monitoring switched off as junk) or gone (404/410). That flatters completeness: a company whose only reports page disappeared still shows the check as passed. v3 counts only pages still watched that have not gone. Measured with `company_coverage.py --compare --compare-rules v2,v3` on the pull request; to switch on after the owner's approval (COVERAGE_RULES=v3). Gone pages are replaced nightly since #54, so most companies keep the check through the replacement. Rejected: counting blocked pages (403) as failed (the page is right, only our robot is refused).
 
