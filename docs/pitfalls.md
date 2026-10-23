@@ -43,3 +43,4 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## Strategy
 - **Sitemaps add junk, not reports** (37,000 bad rows in one run). Page monitoring plus search is the reliable pair.
 - **The goal is events, not URLs.** "Company published a report" is the signal; filtering belongs in the pipeline, not in a review queue.
+- **A formula field can return an object, not text.** When a formula fails on a row, Airtable's API returns `{"error": "#ERROR!"}` (or `{"specialValue": "NaN"}`) instead of a string. Changing `doc_label` to read a new formula (`ai_title`, 23 Oct 2026) made some rows error and `company_coverage.py` crashed on `.split`. Reads now go through `airtable_request`, which turns such values into None; formulas that read AI fields guard with `ISERROR`. Test a formula change on the PR comparison before the nightly run.

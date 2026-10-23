@@ -4,6 +4,8 @@ Newest first. One line per change, with the pull request. Every pull request add
 
 ## October 2026
 - 2026-10-23 Completeness rules v3 proposed (not switched on): the report hub and sustainability page checks count only pages still watched that have not gone (404/410); `--compare` takes any two rule versions (`--compare-rules v2,v3`) and lists checks gained and lost (#58)
+- 2026-10-23 A formula in an error state no longer crashes a script: Airtable reads now turn formula errors into empty values (`monitor_core.airtable_request`); `ai_title` guards against AI fields in an error state. Company coverage crashed on it in the PR comparison the same evening (#59)
+- 2026-10-23 Documents with no type at all (mostly non-English: the AI types English only) are typed nightly from their file name and cover title, including cover-title phrases in a dozen languages (`cover_terms.json`); `year_eval.py` measures it on non-English documents with a sure true type (#55)
 - 2026-10-23 Gone report pages (404/410) are replaced nightly: the company's site is searched and a clear best match is added automatically, the gone page unticked with a dated note; clear matches for missing hubs and sustainability pages are added without waiting for approval (#54)
 - 2026-10-23 A scheduled or chained job that fails on its first attempt re-runs its failed jobs once, two minutes later (new workflow Re-run failed job once); RUN_FAILED now has an automatic owner (#52)
 - 2026-10-23 AI titles that are sentences instead of titles ("I don't have access to the document text...", over 100 rows) no longer show: new formula `report_library.ai_title`, used by `doc_label` (live in Airtable) and by the cards' `title_value` (#51)
