@@ -133,7 +133,7 @@ YEAR_OK = re.compile(r"^20[0-3][0-9]$")   # sanity guard on the {year} formula o
 # v3 (proposed 23 Oct 2026, measured with --compare v2,v3): v2, and the two page checks (report hub,
 #                        sustainability page) count only pages that are still watched (monitor ticked)
 #                        and have not gone (404 / 410); under v2 an unticked or gone page still passed.
-RULES = os.environ.get("COVERAGE_RULES", "v2")       # v2 approved by the owner on 23 Oct 2026
+RULES = os.environ.get("COVERAGE_RULES", "v3")       # v2 approved 23 Oct 2026; v3 approved the same evening
 V2_UP = ("v2", "v3")
 URD_TITLE = re.compile(r"universal\s+registration|registration\s+document|document\s+d.enregistrement|"
                        r"annual\s+financial\s+report|rapport\s+financier\s+annuel|documento\s+de\s+registro|"

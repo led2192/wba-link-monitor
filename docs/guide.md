@@ -179,7 +179,7 @@ Six checks, each worth one sixth of `completeness`:
 | Code of Conduct | any Code of Conduct, any year |
 | Human Rights Policy | any Human Rights Policy, any year |
 
-Proposed (rules v3, awaiting approval): the two page checks would count only pages still watched that have not gone (404/410); today an unticked or gone page still passes.
+Since 24 Oct 2026 (rules v3) the two page checks count only pages still watched that have not gone (404/410); an unticked or gone page no longer passes.
 
 Two scores split the six checks (owner's request, 23 Oct 2026): `disclosure_completeness`, the four document checks (what the company publishes and we hold, the number that matters for WBA's work), and `page_completeness`, the two page checks (whether we watch its pages: the health of our collection). `completeness` stays the six together, so its history remains comparable; `base_health` reports all three averages.
 
