@@ -4,8 +4,10 @@ About 3,000 documents have no file because the company's site refuses requests f
 
 ## How it works
 - A GitHub **self-hosted runner** is installed on the computer. It is attached **only to the private repository `wba-text-store`**, never to this public repository (on a public repository, anyone opening a pull request could run code on the computer).
-- The workflow **Office-network fetch** in `wba-text-store` runs on weekdays at 12:17 UTC (14:17 Madrid in winter, 13:17 in summer). If the computer is off, the run waits for it, up to a day.
-- It runs this repository's `pc_fetch.py`: up to 300 refused files, recent sustainability and annual reports first, one request at a time per site with a pause, at most 90 minutes. A PDF of 5 MB or less is attached to its row; a bigger one is read on the computer (first six pages) so it can be typed and dated; every row tried gets `retried_on` and a `retry_note`.
+- The workflow **Office-network fetch** in `wba-text-store` runs every day, every 4 hours (at 00:17, 04:17, 08:17, 12:17, 16:17 and 20:17 UTC). If the computer is off, at most one run waits for it and starts when it is back; nothing piles up, nothing breaks.
+- It runs this repository's `pc_fetch.py`, at most 90 minutes a run, one request at a time per site with a pause:
+  - **refused files**: up to 300 a run, recent sustainability and annual reports first, each tried at most once a day. A PDF of 5 MB or less is attached to its row; a bigger one is read on the computer (first six pages) so it can be typed and dated; every row tried gets `retried_on` and a `retry_note`.
+  - **refused report pages**: up to 150 a run, read longest ago first (`pc_checked`). The document links found go to `seen_links` and `new_links` as the nightly monitor writes them; the nightly harvest turns them into documents, and any file the cloud cannot then download comes back to the runner as a refused file. This is how reports on about 340 sites that refuse us entirely start to arrive.
 - The computer only downloads public reports and writes to Airtable. It never gets around a login, a captcha or a paywall.
 
 ## Setting it up (about 15 minutes, once)
@@ -36,7 +38,10 @@ In PowerShell: `python --version` should say 3.12 or newer. If it says the comma
 GitHub, `wba-text-store`, Actions, **Office-network fetch**, Run workflow, limit `30`, mode `dry_run`. When it finishes (a few minutes), open the run: the summary says how many refused files your connection reaches. Nothing is written in a dry run. If the numbers are good, the weekday runs write by themselves.
 
 ## Day to day
-Nothing. Keep the runner window open (it starts with Windows). The Monday notification says how many refused files were recovered. If the computer is replaced: Settings, Actions, Runners, remove the old runner, and repeat steps 4 to 6.
+Nothing. Keep the runner window open (it starts with Windows). The Monday notification says how many refused files and pages were reached.
+
+## A second computer
+Repeat steps 4 to 6 on it (step 4 gives it its own runner name). Both serve the same workflow: one run at a time, picked up by whichever computer is on, and a file or page tried today is not tried again the same day. If a computer is replaced: Settings, Actions, Runners, remove the old runner, and repeat steps 4 to 6 on the new one.
 
 ## Turning it off
 GitHub, `wba-text-store`, Actions, Office-network fetch, the "..." menu, Disable workflow. To remove it completely: Settings, Actions, Runners, remove the runner, and delete `C:\actions-runner`.

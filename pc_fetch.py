@@ -20,9 +20,21 @@ sends (cookies from the home page, the company page as Referer), and:
     content_hash and file_size_mb, so the AI type, title and year follow; the file itself stays
     unattached (file_status stays blocked) and the note says so;
   - still refused or not a PDF: says so in retry_note.
-Every row tried gets retried_on and retry_note. Never gets around a login, a captcha or a paywall.
+Every row tried gets retried_on and retry_note.
+
+Refused pages too (--pages, default 150 a run): monitored report pages (reports hub, sustainability,
+investor relations, policies) whose site refuses cloud servers (status blocked, or dead with 401, 403
+or 429), the ones read longest ago first (pc_checked). Each is read here and its document links go to
+seen_links and new_links exactly as the nightly monitor would write them; the nightly harvest then
+turns them into documents, and the files the cloud cannot download come back to this runner as
+refused files. The page's status is left to the nightly monitor.
+
+Meant to run several times a day (every 4 hours); runs that find the computer off simply wait.
+Several computers can run it: each run takes its own slice (oldest first, rows already tried today
+are skipped). Never gets around a login, a captcha or a paywall.
 Dry run by default (prints, writes pc_fetch.md); --commit writes.
-Env: AIRTABLE_TOKEN, AIRTABLE_BASE; QA: AIRTABLE_QA_TOKEN (optional). Args: --limit 300 --minutes 90
+Env: AIRTABLE_TOKEN, AIRTABLE_BASE; QA: AIRTABLE_QA_TOKEN (optional).
+Args: --limit 300 --pages 150 --minutes 90
 """
 import argparse, collections, datetime as dt, hashlib, io, os, re, threading, time
 from concurrent.futures import ThreadPoolExecutor
@@ -148,8 +160,59 @@ def fetch_rows(token, base, limit):
         if not offset:
             break
         time.sleep(0.12)
+    today = dt.date.today().isoformat()
+    out = [r for r in out if (r.get("retried_on") or "") < today]   # another run today already tried it
     out.sort(key=order_key)
     return out[:limit] if limit else out
+
+
+PAGE_TYPES = ("reports_hub", "sustainability_page", "sustainability_report", "investor_relations", "policies")
+
+
+def fetch_pages(token, base, limit):
+    import monitor_core as MC
+    url = f"{API}/{base}/monitored_links"
+    headers = {"Authorization": f"Bearer {token}"}
+    fields = [MC.F_URL, MC.F_TYPE, MC.F_WBA, MC.F_NAME, MC.F_SEEN, MC.F_NEW, MC.F_HASH, "pc_checked"]
+    formula = ("AND({monitor}, OR({status}='blocked', AND({status}='dead', OR({http_status}=401, {http_status}=403, "
+               "{http_status}=429))))")
+    params = [("pageSize", "100"), ("filterByFormula", formula)] + [("fields[]", f) for f in fields]
+    out, offset = [], None
+    while True:
+        p = params + ([("offset", offset)] if offset else [])
+        j = airtable_request("GET", url, headers, params=p).json()
+        out += [r for r in j.get("records", []) if (r.get("fields", {}).get(MC.F_TYPE) or "") in PAGE_TYPES]
+        offset = j.get("offset")
+        if not offset:
+            break
+        time.sleep(0.12)
+    today = dt.date.today().isoformat()
+    out = [r for r in out if (r["fields"].get("pc_checked") or "") < today]
+    out.sort(key=lambda r: r["fields"].get("pc_checked") or "")
+    return out[:limit]
+
+
+def read_page(rec):
+    """(fields to write, outcome) for one refused page read from this network."""
+    import monitor_core as MC
+    f = rec["fields"]
+    today = dt.date.today()
+    upd = {"pc_checked": today.isoformat()}
+    host = urlsplit(f.get(MC.F_URL, "")).netloc
+    with _locks[host]:
+        try:
+            r = requests.get(f[MC.F_URL], headers=HEADERS, timeout=45)
+        except requests.RequestException:
+            r = None
+        finally:
+            time.sleep(SITE_PAUSE)
+    if r is None or r.status_code >= 400:
+        return upd, "refused"
+    current = MC.doc_links(r.text, r.url)
+    if not current:
+        return upd, "no_links"
+    changed, _high, _docs = MC.detection_fields(f, upd, current, bool(f.get(MC.F_HASH)), today)
+    return upd, ("new_links" if changed else "read")
 
 
 def main():
@@ -157,6 +220,7 @@ def main():
     ap.add_argument("--limit", type=int, default=300)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--minutes", type=float, default=90, help="stop starting new files after this long")
+    ap.add_argument("--pages", type=int, default=150, help="refused report pages to read (0 = none)")
     ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
@@ -224,6 +288,20 @@ def main():
             if i % 25 == 0:
                 print(f"  {i}/{len(rows)} {dict(counts)}", flush=True)
 
+    # refused pages: read here, links handed to the nightly harvest
+    pcounts = collections.Counter()
+    if a.pages and time.time() < deadline:
+        pages = fetch_pages(token, base, a.pages)
+        print(f">>> {len(pages):,} refused report pages to read from this computer", flush=True)
+        with ThreadPoolExecutor(max_workers=a.workers) as ex:
+            for rec, (upd, what) in zip(pages, ex.map(lambda r: read_page(r) if time.time() < deadline
+                                                       else ({}, "not_tried"), pages)):
+                pcounts[what] += 1
+                if upd and a.commit:
+                    airtable_request("PATCH", f"{API}/{base}/monitored_links", {"Authorization": f"Bearer {token}"},
+                                     {"records": [{"id": rec["id"], "fields": upd}], "typecast": True})
+                    time.sleep(0.2)
+
     tried = [r for r, w in results if w != "not_tried"]
     got = counts["upload"] + counts["read_here"]
     recent = [r for r, w in results if w != "not_tried" and r.get("effective_type") in FAMILY and (r.get("year") or 0) >= 2023]
@@ -236,10 +314,13 @@ def main():
           f"| read here, too big to attach | {counts['read_here']:,} |",
           f"| still refused | {counts['refused']:,} |",
           f"| not a PDF / too small / over 150 MB | {counts['not_pdf'] + counts['too_small'] + counts['too_big']:,} |",
-          f"| not tried (time budget) | {counts['not_tried']:,} |", ""]
+          f"| not tried (time budget) | {counts['not_tried']:,} |", "",
+          f"Refused report pages read: {sum(v for k, v in pcounts.items() if k != 'not_tried'):,}: "
+          f"{pcounts['new_links']:,} with new document links, {pcounts['read']:,} read with nothing new, "
+          f"{pcounts['no_links']:,} with no document links, {pcounts['refused']:,} refused here too.", ""]
     open("pc_fetch.md", "w", encoding="utf-8").write("\n".join(md))
     print("\n".join(md), flush=True)
-    run.finish("ok", rows_in=len(rows), rows_out=got, counters=dict(counts))
+    run.finish("ok", rows_in=len(rows), rows_out=got, counters={**dict(counts), "pages": dict(pcounts)})
     run.write_step_summary("ok", dict(counts), title="Office-network fetch")
 
 

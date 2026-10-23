@@ -214,7 +214,7 @@ Interface "Pipeline QA": **Check Claude's answers** (the day's cards that need y
 | --- | --- | --- |
 | PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
 | PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#54) |
-| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | documents: the office-network runner on the owner's computer, weekdays (pc_fetch.py, [pc_runner.md](pc_runner.md)); refused pages: to build on the same runner | documents yes (#60, once set up); pages to build |
+| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | the office-network runner on the owner's computer, every 4 hours (pc_fetch.py, [pc_runner.md](pc_runner.md)): refused files and refused report pages | yes (#60, once set up) |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
@@ -306,7 +306,7 @@ Every job, what it writes and how to run it by hand: [scripts.md](scripts.md).
 
 ## 11. Known limits
 
-- **Sites that block robots.** About 3,000 documents have no file because the site refuses requests from cloud servers, by network address: from the cloud, browser-like requests and Internet Archive copies recovered none of 61 recent reports (23 Oct 2026). Every weekday the robot also runs on the owner's computer (the office-network runner, [pc_runner.md](pc_runner.md)) and fetches up to 300 of them from an ordinary connection; `retry_note` says what happened to each. The Monday list names the few that still need a person (`add_file`).
+- **Sites that block robots.** About 3,000 documents have no file because the site refuses requests from cloud servers, by network address: from the cloud, browser-like requests and Internet Archive copies recovered none of 61 recent reports (23 Oct 2026). Every 4 hours the robot also runs on the owner's computer (the office-network runner, [pc_runner.md](pc_runner.md)): it fetches refused files from an ordinary connection and reads the report pages of sites that refuse us entirely, so their new reports reach the library too; `retry_note` says what happened to each file. The Monday list names the few that still need a person (`add_file`).
 - **Files over 5 MB** cannot be attached in Airtable. They are read from `document_url`, so they count, are typed and dated, but show no attachment.
 - **Non-English documents** are not typed by the AI. They keep the address type, or get one from their cover title in their own language (about a dozen languages); covers that name no known title phrase stay untyped.
 - **The base cap**: 500,000 records per base. `base_health` watches both bases.
