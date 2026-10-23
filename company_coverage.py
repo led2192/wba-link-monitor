@@ -85,7 +85,7 @@ C_WBA = "wba_id"
 STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
                "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
-               "sust_reports_total", "completeness", "gaps", "gap_pages",
+               "sust_reports_total", "completeness", "disclosure_completeness", "page_completeness", "gaps", "gap_pages",
                "overdue_reports", "overdue_note", "queue_score", "queue_item", "queue_action",
                "latest_doc_added", "latest_doc", "check_docs", "sust_reporting"]
 # written only when a check flips from passing to failing: which document used to pass it and what
@@ -108,6 +108,11 @@ IMPORTANT_EXACT = ("Code of Conduct", "Human Rights Policy", "Policy Documents")
 # because documents are harvested from pages). Tag names match the gap_pages options.
 COMPLETENESS = ["Report hub page", "Sustainability page", "Sustainability report (recent)",
                 "Annual report (recent)", "Code of Conduct", "Human Rights Policy"]
+# Two views of the same six checks (owner's request, 23 Oct 2026): what the company discloses and we
+# hold, and whether we watch its pages (the health of our collection). completeness stays the six.
+DISCLOSURE_CHECKS = ["Sustainability report (recent)", "Annual report (recent)", "Code of Conduct",
+                     "Human Rights Policy"]
+PAGE_CHECKS = ["Report hub page", "Sustainability page"]
 
 REPORT_TYPES  = SUST_FAMILY | ANNUAL_FAMILY | {
     "Climate Report", "Environmental Reports", "Social Reports", "Interim Reports",
@@ -125,7 +130,11 @@ YEAR_OK = re.compile(r"^20[0-3][0-9]$")   # sanity guard on the {year} formula o
 #   sustainability check also passes on a whole annual report, 10-K or URD whose pages hold a
 #                        substantive sustainability section (sustainability_class = E embedded):
 #                        CSRD sustainability statements, India's BRSR, Hong Kong ESG sections
-RULES = os.environ.get("COVERAGE_RULES", "v2")       # v2 approved by the owner on 23 Oct 2026
+# v3 (proposed 23 Oct 2026, measured with --compare v2,v3): v2, and the two page checks (report hub,
+#                        sustainability page) count only pages that are still watched (monitor ticked)
+#                        and have not gone (404 / 410); under v2 an unticked or gone page still passed.
+RULES = os.environ.get("COVERAGE_RULES", "v3")       # v2 approved 23 Oct 2026; v3 approved the same evening
+V2_UP = ("v2", "v3")
 URD_TITLE = re.compile(r"universal\s+registration|registration\s+document|document\s+d.enregistrement|"
                        r"annual\s+financial\s+report|rapport\s+financier\s+annuel|documento\s+de\s+registro|"
                        r"annual\s+report|rapport\s+annuel", re.I)
@@ -236,7 +245,7 @@ def aggregate(wbas=None):
 
     def co(wba):
         return agg.setdefault(wba, {
-            "urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
+            "urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "live_page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(), "docs_with_file": 0, "docs_typed": 0,
             "type_counts": {}, "type_latest": {}, "latest_report_year": None,
             "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": "", "check_doc": {}, "fam_best": {},
@@ -265,6 +274,9 @@ def aggregate(wbas=None):
         pt = (f.get(F_PTYPE) or "").strip()
         if pt:
             c["page_types"][pt] += 1
+            gone = f.get(F_ST) == "dead" and str(f.get("http_status") or "").split(".")[0] in ("404", "410")
+            if f.get(F_MON) and not gone:
+                c["live_page_types"][pt] += 1
 
     print(">>> sweeping report_library ...", flush=True)
     for rec in sweep(LIB, [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_FILE, F_DISCARD, "created_time", "doc_label",
@@ -455,20 +467,21 @@ def compose(c, year_min, rules=None):
 
     def family_current(family):
         ok = any(c["type_latest"].get(t, 0) >= year_min for t in family)
-        if rules == "v2" and family is ANNUAL_FAMILY:
+        if rules in V2_UP and family is ANNUAL_FAMILY:
             ok = ok or c.get("urd_best", (0,))[0] >= year_min
-        if rules == "v2" and family is SUST_FAMILY:
+        if rules in V2_UP and family is SUST_FAMILY:
             ok = ok or c.get("emb_best", (0,))[0] >= year_min
         return ok
 
+    pages_ok = c.get("live_page_types", collections.Counter()) if rules == "v3" else c["page_types"]
     flags = []
     if c["urls_total"] == 0:
         flags.append("no_urls")
     elif c["urls_monitored"] == 0:
         flags.append("nothing_monitored")
-    if "reports_hub" not in c["page_types"]:
+    if "reports_hub" not in pages_ok:
         flags.append("no_reports_hub")
-    if "sustainability_page" not in c["page_types"]:
+    if "sustainability_page" not in pages_ok:
         flags.append("no_sustainability_page")
     if c["docs_total"] == 0:
         flags.append("no_docs")
@@ -500,9 +513,9 @@ def compose(c, year_min, rules=None):
         return max(ys) if any(ys) else None
     sl, al = latest(SUST_FAMILY), latest(ANNUAL_FAMILY)
     checks = {
-        "Report hub page": ("reports_hub" in c["page_types"],
+        "Report hub page": ("reports_hub" in pages_ok,
                             "No report hub page watched: find the company's reports/publications page and add it."),
-        "Sustainability page": ("sustainability_page" in c["page_types"],
+        "Sustainability page": ("sustainability_page" in pages_ok,
                                 "No sustainability page watched: find the company's sustainability/ESG page and add it."),
         "Sustainability report (recent)": (family_current(SUST_FAMILY),
             f"No sustainability report from {year_min} or later"
@@ -537,6 +550,8 @@ def compose(c, year_min, rules=None):
             "pages_breakdown": pages, "docs_by_year": docs_by_year,
             "sust_years": s_years, "sust_cadence": sust_cadence(c["sust_years"]),
             "completeness": completeness, "gaps": gaps, "gap_pages": failed,
+            "disclosure_completeness": round(1 - sum(k in failed for k in DISCLOSURE_CHECKS) / len(DISCLOSURE_CHECKS), 4),
+            "page_completeness": round(1 - sum(k in failed for k in PAGE_CHECKS) / len(PAGE_CHECKS), 4),
             "latest_doc_added": c["latest_added"][0][:10] if c.get("latest_added") else None,
             "latest_doc": c.get("latest_doc") or "",
             "check_docs": check_docs(c, year_min, failed),
@@ -558,7 +573,7 @@ def check_docs(c, year_min, failed):
     for check, fam, alt in (("Sustainability report (recent)", "sust", "emb_best"),
                             ("Annual report (recent)", "annual", "urd_best")):
         y, rid = c.get("fam_best", {}).get(fam, (0, ""))
-        if y < year_min and RULES == "v2":
+        if y < year_min and RULES in V2_UP:
             y, rid = c.get(alt, (0, ""))[:2]
         docs[check] = rid if y >= year_min else None
     return "\n".join(f"{k}: {v}" for k, v in docs.items() if v and k not in failed) or None
@@ -632,7 +647,7 @@ def _overdue(c):
 
 
 def empty_stats():
-    return {"urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
+    return {"urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "live_page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(),
             "docs_with_file": 0, "docs_typed": 0, "type_counts": {}, "type_latest": {},
             "latest_report_year": None, "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": "", "check_doc": {}, "fam_best": {},
@@ -670,44 +685,65 @@ def changed(current, target):
     return any(_norm(current.get(k)) != _norm(target.get(k)) for k in STAT_FIELDS)
 
 
-def compare(comp, agg, year_min, out="coverage_compare.md"):
-    """Completeness per company under v1 and v2, the companies that change, and the documents that
-    make them change (for a hand check before v2 is switched on). Writes nothing to Airtable."""
+DESCRIBE = {
+    "v1": "the checks count by type only",
+    "v2": "a universal registration document (title + 100 pages) counts as the annual report; a whole annual "
+          "report, 10-K or URD with an embedded sustainability section counts for the sustainability check",
+    "v3": "v2, and the report hub and sustainability page checks count only pages still watched (monitor "
+          "ticked) that have not gone (404/410)",
+}
+
+
+def compare(comp, agg, year_min, out="coverage_compare.md", a="v1", b="v2"):
+    """Completeness per company under rules a and b, the checks gained and lost, and the evidence for
+    a hand check before b is switched on. Writes nothing to Airtable."""
     import random
     names = {w: (cur.get("company_name") or "") for w, (_, cur) in comp.items()}
-    rows, gains = [], {"Annual report (recent)": [], "Sustainability report (recent)": []}
+    rows = []
+    gains, losses = collections.defaultdict(list), collections.defaultdict(list)
+    passing = collections.Counter()
     for w in comp:
         st = agg.get(w) or empty_stats()
-        a, b = compose(st, year_min, "v1"), compose(st, year_min, "v2")
-        rows.append((a["completeness"], b["completeness"]))
-        for check, key in (("Annual report (recent)", "urd_best"), ("Sustainability report (recent)", "emb_best")):
-            if check in a["gap_pages"] and check not in b["gap_pages"]:
-                y, rid, why = st[key]
-                gains[check].append((w, names.get(w, ""), y, why))
+        x, y = compose(st, year_min, a), compose(st, year_min, b)
+        rows.append((x["completeness"], y["completeness"], x["disclosure_completeness"], y["disclosure_completeness"],
+                     x["page_completeness"], y["page_completeness"]))
+        gx, gy = set(x["gap_pages"] or []), set(y["gap_pages"] or [])
+        for check in COMPLETENESS:
+            passing[a, check] += check not in gx
+            passing[b, check] += check not in gy
+            if check in gx and check not in gy:
+                key = {"Annual report (recent)": "urd_best", "Sustainability report (recent)": "emb_best"}.get(check)
+                why = st[key][2] if key and st.get(key) else ""
+                yr = st[key][0] if key and st.get(key) else ""
+                gains[check].append((w, names.get(w, ""), yr, why))
+            elif check not in gx and check in gy:
+                pt = {"Report hub page": "reports_hub", "Sustainability page": "sustainability_page"}.get(check)
+                why = (f"{st['page_types'].get(pt, 0)} page(s) of the type, {st.get('live_page_types', {}).get(pt, 0)} "
+                       f"watched and not gone") if pt else ""
+                losses[check].append((w, names.get(w, ""), "", why))
     n = len(rows) or 1
-    v1 = sum(r[0] for r in rows) / n; v2 = sum(r[1] for r in rows) / n
-    full1 = sum(1 for r in rows if r[0] == 1) / n; full2 = sum(1 for r in rows if r[1] == 1) / n
-    L = ["## Completeness: current rules (v1) vs proposed (v2)", "",
-         "v2 = a universal registration document (title + 100 pages) counts as the annual report; a whole annual "
-         "report, 10-K or URD with an embedded sustainability section (sustainability_class E) counts for the "
-         "sustainability check. Read-only: nothing written.", "",
-         "| | v1 | v2 |", "|---|---:|---:|",
-         f"| average completeness | {v1:.1%} | {v2:.1%} |", f"| companies at 100% | {full1:.1%} | {full2:.1%} |",
-         f"| companies passing the annual check | {n - sum(1 for w in comp if 'Annual report (recent)' in compose(agg.get(w) or empty_stats(), year_min, 'v1')['gap_pages']):,} | "
-         f"{n - sum(1 for w in comp if 'Annual report (recent)' in compose(agg.get(w) or empty_stats(), year_min, 'v2')['gap_pages']):,} |",
-         f"| companies passing the sustainability check | {n - sum(1 for w in comp if 'Sustainability report (recent)' in compose(agg.get(w) or empty_stats(), year_min, 'v1')['gap_pages']):,} | "
-         f"{n - sum(1 for w in comp if 'Sustainability report (recent)' in compose(agg.get(w) or empty_stats(), year_min, 'v2')['gap_pages']):,} |",
-         "", "No company loses a check under v2 (the rules only add ways to pass).", ""]
+    va = sum(r[0] for r in rows) / n; vb = sum(r[1] for r in rows) / n
+    fa = sum(1 for r in rows if r[0] == 1) / n; fb = sum(1 for r in rows if r[1] == 1) / n
+    da, db, pa, pb = (sum(r[i] for r in rows) / n for i in (2, 3, 4, 5))
+    L = [f"## Completeness: rules {a} vs {b}", "",
+         f"{a} = {DESCRIBE.get(a, a)}.", "", f"{b} = {DESCRIBE.get(b, b)}.", "", "Read-only: nothing written.", "",
+         f"| | {a} | {b} |", "|---|---:|---:|",
+         f"| average completeness | {va:.1%} | {vb:.1%} |", f"| companies at 100% | {fa:.1%} | {fb:.1%} |",
+         f"| average disclosure completeness | {da:.1%} | {db:.1%} |",
+         f"| average page completeness | {pa:.1%} | {pb:.1%} |"]
+    for check in COMPLETENESS:
+        L.append(f"| companies passing: {check} | {passing[a, check]:,} | {passing[b, check]:,} |")
+    L.append("")
     rnd = random.Random(23)
-    for check, label in (("Annual report (recent)", "Annual check gained through a universal registration document"),
-                         ("Sustainability report (recent)", "Sustainability check gained through an embedded section (hand-check sample)")):
-        g = gains[check]
-        L += [f"### {label}: {len(g)} companies", ""]
-        sample = g if len(g) <= 40 else rnd.sample(g, 40)
-        if sample:
-            L += ["| company | year | document and evidence |", "|---|---:|---|"]
-            L += [f"| {nm[:30]} ({w}) | {y} | {why[:230].replace('|', '/')} |" for w, nm, y, why in sorted(sample, key=lambda x: x[1])]
-        L.append("")
+    for label, d in (("gained", gains), ("lost", losses)):
+        for check, g in d.items():
+            L += [f"### {check}: {len(g)} companies {label} it (sample up to 40)", ""]
+            sample = g if len(g) <= 40 else rnd.sample(g, 40)
+            L += ["| company | year | evidence |", "|---|---:|---|"]
+            L += [f"| {nm[:30]} ({w}) | {y} | {str(why)[:230].replace('|', '/')} |" for w, nm, y, why in sorted(sample, key=lambda x: x[1])]
+            L.append("")
+    if not gains and not losses:
+        L.append("No company changes.")
     text = "\n".join(L)
     print(text, flush=True)
     open(out, "w").write(text + "\n")
@@ -723,7 +759,8 @@ def main():
     ap.add_argument("--wba", default="", help="only these companies (comma-separated wba_ids); "
                     "used by scan_now.py to refresh one company right after a scan")
     ap.add_argument("--compare", action="store_true",
-                    help="read-only: completeness under the v1 rules vs the proposed v2 rules (coverage_compare.md)")
+                    help="read-only: completeness under two rule versions (coverage_compare.md)")
+    ap.add_argument("--compare-rules", default="v2,v3", help="the two rule versions to compare, e.g. v2,v3")
     args = ap.parse_args()
     wbas = [w.strip() for w in args.wba.split(",") if w.strip()]
 
@@ -741,7 +778,8 @@ def main():
 
     agg = aggregate(wbas)
     if args.compare:
-        compare(comp, agg, args.year_min)
+        ra, rb = (args.compare_rules.split(",") + ["v3"])[:2]
+        compare(comp, agg, args.year_min, a=ra.strip(), b=rb.strip())
         return
 
     orphans = sorted((w for w in agg if w not in comp),

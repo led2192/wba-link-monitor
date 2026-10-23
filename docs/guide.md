@@ -179,6 +179,10 @@ Six checks, each worth one sixth of `completeness`:
 | Code of Conduct | any Code of Conduct, any year |
 | Human Rights Policy | any Human Rights Policy, any year |
 
+Since 24 Oct 2026 (rules v3) the two page checks count only pages still watched that have not gone (404/410); an unticked or gone page no longer passes.
+
+Two scores split the six checks (owner's request, 23 Oct 2026): `disclosure_completeness`, the four document checks (what the company publishes and we hold, the number that matters for WBA's work), and `page_completeness`, the two page checks (whether we watch its pages: the health of our collection). `completeness` stays the six together, so its history remains comparable; `base_health` reports all three averages.
+
 `sust_reporting` says how the company reports sustainability for 2024 onwards: `dedicated`, `embedded`, `both` or `none`. `check_docs` records which document passes each check, and `completeness_change` explains a check lost overnight. `overdue_reports` flags a sustainability or annual report that, by the company's own rhythm, should be out (reports for a year are expected from July of the next year).
 
 ### 6.5 The work queue
