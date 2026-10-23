@@ -115,7 +115,11 @@
 "months ended",
 "quarter ended",
 "quarterly report",
-"trading update"
+"trading update",
+"10 q",
+"form 10 q",
+"integrated filing",
+"quarterly statement"
 ],
 "Code of Conduct": [
 "business conduct",
@@ -281,9 +285,12 @@
 "10-k",
 "10k form",
 "annual report",
-"form 10",
 "form 10k",
-"sec form"
+"sec form",
+"form 10 k",
+"10 k",
+"form 20 f",
+"20 f"
 ],
 "CSR Report": [
 "corporate responsib",
@@ -409,8 +416,7 @@
 "integrated report",
 "integriert",
 "intégr",
-"management report",
-"sustainability report"
+"management report"
 ],
 "Sustainability Report": [
 "citizenship",

@@ -6,7 +6,7 @@ name: Year rules evaluation
 on:
   workflow_dispatch:
   pull_request:
-    paths: [fiscal_year.py, date_documents.py, fiscal_years.py, year_eval.py, .github/workflows/year_eval.yml]
+    paths: [fiscal_year.py, date_documents.py, fiscal_years.py, classify_library.py, source_type_terms.json, year_eval.py, .github/workflows/year_eval.yml]
 
 jobs:
   evaluate:
@@ -29,6 +29,8 @@ jobs:
           mkdir -p baseline
           git show origin/main:fiscal_year.py > baseline/fiscal_year.py
           git show origin/main:date_documents.py > baseline/date_documents.py
+          git show origin/main:classify_library.py > baseline/classify_library.py
+          git show origin/main:source_type_terms.json > baseline/source_type_terms.json
       - name: Evaluate
         run: python year_eval.py --baseline baseline
         env:

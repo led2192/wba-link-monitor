@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-23 add_link opens a PDF before adding it and says when the site refuses it; add_result gives the first type and year guess; a PDF dropped with the link of a file-less row goes onto that row. Address classifier: shared tokens weigh less (ties no longer go to the first type listed), 10-Q and Indian integrated filings are interim reports, 'form 10' no longer means 10-K. year_eval.py also scores the address classifier (#45)
 - 2026-10-23 Files too big to attach (over 5 MB, file_status too_big: 2,996 rows, mostly full annual and integrated reports) are read from document_url for first pages and full text, so they get a type and a year (#47)
 - 2026-10-23 Year fixes after the 22 Oct rewrites: comparison periods ignored, title two years away from the text year lowers the score, ten-year tables are not cover titles; `year_eval.py` scores rule changes on every PR; `check_docs` and `completeness_change` say which document a lost check depended on; CO_GAP messages per check (#43)
 - 2026-10-23 Sustainability class gaps: interim reports, statutory documents and presentations decided from their first pages; rows with no text classed by type; 10-Ks, registration documents and financial statements added to the full-text build; no cap on first-pages reads (#44)

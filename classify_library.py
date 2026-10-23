@@ -42,6 +42,12 @@ except Exception:
                           "Annual Report": ["annual report"], "Policy Documents": ["policy"]}
 
 
+OWNERS = {}
+for _t, _toks in SOURCE_TYPE_TOKENS.items():
+    for _tok in _toks:
+        OWNERS.setdefault(_tok, set()).add(_t)
+
+
 def classify(document_url):
     """Return (source_type, confidence). Whole-token match against the whole URL path,
     so short tokens like 'gri' or 'iso' do not match inside 'nigeria' or 'vision'."""
@@ -53,7 +59,9 @@ def classify(document_url):
         score = 0; specific = False
         for tok in toks:
             if f" {tok} " in text:
-                score += len(tok.split())
+                # a token several types share ("annual report") counts a little less than one only
+                # this type has, so ties no longer go to whichever type is listed first in the file
+                score += len(tok.split()) - (0.1 if len(OWNERS.get(tok, ())) > 1 else 0)
                 if len(tok.split()) >= 2:
                     specific = True
         if score > best_score:
