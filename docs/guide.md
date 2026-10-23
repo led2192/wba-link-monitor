@@ -179,6 +179,8 @@ Six checks, each worth one sixth of `completeness`:
 | Code of Conduct | any Code of Conduct, any year |
 | Human Rights Policy | any Human Rights Policy, any year |
 
+Proposed (rules v3, awaiting approval): the two page checks would count only pages still watched that have not gone (404/410); today an unticked or gone page still passes.
+
 `sust_reporting` says how the company reports sustainability for 2024 onwards: `dedicated`, `embedded`, `both` or `none`. `check_docs` records which document passes each check, and `completeness_change` explains a check lost overnight. `overdue_reports` flags a sustainability or annual report that, by the company's own rhythm, should be out (reports for a year are expected from July of the next year).
 
 ### 6.5 The work queue

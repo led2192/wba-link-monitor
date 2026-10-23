@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - name: Compare
-        run: python company_coverage.py --compare
+        run: python company_coverage.py --compare --compare-rules v2,v3
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
