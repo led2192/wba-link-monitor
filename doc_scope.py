@@ -45,7 +45,7 @@ from urllib.parse import unquote, urlsplit
 
 API = "https://api.airtable.com/v0"
 REPORT_TYPES = {"Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report",
-                "10K Form", "Impact Report"}
+                "10K Form", "Impact Report", "Registration Document"}   # URDs: the annual report in FR/ES/BE
 FULL, PART, SUMMARY = "Full document", "Part of a report", "Summary or short document"
 SHORT = 12      # fewer pages than this is not a whole annual, integrated or sustainability report
 

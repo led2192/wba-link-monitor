@@ -45,5 +45,40 @@ class GapMessageTests(unittest.TestCase):
         self.assertEqual(msgs["no_coc"], "No Code of Conduct. | CoC: type is now Policy Documents")
 
 
+class RulesV2(unittest.TestCase):
+    def test_urd_needs_title_and_pages_and_no_debt_words(self):
+        ok = {"doc_label": "2025 | Eiffage | Document d'enregistrement universel 2025", "page_count": 420}
+        self.assertTrue(C.is_urd(ok, "Registration Document"))
+        self.assertFalse(C.is_urd(dict(ok, page_count=40), "Registration Document"))
+        self.assertFalse(C.is_urd({"doc_label": "Base Prospectus dated 10 May 2024 annual report", "page_count": 300},
+                                  "Registration Document"))
+        self.assertFalse(C.is_urd({"doc_label": "Final Terms dated 30 January 2020", "page_count": 10}, "Registration Document"))
+        self.assertFalse(C.is_urd({"doc_label": "Second Amendment to Universal Registration Document 2026", "page_count": 166},
+                                  "Registration Document"))
+
+    def test_embedded_needs_class_e_and_a_whole_report(self):
+        f = {"sustainability_class": {"name": "E embedded"}, "scope": {"name": "Full document"},
+             "class_reason": "a block of 24 sustainability pages (110 of 344 pages with text)"}
+        self.assertTrue(C.is_embedded(f, "Annual Report"))
+        self.assertFalse(C.is_embedded(dict(f, scope={"name": "Part of a report"}), "Annual Report"))
+        self.assertFalse(C.is_embedded(dict(f, sustainability_class={"name": "F financial only"}), "Annual Report"))
+        self.assertFalse(C.is_embedded(f, "Statutory Documents"))
+        self.assertFalse(C.is_embedded(dict(f, class_reason="9 sustainability pages, a block of 3 (9 of 405 pages with text)"),
+                                       "Annual Report"))
+        self.assertTrue(C.is_embedded(dict(f, class_reason='first pages: the contents names "sustainability statement"'),
+                                      "Annual Report"))
+
+    def test_v2_only_adds_ways_to_pass(self):
+        c = C.empty_stats()
+        c["type_latest"] = {"Annual Report": 2025}; c["type_counts"] = {"Annual Report": 1}
+        c["emb_best"] = (2025, "recA", "AR 2025 | E")
+        a, b = C.compose(c, 2024, "v1"), C.compose(c, 2024, "v2")
+        self.assertIn("Sustainability report (recent)", a["gap_pages"])
+        self.assertNotIn("Sustainability report (recent)", b["gap_pages"])
+        c2 = C.empty_stats(); c2["urd_best"] = (2025, "recU", "URD 2025")
+        self.assertNotIn("Annual report (recent)", C.compose(c2, 2024, "v2")["gap_pages"])
+        self.assertIn("Annual report (recent)", C.compose(c2, 2024, "v1")["gap_pages"])
+
+
 if __name__ == "__main__":
     unittest.main()
