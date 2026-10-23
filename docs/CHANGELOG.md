@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-23 The daily research pastes into `research_link` instead of `add_link`: same handling, but documents and pages it brings are marked as found by research (`latest_doc` says so), its gaps on the day are kept in `research_gaps_before`, and it skips documents the library already holds. First measurement (100 companies, 21-23 Oct): 94 documents and 10 pages added, about a third of its links already held (#PR)
 - 2026-10-23 Office-network runner, second pass: files and pages a plain request could not reach are tried again in Microsoft Edge without a window (up to 100 files a run), skipping paths robots.txt disallows and never solving captchas or logging in; the first test from the owner's computer reached 11 of 30 refused recent reports with plain requests (#62)
 - 2026-10-23 `doc_label` showed #ERROR! on rows whose AI title was never generated (the new `ai_title` formula failed on an empty AI field); `ai_title` now guards every case and `doc_label` was checked on the rows that failed
 - 2026-10-23 Office-network runner: `pc_fetch.py` fetches files that sites refuse to cloud servers from the owner's computer (self-hosted runner on the private repository wba-text-store only, weekdays); set-up guide in docs/pc_runner.md. The cloud retry (#53) was closed: 0 of 61 recovered (#60)

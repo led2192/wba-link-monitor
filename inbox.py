@@ -210,10 +210,14 @@ def handle_company(rec, sess, tombs):
                    for a in (d["fields"].get("file") or [])[:1]}
 
     blocked_links = []    # links the site refused; a file dropped in the same go is that document
-    todo = [(None, u) for u in links_in(f.get("add_link"))]   # None = decide by opening it
+    # (forced type, link, origin): None = decide the type by opening it. Links from the daily research
+    # (research_link) are handled like yours but marked, so the research's contribution can be measured.
+    todo = [(None, u, "hand") for u in links_in(f.get("add_link"))]
+    todo += [(None, u, "research") for u in links_in(f.get("research_link"))
+             if normalize(u) not in {normalize(x) for _, x, _ in todo}]
     if f.get("approve_suggestions"):
-        todo += suggested_in(f.get("suggested_links"))
-    for forced_type, url in todo:
+        todo += [(t, u, "suggestion") for t, u in suggested_in(f.get("suggested_links"))]
+    for forced_type, url, how in todo:
         short = url if len(url) < 90 else url[:87] + "..."
         k = normalize(url)
         if k in page_keys:
@@ -246,6 +250,8 @@ def handle_company(rec, sess, tombs):
         kind, info = ("page", "") if forced_type else what_is(url, sess)   # '' type: decide by opening
         if kind == "pdf":
             row = lib_row(wba, name, info or url)
+            if how == "research":
+                row["Reviewer notes"] = f"Found by research ({stamp()[:10]})"
             if doc_id(wba, row["document_url"]) in known:
                 lines.append(f"Already in the library: {short}"); continue
             created, _, blocked, _ = HR.upsert([row], {}, BASE, TOKEN, LIB,
@@ -261,7 +267,7 @@ def handle_company(rec, sess, tombs):
                 "link_name": f"{name} — {LABEL.get(typ, 'Reports')}", "wba_id": wba,
                 "company_name": name, "url": url, "type": typ, "monitor": True,
                 "frequency": FREQ.get(typ, "mon_fri"), "is_pdf": False,
-                "source": "approved suggestion" if forced_type is not None else "added by hand",
+                "source": {"research": "research", "suggestion": "approved suggestion"}.get(how, "added by hand"),
                 "companies": [rec["id"]], "scan_now": True}}])
             new_pages += [o["id"] for o in out]; page_keys[k] = typ
             lines.append(f"Page added as {typ} and being scanned now: {short}")
@@ -310,9 +316,9 @@ def handle_company(rec, sess, tombs):
 
 
 def run_links():
-    formula = "OR({add_link}!='', {add_file}!='', {approve_suggestions})"
+    formula = "OR({add_link}!='', {research_link}!='', {add_file}!='', {approve_suggestions})"
     recs = get(COMP, [("pageSize", "100"), ("filterByFormula", formula)] +
-               [("fields[]", x) for x in ("wba_id", "company_name", "add_link", "add_file", "add_result",
+               [("fields[]", x) for x in ("wba_id", "company_name", "add_link", "research_link", "add_file", "add_result",
                                            "approve_suggestions", "suggested_links")])
     if not recs:
         return False
@@ -332,7 +338,7 @@ def run_links():
             continue
         created_all += created
         f = rec["fields"]
-        upd = {"add_link": "", "add_file": [], "approve_suggestions": False,
+        upd = {"add_link": "", "research_link": "", "add_file": [], "approve_suggestions": False,
                "add_result": (f"{stamp()}:\n" + "\n".join("- " + l for l in lines) + "\n\n"
                               + (f.get("add_result") or ""))[:90000]}
         if f.get("approve_suggestions"):

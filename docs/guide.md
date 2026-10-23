@@ -277,7 +277,7 @@ These run outside GitHub, as Claude sessions on a schedule, and notify you when 
 
 | Task | When (Madrid) | Model | What it does | What it may write |
 | --- | --- | --- | --- | --- |
-| Daily gap research | weekdays 06:46 | Sonnet | Searches the web for about 25 companies' missing reports and policies (official sources only) and pastes the links into `add_link` | `add_link`, `researched_on`, `research_note` |
+| Daily gap research | weekdays 06:46 | Sonnet | Searches the web for about 25 companies' missing reports and policies (official sources only), skips what the library already holds, and pastes the links into `research_link` (handled like `add_link`, but what comes from it is marked "found by the daily research"); notes the company's gaps that day in `research_gaps_before`, so the gaps it closes can be counted | `research_link`, `researched_on`, `research_note`, `research_gaps_before` |
 | Daily labelling | weekdays 12:46 | Opus | Labels each of the day's cards (type, year, title, confidence, quoted evidence) and leaves about 5 for you to check; notes patterns | its answer fields on labels, and unticks `in_review` on cards it settles |
 | Weekly review and fixes | Mondays 08:47 | Opus | Answers your `scan_concern` notes; fixes gone and wrongly typed pages itself; reads the week's failures, labels and runs; fixes the 2 or 3 most costly causes as pull requests with tests; updates the docs; lists at most 5 items for you | pull requests, page fixes (`add_link`, page `type`, `monitor`, `scan_now`), `audit_reply`, `review_note`, failure status |
 | Weekly missed-reports audit | paused since 20 Oct 2026 | | Its job moved into the weekly review | |

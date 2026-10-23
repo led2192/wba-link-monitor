@@ -74,6 +74,38 @@ class FileOntoExistingRow(unittest.TestCase):
         self.assertIn("existing row", lines[0])
 
 
+class ResearchLinks(unittest.TestCase):
+    def test_research_links_are_marked_and_pages_tagged(self):
+        import inbox as I
+        import harvest_reports as HR
+        created_rows, page_posts = [], []
+        I.company_state = lambda wba: ([], [])
+        I.write = lambda table, method, recs: page_posts.append(recs[0]["fields"]) or [{"id": "recPAGE"}]
+        I.what_is = lambda url, sess: ("pdf", "") if url.endswith(".pdf") else ("page", "")
+        orig = HR.upsert
+        HR.upsert = lambda rows, *a, **k: (created_rows.extend(rows) or [{"id": "recDOC"}], 0, 0, 0)
+        try:
+            rec = {"id": "recCO", "fields": {"wba_id": "PT_9", "company_name": "Acme",
+                                             "research_link": "https://acme.com/esg-report-2025.pdf\nhttps://acme.com/investors/reports"}}
+            lines, created, _ = I.handle_company(rec, FakeSess(200), set())
+        finally:
+            HR.upsert = orig
+        self.assertTrue(created_rows[0]["Reviewer notes"].startswith("Found by research"))
+        self.assertEqual(page_posts[0]["source"], "research")
+        import company_coverage as CC
+        self.assertEqual(CC.origin({"Reviewer notes": created_rows[0]["Reviewer notes"]}), "found by the daily research")
+
+    def test_same_link_in_both_boxes_counts_once_as_yours(self):
+        import inbox as I
+        seen = []
+        I.company_state = lambda wba: ([], [])
+        I.what_is = lambda url, sess: seen.append(url) or ("gone", 404)
+        rec = {"id": "recCO", "fields": {"wba_id": "PT_9", "company_name": "Acme",
+                                         "add_link": "https://acme.com/a.pdf", "research_link": "https://acme.com/a.pdf"}}
+        I.handle_company(rec, FakeSess(200), set())
+        self.assertEqual(seen, ["https://acme.com/a.pdf"])
+
+
 class HumanRightsAddresses(unittest.TestCase):
     def test_human_rights_policies_stay_human_rights(self):
         for u in ("https://x.com/files/policies/human-rights-and-modern-slavery-policy.pdf",
