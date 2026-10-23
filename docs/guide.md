@@ -209,7 +209,7 @@ Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**,
 | Code | Automatic owner | Built? |
 | --- | --- | --- |
 | PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
-| PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#PR) |
+| PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#54) |
 | PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | monthly retry with browser headers and Internet Archive copies; later a runner on an office-network computer | to build |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
