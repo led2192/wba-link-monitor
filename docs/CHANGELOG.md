@@ -4,6 +4,7 @@ Newest first. One line per change, with the pull request. Every pull request add
 
 ## October 2026
 - 2026-10-23 Blocked files retry (monthly): files the site refuses are tried with a browser-like request and from Internet Archive copies, including copies of the same file at another address; found files are attached, with `archive_url`, `retry_note` and `retried_on` on the row (#53)
+- 2026-10-23 Documents with no type at all (mostly non-English: the AI types English only) are typed nightly from their file name and cover title, including cover-title phrases in a dozen languages (`cover_terms.json`); `year_eval.py` measures it on non-English documents with a sure true type (#55)
 - 2026-10-23 Gone report pages (404/410) are replaced nightly: the company's site is searched and a clear best match is added automatically, the gone page unticked with a dated note; clear matches for missing hubs and sustainability pages are added without waiting for approval (#54)
 - 2026-10-23 A scheduled or chained job that fails on its first attempt re-runs its failed jobs once, two minutes later (new workflow Re-run failed job once); RUN_FAILED now has an automatic owner (#52)
 - 2026-10-23 AI titles that are sentences instead of titles ("I don't have access to the document text...", over 100 rows) no longer show: new formula `report_library.ai_title`, used by `doc_label` (live in Airtable) and by the cards' `title_value` (#51)

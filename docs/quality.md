@@ -34,7 +34,7 @@ Nothing depends on a person working through failure rows: there are tens of thou
 | DOC_UNREADABLE | to build: text recognition (OCR) for scanned PDFs | to build |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
 | TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
-| TYPE_MISSING (non-English) | to build: typing of non-English documents | to build |
+| TYPE_MISSING (non-English) | cover-title phrases in other languages (cover_terms.json), nightly in Dedupe, measured on every change | yes (#55) |
 | CO_GAP | the daily gap research (25 companies a day) | yes |
 | CO_MISSED_KNOWN | Source Library matching, the daily research | partly |
 | RUN_FAILED | a failed scheduled or chained job re-runs itself once (Re-run failed job once); a second failure is listed by base_health and read by the weekly review | yes (#52) |

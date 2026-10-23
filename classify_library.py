@@ -134,14 +134,56 @@ def year_from(filename, cover, this_year=None):
     return str(max(ys)) if ys else ""
 
 
+_COVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cover_terms.json")
+try:
+    COVER_TERMS = {k: v for k, v in _json.load(open(_COVER_PATH, encoding="utf-8")).items() if not k.startswith("_")}
+except Exception:
+    COVER_TERMS = {}
+
+
+def fold(text):
+    """Lower case, accents removed, spaces collapsed: 'Relatório  Anual' -> 'relatorio anual'."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", text or "")
+    t = "".join(ch for ch in t if not unicodedata.combining(ch)).lower()
+    t = t.replace("æ", "ae").replace("ø", "o").replace("å", "a").replace("ß", "ss").replace("ł", "l")
+    return re.sub(r"\s+", " ", t)
+
+
+def _rx(phrase):
+    p = fold(phrase)
+    if re.search(r"[a-z]", p) and not re.search(r"[^\x00-\x7f]", p.replace("'", "")):
+        return re.compile(r"(?<![a-z])" + re.escape(p).replace(r"\ ", r"[\s\-_]*") + r"(?![a-z])")
+    return re.compile(re.escape(p).replace(r"\ ", r"\s*"))      # CJK, Thai, Arabic, Cyrillic: no word edges
+
+
+_COVER_RX = [(t, len(p), _rx(p)) for t, ps in COVER_TERMS.items() for p in ps]
+
+
+def cover_type(cover, head=600):
+    """Type from a cover-title phrase in another language: the phrase that appears first wins, then
+    the longer one. '' when none. (Applied only after the address and the file name said nothing.)"""
+    text = fold((cover or "")[:head])
+    best = None
+    for t, n, rx in _COVER_RX:
+        m = rx.search(text)
+        if m and (best is None or (m.start(), -n) < (best[0], -best[1])):
+            best = (m.start(), n, t)
+    return best[2] if best else ""
+
+
 def classify_from_file(filename, cover):
-    """(source_type, confidence) from the file name, else from the title page (first 400 chars)."""
+    """(source_type, confidence) from the file name, else from the title page (first 400 chars),
+    else from a cover-title phrase in another language (cover_terms.json)."""
     t, c = classify("/" + filename.replace(" ", "-")) if filename else ("", "unresolved")
     if t:
         return t, "file name"
     head = re.sub(r"[^\w]+", "-", cover[:400].lower())
     t, c = classify("/" + head)
-    return (t, "cover") if t else ("", "unresolved")
+    if t:
+        return t, "cover"
+    t = cover_type(cover)
+    return (t, "cover title") if t else ("", "unresolved")
 
 
 GENERIC = {"download", "downloads", "document", "documents", "file", "files", "view", "pdf", "attachment",
@@ -223,6 +265,36 @@ def label_from_file(records):
     return updates, by
 
 
+def untyped_rows(base, token, table, limit=0):
+    """Rows with a read cover, no address type (or unresolved) and no AI type (discarded rows skipped)."""
+    url = f"{API}/{base}/{quote(table)}"
+    headers = {"Authorization": f"Bearer {token}"}
+    formula = (f"AND({{{F_COVER}}}!='', {{source_type_check}}='', OR({{{F_TYPE}}}='', {{{F_CONF}}}='unresolved'), "
+               f"NOT({{discard}}))")
+    params = [("pageSize", "100"), ("filterByFormula", formula)] + \
+             [("fields[]", x) for x in (F_ID, F_URL, F_FILE, F_COVER, F_CONF, F_TYPE)]
+    out = []; offset = None
+    while True:
+        p = list(params) + ([("offset", offset)] if offset else [])
+        r = airtable_request("GET", url, headers, params=p); r.raise_for_status()
+        j = r.json()
+        out += j.get("records", [])
+        offset = j.get("offset"); time.sleep(0.22)
+        if not offset or (limit and len(out) >= limit): break
+    return out[:limit] if limit else out
+
+
+def retype(records):
+    updates, by = [], collections.Counter()
+    for rec in records:
+        f = rec.get("fields", {})
+        t, c = classify_from_file(_name(f), f.get(F_COVER) or "")
+        if t:
+            updates.append({"id": rec["id"], "fields": {F_TYPE: t, F_CONF: c}})
+            by[t] += 1
+    return updates, by
+
+
 def commit(base, token, table, updates):
     import requests
     url = f"{API}/{base}/{quote(table)}"
@@ -245,7 +317,23 @@ def main():
     ap.add_argument("--from-file", action="store_true",
                     help="title, date and (if unresolved) type rows from their file name and cover text")
     ap.add_argument("--limit", type=int, default=0, help="--from-file: at most this many rows (0 = all)")
+    ap.add_argument("--retype-untyped", action="store_true",
+                    help="rows with a cover but no type at all (no address type, no AI type): type them from the "
+                         "file name and cover, including cover-title phrases in other languages")
     args = ap.parse_args()
+    if args.retype_untyped:
+        token = os.environ.get("AIRTABLE_TOKEN"); base = os.environ.get("AIRTABLE_BASE")
+        table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
+        if not (token and base):
+            sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
+        recs = untyped_rows(base, token, table, args.limit)
+        updates, by = retype(recs)
+        print(f"retype untyped: {len(recs)} rows with a cover and no type; {len(updates)} typed; {dict(by)}")
+        if args.commit and updates:
+            commit(base, token, table, updates)
+        elif not args.commit:
+            print("DRY-RUN. Re-run with --commit to write the types.")
+        return
     if args.from_file:
         token = os.environ.get("AIRTABLE_TOKEN"); base = os.environ.get("AIRTABLE_BASE")
         table = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")

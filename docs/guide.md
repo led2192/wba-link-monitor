@@ -130,7 +130,7 @@ Everything else is written by the robot or computed. The full list, with who wri
 ## 6. How the robot decides
 
 ### 6.1 Type
-Two opinions: the address (`source_type`, rules in `classify_library.py` and `source_type_terms.json`) and the AI over the first pages (`source_type_check`, English documents only). The AI wins when it has answered (`effective_type`). Non-English documents keep the address type until they are typed another way. `type_mismatch` = 1 marks rows where the two disagree; when the disagreement moves a completeness check, it becomes a TYPE_DISAGREE failure, and some of those become review cards.
+Two opinions: the address (`source_type`, rules in `classify_library.py` and `source_type_terms.json`) and the AI over the first pages (`source_type_check`, English documents only). The AI wins when it has answered (`effective_type`). A document neither of them typed (mostly non-English) is typed from its file name and its cover title, including cover-title phrases in other languages (`cover_terms.json`: "Relatório de Sustentabilidade", "Nachhaltigkeitsbericht", "統合報告書", "年度报告"...); `match_confidence` then says "cover title". `type_mismatch` = 1 marks rows where the two disagree; when the disagreement moves a completeness check, it becomes a TYPE_DISAGREE failure, and some of those become review cards.
 
 There are 24 types plus "Not a disclosure". The question order that settles most documents:
 
@@ -217,7 +217,7 @@ Interface "Pipeline QA": **Check Claude's answers** (the day's cards that need y
 | DOC_UNREADABLE | to build: text recognition (OCR) for scanned PDFs | to build |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
 | TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
-| TYPE_MISSING (non-English) | to build: typing of non-English documents | to build |
+| TYPE_MISSING (non-English) | cover-title phrases in other languages (cover_terms.json), nightly in Dedupe, measured on every change | yes (#55) |
 | CO_GAP | the daily gap research (25 companies a day) | yes |
 | CO_MISSED_KNOWN | Source Library matching, the daily research | partly |
 | RUN_FAILED | a failed scheduled or chained job re-runs itself once (Re-run failed job once); a second failure is listed by base_health and read by the weekly review | yes (#52) |
@@ -304,7 +304,7 @@ Every job, what it writes and how to run it by hand: [scripts.md](scripts.md).
 
 - **Sites that block robots.** About 3,000 documents have no file because the site refuses robots by IP address; a probe in October 2026 found that free routes (browser headers, a headless browser, the Internet Archive) reach only about 17% of them. Every month (the 2nd) the robot retries them with a browser-like request and looks for Internet Archive copies, also of the same file at another address of the company; what it finds is attached, with the archive copy's address in `archive_url` and what happened in `retry_note`. Planned: a runner on a computer in an ordinary office network for what stays refused, attached only to the private text-store repository. The Monday list names the few high-priority reports only a person can download (`add_file`).
 - **Files over 5 MB** cannot be attached in Airtable. They are read from `document_url`, so they count, are typed and dated, but show no attachment.
-- **Non-English documents** are dated and scoped but not typed by the AI; they keep the address type.
+- **Non-English documents** are not typed by the AI. They keep the address type, or get one from their cover title in their own language (about a dozen languages); covers that name no known title phrase stay untyped.
 - **The base cap**: 500,000 records per base. `base_health` watches both bases.
 
 ## 12. Glossary
