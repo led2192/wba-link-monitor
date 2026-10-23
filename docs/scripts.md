@@ -52,6 +52,7 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | `import_source_library.py` | Import Source Library, manual | Analysts' reports 2023+ and missing policies, with duplicate guards; reads Source Library read-only | documents (uploads) |
 | `link_companies.py`, `assign_analysts.py` | Link and assign, 07:03 | Company links and analyst on pages and documents | company, companies, assigned_analyst |
 | `assign_ids.py` | Assign join ids, 02:03 | link_id on pages | link_id |
+| (workflow only) | Re-run failed job once, after any scheduled or chained job fails | Re-runs the failed jobs of that run once, two minutes later (first attempt only; not Scan now, QA archive or timed-out runs). A successful re-run continues the chain | nothing in Airtable |
 | `purge_discarded.py` | Purge discarded rows, manual, two-step | Deletes rows discarded 30+ days, archived and tombstoned first | deletions; tombstones |
 
 ## Manual, one-off and diagnostic
