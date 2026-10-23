@@ -20,7 +20,13 @@ What it derives (one row per distinct failure, keyed; see qa.py and the design d
     DOC_DUPLICATE     discard_reason 'Duplicate of another document'
     DOC_WRONG_ROW     any other discard_reason
     LABEL_CORRECTION  a robot_* snapshot that no longer matches the live value (a person changed it);
-                      the same fact is written as a labels row (labelled_by correction)
+                      the same fact is written as a labels row (labelled_by correction); when an
+                      analyst had flagged the row, the label's reason says so
+    DOC_FLAGGED       analyst_flag set from the Analysts interface; detail = the kind of problem
+                      (wrong_type, wrong_year, ...), message = analyst_flag_note. Report-shaped rows
+                      flagged for type, year, company, scope or not-a-disclosure are High, the rest
+                      Medium. Every flag is a row (flags are rare and always worth a look); the row
+                      goes silent and closes once the flag is cleared or the row discarded.
   companies
     CO_GAP            one row per failed completeness check (gap_pages) and per overdue report
   Document rows are written only for REPORT-SHAPED documents (a report-family type, or a report word
@@ -64,6 +70,11 @@ DISCARD_DETAIL = {"Duplicate of another document": ("DOC_DUPLICATE", "discard"),
                   "File unusable": ("DOC_WRONG_ROW", "file_unusable"),
                   "Other": ("DOC_WRONG_ROW", "other")}
 FETCH_STATUSES = {"blocked", "gone", "too_big", "not_pdf"}
+# analyst_flag choice -> failure detail, and whether it can cost a completeness check
+FLAG_DETAIL = {"Wrong type": ("wrong_type", True), "Wrong year": ("wrong_year", True),
+               "Wrong company": ("wrong_company", True), "Only part of the report": ("part_of_report", True),
+               "Not a disclosure": ("not_disclosure", True), "Duplicate": ("duplicate", False),
+               "File broken or missing": ("file_broken", False), "Other": ("other", False)}
 UNREADABLE = {"no_text", "parse_fail", "truncated"}
 PENDING_DAYS = 7
 
@@ -179,6 +190,14 @@ def derive_doc(f, today):
     kw, ai = (f.get("source_type") or "").strip(), (f.get("source_type_check") or "").strip()
     shaped = report_shaped(f)
     sev = doc_severity(f)
+    flag = (f.get("analyst_flag") or "").strip()
+    flag_note = (f.get("analyst_flag_note") or "").strip()
+    if flag:
+        detail, costly = FLAG_DETAIL.get(flag, ("other", False))
+        counts[f"flag_{detail}"] += 1
+        failures.append(("DOC_FLAGGED", detail, lid, "High" if costly and shaped else "Medium",
+                         dict(ctx, stage="analyst", message=f"{flag}: {flag_note}" if flag_note else flag)))
+    flagged = f"; an analyst had flagged it ({flag}{': ' + flag_note[:200] if flag_note else ''})" if flag else ""
     fs = (f.get("file_status") or "").strip()
     cs = (f.get("cover_status") or "").strip()
     if fs in FETCH_STATUSES or cs == "download_fail":
@@ -232,7 +251,7 @@ def derive_doc(f, today):
                        "doc_label": f.get("doc_label"), "document_url": f.get("document_url"), "library_id": lid,
                        "record_id": f.get("_id"), "doc_language": f.get("doc_language"),
                        "robot_value": rt, "verdict": "Neither", "true_type": ai,
-                       "reason": f"changed by hand from {rt} to {ai}" + (f"; URL said {kw}" if kw else ""),
+                       "reason": f"changed by hand from {rt} to {ai}" + (f"; URL said {kw}" if kw else "") + flagged,
                        "sure": True, "labelled_by": "correction", "labelled_on": today.isoformat(),
                        "reviewed": True, "split": "eval"})
     curated = (f.get("curated_doc_title") or "").strip()
@@ -244,7 +263,7 @@ def derive_doc(f, today):
                        "stratum": "correction", "company_name": f.get("company_name"), "wba_id": f.get("wba_id"),
                        "doc_label": f.get("doc_label"), "document_url": f.get("document_url"), "library_id": lid,
                        "record_id": f.get("_id"), "robot_value": ry, "verdict": "Neither", "true_value": str(y),
-                       "sure": True, "labelled_by": "correction", "labelled_on": today.isoformat(),
+                       "reason": "year changed by hand through curated_doc_title" + flagged, "sure": True, "labelled_by": "correction", "labelled_on": today.isoformat(),
                        "reviewed": True, "split": "eval"})
     rtitle = (f.get("robot_title") or "").strip()
     if curated and rtitle and curated != rtitle:
@@ -254,7 +273,8 @@ def derive_doc(f, today):
                        "stratum": "correction", "company_name": f.get("company_name"), "wba_id": f.get("wba_id"),
                        "doc_label": f.get("doc_label"), "document_url": f.get("document_url"), "library_id": lid,
                        "record_id": f.get("_id"), "robot_value": rtitle[:250], "verdict": "Neither",
-                       "true_value": curated[:250], "sure": True, "labelled_by": "correction",
+                       "true_value": curated[:250], "reason": "title curated by hand" + flagged, "sure": True,
+                       "labelled_by": "correction",
                        "labelled_on": today.isoformat(), "reviewed": True, "split": "eval"})
     return failures, labels, patch, counts
 
@@ -374,7 +394,8 @@ def main():
                        ["library_id", "wba_id", "company_name", "document_url", "doc_label", "discard", "discard_reason",
                         "file_status", "cover_status", "source_type", "source_type_check", "type_mismatch",
                         "doc_language", "year", "doc_year", "source_title", "auto_title", "curated_doc_title",
-                        "robot_type", "robot_year", "robot_title", "created_time"], None, "report_library"):
+                        "robot_type", "robot_year", "robot_title", "created_time", "analyst_flag", "analyst_flag_note"],
+                       None, "report_library"):
             swept["docs"] += 1
             fails, labels, patch, c = derive_doc(f, today)
             counters.update(c)

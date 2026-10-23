@@ -42,7 +42,7 @@ T_RUNS, T_FAILURES, T_LABELS, T_EVALS = "runs", "failures", "labels", "evals"
 CODES = (
     "PAGE_UNREACHABLE", "PAGE_GONE", "PAGE_BLOCKED", "PAGE_EMPTY", "PAGE_UNHARVESTED", "PAGE_WRONG_TYPE",
     "DOC_FETCH_FAIL", "DOC_UNREADABLE", "DOC_DROPPED", "DOC_DUPLICATE", "DOC_WRONG_ROW",
-    "TYPE_DISAGREE", "TYPE_MISSING", "LABEL_CORRECTION",
+    "TYPE_DISAGREE", "TYPE_MISSING", "LABEL_CORRECTION", "DOC_FLAGGED",
     "CO_GAP", "CO_MISSED_KNOWN", "RUN_FAILED",
 )
 SEVERITIES = ("High", "Medium", "Low")
@@ -54,6 +54,7 @@ DEFAULT_SEVERITY = {
     "DOC_FETCH_FAIL": "Medium", "DOC_UNREADABLE": "Medium", "DOC_DROPPED": "High",
     "DOC_DUPLICATE": "Low", "DOC_WRONG_ROW": "Medium",
     "TYPE_DISAGREE": "High", "TYPE_MISSING": "High", "LABEL_CORRECTION": "High",
+    "DOC_FLAGGED": "High",
     "CO_GAP": "Medium", "CO_MISSED_KNOWN": "High", "RUN_FAILED": "High",
 }
 # Context fields a failure may carry (anything else is dropped with a strict-mode error).

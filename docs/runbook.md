@@ -13,6 +13,7 @@ Day-to-day operation through the Airtable interfaces, and what to do when someth
 - **Scan a page now:** tick `monitored_links.scan_now`. If you suspect it, write what you see in `scan_concern`; the weekly review answers in `audit_reply`.
 
 ## Fix things
+- **An analyst flagged a document:** open the Analysts interface, Flagged documents (or Pipeline QA, code DOC_FLAGGED). Read `analyst_flag_note`, fix the row with the tools below, then clear `analyst_flag`. If the analyst was wrong, just clear it.
 - **Wrong document type:** change `source_type_check`. The change is captured as a correction and becomes a label.
 - **Wrong title or year:** type the real title in `curated_doc_title` (it fixes the year too).
 - **Row should not exist:** tick `discard` and pick a `discard_reason`. Reasons are counted and read; they are how rules get fixed.

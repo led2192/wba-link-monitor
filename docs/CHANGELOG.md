@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-23 Analyst flags: `analyst_flag` and `analyst_flag_note` on report_library (set from the new Analysts interface) become DOC_FLAGGED failures in Pipeline QA; a fix of a flagged row becomes a correction label that records the flag (#41)
 - 2026-10-22 Sustainability class: `sustainability_class.py` and its workflow write sustainability_class (D dedicated / E embedded / S specialized / F financial only), class_reason, sustainability_share, frameworks and assurance on report_library, by rules from the text in nine languages (#40)
 - 2026-10-22 QA archive (monthly, closed failures 90+ days to the private store) and Pipeline QA size in base_health; who_fixes and open_in_library on failures (#37)
 - 2026-10-22 Document scope by rules instead of the AI field (`scope`, `scope_reason`); manual workflow to run the doc_year rules over the whole backlog (#38)
