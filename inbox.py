@@ -121,10 +121,32 @@ def guess_type(url, title=""):
     return "reports_hub"
 
 
+def expected(url):
+    """What the library will call this document at first, in plain words: the type guessed from the
+    address and the year, both checked again once the file is read."""
+    import classify_library as CL, harvest_reports as HR
+    t, _ = CL.classify(url)
+    y = HR.year_of(url)
+    what = " ".join(x for x in (t, str(y) if y else "") if x) or "no type yet"
+    return f"First guess from the address: {what}. The type and year are checked once the file is read (minutes to a day)."
+
+
 def what_is(url, sess):
     """('pdf', target) | ('page', title) | ('blocked', code) | ('gone', code) | ('error', '')."""
     import harvest_reports as HR, doc_probe as DP
     if HR.is_pdf_url(url):
+        # an address that looks like a PDF can still be refused (CLP, Oct 2026: the row was added,
+        # the download then failed and the report sat without a file, untyped, "being read")
+        try:
+            r = sess.get(url, headers=UA, timeout=25, allow_redirects=True, stream=True)
+            code = r.status_code
+            r.close()
+            if code in (401, 403, 429):
+                return "blocked", code
+            if code in (404, 410):
+                return "gone", code
+        except requests.RequestException:
+            pass                                   # unreachable now: add it, the attach step retries
         return "pdf", url
     try:
         r = sess.get(url, headers=UA, timeout=25, allow_redirects=True, stream=True)
@@ -179,6 +201,11 @@ def handle_company(rec, sess, tombs):
     page_keys = {normalize(p["fields"].get("url", "")): p["fields"].get("type") or "page" for p in pages}
     page_ids = {normalize(p["fields"].get("url", "")): p.get("id") for p in pages}
     known = {doc_id(wba, d["fields"].get("document_url", "")) for d in docs if d["fields"].get("document_url")}
+    # rows we hold without their PDF (the site refused the download): a file dropped with that link
+    # goes onto the existing row instead of making a second one
+    fileless = {doc_id(wba, d["fields"].get("document_url", "")): d["id"] for d in docs
+                if d["fields"].get("document_url") and not d["fields"].get("file") and not d["fields"].get("discard")}
+    fill_rows = {}                                  # link -> existing record id to put the file on
     known_files = {((a.get("filename") or "").lower(), a.get("size")) for d in docs
                    for a in (d["fields"].get("file") or [])[:1]}
 
@@ -205,7 +232,13 @@ def handle_company(rec, sess, tombs):
             continue
         did = doc_id(wba, url)
         if did in known:
-            lines.append(f"Already in the library: {short}")
+            if did in fileless and f.get("add_file"):
+                blocked_links.append(url); fill_rows[url] = fileless[did]
+            elif did in fileless:
+                lines.append(f"Already in the library, but without its PDF (the site refuses our robot): "
+                             f"download it and drop it in add_file together with this link: {short}")
+            else:
+                lines.append(f"Already in the library: {short}")
             continue
         if did in tombs:
             lines.append(f"Not added, you deleted this document before: {short}")
@@ -219,7 +252,7 @@ def handle_company(rec, sess, tombs):
                                                existing={})   # known docs checked above
             if created:
                 created_docs += created; known.add(did)
-                lines.append(f"Document added and being read: {short}")
+                lines.append(f"Document added: {short}. {expected(row['document_url'])}")
             else:
                 lines.append(f"Already in the library: {short}")
         elif kind == "page":
@@ -257,11 +290,20 @@ def handle_company(rec, sess, tombs):
                "doc_year": HR.year_of(src or fname) or HR.year_of(fname),
                "first_seen": datetime.now(timezone.utc).date().isoformat(),
                "Reviewer notes": f"Uploaded by hand ({fname})" + (f", downloaded from {src}." if src else ".")}
+        if src and src in fill_rows:
+            # the document is already a row, only its PDF was missing: put the file there
+            write(LIB, "PATCH", [{"id": fill_rows[src], "fields": {"file": row["file"],
+                                                                   "Reviewer notes": row["Reviewer notes"]}}])
+            known_files.add((fname.lower(), att.get("size")))
+            lines.append(f"File added to the existing row of {src[:80]}. Its type and year are read from "
+                         "the file within the day.")
+            continue
         if src:
             row["document_url"] = src
         out = write(LIB, "POST", [{"fields": row}])
         created_docs += out; known_files.add((fname.lower(), att.get("size")))
-        lines.append(f"File added and being read: {fname}" + (f" (as the document at {src[:80]})" if src else ""))
+        lines.append(f"File added: {fname}" + (f" (as the document at {src[:80]})" if src else "")
+                     + ". Its type and year are read from the file within the day.")
     for u in blocked_links:
         lines.append(f"The site refused our robot, and no file was left to pair with this link: {u[:90]}")
     return lines, created_docs, new_pages

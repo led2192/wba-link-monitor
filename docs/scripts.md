@@ -33,7 +33,7 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | Script | Workflow, trigger | What it does | Writes |
 | --- | --- | --- | --- |
 | `build_fulltext.py`, `text_core.py` | Build full text, 21:37 | Every page of every attached report (2021+), and of reports too big to attach (read from document_url), into the text store, sharded; report, policy and annual-filing types (10-K, registration document, financial statements included) | text store |
-| `year_eval.py` | Year rules evaluation, on every pull request touching the year rules; manual | Recomputes the {year} formula with the rules on main and with the branch, on every document with a sure true year, and posts the comparison on the PR | nothing (reads only) |
+| `year_eval.py` | Year rules evaluation, on every pull request touching the year rules or the address classifier; manual | Recomputes the address type (classify_library) and the {year} formula with the rules on main and with the branch, on every document with a sure true type or year, and posts the comparison on the PR | nothing (reads only) |
 | `fiscal_year.py`, `fiscal_years.py` | Fiscal years, after Full text | Reporting year with score and evidence: from the full text when the document is in the text store, else from its first pages (`cover_text`, up to 60,000 a run); verifies the AI year's quote | fiscal_year, period_end, year_score, year_basis, year_evidence, ai_year_verified |
 | `sustainability_class.py` | Sustainability class, after Full text; manual | Where the sustainability disclosure lives (D dedicated, E embedded, S specialized, F financial only) by type and by the pages; the standards named (ESRS, GRI, SASB, ISSB, TCFD, TNFD, SDGs...); external assurance of the sustainability information; from the full text, else the first pages (up to 60,000 a run) | sustainability_class, class_reason, sustainability_share, frameworks, assurance |
 | `mention_search.py` | Mention search, after Full text; on demand | Saved "which companies mention X" searches | `mention_searches`, `mention_hits` |
@@ -44,7 +44,7 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | Script | Workflow, trigger | What it does | Writes |
 | --- | --- | --- | --- |
 | `scan_now.py` | Scan now, every 30 minutes | Runs the whole chain for ticked or new pages; runs `inbox.py` | scan_status, scan_outcome, last_manual_scan |
-| `inbox.py` | inside Scan now | add_link, add_file, approve_suggestions, delete_now, new mention searches, live coverage | add_result; new pages and documents; tombstones in `state/` |
+| `inbox.py` | inside Scan now | add_link, add_file, approve_suggestions, delete_now, new mention searches, live coverage. A PDF link is opened first: if the site refuses it, nothing is added and you are asked for the file; an added document says its first type and year guess. A file dropped with the link of a row we hold without its PDF goes onto that row | add_result; new pages and documents; tombstones in `state/` |
 | `discover_pages.py` | Suggest missing report pages, 04:40 | Crawls the website of companies missing a hub or sustainability page | suggested_links, suggestions_checked |
 | `regulator_filings.py` | Regulator filings, Monday 06:20 | SEC 10-K / 20-F and ESEF annual filings for 2023+ gaps | documents typed Annual Report; sec_cik, filings_note |
 | `capture_pages.py` | Capture web pages, Sunday 00:23 | Prints pages ticked capture_page to PDF | `webpage_library` |

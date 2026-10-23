@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-year_eval.py — does a change to the year rules make the year more right or less? Measured, before
-anything is written.
+year_eval.py — does a change to the year rules (or to the address classifier) make them more right or
+less? Measured, before anything is written.
+
+First section: the address classifier (classify_library.py, source_type_terms.json) of main vs this
+branch on every sure true type with a document address, exact and check-level.
 
 For every document with a sure ground-truth year in Pipeline QA (labels with true_year: the
 analysts' Source Library years, corrections and reviewed daily cards), the script recomputes the
@@ -116,6 +119,45 @@ def evaluate(f, pages, from_cover, FY, DD, this_year):
     return y, src, ev
 
 
+def type_section(qtok, qbase, baseline):
+    """The address classifier (classify_library.py + source_type_terms.json) on main vs this branch,
+    against every sure true type that has a document address. Exact and check-level accuracy."""
+    import shutil
+    from qa_sync import checks_of
+    bdir = os.path.join(baseline, "classifier")
+    if not os.path.exists(os.path.join(baseline, "classify_library.py")):
+        return ["(address classifier: no baseline copy, skipped)"]
+    os.makedirs(bdir, exist_ok=True)
+    for n in ("classify_library.py", "source_type_terms.json"):
+        shutil.copy(os.path.join(baseline, n), os.path.join(bdir, n))
+    old = load("cl_main", os.path.join(bdir, "classify_library.py"))
+    new = load("cl_branch", "classify_library.py")
+    rows = get(qtok, qbase, qa.T_LABELS, ["true_type", "document_url", "sure", "company_name"],
+               "AND({true_type}!='', {document_url}!='', {sure})")
+    c = collections.Counter(); flips = {"fixed": [], "broken": []}
+    for r in rows:
+        tt = r["true_type"]; tt = tt.get("name") if isinstance(tt, dict) else tt
+        m, b = old.classify(r["document_url"])[0], new.classify(r["document_url"])[0]
+        for v, t in (("main", m), ("branch", b)):
+            c[v, "exact"] += t == tt
+            c[v, "check"] += checks_of(t) == checks_of(tt)
+        if (m == tt) != (b == tt):
+            flips["fixed" if b == tt else "broken"].append((r.get("company_name") or "", r["document_url"], tt, m, b))
+    n = len(rows) or 1
+    out = ["## Address classifier: main vs this branch, against the true types", "",
+           f"{len(rows):,} documents with a sure true type and an address.", "",
+           "| | exact | check-level |", "|---|---:|---:|"]
+    for v in ("main", "branch"):
+        out.append(f"| {v} | {c[v, 'exact'] / n:.1%} | {c[v, 'check'] / n:.1%} |")
+    out += ["", f"**{len(flips['fixed'])} fixed, {len(flips['broken'])} broken.**", ""]
+    for kind in ("broken", "fixed"):
+        if flips[kind]:
+            out += [f"### {kind.capitalize()} (up to 25)", "", "| company | address | true | main | branch |", "|---|---|---|---|---|"]
+            out += [f"| {co[:25]} | {u[-70:]} | {t} | {m or '-'} | {b or '-'} |" for co, u, t, m, b in flips[kind][:25]]
+            out.append("")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--baseline", required=True, help="folder with the default branch's fiscal_year.py and date_documents.py")
@@ -128,6 +170,9 @@ def main():
     variants = {"main": (load("fy_main", os.path.join(a.baseline, "fiscal_year.py")),
                          load("dd_main", os.path.join(a.baseline, "date_documents.py"))),
                 "branch": (load("fy_branch", "fiscal_year.py"), load("dd_branch", "date_documents.py"))}
+
+    type_lines = type_section(qtok, qbase, a.baseline)
+    print("\n".join(type_lines), flush=True)
 
     labels = get(qtok, qbase, qa.T_LABELS, ["record_id", "true_year", "stratum", "sure", "library_id"],
                  "AND({true_year}, {sure}, {record_id}!='')")
@@ -209,6 +254,7 @@ def main():
             cell = lambda r: f"{r[0]} ({r[1]}) {str(r[2])[:90]}".replace("|", "/")
             lines.append(f"| {co[:30]} | {title.replace('|', '/')} | {true} | {cell(m)} | {cell(b)} |")
         lines.append("")
+    lines = type_lines + [""] + lines
     out = "\n".join(lines)
     print(out, flush=True)
     open(a.out, "w").write(out + "\n")
