@@ -87,7 +87,7 @@ STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
                "sust_reports_total", "completeness", "gaps", "gap_pages",
                "overdue_reports", "overdue_note", "queue_score", "queue_item", "queue_action",
-               "latest_doc_added", "latest_doc", "check_docs"]
+               "latest_doc_added", "latest_doc", "check_docs", "sust_reporting"]
 # written only when a check flips from passing to failing: which document used to pass it and what
 # happened to it (discarded, moved, retyped, re-dated, deleted). Newest first, last 10 kept.
 C_CHANGE = "completeness_change"
@@ -125,7 +125,7 @@ YEAR_OK = re.compile(r"^20[0-3][0-9]$")   # sanity guard on the {year} formula o
 #   sustainability check also passes on a whole annual report, 10-K or URD whose pages hold a
 #                        substantive sustainability section (sustainability_class = E embedded):
 #                        CSRD sustainability statements, India's BRSR, Hong Kong ESG sections
-RULES = os.environ.get("COVERAGE_RULES", "v1")
+RULES = os.environ.get("COVERAGE_RULES", "v2")       # v2 approved by the owner on 23 Oct 2026
 URD_TITLE = re.compile(r"universal\s+registration|registration\s+document|document\s+d.enregistrement|"
                        r"annual\s+financial\s+report|rapport\s+financier\s+annuel|documento\s+de\s+registro|"
                        r"annual\s+report|rapport\s+annuel", re.I)
@@ -539,15 +539,26 @@ def compose(c, year_min, rules=None):
             "latest_doc_added": c["latest_added"][0][:10] if c.get("latest_added") else None,
             "latest_doc": c.get("latest_doc") or "",
             "check_docs": check_docs(c, year_min, failed),
+            "sust_reporting": sust_reporting(c, year_min),
             **_overdue(c)}
+
+
+def sust_reporting(c, year_min):
+    """dedicated / embedded / both / none, for the recent years (year_min or later)."""
+    ded = any(c["type_latest"].get(t, 0) >= year_min for t in SUST_FAMILY)
+    emb = c.get("emb_best", (0,))[0] >= year_min
+    return "both" if ded and emb else "dedicated" if ded else "embedded" if emb else "none"
 
 
 def check_docs(c, year_min, failed):
     """'<check>: <record id>' for every passing document check: the document that passes it."""
     docs = {"Code of Conduct": c.get("check_doc", {}).get("Code of Conduct"),
             "Human Rights Policy": c.get("check_doc", {}).get("Human Rights Policy")}
-    for check, fam in (("Sustainability report (recent)", "sust"), ("Annual report (recent)", "annual")):
+    for check, fam, alt in (("Sustainability report (recent)", "sust", "emb_best"),
+                            ("Annual report (recent)", "annual", "urd_best")):
         y, rid = c.get("fam_best", {}).get(fam, (0, ""))
+        if y < year_min and RULES == "v2":
+            y, rid = c.get(alt, (0, ""))[:2]
         docs[check] = rid if y >= year_min else None
     return "\n".join(f"{k}: {v}" for k, v in docs.items() if v and k not in failed) or None
 
@@ -576,7 +587,13 @@ def why_lost(check, wba, f, year_min):
     if (f.get(F_WBA) or "").strip() != wba:
         return f"{label}: moved to {f.get(F_WBA) or 'no company'}"
     t = eff_type(f)
-    if t not in LOST_TYPES.get(check, set()):
+    if check == "Sustainability report (recent)" and t in EMBEDDED_TYPES and t not in SUST_FAMILY:
+        if not is_embedded(f, t):
+            return f"{label}: no longer read as holding a sustainability section ({f.get('class_reason') or 'no class'})"
+    elif check == "Annual report (recent)" and t == "Registration Document":
+        if not is_urd(f, t):
+            return f"{label}: no longer read as a universal registration document"
+    elif t not in LOST_TYPES.get(check, set()):
         return f"{label}: type is now {t or 'blank'}"
     y = f.get(F_YEAR)
     if check.endswith("(recent)") and not (isinstance(y, (int, float)) and y >= year_min):
@@ -589,7 +606,8 @@ def explain_losses(losses, year_min):
     """losses: [(wba, check, record id)] -> {(wba, check): reason}. One read per 40 documents."""
     out, ids = {}, sorted({rid for _, _, rid in losses})
     found = {}
-    fields = [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_DISCARD, "discard_reason", "doc_label", "year_source"]
+    fields = [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_DISCARD, "discard_reason", "doc_label", "year_source",
+              "sustainability_class", "scope", "class_reason", "page_count"]
     for i in range(0, len(ids), 40):
         chunk = ids[i:i + 40]
         formula = "OR(" + ",".join(f"RECORD_ID()='{r}'" for r in chunk) + ")"
