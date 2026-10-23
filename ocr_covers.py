@@ -46,8 +46,11 @@ def ocr_pdf(data, pages, dpi=200):
         pdf = os.path.join(d, "doc.pdf")
         with open(pdf, "wb") as fh:
             fh.write(data)
-        subprocess.run(["pdftoppm", "-f", "1", "-l", str(pages), "-r", str(dpi), "-png", pdf, os.path.join(d, "p")],
-                       check=True, capture_output=True, timeout=300)
+        # pdftoppm exits non-zero on slightly damaged PDFs while still rendering the pages: judge by the images
+        r = subprocess.run(["pdftoppm", "-f", "1", "-l", str(pages), "-r", str(dpi), "-png", pdf, os.path.join(d, "p")],
+                           capture_output=True, timeout=300)
+        if not any(f.endswith(".png") for f in os.listdir(d)):
+            raise RuntimeError("pdftoppm rendered no page: " + r.stderr.decode("utf-8", "ignore")[:120])
         out = []
         for img in sorted(f for f in os.listdir(d) if f.endswith(".png")):
             r = subprocess.run(["tesseract", os.path.join(d, img), "stdout", "-l", LANGS],
@@ -82,7 +85,7 @@ def one(rec, pages):
     try:
         status, text = outcome(ocr_pdf(data, pages))
     except Exception as e:
-        return rec["id"], "ocr_error", type(e).__name__, None
+        return rec["id"], "ocr_error", f"{type(e).__name__}: {str(e)[:120]}", None
     return rec["id"], status, text, BCT.detect_lang(text) if status == "ok" else None
 
 
@@ -112,7 +115,11 @@ def main():
           f"download failed: {sum(v for k, v in counts.items() if k.startswith('download_')):,}; OCR error: {counts['ocr_error']:,}.", "",
           "Languages of the covers read: " + (", ".join(f"{k} {v}" for k, v in langs.most_common(8)) or "none") + ".", "",
           "Samples (first 160 characters):", ""]
+    errs = collections.Counter(t.split(":")[0] for _, s_, t, _ in results if s_ == "ocr_error")
     md += [f"- {t[:160]}" for _, s, t, _ in results if s == "ok"][:8]
+    if errs:
+        md += ["", "OCR errors: " + ", ".join(f"{k} {v}" for k, v in errs.most_common()),
+               "First error: " + next(t for _, s_, t, _ in results if s_ == "ocr_error")]
     open("ocr_covers.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
     if a.commit:
