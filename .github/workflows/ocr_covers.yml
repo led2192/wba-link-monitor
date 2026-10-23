@@ -1,0 +1,52 @@
+name: OCR scanned covers
+
+# Monthly: scanned PDFs (cover_status no_text) get their first pages read by text recognition, so
+# they can be typed, titled and dated. A pull request touching it runs a dry run on 25 documents.
+on:
+  schedule:
+    - cron: "13 6 3 * *"            # the 3rd of each month, 06:13 UTC
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "scanned documents to read"
+        default: "600"
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+  pull_request:
+    paths: [ocr_covers.py, .github/workflows/ocr_covers.yml]
+
+jobs:
+  ocr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q poppler-utils tesseract-ocr
+      - run: pip install -r requirements.txt
+      - name: Read scanned covers
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 25"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--limit 600 --commit"
+          else ARGS="--limit ${{ inputs.limit }}"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; fi
+          python ocr_covers.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s ocr_covers.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file ocr_covers.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "OCR scanned covers: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
