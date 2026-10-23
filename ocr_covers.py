@@ -6,8 +6,8 @@ Build cover text marks a PDF cover_status = no_text when it parses but holds no 
 that are images. Those rows get no AI type, no title, no year from the text, and count as
 DOC_UNREADABLE in Pipeline QA. This job takes them (not discarded, with a file, or too big to attach
 and read from document_url), up to --limit a run, renders the first --pages pages as images
-(pdftoppm, 200 dpi) and reads them with Tesseract in English, French, German, Spanish, Portuguese and
-Italian. When at least 200 letters come out, it writes cover_text, doc_language, cover_status = ok and
+(pdftoppm, 150 dpi) and reads them with Tesseract (English model: it also reads other Latin-script
+languages, without some accents; six models at once timed out on the runner). When at least 200 letters come out, it writes cover_text, doc_language, cover_status = ok and
 ticks cover_ocr, so the AI type, title, year and sustainability class follow like for any other file.
 Otherwise it writes cover_status = no_text_ocr, so the row is not tried again every month.
 
@@ -22,7 +22,7 @@ import qa
 import build_cover_text as BCT
 from monitor_core import airtable_request
 
-LANGS = os.environ.get("OCR_LANGS", "eng+fra+deu+spa+por+ita")
+LANGS = os.environ.get("OCR_LANGS", "eng")   # 6 languages at once timed out (300 s a page) on the runner
 MIN_LETTERS = 200
 
 
@@ -40,7 +40,7 @@ def outcome(text):
     return ("ok", t) if letters(t) >= MIN_LETTERS else ("no_text_ocr", "")
 
 
-def ocr_pdf(data, pages, dpi=200):
+def ocr_pdf(data, pages, dpi=150):
     """Text of the first `pages` pages of a PDF given as bytes, by Tesseract."""
     with tempfile.TemporaryDirectory() as d:
         pdf = os.path.join(d, "doc.pdf")
@@ -53,8 +53,8 @@ def ocr_pdf(data, pages, dpi=200):
             raise RuntimeError("pdftoppm rendered no page: " + r.stderr.decode("utf-8", "ignore")[:120])
         out = []
         for img in sorted(f for f in os.listdir(d) if f.endswith(".png")):
-            r = subprocess.run(["tesseract", os.path.join(d, img), "stdout", "-l", LANGS],
-                               capture_output=True, timeout=300)
+            r = subprocess.run(["tesseract", os.path.join(d, img), "stdout", "-l", LANGS, "--psm", "3"],
+                               capture_output=True, timeout=120)
             out.append(r.stdout.decode("utf-8", "ignore"))
         return "\n".join(out)
 
@@ -93,7 +93,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=600)
     ap.add_argument("--pages", type=int, default=6)
-    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     if a.commit:
