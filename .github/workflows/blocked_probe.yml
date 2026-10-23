@@ -1,0 +1,48 @@
+name: Blocked sites probe
+
+# Read-only: for documents and report pages our robot is refused, which free route still works
+# (full browser request, headless Chromium, Internet Archive copy), and how many refused companies
+# file with a stock exchange. Manual; a pull request touching the probe runs it and posts the result.
+on:
+  workflow_dispatch:
+    inputs:
+      docs:
+        description: "refused documents to probe (report families and 2023+ first)"
+        default: "300"
+      pages:
+        description: "refused report pages to probe"
+        default: "300"
+  pull_request:
+    paths: [blocked_probe.py, .github/workflows/blocked_probe.yml]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt playwright
+      - run: playwright install --with-deps chromium
+      - name: Probe
+        run: python blocked_probe.py --docs ${{ inputs.docs || '300' }} --pages ${{ inputs.pages || '300' }}
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blocked_probe
+          path: blocked_probe.csv
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s blocked_probe.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file blocked_probe.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Blocked sites probe: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
