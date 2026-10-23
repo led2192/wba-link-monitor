@@ -51,5 +51,13 @@ class Settle(unittest.TestCase):
         self.assertEqual(settle({"reviewed": True, "true_type": "GRI"}, TODAY, CUT), {})
 
 
+class AiTitle(unittest.TestCase):
+    def test_refusals_are_not_titles(self):
+        from qa_sample import ai_text
+        self.assertEqual(ai_text({"value": "I don't have access to the actual document text you're referring to."}), "")
+        self.assertEqual(ai_text("The text provided appears to be excerpts"), "")
+        self.assertEqual(ai_text({"value": "Meiji Holdings | Integrated Report 2025"}), "Meiji Holdings | Integrated Report 2025")
+
+
 if __name__ == "__main__":
     unittest.main()

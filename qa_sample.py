@@ -31,7 +31,7 @@ Each new card gets a split: 70% eval, 15% fewshot, 15% regression (by hash of th
 Modes: dry run by default (prints the batch); --commit writes.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE (Disclosure Library, read only here), AIRTABLE_QA_TOKEN, AIRTABLE_QA_BASE.
 """
-import argparse, collections, datetime as dt, hashlib, json, os, random, sys, time
+import argparse, collections, datetime as dt, hashlib, json, os, random, re, sys, time
 from urllib.parse import quote
 
 import qa
@@ -123,10 +123,16 @@ def settle(l, today, stale_cut):
     return {}
 
 
+REFUSAL = re.compile(r"^\W*(i don.t|i do not|i cannot|i can.t|i.m unable|i am unable|unable to|sorry|there is no|"
+                     r"there are no|the text provided|the extracted text|no title|no clear|i need|please provide|based on the)",
+                     re.I)
+
+
 def ai_text(v):
-    if isinstance(v, dict):
-        return (v.get("value") or "").strip()
-    return (v or "").strip() if isinstance(v, str) else ""
+    """The AI field's answer; '' when it answered with a sentence instead of a title (same rule as the
+    report_library.ai_title formula)."""
+    t = (v.get("value") or "").strip() if isinstance(v, dict) else ((v or "").strip() if isinstance(v, str) else "")
+    return "" if (REFUSAL.match(t[:80]) or len(t) > 200) else t
 
 
 def card(doc, stratum, today):

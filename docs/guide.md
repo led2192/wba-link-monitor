@@ -165,7 +165,7 @@ The year is the year in which the reporting period **ends** (April 2024 to March
 `year_evidence` holds the sentence that decided `fiscal_year`, so a year can be checked without opening the PDF. Comparison periods ("the preceding year ended ...") and ten-year tables are ignored as evidence.
 
 ### 6.3 Title
-`doc_label` (year, company, title) uses `curated_doc_title` when you set one, else the AI's `source_title`, else the robot's `auto_title`. An "[auto]" prefix means a title was constructed, not read.
+`doc_label` (year, company, title) uses `curated_doc_title` when you set one, else the AI's title (`ai_title`: `source_title` unless the AI answered with a sentence such as "I don't have access to the document text"), else the robot's `auto_title`. An "[auto]" prefix means a title was constructed, not read.
 
 ### 6.4 Completeness (rules v2, live since 23 Oct 2026)
 Six checks, each worth one sixth of `completeness`:
