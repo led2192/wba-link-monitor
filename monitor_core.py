@@ -350,6 +350,24 @@ def detection_fields(f, upd, current, had_baseline, today):
     return True, high, docs
 
 
+def is_formula_error(v):
+    """Airtable returns a formula that fails on a row as {"error": "#ERROR!"} or {"specialValue": "NaN"}
+    instead of a string or number. (AI fields come back as {"state": ..., "value": ...}: not errors.)"""
+    return isinstance(v, dict) and ("error" in v or "specialValue" in v) and "state" not in v
+
+
+def clean_records(data):
+    """Formula errors in read records become None, so a script reading a text field never meets a dict
+    (company_coverage crashed on doc_label in an error state, 23 Oct 2026)."""
+    if isinstance(data, dict):
+        for rec in data.get("records", []) or []:
+            f = rec.get("fields") if isinstance(rec, dict) else None
+            if isinstance(f, dict):
+                for k in [k for k, v in f.items() if is_formula_error(v)]:
+                    f[k] = None
+    return data
+
+
 def airtable_request(method, url, headers, payload=None, params=None, timeout=60, tries=5):
     """GET/POST/PATCH to Airtable, retrying transient failures (read timeouts, connection drops,
     429 rate limits, 5xx) with exponential backoff. On timeout retries the per-request timeout
@@ -383,6 +401,12 @@ def airtable_request(method, url, headers, payload=None, params=None, timeout=60
         if r.status_code >= 400:
             print(f"Airtable {method} {r.status_code}: {r.text[:400]}")
         r.raise_for_status()
+        if method.upper() == "GET":
+            try:
+                data = clean_records(r.json())
+                r.json = lambda *a, **k: data
+            except ValueError:
+                pass
         return r
     return r
 

@@ -185,7 +185,8 @@ def origin(f):
 def latest_doc_text(f, t):
     """'2025 | Annual Report 2025 (Annual Report); found by the robot on a reports hub; PT_1-abc'.
     doc_label is 'year | company | title': the company is dropped, the card is already the company."""
-    parts = [p.strip() for p in (f.get("doc_label") or "").split(" | ")]
+    label = f.get("doc_label")
+    parts = [p.strip() for p in (label if isinstance(label, str) else "").split(" | ")]
     if len(parts) >= 3:
         parts = [parts[0]] + parts[2:]
     label = " | ".join(p for p in parts if p) or (f.get("document_url") or "")
