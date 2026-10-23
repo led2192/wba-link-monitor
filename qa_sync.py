@@ -78,7 +78,7 @@ FLAG_DETAIL = {"Wrong type": ("wrong_type", True), "Wrong year": ("wrong_year", 
                "Wrong company": ("wrong_company", True), "Only part of the report": ("part_of_report", True),
                "Not a disclosure": ("not_disclosure", True), "Duplicate": ("duplicate", False),
                "File broken or missing": ("file_broken", False), "Other": ("other", False)}
-UNREADABLE = {"no_text", "parse_fail", "truncated"}
+UNREADABLE = {"no_text", "parse_fail", "truncated", "no_text_ocr"}
 PENDING_DAYS = 7
 
 

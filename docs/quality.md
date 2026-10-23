@@ -31,7 +31,7 @@ Nothing depends on a person working through failure rows: there are tens of thou
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
-| DOC_UNREADABLE | to build: text recognition (OCR) for scanned PDFs | to build |
+| DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every month (OCR scanned covers); broken files stay counted | yes (#PR) |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
 | TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
 | TYPE_MISSING (non-English) | to build: typing of non-English documents | to build |

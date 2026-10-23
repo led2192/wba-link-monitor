@@ -42,7 +42,7 @@ Take a 2024 sustainability report published on a company's "Reports" page.
 3. **A document row is created.** The harvester turns the link into a `report_library` row with a stable `library_id`. It refuses links already held (same normalized address) and links on the deletion list (tombstones), so a re-run never duplicates.
 4. **First guess of the type, from the address.** `source_type` is guessed from the words in the link (for example `/sustainability-report-2024.pdf`). This is opinion number one. Never edit it.
 5. **The PDF is attached.** Airtable fetches the file into `file`. If the site refuses, a second job downloads it itself; if that fails too, `file_status` says why: `blocked` (the site refuses robots), `gone` (404), `not_pdf`, or `too_big` (over Airtable's 5 MB upload limit). Files too big to attach are still read from `document_url`; they just have no attachment.
-6. **The first six pages are read.** `cover_text`, `page_count`, `doc_language` and `content_hash` are written. Two Airtable AI fields then read `cover_text` (English documents only): `source_type_check` (opinion number two, the AI type) and `source_title`.
+6. **The first six pages are read.** `cover_text`, `page_count`, `doc_language` and `content_hash` are written. A scan with no text (`cover_status` no_text) is read by text recognition once a month (`cover_ocr` ticked). Two Airtable AI fields then read `cover_text` (English documents only): `source_type_check` (opinion number two, the AI type) and `source_title`.
 7. **The effective type.** `effective_type` = the AI type when there is one, else the address type. This is the type every count and check uses. When you correct a type, you change `source_type_check`.
 8. **Clean-up.** Duplicates (same file, same address) and non-disclosures (insider-trading forms, call transcripts) are discarded with a `discard_reason`. Nothing is deleted at this stage.
 9. **The year.** See section 6.2. The field to trust is `year`; `year_source` says which rule decided it.
@@ -214,7 +214,7 @@ Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**,
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
-| DOC_UNREADABLE | to build: text recognition (OCR) for scanned PDFs | to build |
+| DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every month (OCR scanned covers); broken files stay counted | yes (#PR) |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
 | TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
 | TYPE_MISSING (non-English) | to build: typing of non-English documents | to build |
