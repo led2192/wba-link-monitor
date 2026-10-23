@@ -44,6 +44,7 @@ flowchart LR
 8. **Full text** (separate chain, 21:37): `build_fulltext.py` reads every page of every report into the text store; `fiscal_years.py` reads the reporting year from it with a confidence score; `sustainability_class.py` reads where the sustainability disclosure lives (a dedicated report, embedded in the annual report, a specialized document, or financial only), the standards named and the assurance; `mention_search.py` answers the saved "which companies mention X" questions.
 
 ## The on-demand paths
+- **Analysts interface** (Disclosure Library, shared interface-only): analysts who use the reports see each company's documents and watched pages, add links and files through the same `add_link` and `add_file` boxes as My queue, and flag documents (`analyst_flag`, `analyst_flag_note`) or pages (`scan_concern`). Flags never change a row: the owner decides, and `qa_sync.py` records each flag in Pipeline QA.
 - **Scan now** (`scan_now.py`, every 30 minutes, watching for 5.5 hours): ticking `scan_now` on a page runs the whole chain for that page in about 10 to 15 minutes. It also runs `inbox.py`, which handles `add_link`, `add_file`, `approve_suggestions`, `delete_now` and new mention searches.
 - **Weekly:** regulator filings (SEC, ESEF annual reports for gaps, Monday 06:20), key figures (revenue, employees, Monday 09:20), page capture to PDF (Sunday 00:23).
 - **Daily:** suggested pages for companies missing a hub (04:40), link and assign (07:03), base health (12:17).

@@ -300,6 +300,33 @@ class SyncDeriveTests(unittest.TestCase):
         # different keys for the three facts
         self.assertEqual(len({qa.key(c, k, d) for c, d, k, s, _ in fails}), 3)
 
+    def test_analyst_flags(self):
+        today = dt.date(2026, 10, 22)
+        base = {"library_id": "PT_1-abc", "wba_id": "PT_1", "company_name": "Acme", "_id": "recD", "year": 2025,
+                "document_url": "https://acme.com/annual-report-2025.pdf", "created_time": "2026-09-01T00:00:00.000Z",
+                "cover_status": "ok", "doc_language": "English", "source_type_check": "Annual Report"}
+        # a costly flag on a report-shaped row is High, with the analyst's words as the message
+        f = dict(base, analyst_flag="Wrong type", analyst_flag_note="It is the integrated report")
+        fails, _, _, counts = qa_sync.derive_doc(f, today)
+        self.assertEqual([(c, d, s) for c, d, k, s, _ in fails], [("DOC_FLAGGED", "wrong_type", "High")])
+        self.assertEqual(fails[0][4]["message"], "Wrong type: It is the integrated report")
+        self.assertEqual(counts["flag_wrong_type"], 1)
+        # a duplicate flag is Medium; a flag on a row that is not report-shaped is Medium
+        f = dict(base, analyst_flag="Duplicate")
+        self.assertEqual(qa_sync.derive_doc(f, today)[0][0][1:4:2], ("duplicate", "Medium"))
+        f = dict(base, document_url="https://acme.com/media/1.pdf", source_type_check="Company Presentations",
+                 year=2019, analyst_flag="Wrong year")
+        self.assertEqual([(c, s) for c, d, k, s, _ in qa_sync.derive_doc(f, today)[0]], [("DOC_FLAGGED", "Medium")])
+        # a discarded row no longer counts as flagged (discarding resolved it)
+        f = dict(base, analyst_flag="Not a disclosure", discard=True, discard_reason="Not a disclosure")
+        self.assertEqual([c for c, d, k, s, _ in qa_sync.derive_doc(f, today)[0]], ["DOC_WRONG_ROW"])
+        # the fix becomes a correction label that remembers the flag
+        f = dict(base, analyst_flag="Wrong type", analyst_flag_note="integrated", robot_type="Annual Report",
+                 source_type_check="Integrated Report")
+        fails, labels, _, _ = qa_sync.derive_doc(f, today)
+        self.assertEqual(sorted(c for c, d, k, s, _ in fails), ["DOC_FLAGGED", "LABEL_CORRECTION"])
+        self.assertIn("an analyst had flagged it (Wrong type: integrated)", labels[0]["reason"])
+
     def test_company_gaps(self):
         f = {"wba_id": "PT_9", "company_name": "Zed", "_id": "recC",
              "gap_pages": ["Report hub page", "Sustainability report (recent)"], "overdue_reports": ["Annual report"],
