@@ -64,6 +64,20 @@ class Classes(unittest.TestCase):
         self.assertTrue(r["reason"].startswith("first pages:"))
         self.assertEqual(SC.decide("Annual Report", None, "")["reason"], "no text yet")
 
+    def test_types_never_read_in_full_are_decided_from_first_pages(self):
+        r = SC.decide("Interim Reports", None, FIN)
+        self.assertEqual(r["class"], F)
+        self.assertIn("not read in full", r["reason"])
+        self.assertEqual(SC.decide("Company Presentations", None, "Contents ... ESG highlights 12 ...")["class"], E)
+        # an annual report still waits for its full text
+        self.assertIsNone(SC.decide("10K Form", None, FIN)["class"])
+
+    def test_no_text_at_all(self):
+        self.assertEqual(SC.decide("ESG Report", None, "")["class"], D)
+        self.assertEqual(SC.decide("Integrated Report", None, "")["class"], E)
+        r = SC.decide("Annual Report", None, "")
+        self.assertIsNone(r["class"]); self.assertEqual(r["reason"], "no text yet")
+
     def test_other_languages(self):
         es = ("Las emisiones de gases de efecto invernadero de alcance 1 y 2 bajaron un 10%. La biodiversidad, los derechos "
               "humanos y la seguridad y salud son asuntos materiales del análisis de materialidad; la economía circular y "

@@ -79,6 +79,10 @@ CORE_TYPES = [
     "Social Reports", "Annual Report", "Engagement Report", "Climate Report", "Environmental Reports",
     "Policy Documents", "Code of Conduct", "Human Rights Policy", "GRI", "SASB Index", "CDP Report",
     "UNKNOWN",
+    # annual filings that can hold a sustainability section (France's universal registration
+    # documents carry the CSRD statement; 10-Ks a human capital section; financial statements volumes
+    # are often whole statutory reports): read in full so sustainability_class.py can judge them
+    "10K Form", "Registration Document", "Financial Statement",
 ]
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

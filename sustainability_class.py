@@ -43,7 +43,11 @@ How the class is decided (decide()):
   first     Without full text, the first pages (cover_text, six pages) decide only in one direction:
   pages     a contents entry such as "Sustainability report 74", "Non-financial statement",
             "BRSR" gives E (reason "first pages: ..."); otherwise the class stays blank until the full
-            text arrives (the queue re-reads first-pages rows once it does).
+            text arrives (the queue re-reads first-pages rows once it does). Exception: interim
+            reports, statutory documents and company presentations are never read in full
+            (FIRST_PAGES_ONLY), so for them no contents entry means F.
+  no text   A row with neither full text nor first pages (no file yet, not a PDF) still gets its
+            class when the type alone decides it (D, integrated E, S); report types say "no text yet".
 Calibrated on 22 Oct 2026 against the 2,619 documents the Source Library analysts typed and the
 pipeline holds in full text: 252 of 452 annual reports come out E, and the blocks found were
 sustainability chapters, TCFD and ESRS sections and BRSRs in every sample checked by hand.
@@ -70,6 +74,10 @@ BY_TYPE = {
 }
 BY_TEXT = {"Annual Report", "10K Form", "Financial Statement", "Interim Reports", "Registration Document",
            "Statutory Documents", "Company Presentations"}
+# types the full-text build never reads (build_fulltext.CORE_TYPES): their first pages are all there
+# will ever be, so waiting for the full text would leave them blank forever
+FIRST_PAGES_ONLY = {"Interim Reports", "Statutory Documents", "Company Presentations"}
+WAITING = "waiting for the full text"
 FIELDS = ["library_id", "source_type_check", "source_type", "discard", "sustainability_class", "class_reason",
           "sustainability_share", "frameworks", "assurance"]
 MIN_PAGE_CHARS = 200      # a page with less text (a photo, a chart) neither counts nor breaks a block
@@ -329,8 +337,11 @@ def decide(doc_type, pages=None, cover=""):
     if section:
         out["class"] = E
         out["reason"] = f"first pages: the contents names \"{section}\""
+    elif doc_type in FIRST_PAGES_ONLY:
+        out["class"] = F
+        out["reason"] = f"first pages: no sustainability section named ({doc_type} are not read in full)"
     else:
-        out["reason"] = "first pages: no sustainability section named; waiting for the full text"
+        out["reason"] = f"first pages: no sustainability section named; {WAITING}"
     return out
 
 
@@ -367,7 +378,9 @@ def cover_rows(token, base, everything):
     H = {"Authorization": f"Bearer {token}"}
     formula = ("AND(NOT({discard}), {cover_text}!='')" if everything else
                "AND(NOT({discard}), {cover_text}!='', OR({class_reason}='', "
-               "LEFT({class_reason}&'', 11)='no text yet', RIGHT({class_reason}&'', 11)='no text yet'))")
+               "LEFT({class_reason}&'', 11)='no text yet', RIGHT({class_reason}&'', 11)='no text yet', "
+               "AND(FIND('" + WAITING + "', {class_reason}&''), OR(" +
+               ",".join(f"{{effective_type}}='{t}'" for t in sorted(FIRST_PAGES_ONLY)) + "))))")
     params = [("pageSize", "100"), ("filterByFormula", formula), ("fields[]", "library_id"), ("fields[]", "cover_text")]
     offset = None
     while True:
@@ -407,7 +420,7 @@ def main():
     ap.add_argument("--all", action="store_true", help="redo every row, not only new ones")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--cover-limit", type=int, default=60000,
+    ap.add_argument("--cover-limit", type=int, default=0,
                     help="at most this many documents read from their first pages per run (0 = all)")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
@@ -428,7 +441,8 @@ def main():
         d = index.get(lid)
         reason = r["fields"].get("class_reason") or ""
         if not d or d.get("status") != "ok":
-            if reason.startswith("first pages:") and not a.all:
+            if reason.startswith("first pages:") and not a.all and not (
+                    WAITING in reason and type_of(r["fields"]) in FIRST_PAGES_ONLY):
                 skipped["first pages already read"] += 1; continue
             cover_ids.add(lid)
             skipped["no full text: first pages"] += 1; continue
@@ -459,6 +473,15 @@ def main():
             if a.cover_limit and n_cover >= a.cover_limit:
                 break
         print(f">>> {n_cover} documents read from their first pages.", flush=True)
+        # no full text and no first pages (no file yet, not a PDF): the type alone still decides D, E
+        # (integrated) and S; report types wait, with the reason "no text yet"
+        n_none = 0
+        for lid in cover_ids:
+            if lid not in results and not (rows[lid]["fields"].get("class_reason") or "").startswith("first pages:"):
+                res = decide(type_of(rows[lid]["fields"]), None, "")
+                if res["class"] or not rows[lid]["fields"].get("class_reason"):
+                    results[lid] = res; n_none += 1
+        print(f">>> {n_none} documents with no text decided by their type alone (or marked no text yet).", flush=True)
     classes = collections.Counter(); fw = collections.Counter(); asr = collections.Counter(); ups = []
     for lid, res in results.items():
         classes[res["class"] or "blank"] += 1
