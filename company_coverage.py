@@ -129,7 +129,7 @@ RULES = os.environ.get("COVERAGE_RULES", "v2")       # v2 approved by the owner 
 URD_TITLE = re.compile(r"universal\s+registration|registration\s+document|document\s+d.enregistrement|"
                        r"annual\s+financial\s+report|rapport\s+financier\s+annuel|documento\s+de\s+registro|"
                        r"annual\s+report|rapport\s+annuel", re.I)
-DEBT_TITLE = re.compile(r"prospectus|final\s+terms|pricing\s+supplement|supplement|offering|programme|"
+DEBT_TITLE = re.compile(r"prospectus|final\s+terms|pricing\s+supplement|supplement|amendment|amendement|offering|programme|"
                         r"program\b|notes\s+due|debt\s+securities|memorandum|bonds?\b", re.I)
 PIECES = ("Part of a report", "Summary or short document")
 EMBEDDED_TYPES = {"Annual Report", "10K Form", "Registration Document"}

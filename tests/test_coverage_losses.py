@@ -53,6 +53,8 @@ class RulesV2(unittest.TestCase):
         self.assertFalse(C.is_urd({"doc_label": "Base Prospectus dated 10 May 2024 annual report", "page_count": 300},
                                   "Registration Document"))
         self.assertFalse(C.is_urd({"doc_label": "Final Terms dated 30 January 2020", "page_count": 10}, "Registration Document"))
+        self.assertFalse(C.is_urd({"doc_label": "Second Amendment to Universal Registration Document 2026", "page_count": 166},
+                                  "Registration Document"))
 
     def test_embedded_needs_class_e_and_a_whole_report(self):
         f = {"sustainability_class": {"name": "E embedded"}, "scope": {"name": "Full document"},
