@@ -4,7 +4,7 @@ Day-to-day operation through the Airtable interfaces, and what to do when someth
 
 ## Every morning (five minutes)
 1. Open `base_health`, top row. `status` and `attention` say what needs you. Problem = a job failed or the base is over 90% full; Check = over 80% full or nothing new arrived.
-2. Open Pipeline QA, Today's cases. Give a verdict on each case (about 15, ten minutes). Untick `sure` when guessing.
+2. Open Pipeline QA, Today's cases, after 13:00 Madrid (Claude pre-reads the cards at 12:46). On each card fill `true_type` and `true_year` (always, even when the shown values are right), tick `title_wrong` only when the title is wrong, untick `sure` when guessing. Ignore `verdict`. Details: [guide.md](guide.md) section 7.4.
 
 ## Add things
 - **A report or page you found:** paste the link in `companies.add_link` (one per line). Within minutes the robot checks it is new, files it, scans it and answers in `add_result`.
@@ -20,13 +20,12 @@ Day-to-day operation through the Airtable interfaces, and what to do when someth
 - **Delete for good:** tick `delete_now` (archived and blocked forever; verified rows are never deleted).
 - **Company really has not published:** set `queue_snooze_until`.
 
-## Pipeline QA failures: find there, fix in the Disclosure Library
-Pipeline QA is where problems are found and counted; the Disclosure Library is where they are fixed. Never fix by editing a failure row.
-1. Open Pipeline QA, Open failures (once or twice a week, not daily). Sort by severity. Read `who_fixes`.
-2. If it says "Nobody" or "Weekly review", leave it. Those are fixed in code; the weekly review reads them by the hundred, and one code fix closes thousands of rows.
-3. If it names you (mainly PAGE_BLOCKED, PAGE_GONE, PAGE_WRONG_TYPE, and a 2023+ report you need now), click `open_in_library`. It opens the page, document or company in the Disclosure Library. Fix it there with the usual tools under "Add things" and "Fix things".
-4. Do nothing else. The next sync sees the fix and closes the failure itself (`fixed`, or `resolved_silently` after 30 days without recurring). A type you change in the library becomes a label automatically.
-5. Only status is yours to set on a failure: `expected` when the behaviour is correct (a page that legitimately has no report), `wontfix` when it is not worth fixing. Both stop it counting as open.
+## Pipeline QA failures: not a to-do list
+Pipeline QA is where problems are found and counted; the Disclosure Library is where they are fixed. You do not work through failure rows: there are tens of thousands, and each kind has an owner (`who_fixes`). The weekly review fixes gone and wrongly typed pages itself and fixes the rest in code; the daily research works on company gaps; the robot retries blocked sites.
+1. What needs you arrives in the Monday notification, "Para ti esta semana": at most 5 items, each with the company and the link (typically a report only a person can download). Do them with the tools under "Add things" and "Fix things".
+2. Analyst flags (DOC_FLAGGED) are yours: Analysts interface, Flagged documents.
+3. Never fix anything by editing a failure row. The next sync sees the fix in the library and closes the failure itself (`fixed`, or `resolved_silently` after 30 days without recurring).
+4. Only status is yours to set on a failure, if you want: `expected` when the behaviour is correct, `wontfix` when it is not worth fixing.
 
 ## When something breaks
 - **A GitHub job failed:** `base_health.failed_jobs` links it. Re-run it from the Actions tab; scripts are idempotent, a re-run never duplicates.

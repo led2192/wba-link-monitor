@@ -51,5 +51,5 @@ flowchart LR
 
 ## Claude tasks (scheduled outside GitHub)
 - **Daily gap research** (weekdays 06:46 Madrid): searches the web for 25 companies' missing reports and pastes official links into `add_link`.
-- **Daily QA review** and **weekly QA review**: see [quality.md](quality.md).
+- **Daily QA pre-read** (weekdays 12:46 Madrid) and **weekly QA review** (Mondays 08:47 Madrid): see [quality.md](quality.md) and [guide.md](guide.md) section 9.
 - **Weekly missed-reports audit**: paused since 20 Oct 2026; its job moves into the weekly QA review.
