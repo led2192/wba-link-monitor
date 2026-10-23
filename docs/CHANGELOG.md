@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-23 Year fixes after the 22 Oct rewrites: periods quoted from other documents ignored, title two years away from the text year lowers the score, ten-year tables are not cover titles; `year_eval.py` scores rule changes on every PR; `check_docs` and `completeness_change` say which document a lost check depended on; CO_GAP messages per check (#43)
 - 2026-10-23 Sustainability class gaps: interim reports, statutory documents and presentations decided from their first pages; rows with no text classed by type; 10-Ks, registration documents and financial statements added to the full-text build; no cap on first-pages reads (#44)
 - 2026-10-23 Companies get `latest_doc_added` (when the newest document with a file arrived, however it came) and `latest_doc` (year, title, type, how it arrived, library_id), written by company_coverage.py (#42)
 - 2026-10-23 Analyst flags: `analyst_flag` and `analyst_flag_note` on report_library (set from the new Analysts interface) become DOC_FLAGGED failures in Pipeline QA; a fix of a flagged row becomes a correction label that records the flag (#41)

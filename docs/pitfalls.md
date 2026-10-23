@@ -26,6 +26,9 @@ Lessons that cost time to learn. Read before changing the area they name.
 - **Two classifiers disagree on half the corpus.** Never pick one silently; measure on labels.
 - **Non-English documents are not AI-typed.** The classify formula runs on English only; 30,000+ rows rely on the URL guess or nothing.
 - **Years in file names are publication years.** "annual-report-2025.pdf" is usually FY2024. Use the reporting-period evidence.
+- **Reports quote other reports' periods.** A quarterly release cites "our Annual Report on Form 10-K for the year ended December 31, 2023"; an annual report excerpt recounts last year's general meeting. A period statement right after the name of another document is that document's period.
+- **The top of a cover can be a table.** "Ten Year Summary 2015 2016 ... 2024" starts with the oldest year. Three or more years in the title line are a header, not the document's year.
+- **Bulk rewrites move the completeness numbers.** Run a bulk year or type rewrite only after its pull request shows the measured effect (`year_eval.py`), and read the next morning's `completeness_change` on the companies that lost a check.
 - **AI cost scales with input length.** The cover_text cap (`COVER_CHARS`) is the lever; whitespace collapsing barely matters.
 
 - **The sections of a split report carry the whole report's contents.** UK and South African report sections repeat the full navigation bar ("Strategic report | Governance | Financial statements") on their first pages, so the parts named there say nothing about the file in hand. Compare the contents page numbers with the file's own page count.

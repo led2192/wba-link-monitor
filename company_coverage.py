@@ -87,10 +87,13 @@ STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
                "sust_reports_total", "completeness", "gaps", "gap_pages",
                "overdue_reports", "overdue_note", "queue_score", "queue_item", "queue_action",
-               "latest_doc_added", "latest_doc"]
+               "latest_doc_added", "latest_doc", "check_docs"]
+# written only when a check flips from passing to failing: which document used to pass it and what
+# happened to it (discarded, moved, retyped, re-dated, deleted). Newest first, last 10 kept.
+C_CHANGE = "completeness_change"
 # companies fields this script READS for the queue but never writes (they belong to the person or
 # to discover_pages.py)
-QUEUE_INPUTS = ["website", "suggested_links", "queue_snooze_until"]
+QUEUE_INPUTS = ["website", "suggested_links", "queue_snooze_until", "completeness_change"]
 C_UPDATED = "coverage_updated"
 
 # Effective-type families for recency flags. Names match source_type_check options verbatim.
@@ -184,7 +187,7 @@ def aggregate(wbas=None):
             "urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(), "docs_with_file": 0, "docs_typed": 0,
             "type_counts": {}, "type_latest": {}, "latest_report_year": None,
-            "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": ""})
+            "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": "", "check_doc": {}, "fam_best": {}})
 
     print(">>> sweeping monitored_links ...", flush=True)
     for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST, "http_status"], "monitored_links",
@@ -228,6 +231,8 @@ def aggregate(wbas=None):
             if stamp[0] and (c["latest_added"] is None or stamp > c["latest_added"]):
                 c["latest_added"] = stamp
                 c["latest_doc"] = latest_doc_text(f, t if t != "UNKNOWN" else "")
+        if t in ("Code of Conduct", "Human Rights Policy"):
+            c["check_doc"].setdefault(t, rec.get("id"))
         if t:
             c["type_counts"][t] = c["type_counts"].get(t, 0) + 1
             if t != "UNKNOWN":
@@ -241,8 +246,12 @@ def aggregate(wbas=None):
             c["year_counts"][y] += 1
             if t in SUST_FAMILY:
                 c["sust_years"].add(y)
+                if y > c["fam_best"].get("sust", (0, ""))[0]:
+                    c["fam_best"]["sust"] = (y, rec.get("id"))
             if t in ANNUAL_FAMILY:
                 c["ann_years"].add(y)
+                if y > c["fam_best"].get("annual", (0, ""))[0]:
+                    c["fam_best"]["annual"] = (y, rec.get("id"))
         if y is not None:
             if t:
                 if y > c["type_latest"].get(t, 0):
@@ -465,7 +474,66 @@ def compose(c, year_min):
             "completeness": completeness, "gaps": gaps, "gap_pages": failed,
             "latest_doc_added": c["latest_added"][0][:10] if c.get("latest_added") else None,
             "latest_doc": c.get("latest_doc") or "",
+            "check_docs": check_docs(c, year_min, failed),
             **_overdue(c)}
+
+
+def check_docs(c, year_min, failed):
+    """'<check>: <record id>' for every passing document check: the document that passes it."""
+    docs = {"Code of Conduct": c.get("check_doc", {}).get("Code of Conduct"),
+            "Human Rights Policy": c.get("check_doc", {}).get("Human Rights Policy")}
+    for check, fam in (("Sustainability report (recent)", "sust"), ("Annual report (recent)", "annual")):
+        y, rid = c.get("fam_best", {}).get(fam, (0, ""))
+        docs[check] = rid if y >= year_min else None
+    return "\n".join(f"{k}: {v}" for k, v in docs.items() if v and k not in failed) or None
+
+
+def parse_check_docs(text):
+    out = {}
+    for line in (text or "").split("\n"):
+        k, _, v = line.partition(": ")
+        if k and v.startswith("rec"):
+            out[k.strip()] = v.strip()
+    return out
+
+
+LOST_TYPES = {"Code of Conduct": {"Code of Conduct"}, "Human Rights Policy": {"Human Rights Policy"},
+              "Sustainability report (recent)": SUST_FAMILY, "Annual report (recent)": ANNUAL_FAMILY}
+
+
+def why_lost(check, wba, f, year_min):
+    """Plain words: what happened to the document that used to pass `check` (f = its fields, or None)."""
+    if f is None:
+        return "the document was deleted"
+    label = (f.get("doc_label") or "")[:90]
+    if f.get(F_DISCARD):
+        r = f.get("discard_reason")
+        return f"{label}: discarded ({(r.get('name') if isinstance(r, dict) else r) or 'no reason'})"
+    if (f.get(F_WBA) or "").strip() != wba:
+        return f"{label}: moved to {f.get(F_WBA) or 'no company'}"
+    t = eff_type(f)
+    if t not in LOST_TYPES.get(check, set()):
+        return f"{label}: type is now {t or 'blank'}"
+    y = f.get(F_YEAR)
+    if check.endswith("(recent)") and not (isinstance(y, (int, float)) and y >= year_min):
+        src = f.get("year_source")
+        return f"{label}: year is now {int(y) if isinstance(y, (int, float)) else 'blank'}" + (f" ({src})" if src else "")
+    return f"{label}: still looks valid, check by hand"
+
+
+def explain_losses(losses, year_min):
+    """losses: [(wba, check, record id)] -> {(wba, check): reason}. One read per 40 documents."""
+    out, ids = {}, sorted({rid for _, _, rid in losses})
+    found = {}
+    fields = [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_DISCARD, "discard_reason", "doc_label", "year_source"]
+    for i in range(0, len(ids), 40):
+        chunk = ids[i:i + 40]
+        formula = "OR(" + ",".join(f"RECORD_ID()='{r}'" for r in chunk) + ")"
+        for rec in sweep(LIB, fields, "lost documents", formula):
+            found[rec["id"]] = rec.get("fields", {})
+    for wba, check, rid in losses:
+        out[(wba, check)] = why_lost(check, wba, found.get(rid), year_min)
+    return out
 
 
 def _overdue(c):
@@ -484,7 +552,7 @@ def empty_stats():
     return {"urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(),
             "docs_with_file": 0, "docs_typed": 0, "type_counts": {}, "type_latest": {},
-            "latest_report_year": None, "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": ""}
+            "latest_report_year": None, "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": "", "check_doc": {}, "fam_best": {}}
 
 
 def companies_index(wbas=None):
@@ -550,17 +618,46 @@ def main():
               + ", ".join(f"{w}({agg[w]['docs_total']})" for w in orphans[:10]), flush=True)
 
     today = date.today().isoformat()
-    to_write, unchanged, gap_count = [], 0, 0
+    to_write, unchanged, gap_count, losses = [], 0, 0, []
     for wba, (rid, current) in comp.items():
         st = agg.get(wba) or empty_stats()
         target = compose(st, args.year_min)
         target.update(queue(st, target, current, args.year_min))
         if target["coverage_flags"]:
             gap_count += 1
+        for check, doc in parse_check_docs(current.get("check_docs")).items():
+            if check in target["gap_pages"]:
+                losses.append((wba, check, doc))
         if changed(current, target):
             to_write.append({"id": rid, "fields": {**target, C_UPDATED: today}})
         else:
             unchanged += 1
+
+    # a check that passed yesterday and fails today: say which document passed it and what happened
+    if losses:
+        why = explain_losses(losses, args.year_min)
+        by_wba = collections.defaultdict(list)
+        for (wba, check), reason in why.items():
+            by_wba[wba].append(f"{today} lost {check}: {reason}")
+        rows = {r["id"]: r for r in to_write}
+        for wba, lines in by_wba.items():
+            rid, current = comp[wba]
+            old = [ln for ln in (current.get(C_CHANGE) or "").split("\n") if ln.strip()]
+            text = "\n".join((lines + old)[:10])
+            if rid in rows:
+                rows[rid]["fields"][C_CHANGE] = text
+            else:
+                to_write.append({"id": rid, "fields": {C_CHANGE: text}})
+        kinds = collections.Counter(next((k for k in ("deleted", "discarded", "moved", "type is now", "year is now")
+                                          if k in r), "still looks valid") for r in why.values())
+        report = (f">>> checks lost since the last run: {len(losses)} ("
+                  + ", ".join(f"{k} {n}" for k, n in kinds.most_common()) + ")")
+        print(report, flush=True)
+        for (wba, check), reason in list(why.items())[:40]:
+            print(f"    {wba} {check}: {reason}", flush=True)
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as fh:
+                fh.write(report.lstrip("> ") + "\n\n" + "\n".join(f"- {w} {c}: {r}" for (w, c), r in why.items()) + "\n")
 
     print(f">>> companies: {len(comp):,} | changed: {len(to_write):,} | unchanged: {unchanged:,} "
           f"| with gap flags: {gap_count:,}", flush=True)
