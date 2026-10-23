@@ -32,6 +32,8 @@ Lessons that cost time to learn. Read before changing the area they name.
 - **"Reasonable assurance" appears in every limited-assurance report.** The ISAE 3000 boilerplate says the procedures are "less in extent than for a reasonable assurance engagement", and every financial audit opinion obtains "reasonable assurance" about the financial statements. Read the level only near sustainability words, away from the audit and internal-control wording, and never from a sentence that compares the two levels.
 - **Some PDFs give text shifted by one character.** Tokio Marine's integrated report reads "DPNQBSFEXJUI" for "compared with" (a font with an off-by-one encoding). Such pages carry no terms and no years; a fix belongs in the text extraction, not in the readers.
 
+- **A reader that waits for the full text must only wait for types the full-text build reads.** The first sustainability_class run left about 60,000 interim reports, statutory documents and presentations blank "waiting for the full text", which `build_fulltext.py` never reads (CORE_TYPES). Check the reader's scope against CORE_TYPES whenever either changes.
+
 ## Strategy
 - **Sitemaps add junk, not reports** (37,000 bad rows in one run). Page monitoring plus search is the reliable pair.
 - **The goal is events, not URLs.** "Company published a report" is the signal; filtering belongs in the pipeline, not in a review queue.
