@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
-- 2026-10-23 Sustainability class gaps: interim reports, statutory documents and presentations decided from their first pages; rows with no text classed by type; 10-Ks, registration documents and financial statements added to the full-text build; no cap on first-pages reads (#PR)
+- 2026-10-23 Sustainability class gaps: interim reports, statutory documents and presentations decided from their first pages; rows with no text classed by type; 10-Ks, registration documents and financial statements added to the full-text build; no cap on first-pages reads (#44)
 - 2026-10-23 Companies get `latest_doc_added` (when the newest document with a file arrived, however it came) and `latest_doc` (year, title, type, how it arrived, library_id), written by company_coverage.py (#42)
 - 2026-10-23 Analyst flags: `analyst_flag` and `analyst_flag_note` on report_library (set from the new Analysts interface) become DOC_FLAGGED failures in Pipeline QA; a fix of a flagged row becomes a correction label that records the flag (#41)
 - 2026-10-22 Sustainability class: `sustainability_class.py` and its workflow write sustainability_class (D dedicated / E embedded / S specialized / F financial only), class_reason, sustainability_share, frameworks and assurance on report_library, by rules from the text in nine languages (#40)
