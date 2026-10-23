@@ -34,6 +34,12 @@ Fields written on `companies` (create them first; see company_coverage.yml heade
     completeness        -> share of the six COMPLETENESS checks passed (0..1, shown as %)
     gaps                -> the failed checks in plain words, one per line, pages first
     gap_pages           -> the failed checks as tags (multiple select), for filtering
+    latest_doc_added    -> date the newest document with a file arrived in the library for this
+                           company (the row's creation date), whatever brought it: the robot,
+                           add_link or add_file, a regulator filing, the Source Library import
+    latest_doc          -> what that document is: year, title, type, how it arrived and its
+                           library_id ("2025 | Acea Annual Financial Report (Annual Report); added
+                           by hand (file); PT_00015-462193389b")
     coverage_updated    -> date the stats last CHANGED (unchanged rows are not rewritten)
 
 Effective type = source_type_check (AI) when set, else source_type (keyword classifier).
@@ -80,7 +86,8 @@ STAT_FIELDS = ["urls_total", "urls_monitored", "docs_total", "docs_with_file",
                "docs_typed", "latest_report_year", "coverage_breakdown", "coverage_flags",
                "missing_types", "pages_breakdown", "docs_by_year", "sust_years", "sust_cadence",
                "sust_reports_total", "completeness", "gaps", "gap_pages",
-               "overdue_reports", "overdue_note", "queue_score", "queue_item", "queue_action"]
+               "overdue_reports", "overdue_note", "queue_score", "queue_item", "queue_action",
+               "latest_doc_added", "latest_doc"]
 # companies fields this script READS for the queue but never writes (they belong to the person or
 # to discover_pages.py)
 QUEUE_INPUTS = ["website", "suggested_links", "queue_snooze_until"]
@@ -105,6 +112,30 @@ REPORT_TYPES  = SUST_FAMILY | ANNUAL_FAMILY | {
     "SASB Index", "Engagement Report"}
 
 YEAR_OK = re.compile(r"^20[0-3][0-9]$")   # sanity guard on the {year} formula output
+
+
+def origin(f):
+    """How a report_library row arrived, from what each writer leaves on it."""
+    note = (f.get("Reviewer notes") or "").strip()
+    if note.startswith("Uploaded by hand"):
+        return "added by hand (file)"
+    if note.startswith("From Source Library"):
+        return "imported from the Source Library"
+    if note.startswith("Added from the"):
+        return "regulator filing"
+    if (f.get("page_type") or "").strip():
+        return f"found by the robot on a {f['page_type'].strip().replace('_', ' ')}"
+    return "added by hand (link)"
+
+
+def latest_doc_text(f, t):
+    """'2025 | Annual Report 2025 (Annual Report); found by the robot on a reports hub; PT_1-abc'.
+    doc_label is 'year | company | title': the company is dropped, the card is already the company."""
+    parts = [p.strip() for p in (f.get("doc_label") or "").split(" | ")]
+    if len(parts) >= 3:
+        parts = [parts[0]] + parts[2:]
+    label = " | ".join(p for p in parts if p) or (f.get("document_url") or "")
+    return (f"{label[:180]}" + (f" ({t})" if t else "") + f"; {origin(f)}; {f.get('library_id') or ''}").strip("; ")
 
 
 def sweep(table, fields, label, formula=None):
@@ -153,7 +184,7 @@ def aggregate(wbas=None):
             "urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(), "docs_with_file": 0, "docs_typed": 0,
             "type_counts": {}, "type_latest": {}, "latest_report_year": None,
-            "ann_years": set(), "blocked": 0})
+            "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": ""})
 
     print(">>> sweeping monitored_links ...", flush=True)
     for rec in sweep(LINKS, [F_WBA, F_MON, F_PTYPE, F_NB, F_ST, "http_status"], "monitored_links",
@@ -180,7 +211,8 @@ def aggregate(wbas=None):
             c["page_types"][pt] += 1
 
     print(">>> sweeping report_library ...", flush=True)
-    for rec in sweep(LIB, [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_FILE, F_DISCARD], "report_library",
+    for rec in sweep(LIB, [F_WBA, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_FILE, F_DISCARD, "created_time", "doc_label",
+                           "library_id", "document_url", "page_type", "Reviewer notes"], "report_library",
                      wba_formula(wbas)):
         f = rec.get("fields", {})
         wba = (f.get(F_WBA) or "").strip()
@@ -188,9 +220,14 @@ def aggregate(wbas=None):
             continue
         c = co(wba)
         c["docs_total"] += 1
+        t = eff_type(f)
         if f.get(F_FILE):
             c["docs_with_file"] += 1
-        t = eff_type(f)
+            # newest document with a file; ties broken by library_id so the answer is stable
+            stamp = ((f.get("created_time") or "")[:19], f.get("library_id") or "")
+            if stamp[0] and (c["latest_added"] is None or stamp > c["latest_added"]):
+                c["latest_added"] = stamp
+                c["latest_doc"] = latest_doc_text(f, t if t != "UNKNOWN" else "")
         if t:
             c["type_counts"][t] = c["type_counts"].get(t, 0) + 1
             if t != "UNKNOWN":
@@ -426,6 +463,8 @@ def compose(c, year_min):
             "pages_breakdown": pages, "docs_by_year": docs_by_year,
             "sust_years": s_years, "sust_cadence": sust_cadence(c["sust_years"]),
             "completeness": completeness, "gaps": gaps, "gap_pages": failed,
+            "latest_doc_added": c["latest_added"][0][:10] if c.get("latest_added") else None,
+            "latest_doc": c.get("latest_doc") or "",
             **_overdue(c)}
 
 
@@ -445,7 +484,7 @@ def empty_stats():
     return {"urls_total": 0, "urls_monitored": 0, "page_types": collections.Counter(), "needs_browser": 0,
             "docs_total": 0, "year_counts": collections.Counter(), "sust_years": set(),
             "docs_with_file": 0, "docs_typed": 0, "type_counts": {}, "type_latest": {},
-            "latest_report_year": None, "ann_years": set(), "blocked": 0}
+            "latest_report_year": None, "ann_years": set(), "blocked": 0, "latest_added": None, "latest_doc": ""}
 
 
 def companies_index(wbas=None):
