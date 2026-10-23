@@ -82,5 +82,15 @@ class HumanRightsAddresses(unittest.TestCase):
             self.assertEqual(C.classify(u)[0], "Human Rights Policy", u)
 
 
+
+
+class ProspectusIsStatutory(unittest.TestCase):
+    def test_bond_documents_are_statutory_and_urds_stay_registration(self):
+        import classify_library as C
+        self.assertEqual(C.classify("https://x.com/bonds/base-prospectus-2024.pdf")[0], "Statutory Documents")
+        self.assertEqual(C.classify("https://x.com/debt/final-terms-series-12.pdf")[0], "Statutory Documents")
+        self.assertEqual(C.classify("https://x.com/universal-registration-document-2024.pdf")[0], "Registration Document")
+
+
 if __name__ == "__main__":
     unittest.main()
