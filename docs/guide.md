@@ -210,7 +210,7 @@ Interface "Pipeline QA": **Today's cases** (the day's cards), **Open failures**,
 | --- | --- | --- |
 | PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
 | PAGE_GONE | the weekly review finds the new address and adds it; to build: a nightly job that searches the company's site for the replacement page and adds it when the match is unambiguous | weekly review only (needs the task update) |
-| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | documents: monthly retry with a browser-like request and Internet Archive copies, also at other addresses of the same file (Blocked files retry); pages, and what stays refused: later a runner on an office-network computer | documents yes (#PR); pages to build |
+| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | documents: monthly retry with a browser-like request and Internet Archive copies, also at other addresses of the same file (Blocked files retry); pages, and what stays refused: later a runner on an office-network computer | documents yes (#53); pages to build |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
