@@ -90,7 +90,7 @@ Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipe
 
 | Interface, page | What it is for |
 | --- | --- |
-| **Base health**, Health | Charts of completeness, how full the base is, new documents per day; the daily rows; every company with its completeness |
+| **Base health**, Health | Rebuilt 24 Oct 2026: numbers and charts of the three averages (completeness, disclosure completeness, page completeness), how full the base is, new documents per day; the daily rows; every company with its three scores |
 | **Base health**, My queue | Your work list: companies ordered by `queue_score` (how much fixing them matters), with `queue_item` saying the one thing to do. Snooze a company with `queue_snooze_until` when it really has not published |
 | **Base health**, Overdue reports | Companies whose next report should be out by their own rhythm and is not held |
 | **Base health**, Pages to check | Report pages with 3 or more document links whose documents are not in the library |
@@ -167,7 +167,7 @@ The year is the year in which the reporting period **ends** (April 2024 to March
 ### 6.3 Title
 `doc_label` (year, company, title) uses `curated_doc_title` when you set one, else the AI's title (`ai_title`: `source_title` unless the AI answered with a sentence such as "I don't have access to the document text"), else the robot's `auto_title`. An "[auto]" prefix means a title was constructed, not read.
 
-### 6.4 Completeness (rules v2, live since 23 Oct 2026)
+### 6.4 Completeness (rules v3, live since 24 Oct 2026)
 Six checks, each worth one sixth of `completeness`:
 
 | Check | Passes when |
@@ -292,7 +292,7 @@ None of them merges anything, writes to the Source Library, or gets around a sit
 | 02:03 | Assign join ids |
 | 02:23 | Monitor links, then in a chain: Harvest, Classify, Attach, Build cover text, then Dedupe and dates, Document scope, Company coverage, then Base health and QA sync |
 | 04:31 weekdays | QA sample (the day's cards; settles yesterday's) |
-| 04:40 | Suggest missing report pages |
+| 04:40 | Suggest missing report pages; untick gone pages and add a clear replacement |
 | 07:03 | Link and assign |
 | 12:17 | Base health (second run) |
 | 19:00 | Recover missing attachments, then Build cover text again |
@@ -301,6 +301,9 @@ None of them merges anything, writes to the Source Library, or gets around a sit
 | Monday | Regulator filings 06:20, Key figures 09:20 |
 | Sunday 00:23 | Capture web pages |
 | 1st of the month | QA archive |
+| 3rd of the month 06:13 | OCR scanned covers |
+| every 4 hours (owner's computer) | Office-network fetch, private repository `wba-text-store` |
+| after any failure | Re-run failed job once |
 
 Every job, what it writes and how to run it by hand: [scripts.md](scripts.md).
 
@@ -329,6 +332,9 @@ Every job, what it writes and how to run it by hand: [scripts.md](scripts.md).
 | ship rule | a change merges only when it fixes more than it breaks on the labels |
 
 ## 13. Where to go next
+
+All the diagrams in one place: [diagrams.md](diagrams.md).
+
 - [fields.md](fields.md): every field of both bases, who writes it, what it means, its allowed values.
 - [runbook.md](runbook.md): how to do common things and what to do when something breaks.
 - [quality.md](quality.md): Pipeline QA in depth.
