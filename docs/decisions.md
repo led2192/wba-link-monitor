@@ -91,3 +91,6 @@ Every queue selects on a text status (`cover_status`, `file_status`), never a nu
 
 ### 2026-06: Documents first, GPT-4o mini for classification
 About 88% of analyst citations come from documents, so the pipeline is built around documents, with web pages captured only when they are disclosures themselves. GPT-4o mini runs the Airtable AI fields for cost; Claude Haiku was considered.
+
+## 2026-10-24 Run the backlog jobs more often, not the whole chain
+The owner asked to run everything more often. Chosen: more runs only where a queue is waiting. The office-network runner goes from every 4 to every 2 hours (about 4,200 refused files and 340 refused sites); the browser monitor runs twice a day (17,600 pages at 4,000 a run had left some unchecked for over two weeks); OCR runs daily instead of monthly (about 12,500 scanned PDFs at about 600 a day, so three to four weeks). Rejected: running the nightly monitor, harvest and scoring several times a day. Companies publish reports a few times a year, so a second daily read of the same pages finds almost nothing new, doubles the requests to company sites and the Airtable write load, and makes the daily health row harder to compare. The research task stays at 25 companies a day until its measurement on 2 November.

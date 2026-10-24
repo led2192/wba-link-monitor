@@ -48,3 +48,6 @@ Lessons that cost time to learn. Read before changing the area they name.
 
 ## One time budget for two queues starves the second
 The office-network runner had one 90-minute budget for refused files, then refused pages. On 24 Oct 2026 the 300 files took 92 minutes and no page was read, although pages unlock whole sites. Give each queue its own slice (`pc_fetch.py --page-minutes`), and check every queue in the first real run, not only the first one.
+
+## Airtable attachment links expire after about two hours
+A job that lists rows first and downloads their attachments later fails on everything it reaches after the links expire. `ocr_covers.py` read 600 rows at the start of a 172-minute run on 23 Oct 2026 and 492 downloads failed. Re-read the rows in small batches just before downloading (`fresh()` in `ocr_covers.py`), or download within minutes of listing.
