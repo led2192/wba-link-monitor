@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-24 Full text of every disclosure type (the nightly build now passes `--types all`: interim reports, statutory documents, presentations and certifications join, read over the following nights); evidence passages gain a financial group (revenue, EBITDA, capex, subsidiaries, employees) and cover every report type from 2024 (#PR)
 - 2026-10-24 OCR of scanned PDFs: up to 8,000 a night instead of 1,000; the first manual run after the fixes read 595 of 600 in 20 minutes, so the backlog of about 12,500 clears in about two nights (#71)
 - 2026-10-24 Office-network runner: one job repeats the fetch every 2 hours for 22 hours (`--repeat-hours`, `--every-minutes`), because GitHub skipped two of the four scheduled runs that day; the first full day reached 231 refused files and read 79 refused pages (#70)
 - 2026-10-24 Evidence passages: 2024+ key reports are cut into passages tagged climate, nature or social, by planning, implementation and performance and by integration aspect, following the Integrated Transition Assessment white paper (Table D.1); passages go to the private text store, `evidence_profile` and `evidence_version` to report_library; new `evidence_chunks.py` and `evidence_terms.json`, nightly after Full text (#69)

@@ -30,6 +30,12 @@ class Tagging(unittest.TestCase):
         n = LEX.tag("We assessed biodiversity and deforestation risks at sites near protected areas using the TNFD LEAP approach.")
         self.assertEqual(n["dims"], ["nature"])
 
+    def test_financial_group(self):
+        t = "Revenue rose 8% to EUR 12.4 billion and EBITDA reached EUR 2.1 billion; the Group employs 45,000 employees in 30 subsidiaries."
+        self.assertEqual(LEX.tag(t)["dims"], ["financial"])
+        lines, summ = E.tag_document(LEX, "lib2", [(5, t)])
+        self.assertTrue(E.profile(summ).startswith("financial"))
+
     def test_one_term_in_passing_is_not_evidence(self):
         self.assertIsNone(LEX.tag("Revenue grew 5% thanks to strong demand; see the sustainability section for our net zero ambition."))
 
