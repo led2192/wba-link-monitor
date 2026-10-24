@@ -185,6 +185,15 @@ Two scores split the six checks (owner's request, 23 Oct 2026): `disclosure_comp
 
 `sust_reporting` says how the company reports sustainability for 2024 onwards: `dedicated`, `embedded`, `both` or `none`. `check_docs` records which document passes each check, and `completeness_change` explains a check lost overnight. `overdue_reports` flags a sustainability or annual report that, by the company's own rhythm, should be out (reports for a year are expected from July of the next year).
 
+### 6.6 Evidence passages (from 24 Oct 2026)
+A first step towards extracting information for the Integrated Transition Assessment. Every 2024+ annual, integrated or sustainability-family report with full text is cut into passages of about 120 words (never across pages), and a passage is kept as evidence when it names at least three distinct phrases of one dimension, or two from two different topics of it. The phrases follow the white paper's grid (Appendix D, Table D.1):
+
+| | Climate | Nature | Social |
+| --- | --- | --- | --- |
+| Topics | targets, emissions, transition plan, decarbonisation levers, climate finance, climate risk | dependencies and impacts (TNFD), biodiversity, land and forests, water, pollution, mitigation hierarchy | human rights, living wage, health and safety, grievance and remedy, affected stakeholders, equity, just transition, responsible AI |
+
+Each passage also gets an area (planning: targets, commitments, governance; implementation: actions, investment, due diligence, engagement; performance: a stated quantity or change), the integration aspects it names (strategy coverage, integrated governance, cross-dimension, value chain, AI and digital) and its page. Passages live in the private text store; `evidence_profile` on the document says how many there are per dimension and area. Running page headers and contents pages are dropped. The lexicon is `evidence_terms.json`: change a phrase there and every document is tagged again. Nothing here scores a company; it is the index a later extraction tool will read from. English phrases only for now.
+
 ### 6.5 The work queue
 `queue_score` ranks companies by how much their top problem matters (mainly missing 2024+ sustainability and annual reports); `queue_item` says the one thing to do and `queue_action` its kind (Find the report, Find the report (site blocks robot), Find the report page, Review suggested pages, Add the website, Find the policy). The daily gap research takes 25 companies a day from the top of this queue.
 

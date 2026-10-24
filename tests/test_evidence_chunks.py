@@ -38,6 +38,11 @@ class Tagging(unittest.TestCase):
         self.assertIsNone(LEX.tag("Proxy advisors pushed diversity and inclusion agendas on American companies."))
         self.assertIsNone(LEX.tag("Regarding the EU\nTaxonomy, the EU Taxonomy delegated act changed."))
 
+    def test_contents_pages_are_skipped(self):
+        toc = ("Renewable Energy Project 32 Anticipating Changes in Demand 33 Disciplined Investments 35 A Resilient "
+               "Portfolio 37 Taxonomy 38 Our Energy Transition-Related Risks 39 Adapting to Physical Risks 41 Advocacy 44")
+        self.assertIsNone(LEX.tag(toc))
+
     def test_running_headers_are_dropped(self):
         nav = "Our Transition Strategy\nCaring for the Environment\n"
         pages = [(i, nav + f"Page {i} body text about scope 1 emissions.") for i in range(1, 11)]

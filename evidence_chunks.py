@@ -81,26 +81,29 @@ class Lexicon:
     @staticmethod
     def hits(pair, text):
         """Distinct phrases found, normalised so a line break, a hyphen or a plural is not a second phrase."""
-        out = set()
+        out = {}
         for rx in pair:
             if rx:
-                out.update(norm_hit(m.group(0)) for m in rx.finditer(text))
+                for m in rx.finditer(text):
+                    out.setdefault(norm_hit(m.group(0)), re.sub(r"\s+", " ", m.group(0).lower()))
         return out
 
     def tag(self, text):
-        """The tags of one passage, or None when it is evidence for no dimension."""
+        """The tags of one passage, or None when it is evidence for no dimension (or it is a contents list)."""
+        if is_contents(text):
+            return None
         dims, topics = {}, {}
         for d, tops in self.dims.items():
-            found = set()
+            found = {}
             for t, pair in tops.items():
                 h = self.hits(pair, text)
                 if h:
                     topics.setdefault(d, []).append(t)
-                    found |= h
+                    found.update(h)
             # three distinct phrases, or two from two different topics: "diversity and inclusion" in a
             # proxy-advisor paragraph, or "EU Taxonomy" named twice, is not evidence (24 Oct 2026 sample)
             if len(found) >= self.min_terms or (len(found) >= self.min_terms_two_topics and len(topics.get(d, [])) >= 2):
-                dims[d] = sorted(found)[:12]
+                dims[d] = sorted(set(found.values()))[:12]
         if not dims:
             return None
         number = bool(NUMBER.search(text))
@@ -111,6 +114,14 @@ class Lexicon:
         integ = sorted(k for k, pair in self.integration.items() if self.hits(pair, text))
         return {"dims": sorted(dims), "terms": dims, "topics": {d: topics[d] for d in dims}, "area": area,
                 "integration": integ, "number": number}
+
+
+CONTENTS_ENTRY = re.compile(r"(?<![\d.,%])\b\d{1,3}\s+[A-Z][a-z]")
+
+
+def is_contents(text):
+    """A table of contents: many 'Title 32 Next title 33' entries and hardly any full sentence."""
+    return len(CONTENTS_ENTRY.findall(text)) >= 6 and text.count(". ") <= 2
 
 
 def norm_hit(s):
@@ -287,4 +298,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        open("evidence_chunks.md", "w").write("### The run failed\n\n```\n" + traceback.format_exc()[-3000:] + "\n```\n")
+        raise
