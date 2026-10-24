@@ -114,9 +114,11 @@ def count_rows(table, field=None):
 
 def company_stats():
     vals, dis, pag, miss, over = [], [], [], collections.Counter(), collections.Counter()
+    kr = collections.Counter()
     for rec in sweep("companies", ["completeness", "disclosure_completeness", "page_completeness", "gap_pages",
-                                   "overdue_reports"]):
+                                   "overdue_reports", "kr_latest_status", "kr_prev_status"]):
         f = rec.get("fields", {})
+        kr[kr_bucket(f.get("kr_latest_status"), f.get("kr_prev_status"))] += 1
         vals.append(float(f.get("completeness") or 0))
         dis.append(float(f.get("disclosure_completeness") or 0))
         pag.append(float(f.get("page_completeness") or 0))
@@ -126,7 +128,21 @@ def company_stats():
     return {"companies": n, "avg": (sum(vals) / n) if n else 0,
             "dis_avg": (sum(dis) / n) if n else 0, "page_avg": (sum(pag) / n) if n else 0,
             "complete": (sum(1 for v in vals if v >= 0.9999) / n) if n else 0, "miss": miss,
-            "over": over}
+            "over": over, "kr": kr}
+
+
+KR_BOTH = ("Both in one report", "Financial and sustainability, separate")
+
+
+def kr_bucket(latest, prev):
+    """Key reports overview (key_reports.py): latest wave complete / partial, only the previous wave, neither."""
+    if latest in KR_BOTH:
+        return "kr_latest_complete"
+    if latest and latest != "None":
+        return "kr_latest_partial"
+    if prev and prev != "None":
+        return "kr_prev_only"
+    return "kr_neither"
 
 
 QA_TABLES = ("runs", "failures", "labels", "evals")
@@ -252,6 +268,8 @@ def main():
            "overdue_sust_reports": co["over"].get("Sustainability report", 0),
            "overdue_annual_reports": co["over"].get("Annual report", 0),
            "pages_to_check": pages_check}
+    if sum(v for k, v in co["kr"].items() if k != "kr_neither"):      # key_reports.py has run at least once
+        row.update({k: co["kr"].get(k, 0) for k in ("kr_latest_complete", "kr_latest_partial", "kr_prev_only", "kr_neither")})
     if qs:
         row.update({"qa_records_total": qs["total"], "qa_base_full": round(qs["total"] / RECORD_LIMIT, 4),
                     "qa_open_failures": qs["open"], "qa_labels_reviewed": qs["reviewed"]})
