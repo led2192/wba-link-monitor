@@ -178,6 +178,10 @@ america usa us deutschland espana españa italia nederland belgie belgique suiss
 """.split())
 
 
+TITLE_MARKERS = (MARKERS | COUNTRIES) - {"finance", "financial", "financing", "capital", "investment", "investments",
+                                        "invest", "credit", "trust", "property", "properties"}
+
+
 def fold(s):
     s = unicodedata.normalize("NFKD", s or "")
     return "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
@@ -208,9 +212,15 @@ def _subsidiary_words(tokens, own):
     return [w for w in tokens if w not in own and (w in MARKERS or w in COUNTRIES)]
 
 
+# In a title, "Financial", "Finance", "Capital"... after the company name are usually the kind of document
+# ("UPM Financial Statement Release", "EBRD Financial Report", "UPM Green Finance Report"), not a subsidiary.
 def title_check(title, company_name):
     """'subsidiary' when the title names the company followed by a subsidiary word ('DNB Boligkreditt Annual
-    Report', 'DNB Asset Management'), 'group' when it names the company's group, else ''."""
+    Report', 'DNB Asset Management', 'Va Tech Wabag Deutschland GmbH'), 'group' when it names the company's
+    group ('DNB Group Annual report', 'DNB konsernet'), else ''. title may be a doc_label ('year | company |
+    title'): only the title part is read."""
+    parts = [x.strip() for x in (title or "").split(" | ")]
+    title = parts[-1] if len(parts) >= 3 else (title or "")
     words = name_words(company_name)
     own = set(re.findall(r"[a-z0-9]+", fold(company_name)))
     toks = re.findall(r"[a-z0-9&]+", fold(title))
@@ -219,7 +229,7 @@ def title_check(title, company_name):
             after = toks[i + 1:i + 3]
             if any(a in GROUP_WORDS for a in after):
                 return "group"
-            if _subsidiary_words(after, own):
+            if [w for w in _subsidiary_words(after, own) if w in TITLE_MARKERS]:
                 return "subsidiary"
     return ""
 

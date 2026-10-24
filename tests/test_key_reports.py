@@ -90,6 +90,14 @@ class Entity(unittest.TestCase):
         self.assertEqual(K.entity_check("Roche Capital Market Ltd Financial Statements 2025", "Roche")[0], "subsidiary")
         self.assertEqual(K.entity_check("Taipei Fubon Commercial Bank Co., Ltd. and Subsidiaries", "Fubon Financial")[0], "subsidiary")
         self.assertEqual(K.entity_check("", "Telstra", title="Telstra Annual Report 2025")[0], "unclear")
+        # second dry run: the company part of doc_label and document words are not subsidiaries
+        for title, co in (("2025 | ENGIE | Annual financial report (ESEF) for fiscal year 2025", "ENGIE"),
+                          ("2025 | Roche | Finance Report 2025", "Roche"),
+                          ("2024 | UPM | UPM Financial Statement Release 2024", "UPM"),
+                          ("2024 | UPM | UPM Green Finance Report 2024", "UPM"),
+                          ("2026 | SPML Infra | Engineering India's Tomorrow ANNUAL REPORT 2025-26", "SPML Infra")):
+            self.assertEqual(K.entity_check("", co, title=title)[0], "unclear", title)
+        self.assertEqual(K.entity_check("", "Va Tech Wabag", title="2026 | Va Tech Wabag | VA TECH WABAG DEUTSCHLAND GMBH, GERMANY - Financial Position")[0], "subsidiary")
 
     def test_unclear_without_a_legal_name(self):
         self.assertEqual(K.entity_check("BMW Group Report 2024", "BMW")[0], "unclear")
