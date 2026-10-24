@@ -53,8 +53,9 @@ def ocr_pdf(data, pages, dpi=150):
             raise RuntimeError("pdftoppm rendered no page: " + r.stderr.decode("utf-8", "ignore")[:120])
         out = []
         for img in sorted(f for f in os.listdir(d) if f.endswith(".png")):
+            # one thread per tesseract: with 4 workers each starting 4 threads, 22 of 25 pages timed out (24 Oct 2026)
             r = subprocess.run(["tesseract", os.path.join(d, img), "stdout", "-l", LANGS, "--psm", "3"],
-                               capture_output=True, timeout=120)
+                               capture_output=True, timeout=120, env={**os.environ, "OMP_THREAD_LIMIT": "1"})
             out.append(r.stdout.decode("utf-8", "ignore"))
         return "\n".join(out)
 

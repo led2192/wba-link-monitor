@@ -51,3 +51,6 @@ The office-network runner had one 90-minute budget for refused files, then refus
 
 ## Airtable attachment links expire after about two hours
 A job that lists rows first and downloads their attachments later fails on everything it reaches after the links expire. `ocr_covers.py` read 600 rows at the start of a 172-minute run on 23 Oct 2026 and 492 downloads failed. Re-read the rows in small batches just before downloading (`fresh()` in `ocr_covers.py`), or download within minutes of listing.
+
+## Tesseract in parallel needs OMP_THREAD_LIMIT=1
+Tesseract starts several threads per page by default. With 4 OCR workers on a 4-core runner they fight for the cores: on 24 Oct 2026, 22 of 25 pages hit the 120-second timeout. `ocr_covers.py` runs each tesseract with `OMP_THREAD_LIMIT=1`, so parallelism comes from the workers only.
