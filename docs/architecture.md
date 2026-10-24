@@ -19,7 +19,7 @@ The Disclosure Library is capped at 500,000 records; `base_health` reports how f
 
 ```mermaid
 flowchart LR
-  BM[00:03 Browser monitor] -.-> M
+  BM[00:03 and 12:03 Browser monitor] -.-> M
   M[02:23 Monitor links] --> H[Harvest report PDFs + probe]
   H --> C[Classify by URL]
   C --> A[Attach PDFs]
@@ -34,8 +34,8 @@ flowchart LR
   FT --> SC[Sustainability class]
   FT --> MS[Mention search]
   DP[04:40 Suggest pages, replace gone pages]
-  OCR[3rd of month 06:13 OCR scanned covers]
-  PC[every 4 h: office-network runner, private repo] -.-> CT
+  OCR[daily 06:13 OCR scanned covers]
+  PC[every 2 h: office-network runner, private repo] -.-> CT
   RR[any failed job: re-run once]
 ```
 
@@ -48,7 +48,7 @@ More pictures (the life of a document, the type and year ladders, completeness, 
 5. **Clean and date.** `dedupe_library.py` discards duplicates and non-disclosures; `classify_library.py --from-file` titles and types from the file name and cover; `date_documents.py` sets `doc_year`.
 6. **Measure.** `company_coverage.py` writes each company's completeness (six checks: report hub page, sustainability page, sustainability report 2024+, annual report 2024+, Code of Conduct, Human Rights Policy; since rules v3 the page checks count only watched pages that have not gone), split into `disclosure_completeness` (the four document checks) and `page_completeness` (the two page checks), its gaps, overdue reports and the work queue. `base_health.py` writes the day's row.
 7. **Quality.** `qa_sync.py` turns the status fields into Pipeline QA failure rows and captures corrections.
-8. **Repair.** Without a person: `rerun_failed.yml` re-runs a failed job once; `discover_pages.py` (04:40) unticks pages gone (404/410) and adds a clear replacement; `classify_library.py --retype-untyped` types non-English documents by their cover title (`cover_terms.json`); `ocr_covers.py` (monthly) reads scanned PDFs; `pc_fetch.py` on the owner's computer (every 4 hours, private repository `wba-text-store`, see [pc_runner.md](pc_runner.md)) fetches refused files and pages, with a second pass in Edge.
+8. **Repair.** Without a person: `rerun_failed.yml` re-runs a failed job once; `discover_pages.py` (04:40) unticks pages gone (404/410) and adds a clear replacement; `classify_library.py --retype-untyped` types non-English documents by their cover title (`cover_terms.json`); `ocr_covers.py` (daily while the backlog lasts) reads scanned PDFs; `pc_fetch.py` on the owner's computer (every 2 hours, private repository `wba-text-store`, see [pc_runner.md](pc_runner.md)) fetches refused files and pages, with a second pass in Edge.
 9. **Full text** (separate chain, 21:37): `build_fulltext.py` reads every page of every report into the text store; `fiscal_years.py` reads the reporting year from it with a confidence score; `sustainability_class.py` reads where the sustainability disclosure lives (a dedicated report, embedded in the annual report, a specialized document, or financial only), the standards named and the assurance; `mention_search.py` answers the saved "which companies mention X" questions.
 
 ## The on-demand paths
