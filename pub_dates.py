@@ -55,14 +55,26 @@ DATE = (r"(?:(?P<d1>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?" + MON.replace("(", "(
         r"|(?P<y3>20\d\d)-(?P<m3>\d\d)-(?P<d3>\d\d)"
         r"|(?P<d4>\d{1,2})[./](?P<m4>\d{1,2})[./](?P<y4>20\d\d)"
         r"|" + MON.replace("(", "(?P<m5>", 1) + r",?\s+(?P<y5>20\d\d))")
-PUBLISHED = re.compile(r"(?:date\s+of\s+(?:publication|issue)|publication\s+date|release\s+date|published(?:\s+(?:on|in))?|"
-                       r"first\s+published|issued\s+on|this\s+report\s+was\s+(?:published|released|issued)(?:\s+(?:on|in))?)"
-                       r"\s*[:\-–]?\s*(?:" + DATE + ")", re.I)
-APPROVED = re.compile(r"(?:authori[sz]ed\s+for\s+(?:issue|publication)|approved\s+(?:and\s+authori[sz]ed\s+for\s+issue\s+)?"
-                      r"(?:for\s+(?:issue|publication)\s+)?by\s+the\s+(?:board|directors|supervisory\s+board|management\s+board)"
-                      r"(?:\s+of\s+directors)?)[^.]{0,80}?\b(?:on|dated)\s+(?:" + DATE + ")", re.I)
+# The document has to be talking about itself. A bare "published on" also dates press releases, delegated
+# acts and bond notices quoted in the text (24 Oct 2026 dry run), so a publication date counts only when
+#   (a) the sentence names this report: "This report was published on 16 April 2024", "The Sustainability
+#       Report of X covers 1 January to 31 December 2024 and was published on 19 March 2025"; or
+#   (b) a "Date of publication:" / "Publication date:" / "Published:" label sits on the first COLOPHON_PAGES
+#       or the last COLOPHON_PAGES pages (the imprint), not next to a bond.
+SELF = (r"(?:this|the|our)\s+(?:[\w&'’-]+\s+){0,4}?(?:report|document|publication|review|statement|"
+        r"accounts)\b[^.]{0,220}?\b(?:was|is|has\s+been|were)\s+(?:first\s+)?(?:published|released|issued|made\s+available)"
+        r"(?:\s+(?:on|in))?\s*")
+PUBLISHED = re.compile(SELF + r"(?:" + DATE + ")", re.I)
+LABEL = re.compile(r"(?:date\s+of\s+publication|publication\s+date|published|release\s+date)\s*[:\-–]\s*(?:" + DATE + ")", re.I)
+COLOPHON_PAGES = 4
+BOND = re.compile(r"bond|notes?\b|issuance|coupon|debenture", re.I)
+# Board approval of THIS report or its accounts, not of by-laws, a dividend or a transaction.
+OBJECT = (r"(?:financial\s+statements|accounts|annual\s+report|strategic\s+report|integrated\s+report|"
+          r"sustainability\s+(?:report|statement)|directors['’]?\s+report|management\s+report|this\s+report|the\s+report)")
+APPROVED = re.compile(OBJECT + r"[^.]{0,160}?(?:approved|authori[sz]ed)(?:\s+for\s+(?:issue|publication))?[^.]{0,100}?"
+                      r"\b(?:on|dated)\s+(?:" + DATE + ")", re.I)
 APPROVED_BEFORE = re.compile(r"\b(?:on\s+)?(?:" + DATE + r"),?\s+the\s+(?:board|directors|supervisory\s+board)[^.]{0,40}?"
-                             r"(?:approved|authori[sz]ed)", re.I)
+                             r"(?:approved|authori[sz]ed)\s+(?:the|these|this|our)\s+(?:[\w-]+\s+){0,3}?" + OBJECT, re.I)
 FILED = re.compile(r"\(filed (20\d\d-\d\d-\d\d)\)")
 KEYWORDS = re.compile(r"publi|release|issue|authori|approved", re.I)
 
@@ -120,11 +132,16 @@ def sentence(text, i, j):
 def find_dates(pages, end, seen):
     """Best (tier, date, precision, evidence) from the text, tiers 2 (publication) and 3 (board approval)."""
     found = {}
+    nums = sorted(p for p, _ in pages)
+    edge = set(nums[:COLOPHON_PAGES]) | set(nums[-COLOPHON_PAGES:])
     for p, text in pages:
         if not text or not KEYWORDS.search(text):
             continue
-        for tier, rx in ((2, PUBLISHED), (3, APPROVED), (3, APPROVED_BEFORE)):
+        rules = [(2, PUBLISHED), (3, APPROVED), (3, APPROVED_BEFORE)] + ([(2, LABEL)] if p in edge else [])
+        for tier, rx in rules:
             for m in rx.finditer(text):
+                if rx is LABEL and BOND.search(text[max(0, m.start() - 120):m.end() + 60]):
+                    continue
                 d, prec = parse(m)
                 if not plausible(d, end, seen):
                     continue
@@ -276,7 +293,7 @@ def main():
             ev = "first pages: " + ev[5:]
         tiers[SOURCES[tier]] += 1
         prec[p] += 1
-        if len(samples[tier]) < 8:
+        if len(samples[tier]) < 12:
             samples[tier].append(f"{lid}: {d.isoformat()} ({p}) {ev[:170]}")
         new = {"pub_date": d.isoformat(), "pub_date_precision": p, "pub_date_source": SOURCES[tier], "pub_date_evidence": ev}
         if any((f.get(k) or None) != v for k, v in new.items()):

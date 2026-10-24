@@ -17,8 +17,19 @@ class Dates(unittest.TestCase):
         self.assertEqual(t[:3], (2, D(2025, 3, 4), "day"))
         t = P.find_dates([(1, "This report was published in March 2025 and covers the year")], end, None)
         self.assertEqual(t[:3], (2, D(2025, 3, 1), "month"))
-        t = P.find_dates([(9, "Published on April 2, 2025 by the Group")], end, None)
-        self.assertEqual(t[:3], (2, D(2025, 4, 2), "day"))
+        t = P.find_dates([(5, "The Sustainability Report of Stadler Rail AG covers the reporting period from 1 January 2024 "
+                               "to 31 December 2024 and was published on 19 March 2025.")], end, None)
+        self.assertEqual(t[:3], (2, D(2025, 3, 19), "day"))
+
+    def test_dates_of_other_documents_are_not_the_publication(self):
+        # 24 Oct 2026 dry run: a delegated act, a press release, a bond notice, by-laws
+        end = D(2024, 12, 31)
+        pages = [(15, "The Omnibus I package changes are in a Delegated Act, the final version of which was published on January 8, 2025."),
+                 (93, "According to the press release published March 13th, 2025, no evidence has been found."),
+                 (44, "63rd Corporate Bonds (Green Bond) Publication date: May 29, 2025 Total issuance amount"),
+                 (107, "On February 27, 2025, the Board approved and adopted amendments to the Company's Restated By-Laws.")]
+        pages += [(i, "Text") for i in range(1, 5)] + [(i, "Text") for i in range(200, 204)]
+        self.assertIsNone(P.find_dates(pages, end, None))
 
     def test_board_approval(self):
         end = D(2025, 3, 31)
@@ -26,10 +37,12 @@ class Dates(unittest.TestCase):
         self.assertEqual(t[:3], (3, D(2025, 5, 27), "day"))
         t = P.find_dates([(80, "On 26 February 2025, the Board of Directors approved the annual report.")], D(2024, 12, 31), None)
         self.assertEqual(t[:3], (3, D(2025, 2, 26), "day"))
+        t = P.find_dates([(197, "The Standalone Financial Statements have been approved by the Board of Directors in its meeting held on 11th May, 2025.")], D(2025, 3, 31), None)
+        self.assertEqual(t[:3], (3, D(2025, 5, 11), "day"))
 
     def test_publication_beats_approval_and_implausible_dates_are_ignored(self):
         end = D(2024, 12, 31)
-        pages = [(3, "approved by the Board on 20 February 2025."), (2, "Publication date: 10 March 2025")]
+        pages = [(3, "The financial statements were approved by the Board on 20 February 2025."), (2, "Publication date: 10 March 2025")]
         self.assertEqual(P.find_dates(pages, end, None)[:2], (2, D(2025, 3, 10)))
         # a date inside the period, or after the robot saw the file, is not the publication
         self.assertIsNone(P.find_dates([(1, "Published on 1 June 2024")], end, None))
