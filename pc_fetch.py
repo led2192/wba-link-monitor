@@ -34,7 +34,7 @@ Several computers can run it: each run takes its own slice (oldest first, rows a
 are skipped). Never gets around a login, a captcha or a paywall.
 Dry run by default (prints, writes pc_fetch.md); --commit writes.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE; QA: AIRTABLE_QA_TOKEN (optional).
-Args: --limit 300 --pages 150 --minutes 90
+Args: --limit 300 --pages 150 --minutes 90 --page-minutes 25 (the last 25 minutes are kept for the pages)
 """
 import argparse, collections, datetime as dt, hashlib, io, os, re, threading, time
 from concurrent.futures import ThreadPoolExecutor
@@ -317,12 +317,24 @@ def links_to_fields(rec, html, final_url):
     return upd, ("new_links" if changed else "read")
 
 
+def deadlines(start, minutes, page_minutes, pages):
+    """(files deadline, pages deadline). The refused pages get their own slice at the end of the run:
+    on 24 Oct 2026 the 300 files took the whole 90 minutes and no page was read."""
+    end = start + minutes * 60
+    if not pages:
+        return end, end
+    reserve = min(page_minutes, minutes / 2) * 60
+    return end - reserve, end
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=300)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--minutes", type=float, default=90, help="stop starting new files after this long")
     ap.add_argument("--pages", type=int, default=150, help="refused report pages to read (0 = none)")
+    ap.add_argument("--page-minutes", type=float, default=25,
+                    help="minutes kept for the refused pages at the end of the run (at most half the run)")
     ap.add_argument("--browser", type=int, default=100,
                     help="files a plain request could not reach to try again in Edge without a window (0 = none); "
                          "refused pages of the run are tried in Edge too")
@@ -337,13 +349,13 @@ def main():
     run = qa.Run("pc_fetch.py")
     rows = fetch_rows(token, base, a.limit)
     print(f">>> {len(rows):,} refused files to try from this computer", flush=True)
-    deadline = time.time() + a.minutes * 60
+    file_deadline, deadline = deadlines(time.time(), a.minutes, a.page_minutes, a.pages)
     counts, results = collections.Counter(), []
 
     from recover_attach import upload
 
     def one(row):
-        if time.time() > deadline:
+        if time.time() > file_deadline:
             return row, "not_tried", None
         code, body, complete = fetch(row["document_url"], row.get("found_on"))
         what = plan(code, body, complete)
@@ -409,7 +421,7 @@ def main():
             with Browser() as b:
                 browser_ok = True
                 for row, extra in deferred:
-                    if time.time() > deadline:
+                    if time.time() > file_deadline:
                         handle(row, "refused", extra)
                         continue
                     if not robots_allows(row["document_url"]):

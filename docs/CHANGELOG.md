@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-24 Office-network runner: the last 25 minutes of each 90-minute run are kept for refused report pages (`--page-minutes`); in the first scheduled run (24 Oct, 04:41 UTC) the 300 files used the whole run, reaching 109 (62 attached, 47 read on the computer, 17 only through Edge), and no page was read (#PR)
 - 2026-10-23 The daily research pastes into `research_link` instead of `add_link`: same handling, but documents and pages it brings are marked as found by research (`latest_doc` says so), its gaps on the day are kept in `research_gaps_before`, and it skips documents the library already holds. First measurement (100 companies, 21-23 Oct): 94 documents and 10 pages added, about a third of its links already held (#63)
 - 2026-10-23 Scanned PDFs (no text in the file) get their first pages read by text recognition once a month (new `ocr_covers.py`); `cover_ocr` marks such rows; covers that still give no text become `no_text_ocr` and are not retried (#57)
 - 2026-10-23 Office-network runner, second pass: files and pages a plain request could not reach are tried again in Microsoft Edge without a window (up to 100 files a run), skipping paths robots.txt disallows and never solving captchas or logging in; the first test from the owner's computer reached 11 of 30 refused recent reports with plain requests (#62)
