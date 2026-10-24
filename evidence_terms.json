@@ -1,0 +1,45 @@
+{
+  "_about": "Lexicon of evidence_chunks.py. Built on WBA's Integrated Transition Assessment white paper (September 2026), Appendix D, Table D.1: three dimensions (climate, nature, social) by three measurement areas (planning, implementation, performance), plus the five integration aspects of section 5.1.3. Each topic lists phrases matched as whole words, case-insensitive; a trailing * matches any ending. A passage is tagged with a dimension when it holds at least min_terms distinct phrases of that dimension, or min_terms_two_topics phrases from two different topics of it. Edit here: the next run re-tags every document.",
+  "min_terms": 3,
+  "min_terms_two_topics": 2,
+  "dimensions": {
+    "climate": {
+      "targets": ["net zero", "net-zero", "carbon neutral*", "science-based target*", "science based target*", "SBTi", "emission* reduction target*", "decarbonisation target*", "decarbonization target*", "1.5°C", "1.5 °C", "1.5 degree*", "Paris Agreement", "Paris-aligned", "climate target*", "interim target*"],
+      "emissions": ["greenhouse gas*", "GHG", "scope 1", "scope 2", "scope 3", "CO2e", "CO2-e", "tCO2e", "carbon dioxide", "carbon emission*", "emission* intensity", "carbon intensity", "carbon footprint"],
+      "transition_plan": ["transition plan*", "climate transition", "decarbonisation pathway*", "decarbonization pathway*", "emissions pathway*", "climate strategy", "climate roadmap", "TCFD", "ISSB", "IFRS S2", "ESRS E1"],
+      "levers": ["renewable energy", "renewable electricity", "energy efficiency", "electrification", "low-carbon", "low carbon", "green hydrogen", "carbon capture", "CCS", "CCUS", "power purchase agreement*", "PPA", "phase out", "phase-out", "coal", "fossil fuel*", "electric vehicle*", "heat pump*"],
+      "finance": ["financed emissions", "PCAF", "green bond*", "sustainability-linked", "internal carbon price", "carbon price", "climate-related capex", "taxonomy-aligned", "EU Taxonomy"],
+      "risk": ["physical risk*", "transition risk*", "climate risk*", "climate scenario*", "scenario analysis", "adaptation", "climate resilience"]
+    },
+    "nature": {
+      "diro": ["nature-related", "nature related", "dependencies and impacts", "TNFD", "LEAP approach", "ESRS E4", "nature risk*", "nature-positive", "nature positive"],
+      "biodiversity": ["biodiversity", "ecosystem*", "habitat*", "species", "protected area*", "key biodiversity area*", "restoration", "reforestation", "rewilding", "no net loss", "net gain", "Kunming-Montreal", "Global Biodiversity Framework"],
+      "land_and_forests": ["deforestation", "deforestation-free", "conversion-free", "land use", "land-use change", "zero deforestation", "palm oil", "soy", "cattle", "EUDR", "forest*"],
+      "water": ["water withdrawal*", "water consumption", "water stress*", "water-stressed", "water scarcity", "water discharge*", "wastewater", "water stewardship", "megalitre*", "m3 of water", "ESRS E3"],
+      "pollution": ["pollution", "pollutant*", "air emissions", "NOx", "SOx", "hazardous waste", "plastic*", "pesticide*", "chemical*", "spill*", "ESRS E2", "microplastic*"],
+      "mitigation_hierarchy": ["mitigation hierarchy", "avoid, minimise", "avoid, minimize", "offset*", "biodiversity offset*", "material location*", "sensitive location*", "site-level"]
+    },
+    "social": {
+      "human_rights": ["human rights", "human rights due diligence", "HRDD", "UNGP*", "UN Guiding Principles", "salient issue*", "salient human rights", "modern slavery", "forced labour", "forced labor", "child labour", "child labor", "human trafficking", "OECD Guidelines", "ESRS S1", "ESRS S2"],
+      "living_wage": ["living wage*", "living income", "fair wage*", "minimum wage", "decent work", "pay gap", "equal pay", "collective bargaining", "freedom of association", "trade union*"],
+      "health_safety": ["health and safety", "occupational health", "LTIFR", "TRIR", "lost time injur*", "fatalit*", "recordable injur*", "safety performance"],
+      "grievance": ["grievance mechanism*", "grievance*", "whistleblow*", "remedy", "remediation", "complaint* mechanism", "speak up", "speak-up"],
+      "stakeholders": ["affected communit*", "local communit*", "indigenous", "free, prior and informed consent", "FPIC", "stakeholder engagement", "rights-holder*", "rightsholder*"],
+      "equity": ["gender representation", "women in", "diversity", "inclusion", "gender balance", "women on the board", "female representation", "disabilit*"],
+      "just_transition": ["just transition", "reskill*", "upskill*", "workforce transition", "redeploy*", "social impact of the transition", "leave no one behind"],
+      "responsible_ai": ["responsible AI", "AI ethics", "ethical AI", "algorithmic bias", "AI governance", "artificial intelligence"]
+    }
+  },
+  "areas": {
+    "planning": ["target*", "commit*", "pledge*", "ambition*", "aim to", "aims to", "goal*", "by 2030", "by 2035", "by 2040", "by 2050", "roadmap*", "strategy", "strategies", "policy", "policies", "plan", "plans", "governance", "board", "oversight", "committee", "accountab*", "incentive*", "remuneration"],
+    "implementation": ["implement*", "launched", "introduced", "rolled out", "invested", "investment*", "capex", "capital expenditure*", "capital allocation", "programme*", "program*", "initiative*", "due diligence", "assessment*", "audit*", "monitor*", "engag*", "train*", "supplier*", "suppliers", "procurement", "actions", "measures"],
+    "performance": ["reduced", "reduction", "decreased", "increased", "compared to", "compared with", "versus", "baseline", "year-on-year", "per cent", "percent", "progress against", "achieved", "tonnes", "tons", "MWh", "GWh", "GJ", "hectares", "rate"]
+  },
+  "integration": {
+    "strategy_coverage": ["integrated report*", "combined management report", "sustainability statement", "capital allocation", "business model", "double materiality"],
+    "integrated_governance": ["board oversight", "board expertise", "sustainability committee", "ESG committee", "remuneration linked", "linked to remuneration", "executive incentive*", "variable pay"],
+    "cross_dimension": ["just transition", "reskill*", "climate and human rights", "environmental and human rights", "heat stress", "extreme heat", "climate-related health", "nature and people", "water and communities"],
+    "value_chain": ["value chain", "supply chain", "upstream", "downstream", "tier 1", "tier 2", "suppliers"],
+    "ai_and_digital": ["artificial intelligence", "AI", "generative AI", "data centre*", "data center*", "digitalisation", "digitalization", "digital technolog*"]
+  }
+}

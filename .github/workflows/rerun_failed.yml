@@ -17,6 +17,7 @@ on:
       - "Capture web pages (print to PDF)"
       - "Classify report library"
       - "Company coverage"
+      - "Evidence passages"
       - "Publication dates"
       - "Key reports"
       - "Dedupe report library"

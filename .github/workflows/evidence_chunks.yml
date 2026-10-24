@@ -1,0 +1,63 @@
+name: Evidence passages
+
+# Cuts the full text of 2024+ key reports into passages tagged climate / nature / social by planning,
+# implementation and performance (evidence_chunks.py, lexicon in evidence_terms.json). Chained after the
+# nightly full-text build, at most 3,000 documents a night; a pull request touching it tags a sample of
+# 40 documents and posts the counts and example passages.
+on:
+  workflow_run:
+    workflows: ["Build full text"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+      limit:
+        description: "documents this run (0 = all in the queue)"
+        default: "40"
+      all:
+        description: "Re-tag every document (after a lexicon change the queue does this by itself)"
+        type: boolean
+        default: false
+  pull_request:
+    paths: [evidence_chunks.py, evidence_terms.json, .github/workflows/evidence_chunks.yml]
+
+concurrency:
+  group: evidence-chunks
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evidence passages
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then ARGS="--commit --limit 3000"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 40"
+          else ARGS="--limit ${{ inputs.limit }}"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"; fi
+          python evidence_chunks.py $ARGS
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s evidence_chunks.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file evidence_chunks.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Evidence passages: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
