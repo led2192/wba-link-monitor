@@ -79,6 +79,18 @@ class Entity(unittest.TestCase):
         self.assertEqual(K.entity_check("HSBC Holdings plc Annual Report and Accounts 2024", "HSBC")[0], "group")
         self.assertEqual(K.entity_check("Swiss Re Ltd Financial Report 2024", "Swiss Re")[0], "group")
 
+    def test_first_dry_run_cases(self):
+        # 24 Oct 2026 dry run: document words before the name are not part of the entity
+        self.assertEqual(K.entity_check("Annual Financial Statements 2025 ANNUAL FINANCIAL STATEMENTS PUMA SE, HERZOGENAURACH", "Puma")[0], "group")
+        self.assertEqual(K.entity_check("FY25 Non-Financial Matters Report Logitech International S.A.", "Logitech International")[0], "group")
+        # DNB Bank ASA is the parent; the title says it is the group report
+        self.assertEqual(K.entity_check("DNB Bank ASA Annual report", "DNB", title="2025 | DNB | DNB Group Annual report 2025")[0], "group")
+        self.assertEqual(K.entity_check("", "DNB", title="2025 | DNB | DNB Boligkreditt Annual Report 2025")[0], "subsidiary")
+        self.assertEqual(K.entity_check("", "DNB", title="Responsible Investments Annual Report 2025 DNB Asset Management")[0], "subsidiary")
+        self.assertEqual(K.entity_check("Roche Capital Market Ltd Financial Statements 2025", "Roche")[0], "subsidiary")
+        self.assertEqual(K.entity_check("Taipei Fubon Commercial Bank Co., Ltd. and Subsidiaries", "Fubon Financial")[0], "subsidiary")
+        self.assertEqual(K.entity_check("", "Telstra", title="Telstra Annual Report 2025")[0], "unclear")
+
     def test_unclear_without_a_legal_name(self):
         self.assertEqual(K.entity_check("BMW Group Report 2024", "BMW")[0], "unclear")
         self.assertEqual(K.entity_check("", "BMW")[0], "unclear")

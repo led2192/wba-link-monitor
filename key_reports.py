@@ -165,6 +165,7 @@ LEGAL = (r"(?:B\.?\s?V\.?|N\.?\s?V\.?|S\.?\s?A\.?(?:\s?B\.?)?|S\.?\s?p\.?\s?A\.?
 MARKERS = set("""
 finance financing financial funding capital treasury investment investments invest credit leasing lease insurance
 assurance reinsurance bank banking securities issuer issuance trust receivables mortgage properties property
+asset boligkreditt livsforsikring forsikring kredit hypotek pensjon pension pensions
 """.split())
 COUNTRIES = set("""
 uganda kenya nigeria ghana tanzania zambia malawi rwanda congo madagascar seychelles chad niger gabon egypt morocco
@@ -191,23 +192,60 @@ def name_words(company_name):
 ENTITY = re.compile(r"((?:[A-Z0-9&][\w&.'’-]*\s+){0,7}?(?:[A-Z0-9&][\w&.'’-]*),?\s+(?:\([A-Za-z ]+\)\s+)?" + LEGAL + r")(?![\w])")
 
 
-def entity_check(cover, company_name, head=1200):
-    """('group' | 'subsidiary' | 'unclear', the entity name found)."""
+GROUP_WORDS = {"group", "holding", "holdings", "konsern", "konsernet", "konzern", "groupe", "grupo", "gruppo", "groep"}
+
+
+def _trim(ent, words):
+    """The entity from its first company-name word: 'Annual Financial Statements 2025 PUMA SE' -> 'PUMA SE'."""
+    toks = ent.split()
+    for i, t in enumerate(toks):
+        if any(w in re.findall(r"[a-z0-9&]+", fold(t)) for w in words):
+            return " ".join(toks[i:])
+    return ent
+
+
+def _subsidiary_words(tokens, own):
+    return [w for w in tokens if w not in own and (w in MARKERS or w in COUNTRIES)]
+
+
+def title_check(title, company_name):
+    """'subsidiary' when the title names the company followed by a subsidiary word ('DNB Boligkreditt Annual
+    Report', 'DNB Asset Management'), 'group' when it names the company's group, else ''."""
     words = name_words(company_name)
-    if not words or not cover:
-        return "unclear", ""
     own = set(re.findall(r"[a-z0-9]+", fold(company_name)))
-    text = re.sub(r"\s+", " ", cover[:head])
+    toks = re.findall(r"[a-z0-9&]+", fold(title))
+    for i, t in enumerate(toks):
+        if t in words:
+            after = toks[i + 1:i + 3]
+            if any(a in GROUP_WORDS for a in after):
+                return "group"
+            if _subsidiary_words(after, own):
+                return "subsidiary"
+    return ""
+
+
+def entity_check(cover, company_name, head=1200, title=""):
+    """('group' | 'subsidiary' | 'unclear', the entity name found). The title decides first when it is plain
+    about it (a group report, or a named subsidiary); else the first legal name on the cover."""
+    words = name_words(company_name)
+    if not words:
+        return "unclear", ""
+    by_title = title_check(title, company_name) if title else ""
+    if by_title == "group":
+        return "group", "title: " + title[:100]
+    own = set(re.findall(r"[a-z0-9]+", fold(company_name)))
+    text = re.sub(r"\s+", " ", (cover or "")[:head])
     for m in ENTITY.finditer(text):
         ent = m.group(1).strip(" ,.;:")
-        ew = re.findall(r"[a-z0-9&]+", fold(ent))
-        if not any(w in ew for w in words):
+        if not any(w in re.findall(r"[a-z0-9&]+", fold(ent)) for w in words):
             continue
-        if any(w in ("group", "holding", "holdings") for w in ew):
+        ent = _trim(ent, words)
+        ew = re.findall(r"[a-z0-9&]+", fold(ent))
+        if any(w in GROUP_WORDS for w in ew):
             return "group", ent[:120]           # "Mizuho Financial Group, Inc.", "HSBC Holdings plc": the parent
-        extra = [w for w in ew if w not in own]
-        sub = [w for w in extra if w in MARKERS or w in COUNTRIES]
-        return ("subsidiary" if sub else "group"), ent[:120]
+        return ("subsidiary" if _subsidiary_words(ew, own) else "group"), ent[:120]
+    if by_title == "subsidiary":
+        return "subsidiary", "title: " + title[:100]
     return "unclear", ""
 
 
@@ -315,7 +353,7 @@ def main():
     for w, waves in cand.items():
         for lst in waves.values():
             for c in lst:
-                kind, ent = entity_check(cov.get(c["id"], ""), names.get(w, ""))
+                kind, ent = entity_check(cov.get(c["id"], ""), names.get(w, ""), title=c["label"])
                 if len(samples[kind]) < (40 if kind == "subsidiary" else 12):
                     samples[kind].append(f"{names.get(w, w)}: \"{ent}\" in {c['label'][:90]}")
                 cur = CC._name(c["entity"]) or ""
@@ -380,4 +418,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        open("key_reports.md", "w").write("### Key reports: the run failed\n\n```\n" + traceback.format_exc()[-3000:] + "\n```\n")
+        raise
