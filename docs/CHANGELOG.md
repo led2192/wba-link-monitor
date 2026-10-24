@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
-- 2026-10-24 OCR of scanned PDFs: up to 8,000 a night instead of 1,000; the first manual run after the fixes read 595 of 600 in 20 minutes, so the backlog of about 12,500 clears in about two nights (#PR)
+- 2026-10-24 OCR of scanned PDFs: up to 8,000 a night instead of 1,000; the first manual run after the fixes read 595 of 600 in 20 minutes, so the backlog of about 12,500 clears in about two nights (#71)
 - 2026-10-24 Evidence passages: 2024+ key reports are cut into passages tagged climate, nature or social, by planning, implementation and performance and by integration aspect, following the Integrated Transition Assessment white paper (Table D.1); passages go to the private text store, `evidence_profile` and `evidence_version` to report_library; new `evidence_chunks.py` and `evidence_terms.json`, nightly after Full text (#69)
 - 2026-10-24 Publication dates of key reports (2023+): regulator filing date, the report's own statement, board approval, or first seen by the robot, with the deciding sentence; new `pub_dates.py` after Fiscal years and report_library `pub_date`, `pub_date_precision`, `pub_date_source`, `pub_date_evidence` (#68)
 - 2026-10-24 Key reports: for every company, the long annual report(s) with full-year financial and sustainability data for the 2026 and 2025 publication waves, with a subsidiary check on the title and cover; new `key_reports.py` after Company coverage, companies `kr_*` fields, report_library `entity_check` and `entity_name`, four counts on base_health. First measurement: 2026 wave complete for 855 companies, partial for 530, only 2025 for 353, neither for 262; 263 subsidiary reports left out (#67)
