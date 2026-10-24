@@ -35,6 +35,8 @@ are skipped). Never gets around a login, a captcha or a paywall.
 Dry run by default (prints, writes pc_fetch.md); --commit writes.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE; QA: AIRTABLE_QA_TOKEN (optional).
 Args: --limit 300 --pages 150 --minutes 90 --page-minutes 25 (the last 25 minutes are kept for the pages)
+      --repeat-hours 22 --every-minutes 120: run again every 2 hours inside one job for 22 hours (the
+      workflow does this, because GitHub drops scheduled runs when it is busy)
 """
 import argparse, collections, datetime as dt, hashlib, io, os, re, threading, time
 from concurrent.futures import ThreadPoolExecutor
@@ -515,5 +517,47 @@ def main():
     run.write_step_summary("ok", dict(counts), title="Office-network fetch")
 
 
+def repeat_plan(start, now, hours, every_minutes):
+    """Seconds to wait before the next run, or None when the next run would start after the window.
+    Runs start every `every_minutes` from `start`; a run that overran waits for the next slot."""
+    end = start + hours * 3600
+    step = every_minutes * 60
+    nxt = start + step * (int((now - start) // step) + 1)
+    if nxt >= end:
+        return None
+    return max(0.0, nxt - now)
+
+
+def repeat(argv, hours, every_minutes):
+    """Run this script again and again inside one job. GitHub skips scheduled runs when it is busy (on
+    24 Oct 2026 two of the four 4-hourly runs were never created), so one long job on the owner's
+    computer is steadier than many short scheduled ones; the schedule stays as the fallback."""
+    import subprocess, sys
+    start = time.time()
+    n = 0
+    while True:
+        n += 1
+        t0 = time.time()
+        print(f">>> run {n} at {time.strftime('%H:%M')}", flush=True)
+        r = subprocess.run([sys.executable, os.path.abspath(__file__)] + argv)
+        print(f">>> run {n} ended with code {r.returncode} after {(time.time() - t0) / 60:.0f} min", flush=True)
+        wait = repeat_plan(start, time.time(), hours, every_minutes)
+        if wait is None:
+            return
+        time.sleep(wait)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--repeat-hours" in sys.argv:
+        i = sys.argv.index("--repeat-hours")
+        hours = float(sys.argv[i + 1])
+        rest = sys.argv[1:i] + sys.argv[i + 2:]
+        every = 120.0
+        if "--every-minutes" in rest:
+            j = rest.index("--every-minutes")
+            every = float(rest[j + 1])
+            rest = rest[:j] + rest[j + 2:]
+        repeat(rest, hours, every)
+    else:
+        main()
