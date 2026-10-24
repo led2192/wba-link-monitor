@@ -114,5 +114,18 @@ class Robots(unittest.TestCase):
             self.assertTrue(P.robots_allows("https://c.com/reports/r.pdf"))
 
 
+
+
+class Deadlines(unittest.TestCase):
+    def test_pages_get_the_end_of_the_run(self):
+        self.assertEqual(P.deadlines(0, 90, 25, 150), (65 * 60, 90 * 60))
+
+    def test_no_pages_files_use_the_whole_run(self):
+        self.assertEqual(P.deadlines(0, 90, 25, 0), (90 * 60, 90 * 60))
+
+    def test_reserve_at_most_half(self):
+        self.assertEqual(P.deadlines(0, 30, 25, 150), (15 * 60, 30 * 60))
+
+
 if __name__ == "__main__":
     unittest.main()
