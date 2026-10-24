@@ -1,10 +1,11 @@
 name: OCR scanned covers
 
-# Monthly: scanned PDFs (cover_status no_text) get their first pages read by text recognition, so
-# they can be typed, titled and dated. A pull request touching it runs a dry run on 25 documents.
+# Daily while the backlog lasts (about 12,500 scanned PDFs on 24 Oct 2026): scanned PDFs (cover_status
+# no_text) get their first four pages read by text recognition, so they can be typed, titled and dated.
+# About 5 hours a run, stopping new documents after 290 minutes; rows done are never tried again. A pull request touching it runs a dry run on 25 documents.
 on:
   schedule:
-    - cron: "13 6 3 * *"            # the 3rd of each month, 06:13 UTC
+    - cron: "13 6 * * *"            # daily 06:13 UTC
   workflow_dispatch:
     inputs:
       limit:
@@ -35,8 +36,8 @@ jobs:
       - name: Read scanned covers
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 25"
-          elif [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--limit 600 --commit"
-          else ARGS="--limit ${{ inputs.limit }}"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; fi
+          elif [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--limit 1000 --pages 4 --minutes 290 --commit"
+          else ARGS="--limit ${{ inputs.limit }} --pages 4 --minutes 290"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; fi
           python ocr_covers.py $ARGS
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
