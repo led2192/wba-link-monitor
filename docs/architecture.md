@@ -25,23 +25,31 @@ flowchart LR
   C --> A[Attach PDFs]
   A --> CT[Build cover text]
   R[19:00 Recover attachments] --> CT
-  CT --> D[Dedupe + label from file + date]
+  CT --> D[Dedupe, titles, dates, retype untyped]
+  CT --> DS[Document scope]
   CT --> CC[Company coverage]
   CC --> BH[Base health]
   CC --> QS[QA sync]
   FT[21:37 Build full text] --> FY[Fiscal years]
   FT --> SC[Sustainability class]
   FT --> MS[Mention search]
+  DP[04:40 Suggest pages, replace gone pages]
+  OCR[3rd of month 06:13 OCR scanned covers]
+  PC[every 4 h: office-network runner, private repo] -.-> CT
+  RR[any failed job: re-run once]
 ```
+
+More pictures (the life of a document, the type and year ladders, completeness, the quality loop, refused files): [diagrams.md](diagrams.md).
 
 1. **Read pages.** `airtable_monitor.py` reads every page due that day with plain requests; `playwright_monitor.py` renders the pages that need a browser (JavaScript sites, bot walls), oldest first, 4,000 a night. Both keep `seen_links` (every document link ever seen on the page) and flag new ones.
 2. **Harvest.** `harvest_reports.py` turns the document links of report-type pages into `report_library` rows, refusing documents already held (`doc_id`) or tombstoned. `doc_probe.py` opens links that do not look like files and keeps the ones that serve a PDF.
 3. **Type and attach.** `classify_library.py` guesses a type from the address; `attach_files.py` asks Airtable to fetch each PDF; `recover_attach.py` downloads the ones Airtable could not and records why (`file_status`).
 4. **Read.** `build_cover_text.py` reads the first six pages of every new file (`cover_text`, language, page count, content hash). Two Airtable AI fields then read `cover_text`: `source_type_check` (type, English documents only) and `source_title`.
 5. **Clean and date.** `dedupe_library.py` discards duplicates and non-disclosures; `classify_library.py --from-file` titles and types from the file name and cover; `date_documents.py` sets `doc_year`.
-6. **Measure.** `company_coverage.py` writes each company's completeness (six checks: report hub page, sustainability page, sustainability report 2024+, annual report 2024+, Code of Conduct, Human Rights Policy), its gaps, overdue reports and the work queue. `base_health.py` writes the day's row.
+6. **Measure.** `company_coverage.py` writes each company's completeness (six checks: report hub page, sustainability page, sustainability report 2024+, annual report 2024+, Code of Conduct, Human Rights Policy; since rules v3 the page checks count only watched pages that have not gone), split into `disclosure_completeness` (the four document checks) and `page_completeness` (the two page checks), its gaps, overdue reports and the work queue. `base_health.py` writes the day's row.
 7. **Quality.** `qa_sync.py` turns the status fields into Pipeline QA failure rows and captures corrections.
-8. **Full text** (separate chain, 21:37): `build_fulltext.py` reads every page of every report into the text store; `fiscal_years.py` reads the reporting year from it with a confidence score; `sustainability_class.py` reads where the sustainability disclosure lives (a dedicated report, embedded in the annual report, a specialized document, or financial only), the standards named and the assurance; `mention_search.py` answers the saved "which companies mention X" questions.
+8. **Repair.** Without a person: `rerun_failed.yml` re-runs a failed job once; `discover_pages.py` (04:40) unticks pages gone (404/410) and adds a clear replacement; `classify_library.py --retype-untyped` types non-English documents by their cover title (`cover_terms.json`); `ocr_covers.py` (monthly) reads scanned PDFs; `pc_fetch.py` on the owner's computer (every 4 hours, private repository `wba-text-store`, see [pc_runner.md](pc_runner.md)) fetches refused files and pages, with a second pass in Edge.
+9. **Full text** (separate chain, 21:37): `build_fulltext.py` reads every page of every report into the text store; `fiscal_years.py` reads the reporting year from it with a confidence score; `sustainability_class.py` reads where the sustainability disclosure lives (a dedicated report, embedded in the annual report, a specialized document, or financial only), the standards named and the assurance; `mention_search.py` answers the saved "which companies mention X" questions.
 
 ## The on-demand paths
 - **Analysts interface** (Disclosure Library, shared interface-only): analysts who use the reports see each company's documents and watched pages, add links and files through the same `add_link` and `add_file` boxes as My queue, and flag documents (`analyst_flag`, `analyst_flag_note`) or pages (`scan_concern`). Flags never change a row: the owner decides, and `qa_sync.py` records each flag in Pipeline QA.
@@ -50,6 +58,6 @@ flowchart LR
 - **Daily:** suggested pages for companies missing a hub (04:40), link and assign (07:03), base health (12:17).
 
 ## Claude tasks (scheduled outside GitHub)
-- **Daily gap research** (weekdays 06:46 Madrid): searches the web for 25 companies' missing reports and pastes official links into `add_link`.
+- **Daily gap research** (weekdays 06:46 Madrid): searches the web for 25 companies' missing reports and pastes official links into `research_link` (with the gaps of the day in `research_gaps_before`), so what it brings is marked as found by research and can be measured.
 - **Daily QA pre-read** (weekdays 12:46 Madrid) and **weekly QA review** (Mondays 08:47 Madrid): see [quality.md](quality.md) and [guide.md](guide.md) section 9.
 - **Weekly missed-reports audit**: paused since 20 Oct 2026; its job moves into the weekly QA review.
