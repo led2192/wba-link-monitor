@@ -44,5 +44,34 @@ class RealScan(unittest.TestCase):
         self.assertIn("Annual Report 2024", text)
 
 
+
+class FreshLinks(unittest.TestCase):
+    def test_rows_are_reread_in_order(self):
+        calls = []
+
+        class R:
+            def __init__(self, j): self.j = j
+            def json(self): return self.j
+
+        def fake(method, url, headers, params=None):
+            calls.append(dict(params)["filterByFormula"])
+            return R({"records": [{"id": "rec2", "fields": {"file": [{"url": "new2"}]}},
+                                  {"id": "rec1", "fields": {"file": [{"url": "new1"}]}}]})
+        old = O.airtable_request
+        O.airtable_request = fake
+        try:
+            got = O.fresh([{"id": "rec1"}, {"id": "rec2"}, {"id": "rec3"}])
+        finally:
+            O.airtable_request = old
+        self.assertEqual([r["id"] for r in got], ["rec1", "rec2"])      # a row gone meanwhile is dropped
+        self.assertIn("RECORD_ID()='rec3'", calls[0])
+        self.assertEqual(O.fresh([]), [])
+
+    def test_source_and_time_budget(self):
+        self.assertEqual(O.source({"fields": {"file": [{"url": "x"}]}}), "file")
+        self.assertEqual(O.source({"fields": {"document_url": "x"}}), "link")
+        self.assertEqual(O.one({"id": "rec1", "fields": {}}, 4, deadline=1)[1], "not_tried")
+
+
 if __name__ == "__main__":
     unittest.main()

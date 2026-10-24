@@ -13,7 +13,7 @@ Otherwise it writes cover_status = no_text_ocr, so the row is not tried again ev
 
 Needs the poppler-utils and tesseract-ocr packages (installed by the workflow). Dry run by default
 (prints and writes ocr_covers.md); --commit writes.
-Env: AIRTABLE_TOKEN, AIRTABLE_BASE; QA: AIRTABLE_QA_TOKEN (optional). Args: --limit 600 --pages 6 --workers 4
+Env: AIRTABLE_TOKEN, AIRTABLE_BASE; QA: AIRTABLE_QA_TOKEN (optional). Args: --limit 600 --pages 6 --workers 4 --minutes 0 --chunk 40
 """
 import argparse, collections, os, re, subprocess, tempfile, time
 from concurrent.futures import ThreadPoolExecutor
@@ -53,8 +53,9 @@ def ocr_pdf(data, pages, dpi=150):
             raise RuntimeError("pdftoppm rendered no page: " + r.stderr.decode("utf-8", "ignore")[:120])
         out = []
         for img in sorted(f for f in os.listdir(d) if f.endswith(".png")):
+            # one thread per tesseract: with 4 workers each starting 4 threads, 22 of 25 pages timed out (24 Oct 2026)
             r = subprocess.run(["tesseract", os.path.join(d, img), "stdout", "-l", LANGS, "--psm", "3"],
-                               capture_output=True, timeout=120)
+                               capture_output=True, timeout=120, env={**os.environ, "OMP_THREAD_LIMIT": "1"})
             out.append(r.stdout.decode("utf-8", "ignore"))
         return "\n".join(out)
 
@@ -75,13 +76,30 @@ def fetch_rows(limit):
     return out[:limit] if limit else out
 
 
-def one(rec, pages):
+def fresh(recs):
+    """The same rows re-read just before use: Airtable attachment links expire after about two hours,
+    and a 600-document run takes longer (23 Oct 2026: 492 of 600 downloads failed)."""
+    if not recs:
+        return []
+    formula = "OR(" + ",".join(f"RECORD_ID()='{r['id']}'" for r in recs) + ")"
+    params = [("pageSize", "100"), ("filterByFormula", formula), ("fields[]", "file"), ("fields[]", "document_url")]
+    got = {r["id"]: r for r in airtable_request("GET", BCT.API, BCT.H, params=params).json().get("records", [])}
+    return [got[r["id"]] for r in recs if r["id"] in got]
+
+
+def source(rec):
+    return "file" if rec.get("fields", {}).get("file") else "link"
+
+
+def one(rec, pages, deadline=None):
+    if deadline and time.time() > deadline:
+        return rec["id"], "not_tried", "", None
     url = BCT.attachment_url(rec)
     if not url:
         return rec["id"], "skip", "", None
     kind, data = BCT.download_pdf(url)
     if kind != "ok":
-        return rec["id"], "download_" + kind, "", None
+        return rec["id"], f"download_{kind}_{source(rec)}", "", None
     try:
         status, text = outcome(ocr_pdf(data, pages))
     except Exception as e:
@@ -93,7 +111,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=600)
     ap.add_argument("--pages", type=int, default=6)
-    ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--minutes", type=float, default=0, help="stop starting new documents after this long (0 = no limit)")
+    ap.add_argument("--chunk", type=int, default=40, help="rows re-read together just before they are processed")
     ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     if a.commit:
@@ -102,17 +122,27 @@ def main():
     rows = fetch_rows(a.limit)
     print(f">>> {len(rows):,} scanned covers to read", flush=True)
     results, counts, langs = [], collections.Counter(), collections.Counter()
+    deadline = time.time() + a.minutes * 60 if a.minutes else None
+    i = 0
     with ThreadPoolExecutor(max_workers=a.workers) as ex:
-        for i, res in enumerate(ex.map(lambda r: one(r, a.pages), rows), 1):
-            results.append(res)
-            counts[res[1]] += 1
-            if res[3]:
-                langs[res[3]] += 1
-            if i % 25 == 0:
-                print(f"  {i}/{len(rows)} {dict(counts)}", flush=True)
+        for c in range(0, len(rows), a.chunk):
+            if deadline and time.time() > deadline:
+                counts["not_tried"] += len(rows) - c
+                break
+            for res in ex.map(lambda r: one(r, a.pages, deadline), fresh(rows[c:c + a.chunk])):
+                i += 1
+                results.append(res)
+                counts[res[1]] += 1
+                if res[3]:
+                    langs[res[3]] += 1
+                if i % 25 == 0:
+                    print(f"  {i}/{len(rows)} {dict(counts)}", flush=True)
     md = ["### Scanned covers read by OCR" + ("" if a.commit else " (dry run)"), "",
           f"Scanned documents tried: {len(results):,}. Read: {counts['ok']:,}; still no text: {counts['no_text_ocr']:,}; "
-          f"download failed: {sum(v for k, v in counts.items() if k.startswith('download_')):,}; OCR error: {counts['ocr_error']:,}.", "",
+          f"download failed: {sum(v for k, v in counts.items() if k.startswith('download_')):,} "
+          f"(attachments {sum(v for k, v in counts.items() if k.startswith('download_') and k.endswith('_file')):,}, "
+          f"links {sum(v for k, v in counts.items() if k.startswith('download_') and k.endswith('_link')):,}); "
+          f"OCR error: {counts['ocr_error']:,}; not tried (time budget): {counts['not_tried']:,}.", "",
           "Languages of the covers read: " + (", ".join(f"{k} {v}" for k, v in langs.most_common(8)) or "none") + ".", "",
           "Samples (first 160 characters):", ""]
     errs = collections.Counter(t.split(":")[0] for _, s_, t, _ in results if s_ == "ocr_error")
