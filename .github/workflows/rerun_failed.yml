@@ -18,6 +18,7 @@ on:
       - "Classify report library"
       - "Company coverage"
       - "Evidence passages"
+      - "Key reports"
       - "Dedupe report library"
       - "Suggest missing report pages"
       - "Document scope"

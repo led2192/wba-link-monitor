@@ -1,0 +1,56 @@
+name: Key reports
+
+# For every company, the long annual reports with its full-year financial and sustainability data, for
+# the latest two publication waves (key_reports.py). Runs after Company coverage at the end of the
+# nightly chain; a pull request touching it runs a dry run and posts the result.
+on:
+  workflow_run:
+    workflows: ["Company coverage"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+      wba:
+        description: "comma-separated wba_ids (blank = all)"
+        default: ""
+  pull_request:
+    paths: [key_reports.py, .github/workflows/key_reports.yml]
+
+concurrency:
+  group: key-reports
+  cancel-in-progress: false
+
+jobs:
+  key_reports:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Key reports
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then ARGS="--commit"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=""
+          else ARGS="--wba '${{ inputs.wba }}'"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; fi
+          eval python key_reports.py $ARGS
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s key_reports.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file key_reports.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Key reports: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
