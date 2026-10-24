@@ -38,7 +38,7 @@ flowchart LR
 Take a 2024 sustainability report published on a company's "Reports" page.
 
 1. **The page is watched.** The page is a row in `monitored_links` with `type` = `reports_hub` and `monitor` ticked. Only five page types are harvested for documents: `reports_hub`, `sustainability_page`, `sustainability_report`, `investor_relations`, `policies`. A report page typed `news` or `other` is read but never harvested, which is why a wrong page type means missed reports.
-2. **The new link is seen.** The nightly monitor (02:23 UTC, plus a browser monitor at 00:03 for JavaScript sites) reads the page, adds the PDF link to `seen_links` and, because it is new, to `new_links`.
+2. **The new link is seen.** The nightly monitor (02:23 UTC, plus a browser monitor at 00:03 and 12:03 for JavaScript sites) reads the page, adds the PDF link to `seen_links` and, because it is new, to `new_links`.
 3. **A document row is created.** The harvester turns the link into a `report_library` row with a stable `library_id`. It refuses links already held (same normalized address) and links on the deletion list (tombstones), so a re-run never duplicates.
 4. **First guess of the type, from the address.** `source_type` is guessed from the words in the link (for example `/sustainability-report-2024.pdf`). This is opinion number one. Never edit it.
 5. **The PDF is attached.** Airtable fetches the file into `file`. If the site refuses, a second job downloads it itself; if that fails too, `file_status` says why: `blocked` (the site refuses robots), `gone` (404), `not_pdf`, or `too_big` (over Airtable's 5 MB upload limit). Files too big to attach are still read from `document_url`; they just have no attachment.
@@ -223,11 +223,11 @@ Interface "Pipeline QA": **Check Claude's answers** (the day's cards that need y
 | --- | --- | --- |
 | PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
 | PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#54) |
-| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | the office-network runner on the owner's computer, every 4 hours (pc_fetch.py, [pc_runner.md](pc_runner.md)): refused files and refused report pages | yes (#60, once set up) |
+| PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | the office-network runner on the owner's computer, every 2 hours (pc_fetch.py, [pc_runner.md](pc_runner.md)): refused files and refused report pages | yes (#60, once set up) |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
-| DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every month (OCR scanned covers); broken files stay counted | yes (#57) |
+| DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every day (OCR scanned covers); broken files stay counted | yes (#57) |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
 | TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
 | TYPE_MISSING (non-English) | cover-title phrases in other languages (cover_terms.json), nightly in Dedupe, measured on every change | yes (#55) |
@@ -297,7 +297,7 @@ None of them merges anything, writes to the Source Library, or gets around a sit
 
 | When | Job |
 | --- | --- |
-| 00:03 | Browser monitor (JavaScript pages, 4,000 a night) |
+| 00:03 and 12:03 | Browser monitor (JavaScript pages, 4,000 a run) |
 | 02:03 | Assign join ids |
 | 02:23 | Monitor links, then in a chain: Harvest, Classify, Attach, Build cover text, then Dedupe and dates, Document scope, Company coverage, then Base health and QA sync |
 | 04:31 weekdays | QA sample (the day's cards; settles yesterday's) |
@@ -310,8 +310,8 @@ None of them merges anything, writes to the Source Library, or gets around a sit
 | Monday | Regulator filings 06:20, Key figures 09:20 |
 | Sunday 00:23 | Capture web pages |
 | 1st of the month | QA archive |
-| 3rd of the month 06:13 | OCR scanned covers |
-| every 4 hours (owner's computer) | Office-network fetch, private repository `wba-text-store` |
+| 06:13 | OCR scanned covers (daily while the backlog of scanned PDFs lasts) |
+| every 2 hours (owner's computer) | Office-network fetch, private repository `wba-text-store` |
 | after any failure | Re-run failed job once |
 
 Every job, what it writes and how to run it by hand: [scripts.md](scripts.md).

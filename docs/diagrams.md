@@ -13,7 +13,7 @@ flowchart LR
   subgraph Cloud["GitHub Actions (cloud, every night)"]
     R["The robot<br/>monitor, harvest, read, type, date, score"]
   end
-  subgraph PC["Owner's computer (every 4 hours)"]
+  subgraph PC["Owner's computer (every 2 hours)"]
     O["Office-network runner<br/>refused files and pages"]
   end
   subgraph AT["Airtable"]
@@ -58,7 +58,7 @@ flowchart TD
   E2 --> G
   E3 --> G
   G --> S{"Scanned PDF,<br/>no text?"}
-  S -- "yes" --> S2["Text recognition (OCR), monthly"] --> H
+  S -- "yes" --> S2["Text recognition (OCR), daily"] --> H
   S -- "no" --> H["AI type and title (English)<br/>cover-title phrases (other languages)"]
   H --> I["Year decided (7 rules)<br/>scope, sustainability class"]
   I --> J["Full text at night<br/>fiscal year with score, standards, assurance"]
@@ -70,7 +70,7 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  T1["01:03 Browser monitor<br/>JavaScript pages"] --> T2["03:23 Monitor links"]
+  T1["01:03 and 13:03 Browser monitor<br/>JavaScript pages"] --> T2["03:23 Monitor links"]
   T2 --> T3["Harvest"] --> T4["Classify by address"] --> T5["Attach PDFs"] --> T6["Build cover text"]
   T6 --> T7["Dedupe, titles, dates,<br/>non-English types"]
   T6 --> T8["Document scope"]
@@ -80,10 +80,10 @@ flowchart LR
   T12["05:31 QA sample<br/>(weekdays)"]
   T13["05:40 Gone pages replaced,<br/>missing pages searched"]
   T14["22:37 Full text"] --> T15["Fiscal years,<br/>sustainability class,<br/>mention search"]
-  T16["Every 4 hours: robot on the owner's computer"]
+  T16["Every 2 hours: robot on the owner's computer"]
   T17["Every 30 minutes: Scan now, add_link, research_link"]
   T18["A failed job re-runs itself once"]
-  T19["3rd of the month 07:13: text recognition of scanned PDFs"]
+  T19["07:13 daily: text recognition of scanned PDFs"]
 ```
 
 ## 4. Which type is it? (the question order)
@@ -181,7 +181,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  A["Cloud robot is refused<br/>(file_status blocked, page status blocked)"] --> B["Robot on the owner's computer<br/>every 4 hours, ordinary connection"]
+  A["Cloud robot is refused<br/>(file_status blocked, page status blocked)"] --> B["Robot on the owner's computer<br/>every 2 hours, ordinary connection"]
   B --> C{"Plain request works?"}
   C -- yes --> OK
   C -- no --> R{"robots.txt allows it?"}
@@ -203,7 +203,7 @@ flowchart LR
   F1["Page does not open"] --> A1["Robot: retries nightly, browser lane"]
   F2["Page gone (404)"] --> A2["Robot: searches the site nightly, adds a clear match"]
   F3["Site refuses robots"] --> A3["Robot on the owner's computer"]
-  F4["Scanned PDF"] --> A4["Robot: text recognition monthly"]
+  F4["Scanned PDF"] --> A4["Robot: text recognition daily"]
   F5["Non-English, no type"] --> A5["Robot: cover-title phrases"]
   F6["Type rules disagree"] --> A6["Weekly review: rule fixes, measured"]
   F7["Company missing a report"] --> A7["Daily research (Claude)"]
