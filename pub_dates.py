@@ -254,7 +254,7 @@ def main():
         os.remove(os.path.join(folder, name))
     for lid, cover in covers(token, base, no_text).items():
         texts[lid] = [(0, cover)]          # page 0 = the first pages (cover_text), not the full text
-    print(f">>> text: {len(want and sum(len(v) for v in want.values())):,} full text, {len(no_text):,} first pages", flush=True)
+    print(f">>> text: {sum(len(v) for v in want.values()):,} full text, {len(no_text):,} first pages", flush=True)
 
     tiers, prec, ups, gaps, samples = collections.Counter(), collections.Counter(), [], [], collections.defaultdict(list)
     for lid, r in lib.items():
@@ -309,4 +309,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        open("pub_dates.md", "w").write("### Publication dates: the run failed\n\n```\n" + traceback.format_exc()[-3000:] + "\n```\n")
+        raise
