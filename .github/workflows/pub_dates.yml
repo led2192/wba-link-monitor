@@ -1,0 +1,59 @@
+name: Publication dates
+
+# When each key report was published (pub_dates.py): regulator filing date, a stated publication date,
+# the board approval date, or the day the robot first saw it. Chained after Fiscal years (it needs the
+# period end); a pull request touching it runs a dry run on the whole base and posts the result.
+on:
+  workflow_run:
+    workflows: ["Fiscal years"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+      all:
+        description: "Re-read every key report, not only the queue"
+        type: boolean
+        default: false
+  pull_request:
+    paths: [pub_dates.py, .github/workflows/pub_dates.yml]
+
+concurrency:
+  group: pub-dates
+  cancel-in-progress: false
+
+jobs:
+  dates:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Publication dates
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then ARGS="--commit"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--all"
+          else ARGS=""; [ "${{ inputs.mode }}" = "commit" ] && ARGS="--commit"; [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"; fi
+          python pub_dates.py $ARGS
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s pub_dates.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file pub_dates.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Publication dates: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}

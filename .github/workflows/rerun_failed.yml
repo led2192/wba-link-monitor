@@ -17,6 +17,7 @@ on:
       - "Capture web pages (print to PDF)"
       - "Classify report library"
       - "Company coverage"
+      - "Publication dates"
       - "Dedupe report library"
       - "Suggest missing report pages"
       - "Document scope"
