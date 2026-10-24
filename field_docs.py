@@ -29,7 +29,7 @@ HUMAN = {
                         "capture_page", "scan_now", "scan_concern", "delete_now", "assigned_analyst"},
     "report_library": {"source_type_check", "source_subtypes", "discard", "discard_reason", "Reviewer notes",
                        "curated_doc_title", "verified", "delete_now", "doc_scope", "analyst_flag",
-                       "analyst_flag_note", "ai_year_test"},
+                       "analyst_flag_note", "ai_year_test", "entity_check"},
     "companies": {"analyst", "adopted_on", "Notes", "add_link", "add_file", "website", "suggested_links",
                   "approve_suggestions", "queue_snooze_until", "key_figures_checked", "sec_cik", "logo"},
     "mention_searches": {"search", "find", "short_names", "confirming_words", "near", "distance", "doc_types",
