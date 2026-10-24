@@ -33,6 +33,18 @@ class Tagging(unittest.TestCase):
     def test_one_term_in_passing_is_not_evidence(self):
         self.assertIsNone(LEX.tag("Revenue grew 5% thanks to strong demand; see the sustainability section for our net zero ambition."))
 
+    def test_pairs_from_one_topic_and_repeats_are_not_evidence(self):
+        # seen in the first sample (24 Oct 2026): a proxy-advisor paragraph, the EU Taxonomy named twice
+        self.assertIsNone(LEX.tag("Proxy advisors pushed diversity and inclusion agendas on American companies."))
+        self.assertIsNone(LEX.tag("Regarding the EU\nTaxonomy, the EU Taxonomy delegated act changed."))
+
+    def test_running_headers_are_dropped(self):
+        nav = "Our Transition Strategy\nCaring for the Environment\n"
+        pages = [(i, nav + f"Page {i} body text about scope 1 emissions.") for i in range(1, 11)]
+        out = E.strip_repeated_lines(pages)
+        self.assertTrue(all("Our Transition Strategy" not in t for _, t in out))
+        self.assertIn("Page 3 body", out[2][1])
+
     def test_capital_terms_match_capitals_only(self):
         self.assertIsNone(LEX.tag("The ghg of tcfd was a typo in this sentence about nothing."))
 

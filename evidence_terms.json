@@ -1,6 +1,7 @@
 {
-  "_about": "Lexicon of evidence_chunks.py. Built on WBA's Integrated Transition Assessment white paper (September 2026), Appendix D, Table D.1: three dimensions (climate, nature, social) by three measurement areas (planning, implementation, performance), plus the five integration aspects of section 5.1.3. Each topic lists phrases matched as whole words, case-insensitive; a trailing * matches any ending. A passage is tagged with a dimension when it holds at least min_terms distinct phrases of that dimension. Edit here: the next run re-tags every document.",
-  "min_terms": 2,
+  "_about": "Lexicon of evidence_chunks.py. Built on WBA's Integrated Transition Assessment white paper (September 2026), Appendix D, Table D.1: three dimensions (climate, nature, social) by three measurement areas (planning, implementation, performance), plus the five integration aspects of section 5.1.3. Each topic lists phrases matched as whole words, case-insensitive; a trailing * matches any ending. A passage is tagged with a dimension when it holds at least min_terms distinct phrases of that dimension, or min_terms_two_topics phrases from two different topics of it. Edit here: the next run re-tags every document.",
+  "min_terms": 3,
+  "min_terms_two_topics": 2,
   "dimensions": {
     "climate": {
       "targets": ["net zero", "net-zero", "carbon neutral*", "science-based target*", "science based target*", "SBTi", "emission* reduction target*", "decarbonisation target*", "decarbonization target*", "1.5°C", "1.5 °C", "1.5 degree*", "Paris Agreement", "Paris-aligned", "climate target*", "interim target*"],

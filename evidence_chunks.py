@@ -72,17 +72,19 @@ def _rx(phrases):
 
 class Lexicon:
     def __init__(self, terms):
-        self.min_terms = int(terms.get("min_terms", 2))
+        self.min_terms = int(terms.get("min_terms", 3))
+        self.min_terms_two_topics = int(terms.get("min_terms_two_topics", 2))
         self.dims = {d: {t: _rx(ph) for t, ph in topics.items()} for d, topics in terms["dimensions"].items()}
         self.areas = {a: _rx(ph) for a, ph in terms["areas"].items()}
         self.integration = {k: _rx(ph) for k, ph in terms["integration"].items()}
 
     @staticmethod
     def hits(pair, text):
+        """Distinct phrases found, normalised so a line break, a hyphen or a plural is not a second phrase."""
         out = set()
         for rx in pair:
             if rx:
-                out.update(m.group(0).lower() for m in rx.finditer(text))
+                out.update(norm_hit(m.group(0)) for m in rx.finditer(text))
         return out
 
     def tag(self, text):
@@ -95,7 +97,9 @@ class Lexicon:
                 if h:
                     topics.setdefault(d, []).append(t)
                     found |= h
-            if len(found) >= self.min_terms:
+            # three distinct phrases, or two from two different topics: "diversity and inclusion" in a
+            # proxy-advisor paragraph, or "EU Taxonomy" named twice, is not evidence (24 Oct 2026 sample)
+            if len(found) >= self.min_terms or (len(found) >= self.min_terms_two_topics and len(topics.get(d, [])) >= 2):
                 dims[d] = sorted(found)[:12]
         if not dims:
             return None
@@ -109,12 +113,32 @@ class Lexicon:
                 "integration": integ, "number": number}
 
 
+def norm_hit(s):
+    s = re.sub(r"[\s-]+", " ", s.lower()).strip()
+    return s[:-1] if len(s) > 4 and s.endswith("s") and not s.endswith("ss") else s
+
+
+def strip_repeated_lines(pages, share=0.3, min_count=3):
+    """Drop lines that repeat on many pages of the same document (running headers, navigation tabs,
+    footers), so a passage starts with what the page says, not with its menu."""
+    count = collections.Counter()
+    for _, text in pages:
+        count.update({re.sub(r"\s+", " ", ln).strip().lower() for ln in (text or "").splitlines() if ln.strip()})
+    limit = max(min_count, int(len(pages) * share))
+    rep = {ln for ln, c in count.items() if c >= limit and len(ln) < 120}
+    out = []
+    for p, text in pages:
+        keep = [ln for ln in (text or "").splitlines() if re.sub(r"\s+", " ", ln).strip().lower() not in rep]
+        out.append((p, "\n".join(keep)))
+    return out
+
+
 SENT = re.compile(r"(?<=[.!?;])\s+(?=[A-Z0-9•\-–(])")
 
 
 def passages(text, target=TARGET_WORDS):
     """Split one page into passages of about `target` words, by sentences."""
-    text = re.sub(r"[ \t]+", " ", text or "").strip()
+    text = re.sub(r"\s+", " ", text or "").strip()
     if not text:
         return []
     out, cur, n = [], [], 0
@@ -134,7 +158,7 @@ def passages(text, target=TARGET_WORDS):
 def tag_document(lex, lid, pages):
     """[passage lines] and the document summary for one document's pages [(page, text)]."""
     lines, by_dim, by_area = [], collections.Counter(), collections.defaultdict(collections.Counter)
-    for p, text in sorted(pages):
+    for p, text in strip_repeated_lines(sorted(pages)):
         for n, t in enumerate(passages(text)):
             tg = lex.tag(t)
             if not tg:
@@ -229,8 +253,8 @@ def main():
                     out.write(json.dumps(ln, ensure_ascii=False, separators=(",", ":")) + "\n")
                     for d in ln["dims"]:
                         totals[d] += 1
-                        if len(samples[(d, ln["area"])]) < 2:
-                            samples[(d, ln["area"])].append(f"{lid} p.{ln['p']} [{', '.join(ln['terms'][d][:5])}]: {ln['t'][:260]}")
+                        if len(samples[(d, ln["area"])]) < 3:
+                            samples[(d, ln["area"])].append(f"{lid} p.{ln['p']} [{', '.join(ln['terms'][d][:5])}]: {ln['t'][:400]}")
                     areas[ln["area"]] += 1
                     integ.update(ln["integration"])
     n_pass = sum(d["passages"] for d in docs)
