@@ -54,3 +54,6 @@ A job that lists rows first and downloads their attachments later fails on every
 
 ## Tesseract in parallel needs OMP_THREAD_LIMIT=1
 Tesseract starts several threads per page by default. With 4 OCR workers on a 4-core runner they fight for the cores: on 24 Oct 2026, 22 of 25 pages hit the 120-second timeout. `ocr_covers.py` runs each tesseract with `OMP_THREAD_LIMIT=1`, so parallelism comes from the workers only.
+
+## GitHub skips scheduled runs when it is busy
+On 24 Oct 2026 the office-network workflow (cron every 4 hours) got only two of its four runs: GitHub never created the others. A job that must run often on a self-hosted runner should repeat inside one long job (`pc_fetch.py --repeat-hours 22 --every-minutes 120`) and keep the schedule only as the fallback. Cloud jobs in the nightly chain are safe because they are chained on each other (workflow_run), not scheduled one by one.

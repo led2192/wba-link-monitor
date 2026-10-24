@@ -127,5 +127,14 @@ class Deadlines(unittest.TestCase):
         self.assertEqual(P.deadlines(0, 30, 25, 150), (15 * 60, 30 * 60))
 
 
+
+class Repeat(unittest.TestCase):
+    def test_runs_every_two_hours_inside_the_window(self):
+        self.assertEqual(P.repeat_plan(0, 95 * 60, 22, 120), 25 * 60)       # a 95-minute run waits 25 minutes
+        self.assertEqual(P.repeat_plan(0, 130 * 60, 22, 120), 110 * 60)     # overran: next slot at 240
+        self.assertIsNone(P.repeat_plan(0, 21 * 3600, 22, 120))             # the 22:00 slot is at the window end
+        self.assertEqual(P.repeat_plan(0, 19.5 * 3600, 22, 120), 0.5 * 3600)
+
+
 if __name__ == "__main__":
     unittest.main()
