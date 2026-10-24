@@ -185,6 +185,9 @@ Two scores split the six checks (owner's request, 23 Oct 2026): `disclosure_comp
 
 `sust_reporting` says how the company reports sustainability for 2024 onwards: `dedicated`, `embedded`, `both` or `none`. `check_docs` records which document passes each check, and `completeness_change` explains a check lost overnight. `overdue_reports` flags a sustainability or annual report that, by the company's own rhythm, should be out (reports for a year are expected from July of the next year).
 
+### 6.5 The work queue
+`queue_score` ranks companies by how much their top problem matters (mainly missing 2024+ sustainability and annual reports); `queue_item` says the one thing to do and `queue_action` its kind (Find the report, Find the report (site blocks robot), Find the report page, Review suggested pages, Add the website, Find the policy). The daily gap research takes 25 companies a day from the top of this queue.
+
 ### 6.7 Key reports (from 24 Oct 2026)
 The overview the owner asked for: for every company, do we hold the long annual report(s) with its full-year financial data and its full-year sustainability data, first for the reports published this year, then for last year's?
 
@@ -194,8 +197,15 @@ The overview the owner asked for: for every company, do we hold the long annual 
 - **On each company**: `kr_latest_status` and `kr_prev_status` (Both in one report, Financial and sustainability separate, Financial only, Sustainability only, None), links to the chosen reports, and `kr_note` in words. `base_health` counts companies whose latest wave is complete, partial, only in the previous wave, or in neither.
 - First measurement (24 Oct 2026, 2,000 companies): 2026 wave complete for 855 (43%), partial for 530, only the 2025 wave for 353, neither for 262; 263 candidate reports left out as subsidiaries (Roche Capital Market, Fubon's bank, insurers and broker, Sun Pharma's country companies, DNB Boligkreditt).
 
-### 6.5 The work queue
-`queue_score` ranks companies by how much their top problem matters (mainly missing 2024+ sustainability and annual reports); `queue_item` says the one thing to do and `queue_action` its kind (Find the report, Find the report (site blocks robot), Find the report page, Review suggested pages, Add the website, Find the policy). The daily gap research takes 25 companies a day from the top of this queue.
+### 6.8 Publication dates (from 24 Oct 2026)
+When was a key report published? `pub_date` holds the answer as far as the evidence goes, `pub_date_precision` says day or month, `pub_date_source` says what decided it and `pub_date_evidence` quotes the sentence and page. The order, strongest first:
+
+1. **regulator filing**: the SEC or ESEF filing date;
+2. **publication**: the report says it about itself ("This report was published on 16 April 2024", "The Sustainability Report of Stadler Rail AG covers ... and was published on 19 March 2025"), or a "Publication date:" label on its first or last four pages. A date quoted for something else (a delegated act, a press release, a green bond) never counts;
+3. **board approval**: the board approved the report or authorised its financial statements for issue ("authorized for issue by the Board of Directors on February 19, 2026"). Usually the publication day or a few weeks before;
+4. **first seen**: the day the robot first saw the file on a page it was already watching, so the report was published on or before that day. Only for files first seen after 15 July 2026 (before that, everything was first seen at the initial collection).
+
+Every date must fall after the end of the period the report covers and no later than the day the robot first saw the file. To correct a date, type it and set `pub_date_source` to person: the robot then leaves the row alone. English phrases only for now; PDF metadata (the date the file was made) is a possible next source.
 
 ## 7. Pipeline QA
 
