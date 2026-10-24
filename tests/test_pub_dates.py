@@ -28,6 +28,7 @@ class Dates(unittest.TestCase):
                  (93, "According to the press release published March 13th, 2025, no evidence has been found."),
                  (44, "63rd Corporate Bonds (Green Bond) Publication date: May 29, 2025 Total issuance amount"),
                  (107, "On February 27, 2025, the Board approved and adopted amendments to the Company's Restated By-Laws.")]
+        pages.append((4, "For example, the prior 2024 Economic Impact Report, which was published April 2025, presented data."))
         pages += [(i, "Text") for i in range(1, 5)] + [(i, "Text") for i in range(200, 204)]
         self.assertIsNone(P.find_dates(pages, end, None))
 

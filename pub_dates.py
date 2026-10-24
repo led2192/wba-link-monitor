@@ -65,6 +65,7 @@ SELF = (r"(?:this|the|our)\s+(?:[\w&'’-]+\s+){0,4}?(?:report|document|publicat
         r"accounts)\b[^.]{0,220}?\b(?:was|is|has\s+been|were)\s+(?:first\s+)?(?:published|released|issued|made\s+available)"
         r"(?:\s+(?:on|in))?\s*")
 PUBLISHED = re.compile(SELF + r"(?:" + DATE + ")", re.I)
+OTHER_REPORT = re.compile(r"\b(?:prior|previous|preceding|last\s+year['’]?s?|next|upcoming|first)\b", re.I)
 LABEL = re.compile(r"(?:date\s+of\s+publication|publication\s+date|published|release\s+date)\s*[:\-–]\s*(?:" + DATE + ")", re.I)
 COLOPHON_PAGES = 4
 BOND = re.compile(r"bond|notes?\b|issuance|coupon|debenture", re.I)
@@ -142,6 +143,8 @@ def find_dates(pages, end, seen):
             for m in rx.finditer(text):
                 if rx is LABEL and BOND.search(text[max(0, m.start() - 120):m.end() + 60]):
                     continue
+                if rx is PUBLISHED and OTHER_REPORT.search(m.group(0)[:80]):
+                    continue            # "the prior 2024 Economic Impact Report, which was published April 2024"
                 d, prec = parse(m)
                 if not plausible(d, end, seen):
                     continue
