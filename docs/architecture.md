@@ -9,7 +9,7 @@ The pipeline turns about 36,500 monitored company web pages into a library of ab
 | Airtable base **Disclosure Library** (`appXS0v6SnWdzAsY3`) | `companies` (2,000), `monitored_links` (pages), `report_library` (documents), `webpage_library` (printed pages), `mention_searches` and `mention_hits`, `base_health` (one row per day) | the scripts, and the owner through the interfaces |
 | Airtable base **Pipeline QA** (`appJQ2mRtjHjzLq9E`) | `runs`, `failures`, `labels` (the golden set), `evals` | `qa.py` from the scripts, `qa_sync.py`, the daily and weekly Claude reviews, the owner |
 | Airtable bases **Source Library 2024 / 2025** | the analysts' curated sources, with their own type and year | analysts. The pipeline only reads them |
-| Text store (GitHub release assets of a private repository) | page-by-page full text of every readable report, 2021 onwards (70,000+ documents) | `build_fulltext.py` |
+| Text store (GitHub release assets of a private repository) | page-by-page full text of every readable disclosure, 2021 onwards (every type since 24 Oct 2026; about 4 GB compressed before the wider scope) | `build_fulltext.py` |
 | `state/` in this repository | tombstones of deleted documents and pages, the hand-deletion archive | `purge_discarded.py`, `inbox.py` |
 | Actions cache | the probe cache (`state/probe_cache.tsv.gz`) | `doc_probe.py` |
 
