@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-evidence_chunks.py: cut the full text of the key reports into passages and tag each passage as evidence on
-climate, nature or social, by measurement area (planning, implementation, performance) and integration
+evidence_chunks.py: cut the full text of the reports into passages and tag each passage as evidence on
+climate, nature, social or financial data, by measurement area (planning, implementation, performance) and integration
 aspect, following the grid of WBA's Integrated Transition Assessment white paper (September 2026,
 Appendix D, Table D.1). Owner's request, 24 Oct 2026: a first step towards a later information-extraction
 tool; nothing here scores a company.
 
-Scope: documents in the full-text store whose type is a sustainability-family, annual, integrated or 10-K
-report (or a registration document) with year 2024 or later, not discarded, not yet tagged with the current
+Scope: documents in the full-text store whose type is a report of any kind (sustainability family, annual,
+integrated, 10-K, registration document, financial statement, interim report, presentation, single-topic
+report) with year 2024 or later, not discarded, not yet tagged with the current
 lexicon version (or every one with --all).
 
 Passages: each page is split into sentences and the sentences are grouped into passages of about
@@ -39,7 +40,8 @@ from monitor_core import airtable_request
 
 API = "https://api.airtable.com/v0"
 TYPES = {"Sustainability Report", "ESG Report", "CSR Report", "Integrated Report", "Impact Report", "Annual Report",
-         "10K Form", "Registration Document"}
+         "10K Form", "Registration Document", "Financial Statement", "Interim Reports", "Company Presentations",
+         "Climate Report", "Environmental Reports", "Social Reports", "CDP Report", "GRI", "SASB Index"}
 YEAR_MIN = 2024
 TARGET_WORDS = 120
 MAX_CHARS = 1800
@@ -183,13 +185,13 @@ def tag_document(lex, lid, pages):
 
 def profile(summary):
     parts = []
-    for d in ("climate", "nature", "social"):
+    for d in ("climate", "nature", "social", "financial"):
         n = summary["by_dim"].get(d, 0)
         if n:
-            a = summary["by_area"].get(d, {})
+            a = summary["by_area"].get(d, {}) if d != "financial" else {}
             inner = ", ".join(f"{k} {a[k]}" for k in ("planning", "implementation", "performance") if a.get(k))
             parts.append(f"{d} {n}" + (f" ({inner})" if inner else ""))
-    return " · ".join(parts) or "no climate, nature or social passages found"
+    return " · ".join(parts) or "no climate, nature, social or financial passages found"
 
 
 def rows(token, base, ver, everything):
@@ -275,7 +277,7 @@ def main():
           "By dimension: " + ", ".join(f"{k} {v:,}" for k, v in totals.most_common()) + ".",
           "By area: " + ", ".join(f"{k} {v:,}" for k, v in areas.most_common()) + ".",
           "Integration aspects named: " + (", ".join(f"{k} {v:,}" for k, v in integ.most_common()) or "none") + ".", ""]
-    for d in ("climate", "nature", "social"):
+    for d in ("climate", "nature", "social", "financial"):
         for ar in ("planning", "implementation", "performance"):
             for s in samples.get((d, ar), []):
                 md.append(f"- **{d} / {ar}** {s}")

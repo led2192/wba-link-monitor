@@ -189,11 +189,13 @@ Two scores split the six checks (owner's request, 23 Oct 2026): `disclosure_comp
 `queue_score` ranks companies by how much their top problem matters (mainly missing 2024+ sustainability and annual reports); `queue_item` says the one thing to do and `queue_action` its kind (Find the report, Find the report (site blocks robot), Find the report page, Review suggested pages, Add the website, Find the policy). The daily gap research takes 25 companies a day from the top of this queue.
 
 ### 6.6 Evidence passages (from 24 Oct 2026)
-A first step towards extracting information for the Integrated Transition Assessment. Every 2024+ annual, integrated or sustainability-family report with full text is cut into passages of about 120 words (never across pages), and a passage is kept as evidence when it names at least three distinct phrases of one dimension, or two from two different topics of it. The phrases follow the white paper's grid (Appendix D, Table D.1):
+A first step towards extracting information for the Integrated Transition Assessment. Every 2024+ report with full text (annual, integrated, sustainability family, financial statements, interim reports, presentations, single-topic reports) is cut into passages of about 120 words (never across pages), and a passage is kept as evidence when it names at least three distinct phrases of one dimension, or two from two different topics of it. The phrases follow the white paper's grid (Appendix D, Table D.1):
 
 | | Climate | Nature | Social |
 | --- | --- | --- | --- |
 | Topics | targets, emissions, transition plan, decarbonisation levers, climate finance, climate risk | dependencies and impacts (TNFD), biodiversity, land and forests, water, pollution, mitigation hierarchy | human rights, living wage, health and safety, grievance and remedy, affected stakeholders, equity, just transition, responsible AI |
+
+A fourth group, **financial** (since 24 Oct 2026), holds income (revenue, EBITDA, net income), balance sheet, investment (capex, R&D, acquisitions, dividends), structure (subsidiaries, segments, employees, stores) and reporting words, for figures such as revenue and employees that may come from any kind of report.
 
 Each passage also gets an area (planning: targets, commitments, governance; implementation: actions, investment, due diligence, engagement; performance: a stated quantity or change), the integration aspects it names (strategy coverage, integrated governance, cross-dimension, value chain, AI and digital) and its page. Passages live in the private text store; `evidence_profile` on the document says how many there are per dimension and area. Running page headers and contents pages are dropped. The lexicon is `evidence_terms.json`: change a phrase there and every document is tagged again. Nothing here scores a company; it is the index a later extraction tool will read from. English phrases only for now.
 

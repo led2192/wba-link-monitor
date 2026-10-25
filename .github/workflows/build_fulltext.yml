@@ -48,9 +48,11 @@ on:
         default: false
 
 env:
-  # What the NIGHTLY run reads. Blank = report and policy families. If you ever backfill with
-  # types = all, set this to "all" as well so the nightly run keeps that wider scope current.
-  NIGHTLY_TYPES: ""
+  # What the NIGHTLY run reads. "all" since 24 Oct 2026 (owner's decision): every attached disclosure,
+  # including 10-K, registration documents, financial statements, interim reports and presentations,
+  # because the evidence library needs every disclosure in full, not only the report families.
+  # The backlog this adds is read over the following nights (each shard stops inside its budget).
+  NIGHTLY_TYPES: "all"
   NIGHTLY_YEAR_MIN: "2021"
 
 concurrency:
