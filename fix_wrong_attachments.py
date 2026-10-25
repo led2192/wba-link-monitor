@@ -12,7 +12,8 @@ cover_status = not_pdf, but nothing tried again, because the row looked attached
 takes rows with no file, and the office-network runner only rows with file_status = blocked.
 
 This job takes rows that are not discarded, have a file, have cover_status = not_pdf, whose attachment
-Airtable typed as a web page (text/html) and whose address looks like a PDF (.pdf in the path). For each it
+Airtable typed as a web page, a JSON error or an image (what servers send instead of a file), and whose
+address looks like a PDF (.pdf in the path). For each it
 removes the wrong attachment, sets file_status = blocked (so the office-network runner tries it from an
 ordinary connection, with the browser pass), clears cover_status (so the cover is read again once a real
 file arrives) and explains it in retry_note. Attachments of other kinds (spreadsheets, Word files, images)
@@ -42,13 +43,17 @@ def verdict(f):
     """'web_page' (a page stored as the PDF: fix it), 'other_file' (a real non-PDF file: leave it), or None."""
     att = (f.get("file") or [{}])[0]
     kind = (att.get("type") or "").lower()
-    if kind.startswith("text/html") or kind == "application/xhtml+xml":
-        return "web_page" if looks_like_pdf_address(f.get("document_url")) else "other_file"
+    # what a server sends when it is not sending the file: a page, an error in JSON, a picture of a wall
+    answer = (kind.startswith("text/html") or kind == "application/xhtml+xml" or kind.startswith("application/json")
+              or kind.startswith("image/") or kind.startswith("text/plain"))
+    if answer and looks_like_pdf_address(f.get("document_url")):
+        return "web_page"
     return "other_file"
 
 
-def note_for(today, size):
-    return (f"{today}: the site served a web page ({size / 1024:.0f} KB of HTML) instead of the PDF; the wrong "
+def note_for(today, size, kind="text/html"):
+    what = "HTML" if "html" in kind else kind
+    return (f"{today}: the site served something else ({size / 1024:.0f} KB of {what}) instead of the PDF; the wrong "
             f"attachment was removed and the file goes to the office-network runner")
 
 
@@ -86,7 +91,7 @@ def main():
         if v == "web_page":
             hosts[urlsplit(f.get("document_url") or "").netloc.lower()] += 1
             ups.append({"id": r["id"], "fields": {"file": [], "file_status": "blocked", "cover_status": None,
-                                                  "retry_note": note_for(today, att.get("size") or 0)}})
+                                                  "retry_note": note_for(today, att.get("size") or 0, (att.get("type") or "").lower())}})
         else:
             other_kinds[(att.get("type") or "unknown").lower()] += 1
     md = ["### Attachments that are not the PDF" + ("" if a.commit else " (dry run)"), "",

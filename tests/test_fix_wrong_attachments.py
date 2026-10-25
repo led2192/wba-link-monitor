@@ -20,6 +20,10 @@ class Verdict(unittest.TestCase):
         self.assertEqual(F.verdict({"document_url": "https://x.com/report-page",
                                     "file": [{"filename": "page.html", "type": "text/html"}]}), "other_file")
 
+    def test_json_errors_and_images_at_a_pdf_address(self):
+        for kind in ("application/json", "image/jpeg", "text/plain"):
+            self.assertEqual(F.verdict({"document_url": "https://x.com/report.pdf", "file": [{"type": kind}]}), "web_page")
+
     def test_note(self):
         self.assertIn("210 KB of HTML", F.note_for("2026-10-25", 215327))
 
