@@ -57,3 +57,6 @@ Tesseract starts several threads per page by default. With 4 OCR workers on a 4-
 
 ## GitHub skips scheduled runs when it is busy
 On 24 Oct 2026 the office-network workflow (cron every 4 hours) got only two of its four runs: GitHub never created the others. A job that must run often on a self-hosted runner should repeat inside one long job (`pc_fetch.py --repeat-hours 22 --every-minutes 120`) and keep the schedule only as the fallback. Cloud jobs in the nightly chain are safe because they are chained on each other (workflow_run), not scheduled one by one.
+
+## A 200 answer is not a file
+Some sites answer a request for a PDF with their home page and status 200. Airtable's own URL fetch then stores the page under the PDF's name, and the row looks attached: on 25 Oct 2026, 79 Asian Development Bank documents held the same 215 KB copy of adb.org's home page (adb-financial-report-2025.pdf, adb-sustainability-report-2024.pdf...). Build cover text marked them not_pdf, but no retry job looked at rows that already had a file. Check the attachment's type, not only its presence; `fix_wrong_attachments.py` now sends such rows back to be fetched.
