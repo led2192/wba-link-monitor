@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-25 Attachments that are a web page instead of the PDF (Airtable stored a site's home page under the PDF's name, as on 79 ADB documents) lose the wrong attachment and go to the office-network runner; new `fix_wrong_attachments.py`, nightly after Build cover text (#PR)
 - 2026-10-24 OCR of scanned PDFs: up to 8,000 a night instead of 1,000; the first manual run after the fixes read 595 of 600 in 20 minutes, so the backlog of about 12,500 clears in about two nights (#71)
 - 2026-10-24 Office-network runner: one job repeats the fetch every 2 hours for 22 hours (`--repeat-hours`, `--every-minutes`), because GitHub skipped two of the four scheduled runs that day; the first full day reached 231 refused files and read 79 refused pages (#70)
 - 2026-10-24 Evidence passages: 2024+ key reports are cut into passages tagged climate, nature or social, by planning, implementation and performance and by integration aspect, following the Integrated Transition Assessment white paper (Table D.1); passages go to the private text store, `evidence_profile` and `evidence_version` to report_library; new `evidence_chunks.py` and `evidence_terms.json`, nightly after Full text (#69)
