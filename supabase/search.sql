@@ -3,6 +3,9 @@
 -- The tables stay closed (row level security, no policy): the page reaches the data only through these
 -- functions, which check who is asking first. Safe to run again.
 
+-- Documents with no company are out of the library's current scope (discarded since their text was read:
+-- duplicates, wrong rows): the store keeps their text, the searches leave them out.
+
 -- Who may search: a signed-in user with a WBA address, or an address listed in search_access (added by
 -- the owner in the SQL editor: insert into search_access (email) values ('name@example.com');).
 -- A direct database session (the loader, the checks) may too.
@@ -50,6 +53,7 @@ begin
       from public.pages p
       join public.documents d on d.library_id = p.library_id
       where public.page_words(p.body) @@ tsq
+        and d.company is not null
         and (company_filter is null or d.company ilike '%' || company_filter || '%' or d.wba_id = company_filter)
         and (year_from is null or d.year >= year_from)
         and (year_to is null or d.year <= year_to)
@@ -92,6 +96,7 @@ begin
       from public.pages p
       join public.documents d on d.library_id = p.library_id
       where public.page_words(p.body) @@ tsq
+        and d.company is not null
         and (company_filter is null or d.company ilike '%' || company_filter || '%' or d.wba_id = company_filter)
         and (year_from is null or d.year >= year_from)
         and (year_to is null or d.year <= year_to)
@@ -124,6 +129,7 @@ begin
     from public.passages ps
     join public.documents d on d.library_id = ps.library_id
     where (numnode(tsq) = 0 or public.page_words(ps.body) @@ tsq)
+      and d.company is not null
       and (dim is null or dim = any(ps.dims))
       and (company_filter is null or d.company ilike '%' || company_filter || '%' or d.wba_id = company_filter)
       and (year_from is null or d.year >= year_from)
