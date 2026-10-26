@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-26 Publication dates: a 10-K, 20-F or 40-F from a company's own site is dated by its SEC filing (EDGAR, by accession number or period of report), else by the date under the registrant's signature (new source value `signature`); "first seen" counts only on a page watched for at least 14 days and when the file's own dates are not more than 30 days older (Macy's 10-K for January 2026: first seen 18 July 2026, filed 27 March 2026). About 280 key reports are SEC forms without a filing date today (#95)
 - 2026-10-26 Interfaces: new Hoy (key reports, queue, health over time, publication months), Empresas (one company list with gap tabs) and Páginas (pages to check and scan), built alongside the old ones for the owner to compare and remove; fields `key_role` and `pub_month` on report_library; first measurement of when key reports are published in `docs/guide.md` 6.9 (#94)
 - 2026-10-26 Docs: `docs/evidence.md` (the evidence database: layers, tables, searching and access, how it is kept current, setup, the gold evaluation, what comes next), the README index, and runbook sections on searching and on re-dating after a rule change (#93)
 - 2026-10-26 Document years, `redo_future`: a row the rules can no longer date is blanked instead of keeping its wrong year (the dry run of 26 Oct left 145 of 809 rows at 2027 because nothing else was found; blank lets the year formula use its other sources) (#92)

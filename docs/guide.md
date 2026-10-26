@@ -216,10 +216,11 @@ The overview the owner asked for: for every company, do we hold the long annual 
 ### 6.8 Publication dates (from 24 Oct 2026)
 When was a key report published? `pub_date` holds the answer as far as the evidence goes, `pub_date_precision` says day or month, `pub_date_source` says what decided it and `pub_date_evidence` quotes the sentence and page. The order, strongest first:
 
-1. **regulator filing**: the SEC or ESEF filing date;
+1. **regulator filing**: the SEC or ESEF filing date, also for a 10-K, 20-F or 40-F downloaded from the company's own site (the SEC filing of the same period is looked up, from 27 Oct 2026);
+1. **signature**: a 10-K, 20-F or 40-F with no filing found: the date under the registrant's signature, usually the filing day;
 2. **publication**: the report says it about itself ("This report was published on 16 April 2024", "The Sustainability Report of Stadler Rail AG covers ... and was published on 19 March 2025"), or a "Publication date:" label on its first or last four pages. A date quoted for something else (a delegated act, a press release, a green bond) never counts;
 3. **board approval**: the board approved the report or authorised its financial statements for issue ("authorized for issue by the Board of Directors on February 19, 2026"). Usually the publication day or a few weeks before;
-4. **first seen**: the day the robot first saw the file on a page it was already watching, so the report was published on or before that day. Only for files first seen after 15 July 2026 (before that, everything was first seen at the initial collection).
+4. **first seen**: the day the robot first saw the file on a page it was already watching, so the report was published on or before that day. Only for files first seen after 15 July 2026 (before that, everything was first seen at the initial collection), on a page watched for at least 14 days, and whose own file dates are not more than 30 days older. Macy's 10-K for January 2026 had first seen 18 July 2026 while EDGAR says filed 27 March 2026: the robot had found an old file, which is why these conditions exist.
 
 Every date must fall after the end of the period the report covers and no later than the day the robot first saw the file. To correct a date, type it and set `pub_date_source` to person: the robot then leaves the row alone. English phrases only for now; PDF metadata (the date the file was made) is a possible next source.
 

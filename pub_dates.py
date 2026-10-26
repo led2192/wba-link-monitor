@@ -9,7 +9,16 @@ statements whose year is 2023 or later, not discarded.
 Evidence, strongest first (the first that applies decides; all dates must fall after the end of the
 period the report covers and no later than the day the robot first saw the document):
     1 regulator filing   the filing date the SEC or ESEF database gives (regulator_filings.py notes it as
-                         "filed YYYY-MM-DD" in Reviewer notes): the publication date itself.
+                         "filed YYYY-MM-DD" in Reviewer notes): the publication date itself. Also for a 10-K,
+                         20-F or 40-F taken from the company's own site (26 Oct 2026: Macy's 10-K for the
+                         year ended 31 January 2026, hosted on its investor site, was dated by first seen,
+                         18 July 2026; EDGAR says filed 27 March 2026): the company's SEC filings (CIK from
+                         the address or companies.sec_cik) are read and the original annual filing whose
+                         period of report is the document's period end, or whose accession number the
+                         address or title names, gives the date.
+    1b signature         a 10-K, 20-F or 40-F with no filing found: the date under the registrant's
+                         signature ("has duly caused this report to be signed on its behalf ... Date: March
+                         27, 2026"), which is the filing day or a day or two before.
     2 publication        the document says so: "Date of publication: 4 March 2025", "Published in March
                          2025", "This report was published on ...", "Release date ...".
     3 board approval     the date the board approved the report or authorised the financial statements
@@ -19,8 +28,13 @@ period the report covers and no later than the day the robot first saw the docum
                          (below) says by how much.
     4 first seen         the day the robot first saw the document on a page it was already watching:
                          an upper bound, used only for documents first seen after FIRST_SEEN_FROM (before
-                         that date everything was first seen at the initial collection) and within 18
-                         months of the period end.
+                         that date everything was first seen at the initial collection), within 18 months
+                         of the period end, and found on a watched page (source_page) that had been
+                         watched for at least PAGE_WATCHED_DAYS before, and not when the file's own dates
+                         (file_created, file_modified, from file_dates.py) are more than FILE_AGE_DAYS older
+                         than the day it was first seen. A file found on a page the robot had just started
+                         watching, or a file made months before the robot met it, was there before; that
+                         day says nothing about its publication.
 The text is the full text (text store) when the document is in it, else the first pages (cover_text).
 English phrases only in this first version, with day-month-year, month-day-year, ISO and "Month YYYY"
 dates.
@@ -41,9 +55,13 @@ TYPES = {"Sustainability Report", "ESG Report", "CSR Report", "Integrated Report
          "10K Form", "Registration Document", "Financial Statement"}
 YEAR_MIN = 2023
 FIRST_SEEN_FROM = dt.date(2026, 7, 15)
+PAGE_WATCHED_DAYS = 14
+FILE_AGE_DAYS = 30
 FIELDS = ["library_id", "source_type_check", "source_type", "discard", "year", "period_end", "first_seen",
-          "Reviewer notes", "pub_date", "pub_date_precision", "pub_date_source", "pub_date_evidence"]
-SOURCES = {1: "regulator filing", 2: "publication", 3: "board approval", 4: "first seen"}
+          "Reviewer notes", "document_url", "doc_label", "wba_id", "source_page", "file_created", "file_modified",
+          "pub_date", "pub_date_precision", "pub_date_source", "pub_date_evidence"]
+SOURCES = {1: "regulator filing", 5: "signature", 2: "publication", 3: "board approval", 4: "first seen"}
+ORDER = (1, 5, 2, 3, 4)          # strongest first; 5 (signature) was added later, hence the number
 
 MONTHS = {m: i for i, m in enumerate(["january", "february", "march", "april", "may", "june", "july", "august",
                                       "september", "october", "november", "december"], 1)}
@@ -104,6 +122,14 @@ SPAN_OTHER = re.compile(r"interest|bond|accrual|coupon|dividend|term\s+of\s+offi
 # "for the year ended 31 March 2026": past tense only; "year ending March 2026" is usually a forecast.
 YEAR_ENDED = re.compile(r"\byear\s+ended\s+(?:on\s+)?(?:" + DATE + ")", re.I)
 FILED = re.compile(r"\(filed (20\d\d-\d\d-\d\d)\)")
+# SEC filings named in a document's address or title: the company (CIK) and the filing (accession number).
+CIK_IN_URL = re.compile(r"(?:CIK[-_=]?|/edgar/data/)0*(\d{1,10})(?!\d)", re.I)
+ACCESSION = re.compile(r"(?<!\d)(\d{10})-?(\d{2})-?(\d{6})(?!\d)")
+SEC_COVER = re.compile(r"securities\s+and\s+exchange\s+commission.{0,600}?form\s+(10-k|20-f|40-f)\b", re.I | re.S)
+SEC_FORMS = {"10-K", "20-F", "40-F"}
+# "the registrant has duly caused this report to be signed on its behalf by the undersigned ... Date: March 27, 2026"
+SIGNED = re.compile(r"duly\s+caused(?:\s+and\s+authori[sz]ed)?\s+(?:this\s+(?:annual\s+)?report\s+to\s+be\s+signed|the\s+undersigned\s+to\s+sign)", re.I)
+SIGNED_DATE = re.compile(r"\bDated?\s*:?\s*(?:" + DATE + ")", re.I)
 KEYWORDS = re.compile(r"publi|release|issue|authori|approved", re.I)
 
 
@@ -237,8 +263,78 @@ def doc_year(f):
         return None
 
 
-def decide(f, pages, seen):
-    """(tier, date, precision, evidence) for one row, or None."""
+def is_sec_form(f, pages):
+    if eff_type(f) == "10K Form":
+        return True
+    first = " ".join(t for p, t in sorted(pages)[:3] if t)
+    return bool(SEC_COVER.search(first[:20000]))
+
+
+def sec_cik(f, company_cik=None):
+    m = CIK_IN_URL.search(f.get("document_url") or "")
+    if m:
+        return str(int(m.group(1)))
+    return company_cik if company_cik and company_cik != "none" else None
+
+
+def sec_match(f, end, filings, seen):
+    """(date, evidence) of the SEC annual filing this document is, or None. filings: [(form, accession,
+    report_date, filing_date)] of the company. The accession number in the address or title decides when
+    there is one; else the original annual filing whose period of report is in the same month as the period
+    end."""
+    if not filings:
+        return None
+    named = {"".join(m.groups()) for m in ACCESSION.finditer(f"{f.get('document_url') or ''} {f.get('doc_label') or ''}")}
+    pick = None
+    for form, acc, rep_date, filed in filings:
+        if named and acc.replace("-", "") in named:
+            pick = (form, acc, rep_date, filed); break
+    if pick is None and end and end.month and end.day > 1:
+        for form, acc, rep_date, filed in filings:
+            if form in SEC_FORMS and rep_date and rep_date[:7] == end.isoformat()[:7]:
+                pick = (form, acc, rep_date, filed); break
+    if pick is None:
+        return None
+    form, acc, rep_date, filed = pick
+    try:
+        d = dt.date.fromisoformat(filed[:10])
+    except ValueError:
+        return None
+    if end and d <= end or seen and d > seen:
+        return None
+    return d, f"SEC EDGAR: Form {form} for the period ended {rep_date}, filed {filed[:10]} (accession {acc})"
+
+
+def signed_date(pages, end, seen):
+    """(date, precision, evidence) under the registrant's signature in a 10-K / 20-F / 40-F, or None."""
+    for p, text in pages:
+        if not text:
+            continue
+        for m in SIGNED.finditer(text):
+            window = text[m.end():m.end() + 1500]
+            dm = SIGNED_DATE.search(window)
+            if not dm:
+                continue
+            d, prec = parse(dm)
+            if prec == "day" and plausible(d, end, seen):
+                return d, prec, f"p.{p}: {sentence(window, dm.start(), dm.end())[:200]}"
+    return None
+
+
+def file_older_than_seen(f, seen):
+    """True when the PDF's own latest date is more than FILE_AGE_DAYS before the day the robot first saw it."""
+    dates = []
+    for k in ("file_created", "file_modified"):
+        try:
+            dates.append(dt.date.fromisoformat(str(f.get(k) or "")[:10]))
+        except ValueError:
+            pass
+    return bool(dates) and (seen - max(dates)).days > FILE_AGE_DAYS
+
+
+def decide(f, pages, seen, filings=None, page_added=None):
+    """(tier, date, precision, evidence) for one row, or None. filings: the company's SEC filings when the
+    row is a 10-K, 20-F or 40-F (sec_match); page_added: the day its source page started being watched."""
     end = period_end_date(f.get("period_end"), f.get("year"))
     if not re.match(r"^20\d\d-\d\d", str(f.get("period_end") or "")):
         stated = stated_period_end(pages, doc_year(f), seen)
@@ -248,10 +344,20 @@ def decide(f, pages, seen):
     if m:
         d = dt.date.fromisoformat(m.group(1))
         return 1, d, "day", "filing date in the regulator database"
+    if filings:
+        hit = sec_match(f, end, filings, seen)
+        if hit:
+            return 1, hit[0], "day", hit[1]
+    if is_sec_form(f, pages):
+        hit = signed_date(pages, end, seen)
+        if hit:
+            return (5,) + hit
     hit = find_dates(pages, end, seen, doc_year(f))
     if hit:
         return hit
-    if seen and seen >= FIRST_SEEN_FROM and end and 0 < (seen - end).days <= 548:
+    if (seen and seen >= FIRST_SEEN_FROM and end and 0 < (seen - end).days <= 548
+            and page_added and (seen - page_added).days >= PAGE_WATCHED_DAYS
+            and not file_older_than_seen(f, seen)):
         return 4, seen, "day", "first seen by the robot on a watched page (published on or before this day)"
     return None
 
@@ -292,6 +398,55 @@ def covers(token, base, ids):
             out[r["fields"].get("library_id")] = r["fields"].get("cover_text") or ""
         time.sleep(0.2)
     return out
+
+
+def page_added_dates(token, base, page_ids):
+    """{monitored_links record id: the day the page was added (its created time)}."""
+    H = {"Authorization": f"Bearer {token}"}
+    out, ids = {}, sorted(set(page_ids))
+    for i in range(0, len(ids), 50):
+        formula = "OR(" + ",".join(f"RECORD_ID()='{x}'" for x in ids[i:i + 50]) + ")"
+        params = [("pageSize", "100"), ("filterByFormula", formula), ("fields[]", "url")]
+        j = airtable_request("GET", f"{API}/{base}/monitored_links", H, params=params).json()
+        for r in j.get("records", []):
+            out[r["id"]] = dt.date.fromisoformat(r["createdTime"][:10])
+        time.sleep(0.2)
+    return out
+
+
+def company_ciks(token, base):
+    """{wba_id: sec_cik} for companies with an SEC CIK."""
+    H = {"Authorization": f"Bearer {token}"}
+    params = [("pageSize", "100"), ("filterByFormula", "AND({sec_cik}!='', {sec_cik}!='none')"),
+              ("fields[]", "wba_id"), ("fields[]", "sec_cik")]
+    out, offset = {}, None
+    while True:
+        p = params + ([("offset", offset)] if offset else [])
+        j = airtable_request("GET", f"{API}/{base}/companies", H, params=p).json()
+        for r in j.get("records", []):
+            f = r["fields"]
+            if f.get("wba_id") and f.get("sec_cik"):
+                out[f["wba_id"]] = str(f["sec_cik"])
+        offset = j.get("offset")
+        if not offset:
+            return out
+        time.sleep(0.2)
+
+
+def sec_annual_filings(cik, sess):
+    """[(form, accession, report_date, filing_date)] of the company's recent SEC filings, annual forms first
+    in date order as EDGAR lists them (newest first). [] when EDGAR does not answer."""
+    from regulator_filings import SEC_UA
+    try:
+        r = sess.get(f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json", headers=SEC_UA, timeout=60)
+    except Exception:
+        return []
+    time.sleep(0.15)                              # SEC fair access: well under 10 requests/second
+    if not r.ok:
+        return []
+    rec = r.json().get("filings", {}).get("recent", {})
+    return [(form, acc, rep or "", filed) for form, acc, rep, filed in
+            zip(rec.get("form", []), rec.get("accessionNumber", []), rec.get("reportDate", []), rec.get("filingDate", []))]
 
 
 def read_part(path, wanted):
@@ -357,18 +512,43 @@ def main():
         texts[lid] = [(0, cover)]          # page 0 = the first pages (cover_text), not the full text
     print(f">>> text: {sum(len(v) for v in want.values()):,} full text, {len(no_text):,} first pages", flush=True)
 
+    added = page_added_dates(token, base, [x for r in lib.values() for x in (r["fields"].get("source_page") or [])])
+    ciks = company_ciks(token, base)
+    import requests
+    sess, edgar = requests.Session(), {}
+    sec_rows = 0
+
     tiers, prec, ups, gaps, samples = collections.Counter(), collections.Counter(), [], [], collections.defaultdict(list)
     changed, change_samples = collections.Counter(), []
     for lid, r in lib.items():
         f = r["fields"]
         seen = seen_date(f)
-        res = decide(f, texts.get(lid, []), seen)
+        pages = texts.get(lid, [])
+        filings = None
+        wba = f.get("wba_id")
+        wba = wba[0] if isinstance(wba, list) and wba else wba
+        cik = sec_cik(f, ciks.get(wba or ""))
+        if cik and not FILED.search(f.get("Reviewer notes") or "") and is_sec_form(f, pages):
+            if cik not in edgar:
+                edgar[cik] = sec_annual_filings(cik, sess)
+            filings = edgar[cik]
+            sec_rows += 1
+        page_added = min((added[x] for x in (f.get("source_page") or []) if x in added), default=None)
+        res = decide(f, pages, seen, filings, page_added)
         if f.get("Reviewer notes") and FILED.search(f["Reviewer notes"]):
             other = find_dates(texts.get(lid, []), period_end_date(f.get("period_end"), f.get("year")), None, doc_year(f))
             if other and other[0] == 3:
                 gaps.append((res[1] - other[1]).days)
         if not res:
             tiers["none"] += 1
+            if lid in no_text and f.get("pub_date_source") == "first seen":
+                # the first-seen date no longer qualifies and there is no full text to say "not found"
+                changed["date removed"] += 1
+                if len(change_samples) < 15:
+                    change_samples.append(f"{lid}: {f.get('pub_date')} removed (first seen on a page just added)")
+                ups.append({"id": r["id"], "fields": {"pub_date_source": None, "pub_date_precision": None,
+                                                      "pub_date": None, "pub_date_evidence": None}})
+                continue
             if lid not in no_text and f.get("pub_date_source") != "not found":
                 if f.get("pub_date"):
                     changed["date removed"] += 1
@@ -397,13 +577,14 @@ def main():
           f"Reports {YEAR_MIN}+ of the key types: {len(lib):,}. Dated: {n - tiers['none']:,} ({(n - tiers['none']) / n:.0%}); "
           f"to the day {prec['day']:,}, to the month {prec['month']:,}.", "",
           "| Evidence | Reports |", "| --- | --- |"] + \
-         [f"| {SOURCES[t]} | {tiers[SOURCES[t]]:,} |" for t in (1, 2, 3, 4)] + [f"| none | {tiers['none']:,} |", ""]
+         [f"| {SOURCES[t]} | {tiers[SOURCES[t]]:,} |" for t in ORDER] + [f"| none | {tiers['none']:,} |", "",
+          f"SEC forms checked against EDGAR: {sec_rows:,} rows of {len(edgar):,} companies.", ""]
     if gaps:
         gaps.sort()
         md += [f"Regulator filings that also state a board approval date ({len(gaps)}): filing minus approval, median "
                f"{gaps[len(gaps) // 2]} days; within 7 days {sum(1 for g in gaps if 0 <= g <= 7) / len(gaps):.0%}, "
                f"within 31 days {sum(1 for g in gaps if 0 <= g <= 31) / len(gaps):.0%}, negative {sum(1 for g in gaps if g < 0)}.", ""]
-    for t in (2, 3, 4):
+    for t in (1, 5, 2, 3, 4):
         if samples[t]:
             md += [f"Samples, {SOURCES[t]}:", ""] + [f"- {s}" for s in samples[t]] + [""]
     md += [f"Rows to write: {len(ups):,}. Dates already written that change: {changed['date changed']:,}; "
