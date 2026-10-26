@@ -60,3 +60,6 @@ On 24 Oct 2026 the office-network workflow (cron every 4 hours) got only two of 
 
 ## A 200 answer is not a file
 Some sites answer a request for a PDF with their home page and status 200. Airtable's own URL fetch then stores the page under the PDF's name, and the row looks attached: on 25 Oct 2026, 79 Asian Development Bank documents held the same 215 KB copy of adb.org's home page (adb-financial-report-2025.pdf, adb-sustainability-report-2024.pdf...). Build cover text marked them not_pdf, but no retry job looked at rows that already had a file. Check the attachment's type, not only its presence; `fix_wrong_attachments.py` now sends such rows back to be fetched.
+
+## A page type is too coarse to say a gone page is covered
+`sustainability_page` covers both a company's report library and a topic page about cocoa. On 25 Oct 2026 the gone-page repair unticked 307 of 317 gone pages without searching for a replacement, because the company had some other live page of the same type: Hanwha's sustainability report list (`/sustainability/reports.do`) was "covered" by an ESG topic page, FrieslandCampina's financial and sustainability reports page by whatever else was watched. A gone page that lists reports is now covered only by another live page that also lists reports (`discover_pages.is_listing`). Judge coverage by what the page holds, not by its type.
