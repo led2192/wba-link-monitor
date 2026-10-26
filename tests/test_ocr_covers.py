@@ -73,5 +73,32 @@ class FreshLinks(unittest.TestCase):
         self.assertEqual(O.one({"id": "rec1", "fields": {}}, 4, deadline=1)[1], "not_tried")
 
 
+
+class Languages(unittest.TestCase):
+    def test_company_language(self):
+        self.assertEqual(O.langs_for("CHN"), "eng+chi_sim")
+        self.assertEqual(O.langs_for("JPN"), "eng+jpn")
+        self.assertEqual(O.langs_for("BRA"), "eng+por")
+        self.assertEqual(O.langs_for("USA"), "eng")
+        self.assertEqual(O.langs_for(None), "eng")
+
+    def test_noise_is_not_text(self):
+        # 26 Oct 2026: a Chinese scan read with the English model, from which a false year 2016 came out
+        noise = ("WENS iEt imECBS {it AER GS) Social Responsibility Be Repor ONS10dE93E292q 29USSH GA9QOIEOOS "
+                 "LgvesgopSsqSsqps BrgoreqpepSa8op REE g8o39003Es07EsaojysoEsaorQ003 wpSzqiS saor0h ") * 6
+        self.assertFalse(O.readable(noise))
+        self.assertEqual(O.outcome(noise)[0], "no_text_ocr")
+
+    def test_real_covers(self):
+        english = ("Airtel Mobile Commerce Uganda Limited Annual Report and Financial Statements for the year ended "
+                   "31 December 2018. The directors present their report together with the audited financial "
+                   "statements of the company, which show the state of affairs of the company and its results. "
+                   "Principal activities of the company are mobile money services in Uganda, and the directors "
+                   "confirm that the financial statements give a true and fair view of the company.")
+        self.assertTrue(O.readable(english))
+        self.assertTrue(O.readable("温氏食品集团股份有限公司社会责任报告" * 6, "eng+chi_sim"))
+        self.assertFalse(O.readable("温氏食品集团股份有限公司社会责任报告" * 6, "eng"))
+
+
 if __name__ == "__main__":
     unittest.main()

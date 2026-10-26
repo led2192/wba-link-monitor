@@ -15,6 +15,10 @@ on:
       mode:
         description: "dry_run or commit"
         default: "dry_run"
+      redo:
+        description: "Read again the covers already read by OCR (own-script companies with their language; noise dropped)"
+        type: boolean
+        default: false
   pull_request:
     paths: [ocr_covers.py, .github/workflows/ocr_covers.yml]
 
@@ -32,13 +36,18 @@ jobs:
           python-version: "3.12"
       - run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q poppler-utils tesseract-ocr
+          # English plus the model of each company's home country (ocr_covers.py: NON_LATIN, LATIN)
+          sudo apt-get install -y -q poppler-utils tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
+            tesseract-ocr-jpn tesseract-ocr-kor tesseract-ocr-rus tesseract-ocr-ukr tesseract-ocr-tha tesseract-ocr-heb \
+            tesseract-ocr-ell tesseract-ocr-ara tesseract-ocr-deu tesseract-ocr-fra tesseract-ocr-spa tesseract-ocr-por \
+            tesseract-ocr-ita tesseract-ocr-nld tesseract-ocr-vie tesseract-ocr-tur tesseract-ocr-ind tesseract-ocr-pol \
+            tesseract-ocr-swe tesseract-ocr-nor tesseract-ocr-dan tesseract-ocr-fin
       - run: pip install -r requirements.txt
       - name: Read scanned covers
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 25"
           elif [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--limit 8000 --pages 4 --minutes 290 --commit"
-          else ARGS="--limit ${{ inputs.limit }} --pages 4 --minutes 290"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; fi
+          else ARGS="--limit ${{ inputs.limit }} --pages 4 --minutes 290"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; [ "${{ inputs.redo }}" = "true" ] && ARGS="$ARGS --redo"; fi
           python ocr_covers.py $ARGS
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
