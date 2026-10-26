@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-26 Evidence database search: `supabase/search.sql` adds search_pages, search_summary and search_passages (word and phrase search in every language, newest first, highlighted extracts, filters by company, year and type), open only to signed-in WBA addresses and addresses listed in search_access; a word index on passages; `search_check.py` times sample searches (#86)
 - 2026-10-26 File dates: `file_dates.py` (File dates, daily 03:17, newest first) reads the creation and modification dates written inside each key report's PDF into report_library file_created, file_modified, file_dates_from; a clue for the publication date of reports that state none, used by Publication dates in a following pull request (#85)
 - 2026-10-26 Evidence database, schema and first load: `load_supabase.py` (Evidence database load, every 6 hours) copies the full-text store into Supabase (documents, pages, evidence passages, plus an empty datapoints table for extraction), only what is new each run, and builds a word index in every language once the backlog is in; stops at SUPABASE_MAX_GB so the disk never fills (#83)
 - 2026-10-26 Evidence database: `supabase_check.py` and the Supabase check workflow test, read-only, that the Supabase project answers with the three SUPABASE_* secrets (session pooler address, Postgres, vector and pg_trgm extensions, REST API and secret-level key) before anything is loaded (#82)

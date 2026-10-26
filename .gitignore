@@ -9,3 +9,7 @@ coverage_compare.md
 blocked_probe.csv
 blocked_probe.md
 year_eval.md
+load_supabase.md
+search_check.md
+supabase_check.md
+file_dates.md

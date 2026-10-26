@@ -32,6 +32,7 @@ import qa
 import text_core as tc
 
 SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "supabase", "schema.sql")
+SEARCH_SQL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "supabase", "search.sql")
 EVIDENCE = re.compile(r"^evidence-(\d{8}T\d{6})\.jsonl\.gz$")
 EVIDENCE_DOCS = re.compile(r"^evidence-docs-(\d{8}T\d{6})\.jsonl\.gz$")
 MAX_BODY = 1_000_000                       # characters of one page or passage kept
@@ -120,9 +121,12 @@ def loaded_names(conn):
 
 
 def apply_schema(conn, commit):
-    sql = open(SCHEMA, encoding="utf-8").read()
+    """schema.sql, then search.sql where Supabase's auth schema exists (it is not in a plain Postgres)."""
     with conn.cursor() as c:
-        c.execute(sql)
+        c.execute(open(SCHEMA, encoding="utf-8").read())
+        c.execute("select to_regnamespace('auth') is not null")
+        if c.fetchone()[0]:
+            c.execute(open(SEARCH_SQL, encoding="utf-8").read())
     (conn.commit if commit else conn.rollback)()
 
 
