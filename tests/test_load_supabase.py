@@ -1,0 +1,114 @@
+import os
+import tempfile
+import unittest
+
+import load_supabase as L
+import text_core as tc
+
+P1 = "20261001T000000-r1-00-001"
+P2 = "20261020T000000-r1-00-001"
+
+
+def store_files(folder):
+    """A small store: doc a extracted twice (P2 wins, with fewer pages), b once, c failed."""
+    tc.write_jsonl_gz(os.path.join(folder, f"pages-{P1}.jsonl.gz"),
+                      [{"id": "a", "p": 1, "t": "old one"}, {"id": "a", "p": 2, "t": "old two"},
+                       {"id": "a", "p": 3, "t": "old three"}, {"id": "b", "p": 1, "t": "net zero by 2050\x00"}])
+    tc.write_jsonl_gz(os.path.join(folder, f"docs-{P1}.jsonl.gz"),
+                      [{"id": "a", "rec": "recA", "status": "ok", "pages": 3, "chars": 21, "at": "2026-10-01"},
+                       {"id": "b", "rec": "recB", "status": "ok", "pages": 1, "chars": 16, "at": "2026-10-01"}])
+    tc.write_jsonl_gz(os.path.join(folder, f"pages-{P2}.jsonl.gz"),
+                      [{"id": "a", "p": 1, "t": "new one"}, {"id": "a", "p": 2, "t": "new two"}])
+    tc.write_jsonl_gz(os.path.join(folder, f"docs-{P2}.jsonl.gz"),
+                      [{"id": "a", "rec": "recA", "status": "ok", "pages": 2, "chars": 14, "at": "2026-10-20"},
+                       {"id": "c", "rec": "recC", "status": "no_text", "pages": 4, "chars": 0, "at": "2026-10-20"}])
+    # an interrupted flush: pages without its docs file
+    tc.write_jsonl_gz(os.path.join(folder, "pages-20261021T000000-r1-00-001.jsonl.gz"), [{"id": "z", "p": 1, "t": "x"}])
+    tc.write_jsonl_gz(os.path.join(folder, "meta-20261020T000000.jsonl.gz"),
+                      [{"id": "a", "rec": "recA", "wba": "WBA1", "co": "Acme", "type": "Annual Report", "year": 2025,
+                        "lang": "en", "label": "Acme AR 2025", "url": "https://acme.com/ar.pdf", "pages": 2}])
+    tc.write_jsonl_gz(os.path.join(folder, "evidence-20261021T010000.jsonl.gz"),
+                      [{"id": "b", "p": 1, "n": 0, "dims": ["climate"], "terms": {"climate": ["net zero"]},
+                        "topics": {"climate": ["targets"]}, "area": "planning", "integration": [], "number": True,
+                        "t": "net zero by 2050"},
+                       {"id": "q", "p": 1, "n": 0, "dims": ["social"], "t": "not in the store"}])
+    tc.write_jsonl_gz(os.path.join(folder, "evidence-docs-20261021T010000.jsonl.gz"),
+                      [{"id": "b", "passages": 1, "v": "lex1"}, {"id": "q", "passages": 1, "v": "lex1"}])
+    # an evidence run still uploading (no docs file yet)
+    tc.write_jsonl_gz(os.path.join(folder, "evidence-20261022T010000.jsonl.gz"), [])
+
+
+class Planning(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        store_files(self.dir)
+        self.listing = tc.LocalStore(self.dir).assets()
+
+    def test_plan_skips_incomplete_and_loaded_files(self):
+        pages, ev = L.plan(self.listing, set())
+        self.assertEqual(pages, [f"pages-{P1}.jsonl.gz", f"pages-{P2}.jsonl.gz"])
+        self.assertEqual([e[0] for e in ev], ["20261021T010000"])
+        pages, ev = L.plan(self.listing, {f"pages-{P1}.jsonl.gz", "evidence-20261021T010000.jsonl.gz"})
+        self.assertEqual(pages, [f"pages-{P2}.jsonl.gz"])
+        self.assertEqual(ev, [])
+
+    def test_evidence_docs_file_is_not_taken_for_a_passages_file(self):
+        self.assertEqual(L.evidence_files(["evidence-docs-20261021T010000.jsonl.gz"]), [])
+
+    def test_only_the_newest_text_of_a_document_is_copied(self):
+        docs, _ = tc.complete_parts(self.listing)
+        index = tc.load_docs_index(self.dir, docs)
+        old = list(L.current_pages(tc.read_jsonl_gz(os.path.join(self.dir, f"pages-{P1}.jsonl.gz")), index, P1))
+        self.assertEqual(old, [("b", 1, "net zero by 2050")])     # a's old pages skipped, NUL removed
+        new = list(L.current_pages(tc.read_jsonl_gz(os.path.join(self.dir, f"pages-{P2}.jsonl.gz")), index, P2))
+        self.assertEqual([r[:2] for r in new], [("a", 1), ("a", 2)])
+
+    def test_document_row(self):
+        row = L.document_row({"id": "a", "rec": "recA", "status": "ok", "pages": 2, "chars": 14, "at": "2026-10-20",
+                              "part": P2}, {"wba": "WBA1", "co": "Acme", "type": "Annual Report", "year": "2025"})
+        self.assertEqual(row[:6], ("a", "recA", "WBA1", "Acme", "Annual Report", 2025))
+        self.assertEqual(row[11:13], ("ok", P2))
+        self.assertIsNone(L.document_row({"id": "c", "status": "no_text"}, {})[2])
+
+
+@unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres to run")
+class AgainstPostgres(unittest.TestCase):
+    """End to end on a local Postgres without pgvector: the vector column becomes real[]."""
+
+    def test_load_twice(self):
+        import psycopg
+        d = tempfile.mkdtemp()
+        store_files(d)
+        schema = open(L.SCHEMA).read()
+        schema = "\n".join(l for l in schema.splitlines() if "extension if not exists vector" not in l)
+        schema = schema.replace("extensions.vector(1024)", "real[]")
+        L.SCHEMA = os.path.join(d, "schema.sql"); open(L.SCHEMA, "w").write(schema)
+        url = os.environ["PG_TEST_URL"]
+        with psycopg.connect(url) as c:
+            c.execute("drop table if exists public.datapoints, public.passages, public.pages, public.documents, "
+                      "public.load_log cascade")
+        os.environ.update({"SUPABASE_DB_URL": url, "TEXT_STORE_DIR": os.path.join(d, "store")})
+        os.makedirs(os.environ["TEXT_STORE_DIR"])
+        for n in os.listdir(d):
+            if n.endswith(".gz"):
+                os.rename(os.path.join(d, n), os.path.join(d, "store", n))
+        import sys
+        for _ in range(2):                                  # the second run must change nothing
+            sys.argv = ["load_supabase.py", "--commit", "--index", "--max-gb", "50"]
+            L.main()
+        with psycopg.connect(url) as c:
+            pages = c.execute("select library_id, page, body from public.pages order by 1, 2").fetchall()
+            self.assertEqual(pages, [("a", 1, "new one"), ("a", 2, "new two"), ("b", 1, "net zero by 2050")])
+            self.assertEqual(c.execute("select count(*) from public.documents").fetchone()[0], 3)
+            self.assertEqual(c.execute("select company, year from public.documents where library_id='a'").fetchone(),
+                             ("Acme", 2025))
+            self.assertEqual(c.execute("select library_id, dims, lexicon from public.passages").fetchall(),
+                             [("b", ["climate"], "lex1")])
+            hit = c.execute("select library_id from public.pages where public.page_words(body) @@ "
+                            "plainto_tsquery('simple', 'net zero')").fetchall()
+            self.assertEqual(hit, [("b",)])
+            self.assertEqual(c.execute("select count(*) from public.load_log").fetchone()[0], 3)
+
+
+if __name__ == "__main__":
+    unittest.main()

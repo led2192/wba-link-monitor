@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-26 Evidence database, schema and first load: `load_supabase.py` (Evidence database load, every 6 hours) copies the full-text store into Supabase (documents, pages, evidence passages, plus an empty datapoints table for extraction), only what is new each run, and builds a word index in every language once the backlog is in; stops at SUPABASE_MAX_GB so the disk never fills (#83)
 - 2026-10-26 Evidence database: `supabase_check.py` and the Supabase check workflow test, read-only, that the Supabase project answers with the three SUPABASE_* secrets (session pooler address, Postgres, vector and pg_trgm extensions, REST API and secret-level key) before anything is loaded (#82)
 - 2026-10-26 OCR reads each scan with English plus the company's home-country language (Chinese, Japanese, Korean, Russian, Arabic, Thai and others), counts noise as no text, and `--redo` re-reads earlier own-script covers and drops earlier noise, after a Chinese scan read as noise gave Wen's Foodstuff a false year (#81)
 - 2026-10-26 Documentation conflicts between open pull requests resolve themselves: after every merge, `resolve_doc_conflicts.py` merges main into each open pull request and keeps both sides when only docs/*.md or the re-run list collide (#80)
