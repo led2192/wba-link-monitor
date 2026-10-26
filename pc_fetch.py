@@ -539,7 +539,9 @@ def repeat(argv, hours, every_minutes):
         n += 1
         t0 = time.time()
         print(f">>> run {n} at {time.strftime('%H:%M')}", flush=True)
-        r = subprocess.run([sys.executable, os.path.abspath(__file__)] + argv)
+        # each run gets its own Pipeline QA row: without a part number every run of the 22-hour job
+        # overwrote the same row (run key = workflow + GitHub run id)
+        r = subprocess.run([sys.executable, os.path.abspath(__file__)] + argv, env={**os.environ, "QA_RUN_PART": str(n)})
         print(f">>> run {n} ended with code {r.returncode} after {(time.time() - t0) / 60:.0f} min", flush=True)
         wait = repeat_plan(start, time.time(), hours, every_minutes)
         if wait is None:
