@@ -1,0 +1,36 @@
+name: Resolve documentation conflicts
+
+# After every push to main (a merged pull request), open pull requests whose only conflicts with main are in
+# docs/*.md or the re-run list get main merged in with both sides kept (resolve_doc_conflicts.py). Code
+# conflicts are left alone and noted on the pull request. Never merges anything into main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: resolve-doc-conflicts
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # PR_UPDATE_TOKEN (optional): a fine-grained token with Contents, Workflows and Pull requests write on
+      # this repository. GitHub refuses pushes from the built-in token when the merge brings a changed
+      # workflow file into the branch, and pushes made with the built-in token do not start the branch's tests.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PR_UPDATE_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Resolve
+        env:
+          GH_TOKEN: ${{ secrets.PR_UPDATE_TOKEN || github.token }}
+        run: python resolve_doc_conflicts.py
