@@ -89,6 +89,11 @@ APPROVED = re.compile(OBJECT + r"[^.]{0,160}?(?:approved|authori[sz]ed)(?:\s+for
                       r"\b(?:on|dated)\s+(?:" + DATE + ")", re.I)
 APPROVED_BEFORE = re.compile(r"\b(?:on\s+)?(?:" + DATE + r"),?\s+the\s+(?:board|directors|supervisory\s+board)[^.]{0,40}?"
                              r"(?:approved|authori[sz]ed)\s+(?:the|these|this|our)\s+(?:[\w-]+\s+){0,3}?" + OBJECT, re.I)
+# The period the report says it covers: "for the period from 1 January to 31 December 2025", "for the period
+# 1 April 2025 to 31 March 2026", "for the year ended 31 March 2026". Its end is a floor for the publication
+# date when Airtable has no period_end (26 Oct 2026, owner's suggestion after Bank Mandiri and SSE).
+PERIOD_TO = re.compile(r"\b(?:period|year|fy)\b[^.]{0,120}?\b(?:to|until|through|till)\s+(?:" + DATE + ")", re.I)
+YEAR_ENDED = re.compile(r"\byear\s+end(?:ed|ing)\s+(?:on\s+)?(?:" + DATE + ")", re.I)
 FILED = re.compile(r"\(filed (20\d\d-\d\d-\d\d)\)")
 KEYWORDS = re.compile(r"publi|release|issue|authori|approved", re.I)
 
@@ -179,6 +184,28 @@ def find_dates(pages, end, seen, doc_year=None):
     return None
 
 
+def stated_period_end(pages, year=None, seen=None):
+    """Latest period end the text states for this report, or None. Only ends in the document's year or the
+    year after (a 2025 report covering April 2025 to March 2026), and not after the robot saw the file, so a
+    target ("for the period to 31 December 2030") or a comparative of an older year cannot move it."""
+    best = None
+    for _, text in pages:
+        if not text:
+            continue
+        for rx in (PERIOD_TO, YEAR_ENDED):
+            for m in rx.finditer(text):
+                d, prec = parse(m)
+                if not d or prec != "day":
+                    continue
+                if year and not (int(year) <= d.year <= int(year) + 1):
+                    continue
+                if seen and d >= seen:
+                    continue
+                if best is None or d > best:
+                    best = d
+    return best
+
+
 def doc_year(f):
     try:
         return int(str(f.get("year"))[:4])
@@ -189,6 +216,10 @@ def doc_year(f):
 def decide(f, pages, seen):
     """(tier, date, precision, evidence) for one row, or None."""
     end = period_end_date(f.get("period_end"), f.get("year"))
+    if not re.match(r"^20\d\d-\d\d", str(f.get("period_end") or "")):
+        stated = stated_period_end(pages, doc_year(f), seen)
+        if stated and (end is None or stated > end):
+            end = stated
     m = FILED.search(f.get("Reviewer notes") or "")
     if m:
         d = dt.date.fromisoformat(m.group(1))

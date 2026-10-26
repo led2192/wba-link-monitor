@@ -74,6 +74,20 @@ class Dates(unittest.TestCase):
 
 
 class Decide(unittest.TestCase):
+    def test_the_period_the_report_states_is_a_floor(self):
+        # no period_end in Airtable: the text's own period decides what cannot be the publication date
+        pages = [(3, "This Sustainability Report for the period 1 April 2025 to 31 March 2026 provides enhanced disclosure."),
+                 (40, "Our previous report was published in March 2026."), (41, "Published: June 2026")]
+        pages += [(i, "Text") for i in range(36, 40)]
+        self.assertEqual(P.stated_period_end(pages, 2026, None), D(2026, 3, 31))
+        self.assertEqual(P.decide({"year": 2026}, [(3, pages[0][1]), (40, "This report was published in March 2026.")], None), None)
+        self.assertEqual(P.decide({"year": 2026}, [(3, pages[0][1]), (41, "This report was published in June 2026.")], None)[:2],
+                         (2, D(2026, 6, 1)))
+        # targets and old comparatives do not move it
+        self.assertIsNone(P.stated_period_end([(9, "reduce emissions over the period to 31 December 2030")], 2025, None))
+        self.assertEqual(P.stated_period_end([(1, "for the year ended 31 December 2025 and the year ended 31 December 2024")],
+                                             2025, None), D(2025, 12, 31))
+
     def test_regulator_filing_first(self):
         f = {"Reviewer notes": "Added from the SEC regulator database (filed 2025-02-21). ", "period_end": "2024-12"}
         self.assertEqual(P.decide(f, [(1, "Published on 1 March 2025")], None)[:3], (1, D(2025, 2, 21), "day"))
