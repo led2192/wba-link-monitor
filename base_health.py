@@ -79,20 +79,30 @@ def parse_ts(s):
         return None
 
 
+def day_window(now):
+    """[start, end) of the previous calendar day in UTC, as aware datetimes like parse_ts returns."""
+    end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return end - timedelta(days=1), end
+
+
 def library_stats(now):
     s = {"live": 0, "discarded": 0, "purge_ready": 0, "new_24h": 0, "disc_24h": collections.Counter(),
          "rows": 0}
-    day_ago, purge_cut = now - timedelta(days=1), now - timedelta(days=PURGE_DAYS)
+    # "new" and "discarded" count the previous calendar day (UTC), not the last 24 hours: the job runs
+    # more than once a day at times GitHub delays by hours, and two rolling windows that overlap counted
+    # the same 2,880 documents on 25 and 26 Oct 2026. A day window counts each document exactly once.
+    day_start, day_end = day_window(now)
+    purge_cut = now - timedelta(days=PURGE_DAYS)
     for rec in sweep("report_library", ["discard", "discard_reason", "discarded_on", "verified"]):
         s["rows"] += 1
         f = rec.get("fields", {})
         ct = parse_ts(rec.get("createdTime"))
-        if ct and ct >= day_ago:
+        if ct and day_start <= ct < day_end:
             s["new_24h"] += 1
         if f.get("discard"):
             s["discarded"] += 1
             d = parse_ts(f.get("discarded_on"))
-            if d and d >= day_ago:
+            if d and day_start <= d < day_end:
                 s["disc_24h"][f.get("discard_reason") or "(no reason)"] += 1
             if d and d < purge_cut and not f.get("verified"):
                 s["purge_ready"] += 1
