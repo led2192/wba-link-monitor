@@ -1,0 +1,36 @@
+name: Supabase check
+
+# Read-only check that the evidence database (Supabase project wba-evidence) answers with the three
+# SUPABASE_* secrets (supabase_check.py). Run by hand, and on pull requests that touch it; posts the
+# result on the pull request. Writes nothing.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: [supabase_check.py, .github/workflows/supabase_check.yml]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Check Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python supabase_check.py
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s supabase_check.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file supabase_check.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Supabase check: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}

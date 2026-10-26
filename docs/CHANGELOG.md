@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-26 Evidence database: `supabase_check.py` and the Supabase check workflow test, read-only, that the Supabase project answers with the three SUPABASE_* secrets (session pooler address, Postgres, vector and pg_trgm extensions, REST API and secret-level key) before anything is loaded (#82)
 - 2026-10-26 OCR reads each scan with English plus the company's home-country language (Chinese, Japanese, Korean, Russian, Arabic, Thai and others), counts noise as no text, and `--redo` re-reads earlier own-script covers and drops earlier noise, after a Chinese scan read as noise gave Wen's Foodstuff a false year (#81)
 - 2026-10-26 Documentation conflicts between open pull requests resolve themselves: after every merge, `resolve_doc_conflicts.py` merges main into each open pull request and keeps both sides when only docs/*.md or the re-run list collide (#80)
 - 2026-10-26 Docs, first weekly review: quality.md snapshot of the week (39,048 open failures, 8,331 labels, year formula right on 83% of sure labels); decisions.md proposal for the type pairs where the AI type is right less than 70% of the time (for the owner to approve, not applied); PAGE_WRONG_TYPE now owned by the weekly review (#79)
