@@ -33,6 +33,11 @@ class ApiUrlAndKey(unittest.TestCase):
     def test_api_url(self):
         self.assertEqual(S.check_api_url(f"https://{REF}.supabase.co"), ([], REF))
         self.assertTrue(S.check_api_url("https://supabase.com/dashboard/project/x")[0])
+        p, ref = S.check_api_url(f"https://{REF}.supabase.co/rest/v1/")
+        self.assertEqual(ref, REF)
+        self.assertIn("path", p[0])
+        p, _ = S.check_api_url(f"{REF}.supabase.co")
+        self.assertIn("https://", p[0])
 
     def test_key_kinds(self):
         self.assertEqual(S.key_kind("sb_secret_abc"), "secret")

@@ -60,10 +60,31 @@ def check_api_url(url):
     """Returns (problems, ref)."""
     if not url:
         return ["SUPABASE_URL is empty or missing"], None
-    m = re.fullmatch(r"https://([a-z0-9]{20})\.supabase\.co/?", url.strip())
-    if not m:
-        return ["SUPABASE_URL should look like https://<project ref>.supabase.co"], None
-    return [], m.group(1)
+    u = url.strip()
+    m = re.fullmatch(r"https://([a-z0-9]{20})\.supabase\.co/?", u)
+    if m:
+        return [], m.group(1)
+    # say what is off without printing the value
+    hints = []
+    if not u.startswith("https://"):
+        hints.append("it does not start with https://")
+    if u.startswith("postgres"):
+        hints.append("it looks like the database address (that one goes in SUPABASE_DB_URL)")
+    if u.startswith("sb_") or u.startswith("eyJ"):
+        hints.append("it looks like a key, not the address")
+    if "supabase.com/dashboard" in u:
+        hints.append("it is the dashboard address, not the project address")
+    host = urlsplit(u if "://" in u else "https://" + u).hostname or ""
+    if host and not host.endswith(".supabase.co"):
+        hints.append("the host does not end in .supabase.co")
+    if re.search(r"\.supabase\.co/.+", u):
+        hints.append("it has a path after .supabase.co (for example /rest/v1); remove it")
+    if u != u.lower():
+        hints.append("it has capital letters")
+    ref = re.match(r"(?:https?://)?([a-z0-9]{20})\.supabase\.co", u)
+    return ["SUPABASE_URL should be exactly https://<project ref>.supabase.co"
+            + (": " + "; ".join(hints) if hints else f" (it has {len(u)} characters, expected 40)")], \
+        (ref.group(1) if ref else None)
 
 
 def key_kind(key):
