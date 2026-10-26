@@ -246,7 +246,7 @@ Interface "Pipeline QA": **Check Claude's answers** (the day's cards that need y
 | PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#54) |
 | PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | the office-network runner on the owner's computer, every 2 hours (pc_fetch.py, [pc_runner.md](pc_runner.md)): refused files and refused report pages | yes (#60, once set up) |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
-| PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
+| PAGE_WRONG_TYPE | the weekly review fixes the page type and ticks scan_now (up to 20 High pages a week, with PAGE_GONE) | yes (weekly review, since 26 Oct 2026) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
 | DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every day (OCR scanned covers); broken files stay counted | yes (#57) |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |

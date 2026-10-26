@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-26 Docs, first weekly review: quality.md snapshot of the week (39,048 open failures, 8,331 labels, year formula right on 83% of sure labels); decisions.md proposal for the type pairs where the AI type is right less than 70% of the time (for the owner to approve, not applied); PAGE_WRONG_TYPE now owned by the weekly review (#PR)
 - 2026-10-25 Attachments that are a web page instead of the PDF (Airtable stored a site's home page under the PDF's name, as on 79 ADB documents) lose the wrong attachment and go to the office-network runner; new `fix_wrong_attachments.py`, nightly after Build cover text (#73)
 - 2026-10-24 Full text of every disclosure type (the nightly build now passes `--types all`: interim reports, statutory documents, presentations and certifications join, read over the following nights); evidence passages gain a financial group (revenue, EBITDA, capex, subsidiaries, employees) and cover every report type from 2024 (#72)
 - 2026-10-24 OCR of scanned PDFs: up to 8,000 a night instead of 1,000; the first manual run after the fixes read 595 of 600 in 20 minutes, so the backlog of about 12,500 clears in about two nights (#71)
