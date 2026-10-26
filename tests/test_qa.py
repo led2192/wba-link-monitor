@@ -351,5 +351,16 @@ class SyncDeriveTests(unittest.TestCase):
         self.assertEqual(qa_sync.derive_company({"company_name": "no id"}), [])
 
 
+
+class RunPart(unittest.TestCase):
+    def test_repeated_runs_in_one_job_get_their_own_row(self):
+        os.environ["QA_RUN_PART"] = "2"
+        try:
+            self.assertTrue(qa.Run("pc_fetch.py").run_key.endswith(".2"))
+        finally:
+            del os.environ["QA_RUN_PART"]
+        self.assertFalse(qa.Run("pc_fetch.py").run_key.endswith(".2"))
+
+
 if __name__ == "__main__":
     unittest.main()
