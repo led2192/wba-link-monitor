@@ -118,10 +118,12 @@ def parse(m):
 
 
 def period_end_date(period_end, year):
-    """Last day of the period: '2025-03' -> 2025-03-31. With only the year known ('2025' or a bare year) the
-    earliest end that is still realistic, 2025-03-31: a report labelled 2025 covers a year ending between
-    March 2025 (Japan, India) and December 2025, so it cannot be published before April 2025. Until 26 Oct 2026
-    this was 1 January, which let Bank Mandiri's 2025 report take its 2024 report's March 2025 date."""
+    """Last day of the period: '2025-03' -> 2025-03-31; '2025' or a bare year -> 2025-01-01 (only the year is
+    known). The year alone cannot give a tighter floor: many companies label a report with its publication
+    year (a "2025" report covering 2024, published in March 2025), so a floor of 31 March 2025 removed correct
+    dates (26 Oct 2026 dry run: 43 dates lost, among them a board approval on 30 March 2026 for a 2026-labelled
+    report). The period the report states about itself (stated_period_end) is the floor instead.
+    """
     m = re.match(r"^(20\d\d)(?:-(\d\d))?", str(period_end or ""))
     if m and m.group(2):
         y, mo = int(m.group(1)), int(m.group(2))
@@ -129,7 +131,7 @@ def period_end_date(period_end, year):
             nxt = dt.date(y + (mo == 12), mo % 12 + 1, 1)
             return nxt - dt.timedelta(days=1)
     y = int(m.group(1)) if m else (int(year) if isinstance(year, (int, float)) else None)
-    return dt.date(y, 3, 31) if y else None
+    return dt.date(y, 1, 1) if y else None
 
 
 def plausible(d, end, seen):
