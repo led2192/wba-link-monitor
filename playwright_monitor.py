@@ -30,7 +30,7 @@ Setup (see playwright.yml): pip install -r requirements.txt playwright; playwrig
 """
 import os, re, sys, time, random, argparse, threading, collections, datetime as dt
 from urllib.parse import quote
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeout
 
 try:
     import requests
@@ -196,6 +196,20 @@ def process(rec):
             except Exception: pass
 
 
+CHUNK_GRACE_S = 15 * 60     # a chunk may run this long past the budget before its stragglers are left
+CHUNK_MAX_S = 20 * 60       # and never longer than this in all: a chunk normally takes a few minutes
+
+
+def chunk_wait(t0, budget_s, now=None):
+    """Seconds a chunk may wait for its pages: at most CHUNK_MAX_S, and not past the budget plus the
+    grace, but never less than one navigation (so the last chunk gets a fair chance)."""
+    now = time.time() if now is None else now
+    floor = NAV_TIMEOUT_MS / 1000 + SETTLE_MS / 1000 + 30
+    if not budget_s:
+        return CHUNK_MAX_S
+    return max(floor, min(CHUNK_MAX_S, t0 + budget_s + CHUNK_GRACE_S - now))
+
+
 def main():
     global OWN_PAGES
     ap = argparse.ArgumentParser()
@@ -222,17 +236,24 @@ def main():
     t0 = time.time()
     updates = []; rescued = changed = still_dead = 0; done = 0; alerted = 0; slow = 0
     stopped_early = False
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        i = 0
-        CHUNK = max(args.workers * 10, 20)
-        while i < len(recs):
-            if budget_s and time.time() - t0 > budget_s:
-                stopped_early = True
-                print(f">>> time budget ({args.budget_min} min) reached with {len(recs) - i} "
-                      f"pages unprocessed this run; they stay at the head of the rotation.", flush=True)
-                break
-            chunk = recs[i:i + CHUNK]; i += len(chunk)
-            for fut in as_completed([ex.submit(process, r) for r in chunk]):
+    # No "with": its exit waits for every worker, and one browser that hangs (a page that never
+    # answers, a Chromium that never closes) kept every run since mid-October alive until GitHub
+    # cancelled it at the job limit. Each chunk now waits at most CHUNK_WAIT_S past the budget; pages
+    # still hanging then are left for the next run, and the process ends without waiting for them.
+    ex = ThreadPoolExecutor(max_workers=args.workers)
+    hung = 0
+    i = 0
+    CHUNK = max(args.workers * 10, 20)
+    while i < len(recs):
+        if budget_s and time.time() - t0 > budget_s:
+            stopped_early = True
+            print(f">>> time budget ({args.budget_min} min) reached with {len(recs) - i} "
+                  f"pages unprocessed this run; they stay at the head of the rotation.", flush=True)
+            break
+        chunk = recs[i:i + CHUNK]; i += len(chunk)
+        futs = [ex.submit(process, r) for r in chunk]
+        try:
+            for fut in as_completed(futs, timeout=chunk_wait(t0, budget_s)):
                 rid, upd, ch, high, _docs, ok, secs = fut.result()
                 if ok: rescued += 1
                 elif upd.get(F_STATUS) in ("dead", "error", "blocked"): still_dead += 1
@@ -244,9 +265,17 @@ def main():
                 updates.append({"id": rid, "fields": upd}); done += 1
                 if len(updates) >= 100:    # checkpoint progress so a long run survives a hiccup
                     patch(updates); updates = []
-            if done % 200 < CHUNK: print(f"  {done}/{len(recs)}  ({(time.time()-t0)/60:.0f} min)", flush=True)
+        except FuturesTimeout:
+            stuck = sum(1 for f_ in futs if not f_.done())
+            hung += stuck
+            print(f">>> {stuck} page(s) of this chunk still hanging; left for the next run, fresh browsers "
+                  f"for the rest.", flush=True)
+            ex.shutdown(wait=False, cancel_futures=True)
+            ex = ThreadPoolExecutor(max_workers=args.workers)     # the stuck threads are abandoned
+        if done % 200 < CHUNK: print(f"  {done}/{len(recs)}  ({(time.time()-t0)/60:.0f} min)", flush=True)
     print(f"Writing the final {len(updates)} updates back to Airtable ...")
     patch(updates)
+    ex.shutdown(wait=False, cancel_futures=True)
     print(f"Done. Readable in a real browser: {rescued}.  Still dead/error: {still_dead}.  "
           f"Pages with new doc links: {changed} (high-signal alerts: {alerted}).")
     left = remaining + (len(recs) - done)
@@ -255,7 +284,11 @@ def main():
               f"(cap {remaining}, budget {len(recs) - done}); rotation continues next run.")
     if slow:
         print(f"Slow pages (>30s): {slow} — listed above; recurring hosts are stealth-wall candidates.")
+    if hung:
+        print(f"Pages that hung and were abandoned: {hung}.")
 
 
 if __name__ == "__main__":
     main()
+    sys.stdout.flush()
+    os._exit(0)        # do not wait for a browser thread that never returns

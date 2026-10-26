@@ -63,3 +63,9 @@ Some sites answer a request for a PDF with their home page and status 200. Airta
 
 ## A page type is too coarse to say a gone page is covered
 `sustainability_page` covers both a company's report library and a topic page about cocoa. On 25 Oct 2026 the gone-page repair unticked 307 of 317 gone pages without searching for a replacement, because the company had some other live page of the same type: Hanwha's sustainability report list (`/sustainability/reports.do`) was "covered" by an ESG topic page, FrieslandCampina's financial and sustainability reports page by whatever else was watched. A gone page that lists reports is now covered only by another live page that also lists reports (`discover_pages.is_listing`). Judge coverage by what the page holds, not by its type.
+
+## A thread that never returns keeps the whole job alive
+Every Browser monitor run from at least 16 Oct to 25 Oct 2026 ended cancelled at GitHub's 350-minute job limit, although the script stops starting pages after 180 minutes: one browser page or a Playwright thread that never returned kept the thread pool (and the Python exit) waiting. Progress was saved every 100 pages, so most of the work survived, but the runs never ended cleanly and the last pages of each were lost. Never wait on a pool without a time limit: `playwright_monitor.py` now gives each chunk at most 20 minutes, abandons hung pages to fresh workers, and ends the process with `os._exit` after the last write.
+
+## Rolling 24-hour counts double count when a job runs twice
+base_health ran at 16:41 on 25 Oct 2026 (the 12:17 schedule, started late) and again at 00:50 on 26 Oct (chained after the nightly coverage). Both counted documents created in the 24 hours before, so the 2,880 documents harvested on the morning of the 25th showed as new on both days, and the second day looked like growth that never reached the base. Count per calendar day.
