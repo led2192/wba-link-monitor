@@ -63,7 +63,7 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | `purge_discarded.py` | Purge discarded rows, manual, two-step | Deletes rows discarded 30+ days, archived and tombstoned first | deletions; tombstones |
 
 ## Manual, one-off and diagnostic
-`field_docs.py` (writes `docs/fields.md` from the Airtable schema of both bases; read-only, `--from-json` or the meta API), `active_search.py` (homepage crawl for new pages), `link_documents.py` (one-off source_page links), `fetch_logos.py`, `unmonitor_shared.py` (switch off pages shared by 3+ companies), `diagnose_attach.py`, `diagnose_blocked.py` (read-only diagnoses), `ids.py` (normalize, doc_key, doc_id, link_id).
+`field_docs.py` (writes `docs/fields.md` from the Airtable schema of both bases; read-only, `--from-json` or the meta API), `active_search.py` (homepage crawl for new pages), `link_documents.py` (one-off source_page links), `fetch_logos.py`, `unmonitor_shared.py` (switch off pages shared by 3+ companies), `diagnose_attach.py`, `diagnose_blocked.py` (read-only diagnoses), `supabase_check.py` (Supabase check workflow, manual and on pull requests: read-only test that the evidence database answers with the SUPABASE_URL, SUPABASE_SERVICE_KEY and SUPABASE_DB_URL secrets), `ids.py` (normalize, doc_key, doc_id, link_id).
 
 ## Tests
 `tests/` holds offline tests (no network, fake Airtable). The Tests workflow runs them on every pull request and every push to `main`: `QA_STRICT=true python -m unittest discover -s tests -v`.

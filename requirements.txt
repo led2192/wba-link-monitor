@@ -4,3 +4,4 @@ tldextract
 pypdf
 langdetect
 cryptography
+psycopg[binary]
