@@ -66,3 +66,6 @@ Every Browser monitor run from at least 16 Oct to 25 Oct 2026 ended cancelled at
 
 ## Rolling 24-hour counts double count when a job runs twice
 base_health ran at 16:41 on 25 Oct 2026 (the 12:17 schedule, started late) and again at 00:50 on 26 Oct (chained after the nightly coverage). Both counted documents created in the 24 hours before, so the 2,880 documents harvested on the morning of the 25th showed as new on both days, and the second day looked like growth that never reached the base. Count per calendar day.
+
+## Every pull request that adds a changelog line conflicts with the next
+Each pull request adds its line at the top of docs/CHANGELOG.md, so merging one leaves every other open pull request with a conflict on the same lines, and the owner waited for someone to resolve it before the next merge (26 Oct 2026). `resolve_doc_conflicts.py` now merges main into open pull requests after every merge and keeps both sides when only documentation collides. Do not resolve those by hand from a shared working folder while another job uses it: a background resolver using `git checkout -f` in the same folder discarded uncommitted work the same morning; it runs in GitHub now.
