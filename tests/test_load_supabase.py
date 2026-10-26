@@ -26,7 +26,8 @@ def store_files(folder):
     tc.write_jsonl_gz(os.path.join(folder, "pages-20261021T000000-r1-00-001.jsonl.gz"), [{"id": "z", "p": 1, "t": "x"}])
     tc.write_jsonl_gz(os.path.join(folder, "meta-20261020T000000.jsonl.gz"),
                       [{"id": "a", "rec": "recA", "wba": "WBA1", "co": "Acme", "type": "Annual Report", "year": 2025,
-                        "lang": "en", "label": "Acme AR 2025", "url": "https://acme.com/ar.pdf", "pages": 2}])
+                        "lang": "en", "label": "Acme AR 2025", "url": "https://acme.com/ar.pdf", "pages": 2},
+                       {"id": "b", "rec": "recB", "wba": "WBA2", "co": "Beta", "type": "Sustainability Report", "year": 2024}])
     tc.write_jsonl_gz(os.path.join(folder, "evidence-20261021T010000.jsonl.gz"),
                       [{"id": "b", "p": 1, "n": 0, "dims": ["climate"], "terms": {"climate": ["net zero"]},
                         "topics": {"climate": ["targets"]}, "area": "planning", "integration": [], "number": True,
@@ -86,7 +87,14 @@ class AgainstPostgres(unittest.TestCase):
         url = os.environ["PG_TEST_URL"]
         with psycopg.connect(url) as c:
             c.execute("drop table if exists public.datapoints, public.passages, public.pages, public.documents, "
-                      "public.load_log cascade")
+                      "public.load_log, public.search_access cascade")
+            # what Supabase provides and a plain Postgres lacks: the auth schema and the API roles
+            c.execute("create schema if not exists auth")
+            c.execute("create or replace function auth.jwt() returns jsonb language sql stable as "
+                      "$$ select coalesce(nullif(current_setting('test.jwt', true), ''), '{}')::jsonb $$")
+            for role in ("anon", "authenticated"):
+                if not c.execute("select 1 from pg_roles where rolname = %s", (role,)).fetchone():
+                    c.execute(f"create role {role}")
         os.environ.update({"SUPABASE_DB_URL": url, "TEXT_STORE_DIR": os.path.join(d, "store")})
         os.makedirs(os.environ["TEXT_STORE_DIR"])
         for n in os.listdir(d):
@@ -108,6 +116,27 @@ class AgainstPostgres(unittest.TestCase):
                             "plainto_tsquery('simple', 'net zero')").fetchall()
             self.assertEqual(hit, [("b",)])
             self.assertEqual(c.execute("select count(*) from public.load_log").fetchone()[0], 3)
+            # search functions (search.sql): a direct session may search; the page's users go through can_search()
+            rows = c.execute("select library_id, page, excerpt from public.search_pages('\"net zero\"')").fetchall()
+            self.assertEqual([(r[0], r[1]) for r in rows], [("b", 1)])
+            self.assertIn("<mark>net</mark>", rows[0][2])
+            self.assertEqual(c.execute("select companies, documents, pages, capped from public.search_summary('one')").fetchone(),
+                             (1, 1, 1, False))                        # "new one": doc a
+            self.assertEqual(c.execute("select library_id, dims from public.search_passages('zero', 'climate')").fetchall(),
+                             [("b", ["climate"])])
+            self.assertEqual(c.execute("select count(*) from public.search_pages('')").fetchone()[0], 0)
+            # a document with no metadata (out of the library's scope now) is left out of searches
+            c.execute("update public.documents set company = null where library_id = 'b'")
+            self.assertEqual(c.execute("select count(*) from public.search_pages('zero')").fetchone()[0], 0)
+            c.execute("update public.documents set company = 'Beta' where library_id = 'b'")
+            # who may search: a WBA address, or one listed in search_access
+            may = lambda e: c.execute("select public.email_may_search(%s)", (e,)).fetchone()[0]
+            self.assertTrue(may("Someone@WorldBenchmarkingAlliance.org"))
+            self.assertFalse(may("someone@example.com"))
+            self.assertFalse(may(None))
+            c.execute("insert into public.search_access (email) values ('someone@example.com')")
+            self.assertTrue(may("SOMEONE@example.com"))
+
 
 
 if __name__ == "__main__":

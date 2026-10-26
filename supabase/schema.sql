@@ -63,6 +63,7 @@ create table if not exists public.passages (
   primary key (library_id, page, n)
 );
 create index if not exists passages_dims on public.passages using gin (dims);
+create index if not exists passages_words on public.passages using gin (public.page_words(body));
 
 -- Extracted values, one per company x attribute x period. Empty until the extraction pilot.
 create table if not exists public.datapoints (
