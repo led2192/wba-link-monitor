@@ -134,6 +134,9 @@ class Run:
         self.workflow = workflow or gh["workflow"] or script
         self.run_id = gh["run_id"] or dt.datetime.now().strftime("%Y%m%d%H%M%S")
         self.run_key = f"{self.workflow}#{self.run_id}"
+        part = (os.environ.get("QA_RUN_PART") or "").strip()
+        if part:                       # one job running a script several times (pc_fetch --repeat-hours)
+            self.run_key += f".{part}"
         self.trigger = trigger or trigger_from_event(gh["event"], script)
         self.commit_sha = commit or gh["commit"]
         self.github_url = gh["url"]
