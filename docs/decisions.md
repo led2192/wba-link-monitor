@@ -106,3 +106,26 @@ The owner asked to run everything more often. Chosen: more runs only where a que
 
 ## 2026-10-24 Towards an evidence library: sources are the proof, the text is the product
 Owner's direction: what WBA needs is evidence and data per company; the sources are the proof behind them, checked for company, year and metric. Classification by fine type matters less; what matters is whether the latest disclosures are held (key reports, publication dates) and which fiscal year each figure belongs to (decided per figure at extraction, because a 2026 report carries five years of emissions). Layers: sources; the full text of every disclosure, untagged, with its publication date; broad evidence groups (climate, nature, social, financial); evidence per methodology attribute or metric; extraction of values with quote, page and period, measured against known answers. Search will combine keyword search (figures, acronyms, names) with semantic search over the tagged passages, and a model reads only the best passages to extract; no model is trained until an evaluated set exists. The search index needs a database outside Airtable and GitHub (a managed Postgres with text and vector search); the owner will open the account. First steps decided: the full text covers every disclosure type from now on (the nightly build passes --types all), and a financial group joins the evidence lexicon. First extraction pilot: revenue and employees (known values from SEC and ESEF), then Scope 1 and 2 emissions. Rejected: loading only 2024+ reports into the search index (the owner wants the whole corpus); training a model first.
+
+## 2026-10-26 Proposal (not applied): arbitration on the type pairs where the AI loses
+Evidence, weekly review of 26 Oct 2026: the pipeline's type is the AI type whenever it exists (`source_type_check`, else the address type `source_type`). On the 7,383 sure Source Library labels plus 15 settled cards, the pairs with 10+ labels where that choice is right less than 70% of the time (address type / AI type: AI right, address right, neither):
+- Policy Documents / Statutory Documents: 3, 92, 19 (114 labels; the AI is right 3%)
+- Financial Statement / Statutory Documents: 3, 26, 16 (45; 7%)
+- Social Reports / Statutory Documents: 0, 23, 3 (26; 0%)
+- Environmental Reports / Certifications: 0, 38, 0 (38; 0%)
+- Environmental Reports / Climate Report: 12, 34, 1 (47; 26%)
+- Sustainability Report / ESG Report: 7, 48, 1 (56; 13%)
+- Integrated Report / Annual Report: 6, 19, 3 (28; 21%). This one moves a check: an integrated report counts for both the annual and the sustainability report, the AI's Annual Report only for the first.
+- Annual Report / 10K Form: 8, 20, 0 (28; 29%)
+- Human Rights Policy / Statutory Documents: 0, 0, 21 (21; both wrong)
+- Code of Conduct / Policy Documents: 67, 37, 2 (106; 63%). Moves the Code of Conduct check.
+- ESG Report / Sustainability Report: 47, 22, 6 (75; 63%)
+- Financial Statement / Annual Report: 23, 6, 7 (36; 64%). Moves the annual report check.
+- Human Rights Policy / Social Reports: 16, 2, 11 (29; 55%); Policy Documents / Human Rights Policy: 20, 16, 0 (36; 56%). Both move the Human Rights Policy check.
+Where the AI is right (Integrated Report / Sustainability Report: 513 of 540; Statutory Documents / Policy Documents: 88 of 98) nothing changes.
+
+Proposed change, for the owner to approve:
+1. Arbitration rule: on the first eight pairs above, keep the address type instead of the AI type (the address is right 58% to 100% of the time there, the AI 0% to 29%). A table in the classifier code, scored on the same labels by the rules comparison before the bulk rewrite; expected net gain about 260 of the labelled documents, 13 of them on the sustainability report check (Integrated Report / Annual Report).
+2. Prompt wording for the AI type: "Statutory Documents" only for filings required by a regulator that are not reports (articles, notices, prospectuses); a policy, a financial statement or a social report filed with a regulator keeps its own type. "Certifications" only for a certificate issued by a third party, not an environmental report that mentions one.
+3. No change yet on Code of Conduct / Policy Documents and the Human Rights Policy pairs: neither side passes 70%. These need the daily cards (owner-checked) before a rule, because the Source Library analysts filed many named policies under Policy Documents.
+Rejected: switching the whole arbitration to the address type (the AI wins 4,012 agreements and most large pairs) and a confidence threshold (the AI field gives no confidence).
