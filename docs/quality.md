@@ -29,7 +29,7 @@ Nothing depends on a person working through failure rows: there are tens of thou
 | PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous | yes (#54) |
 | PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | the office-network runner on the owner's computer, every 2 hours (pc_fetch.py, [pc_runner.md](pc_runner.md)): refused files and refused report pages | yes (#60, once set up) |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
-| PAGE_WRONG_TYPE | the weekly review fixes the page type | weekly review only (needs the task update) |
+| PAGE_WRONG_TYPE | the weekly review fixes the page type and ticks scan_now (up to 20 High pages a week, with PAGE_GONE) | yes (weekly review, since 26 Oct 2026) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
 | DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every day (OCR scanned covers); broken files stay counted | yes (#57) |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
@@ -97,6 +97,11 @@ Rule changes to the year (`fiscal_year.py`, `date_documents.py`) are gated by `y
 
 ## The ship rule
 A change to a rule or a prompt merges only when, on the evaluation labels, overall accuracy does not fall, accuracy on the classes that move a completeness check does not fall, and no regression case flips from right to wrong. Today the measurement is the pull request comment (`year_eval.py`, coverage comparison); a general `eval.py` that writes every scoring to `evals` is not built yet.
+
+## Snapshot: week of 26 Oct 2026 (first weekly review)
+Open failures: 39,048 distinct rows (all first seen 22-26 Oct; none fixed or closed yet, the 30-day silent close starts on 21 Nov). TYPE_DISAGREE 12,318, DOC_FETCH_FAIL 5,271, TYPE_MISSING 4,921, PAGE_UNREACHABLE 4,519, CO_GAP 3,544, PAGE_EMPTY 3,185, DOC_UNREADABLE 1,558, DOC_DUPLICATE 1,471, PAGE_GONE 1,400 (17 more set expected by the review), PAGE_BLOCKED 351 domains, DOC_WRONG_ROW 260, PAGE_UNHARVESTED 181, LABEL_CORRECTION 69. High: 26,768. No DOC_FLAGGED and no PAGE_WRONG_TYPE row yet. Runs: 27 recorded, none failed; base_health was Problem on 22-24 Oct (a failed job each day, re-run) and OK on 25-26 Oct.
+
+Labels so far: 8,247 Source Library labels (7,383 sure), 69 corrections, 15 daily cards (not yet checked by the owner). On the sure labels the year formula is right for 3,269 of the 3,957 documents with a year (83%). Where the address type and the AI type disagree, the AI (the pipeline's choice) is right on the large pairs (Integrated Report vs Sustainability Report: 513 of 540) and wrong on others; the pairs under 70% are listed in [decisions.md](decisions.md) (proposal of 26 Oct 2026). Titles: 2 of the 15 cards had a wrong title.
 
 ## Snapshot: first picture, 22 Oct 2026
 Dry run over 36,525 pages, 275,969 documents and 2,000 companies: 36,233 distinct open failures. TYPE_DISAGREE 12,163 (29,298 high-stakes disagreements in total, 17,135 of them on pre-2023 documents, counted only), TYPE_MISSING 4,705 (30,605 untyped non-English rows in total), PAGE_UNREACHABLE 4,105, CO_GAP 3,821, DOC_FETCH_FAIL 3,706, PAGE_EMPTY 3,093, DOC_UNREADABLE 1,496, PAGE_GONE 1,351, DOC_DUPLICATE 1,090, PAGE_BLOCKED 299 domains, DOC_WRONG_ROW 225, PAGE_UNHARVESTED 179. 266,726 rows awaited a robot_* snapshot.
