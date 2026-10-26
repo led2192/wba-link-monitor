@@ -20,6 +20,7 @@ on:
       - "Fix wrong attachments"
       - "Evidence passages"
       - "Evidence database load"
+      - "File dates"
       - "Publication dates"
       - "Key reports"
       - "Dedupe report library"
