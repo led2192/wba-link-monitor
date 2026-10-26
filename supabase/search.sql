@@ -64,7 +64,7 @@ begin
     )
     select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, t.page,
            ts_headline('simple', left(p.body, 200000), tsq,
-                       'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=<mark>, StopSel=</mark>')
+                       'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
     from top t
     join public.documents d on d.library_id = t.library_id
     join public.pages p on p.library_id = t.library_id and p.page = t.page
@@ -125,7 +125,7 @@ begin
   return query
     select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, ps.page, ps.dims, ps.area,
            case when numnode(tsq) = 0 then left(ps.body, 600)
-                else ts_headline('simple', ps.body, tsq, 'MaxFragments=1, MaxWords=60, MinWords=25, StartSel=<mark>, StopSel=</mark>') end
+                else ts_headline('simple', ps.body, tsq, 'MaxFragments=1, MaxWords=60, MinWords=25, StartSel=⟦, StopSel=⟧') end
     from public.passages ps
     join public.documents d on d.library_id = ps.library_id
     where (numnode(tsq) = 0 or public.page_words(ps.body) @@ tsq)

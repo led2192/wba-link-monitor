@@ -119,7 +119,7 @@ class AgainstPostgres(unittest.TestCase):
             # search functions (search.sql): a direct session may search; the page's users go through can_search()
             rows = c.execute("select library_id, page, excerpt from public.search_pages('\"net zero\"')").fetchall()
             self.assertEqual([(r[0], r[1]) for r in rows], [("b", 1)])
-            self.assertIn("<mark>net</mark>", rows[0][2])
+            self.assertIn("⟦net⟧", rows[0][2])
             self.assertEqual(c.execute("select companies, documents, pages, capped from public.search_summary('one')").fetchone(),
                              (1, 1, 1, False))                        # "new one": doc a
             self.assertEqual(c.execute("select library_id, dims from public.search_passages('zero', 'climate')").fetchall(),
