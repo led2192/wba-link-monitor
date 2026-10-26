@@ -3,7 +3,11 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+<<<<<<< HEAD
 - 2026-10-26 OCR reads each scan with English plus the company's home-country language (Chinese, Japanese, Korean, Russian, Arabic, Thai and others), counts noise as no text, and `--redo` re-reads earlier own-script covers and drops earlier noise, after a Chinese scan read as noise gave Wen's Foodstuff a false year (#81)
+=======
+- 2026-10-26 Docs, first weekly review: quality.md snapshot of the week (39,048 open failures, 8,331 labels, year formula right on 83% of sure labels); decisions.md proposal for the type pairs where the AI type is right less than 70% of the time (for the owner to approve, not applied); PAGE_WRONG_TYPE now owned by the weekly review (#79)
+>>>>>>> origin/main
 - 2026-10-26 PAGE_GONE and PAGE_UNREACHABLE are High only for pages that can cost a report (report hubs, sustainability report pages, sustainability or investor pages whose address lists reports); gone topic pages (cocoa, an article, a privacy policy) are Medium. Up to 556 of the 1,050 High PAGE_GONE rows and 1,459 of the 2,705 High PAGE_UNREACHABLE rows were topic pages (#78)
 - 2026-10-26 Gone report listings are searched for a replacement again: a gone page whose address lists reports counts as covered only by another live listing of its type, not by any page of the type (on 25 Oct, 307 of 317 gone pages were unticked with no search, among them Hanwha's sustainability report list and FrieslandCampina's financial and sustainability reports page); listings unticked that way on 24-25 Oct are searched once more and marked re-checked (#77)
 - 2026-10-26 Each run of the office-network fetch inside its 22-hour job gets its own Pipeline QA row (`QA_RUN_PART`); until now every run overwrote the job's single row, so only the last run of the day was visible (#76)
