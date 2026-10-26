@@ -21,6 +21,14 @@ added, or the company is still watched through another live page of that type, t
 unticked (monitor off) with a dated note; when nothing is found the page is unticked with a note too
 (a 404 read every night teaches nothing) and the company is searched again after RECHECK_DAYS.
 
+A gone page that LISTS reports (its address names reports, an annual report, a library, downloads,
+publications, disclosures, filings, results or ESG data) counts as covered only by another live page
+of its type that also lists reports (since 26 Oct 2026): on 25 Oct, 307 of 317 gone pages were unticked
+without any search because the company had some other live page of the type, such as a sustainability
+topic page standing in for a gone sustainability report library. Pages unticked that way before the
+fix ("still watched through another page of this type") are searched once more, a few companies a
+night within --max-gone, and marked "re-checked" so they are never picked twice.
+
 Order: companies with gone pages, new companies, then the highest queue_score. A company is searched again after
 RECHECK_DAYS at most, and never while suggestions are waiting. At most --max companies per run.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE.  Options: --max N (default 150), --max-gone N (default 100),
@@ -41,6 +49,11 @@ WANT = {"Report hub page": "reports_hub", "Sustainability page": "sustainability
 MAX_PER_TYPE = 2
 GONE_TYPES = ("reports_hub", "sustainability_page", "investor_relations", "policies")
 MIN_DOCS_AUTO = 3
+# an address that lists reports: losing it loses the documents, whatever else of the type is watched
+LISTING = re.compile(r"report|annual|librar|download|publication|disclos|document|filing|result|"
+                     r"e?esg[-_ ]?data|archive|investor[-_ ]?kit|csr[-_]?doc", re.I)
+COVERED_NOTE = "the company is still watched through another page of this type"
+RECHECKED = "re-checked"
 
 
 def clear_winner(cands):
@@ -72,12 +85,55 @@ def is_gone(f):
             and (f.get("type") or "") in GONE_TYPES)
 
 
-def gone_note(today, code, replacement=None, other_live=False):
+def is_retired_covered(f):
+    """A page unticked before 26 Oct 2026 only because another page of its type was live, not yet
+    searched again. Only report listings are worth the second search."""
+    notes = f.get("notes") or ""
+    return (not f.get("monitor") and COVERED_NOTE in notes and RECHECKED not in notes
+            and (f.get("type") or "") in GONE_TYPES and is_listing(f.get("url")))
+
+
+def is_listing(url):
+    """The page's address says it lists reports (path and query only, never the host)."""
+    parts = urlsplit(url or "")
+    return bool(LISTING.search(parts.path + "?" + parts.query))
+
+
+def covered_by(g, pages, gone_ids):
+    """Is gone page g still covered by another live page of its type? A gone report listing is covered
+    only by a live page of the type that is itself a listing."""
+    t = g["fields"].get("type")
+    need_listing = is_listing(g["fields"].get("url"))
+    for p in pages:
+        pf = p["fields"]
+        if p["id"] in gone_ids or p["id"] == g["id"] or not pf.get("monitor") or pf.get("status") == "dead":
+            continue
+        if pf.get("type") == t and (not need_listing or is_listing(pf.get("url"))):
+            return True
+    return False
+
+
+def decide_gone(gone_here, pages):
+    """(types to search a replacement for, {gone page id: covered})."""
+    gone_ids = {g["id"] for g in gone_here}
+    covered = {g["id"]: covered_by(g, pages, gone_ids) for g in gone_here}
+    replace = [t for t in GONE_TYPES
+               if any(g["fields"].get("type") == t and not covered[g["id"]] for g in gone_here)]
+    return replace, covered
+
+
+def gone_note(today, code, replacement=None, other_live=False, recheck=False):
     code = str(code or "404").split(".")[0]
+    if recheck:
+        if replacement:
+            return f"{today}: {RECHECKED}, replaced by {replacement}"
+        if other_live:
+            return f"{today}: {RECHECKED}, another live page of this type lists reports"
+        return f"{today}: {RECHECKED}, no replacement found on the company's site"
     if replacement:
         return f"{today}: gone ({code}); replaced by {replacement}"
     if other_live:
-        return f"{today}: gone ({code}); the company is still watched through another page of this type"
+        return f"{today}: gone ({code}); {COVERED_NOTE}"
     return f"{today}: gone ({code}); no replacement found on the company's site, monitoring stopped"
 
 
@@ -174,6 +230,13 @@ def gone_by_company(wbas=None):
     for r in get("monitored_links", [("pageSize", "100"), ("filterByFormula", formula)] + [("fields[]", f) for f in fields]):
         if is_gone(r["fields"]) and r["fields"].get("wba_id"):
             out[r["fields"]["wba_id"]].append(r)
+    # pages unticked before the listing rule only because another page of the type was live
+    formula = (f"AND(NOT({{monitor}}), FIND('{COVERED_NOTE}', {{notes}}&''), NOT(FIND('{RECHECKED}', {{notes}}&'')))")
+    if wbas:
+        formula = "AND(" + formula + ", OR(" + ",".join(f"{{wba_id}}='{w}'" for w in wbas) + "))"
+    for r in get("monitored_links", [("pageSize", "100"), ("filterByFormula", formula)] + [("fields[]", f) for f in fields]):
+        if is_retired_covered(r["fields"]) and r["fields"].get("wba_id"):
+            out[r["fields"]["wba_id"]].append(r)
     return out
 
 
@@ -214,11 +277,7 @@ def main():
         # pages deleted by hand are never proposed again
         have |= {AS.normalize(u)[0] for k, u in dead_pages.items() if k.startswith(wba + "|") and u}
         gone_here = gone.get(wba, [])
-        gone_ids = {g["id"] for g in gone_here}
-        live_types = {p["fields"].get("type") for p in pages
-                      if p["fields"].get("monitor") and p["id"] not in gone_ids and p["fields"].get("status") != "dead"}
-        gone_types = {g["fields"].get("type") for g in gone_here}
-        replace = [t for t in GONE_TYPES if t in gone_types and t not in live_types]
+        replace, covered = decide_gone(gone_here, pages)
         gaps = set(f.get("gap_pages") or [])
         want = [t for g, t in WANT.items() if g in gaps]
         if not pages:
@@ -245,10 +304,15 @@ def main():
         added = {t: u for t, u, _, _ in auto}
         for g in gone_here:
             gf = g["fields"]; t = gf.get("type")
-            note = gone_note(today, gf.get("http_status"), replacement=added.get(t), other_live=t in live_types)
+            recheck = not gf.get("monitor")
+            # a replacement is credited only to the gone pages it was searched for (not covered ones)
+            repl = None if covered[g["id"]] else added.get(t)
+            note = gone_note(today, gf.get("http_status"), replacement=repl, other_live=covered[g["id"]],
+                             recheck=recheck)
             page_updates.append({"id": g["id"], "fields": {"monitor": False,
                                  "notes": (note + "\n" + (gf.get("notes") or "")).strip()[:5000]}})
-            n["gone_replaced" if added.get(t) else ("gone_other_live" if t in live_types else "gone_unreplaced")] += 1
+            outcome = "gone_replaced" if repl else ("gone_other_live" if covered[g["id"]] else "gone_unreplaced")
+            n[("recheck_" if recheck else "") + outcome] += 1
         print(f"    {f.get('company_name')}: {len(auto)} added, {len(amb)} ambiguous, {len(gone_here)} gone"
               + (f" (home page did not open: {err})" if err else "") + ("" if home else " (no website known)"), flush=True)
         updates.append({"id": rec["id"], "fields": upd})
@@ -260,7 +324,10 @@ def main():
           f"| companies left with ambiguous suggestions | {n['companies_ambiguous']:,} |",
           f"| gone pages replaced | {n['gone_replaced']:,} |",
           f"| gone pages, company still watched through another page of the type | {n['gone_other_live']:,} |",
-          f"| gone pages, no replacement found | {n['gone_unreplaced']:,} |", ""]
+          f"| gone pages, no replacement found | {n['gone_unreplaced']:,} |",
+          f"| report listings unticked before 26 Oct, searched again: replaced | {n['recheck_gone_replaced']:,} |",
+          f"| ... another live listing of the type | {n['recheck_gone_other_live']:,} |",
+          f"| ... still no replacement | {n['recheck_gone_unreplaced']:,} |", ""]
     open("discover_pages.md", "w").write("\n".join(md))
     print("\n".join(md), flush=True)
     if not a.commit:
