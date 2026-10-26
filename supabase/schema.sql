@@ -5,6 +5,7 @@
 
 create extension if not exists vector with schema extensions;
 create extension if not exists pg_trgm with schema extensions;
+create extension if not exists btree_gin with schema extensions;   -- year, type and company inside the word index
 
 -- One row per document in the full-text store. Metadata is the store's latest snapshot of the
 -- Disclosure Library (report_library); the library stays the source of truth.
@@ -29,21 +30,62 @@ create index if not exists documents_wba_id on public.documents (wba_id);
 create index if not exists documents_year on public.documents (year);
 create index if not exists documents_doc_type on public.documents (doc_type);
 
--- Full text, one row per page. The word index (pages_words) is built by the loader after the
--- first load, because building it once is much faster than updating it row by row.
+-- Full text, one row per page.
+--   words: the page's words with their positions (page_words), stored so that a phrase search can check
+--          candidates without re-reading the text (26 Oct 2026: re-reading made "scope 3" take minutes).
+--   year, doc_type, wba_id: copies of the document's values, kept in step by the trigger below, so the
+--          word index (pages_search) can answer "newest first", a type filter or a company filter
+--          without fetching pages that will be thrown away.
+-- The index pages_search is built by the loader once every row has its words (building it once is
+-- much faster than updating it row by row); until then searches use the older pages_words index.
 create table if not exists public.pages (
   library_id  text not null references public.documents (library_id),
   page        int  not null,
   body        text not null,
   primary key (library_id, page)
 );
+alter table public.pages add column if not exists words tsvector;
+alter table public.pages add column if not exists year int;        -- 0 = undated
+alter table public.pages add column if not exists doc_type text;   -- '' = untyped
+alter table public.pages add column if not exists wba_id text;     -- '' = no company (out of the library's scope)
 
 -- The text the word index reads: the first 200,000 characters of a page in the 'simple'
 -- configuration (no stemming, so it works in every language and finds figures and acronyms).
--- Queries must use the same function to hit the index.
 create or replace function public.page_words(t text) returns tsvector
   language sql immutable parallel safe
   as $$ select to_tsvector('simple'::regconfig, left(t, 200000)) $$;
+
+-- Every page written gets its words and its document's year, type and company.
+create or replace function public.pages_before_write() returns trigger
+  language plpgsql
+  as $$
+  begin
+    new.words := public.page_words(new.body);
+    select coalesce(d.year, 0), coalesce(d.doc_type, ''), coalesce(d.wba_id, '')
+      into new.year, new.doc_type, new.wba_id
+      from public.documents d where d.library_id = new.library_id;
+    new.year := coalesce(new.year, 0); new.doc_type := coalesce(new.doc_type, ''); new.wba_id := coalesce(new.wba_id, '');
+    return new;
+  end $$;
+drop trigger if exists pages_before_write on public.pages;
+create trigger pages_before_write before insert or update of body on public.pages
+  for each row execute function public.pages_before_write();
+
+-- When a document's year, type or company changes (a correction in the library), its pages follow.
+create or replace function public.documents_after_change() returns trigger
+  language plpgsql
+  as $$
+  begin
+    update public.pages set year = coalesce(new.year, 0), doc_type = coalesce(new.doc_type, ''), wba_id = coalesce(new.wba_id, '')
+     where library_id = new.library_id
+       and (year, doc_type, wba_id) is distinct from (coalesce(new.year, 0), coalesce(new.doc_type, ''), coalesce(new.wba_id, ''));
+    return null;
+  end $$;
+drop trigger if exists documents_after_change on public.documents;
+create trigger documents_after_change after update of year, doc_type, wba_id on public.documents
+  for each row
+  when (old.year is distinct from new.year or old.doc_type is distinct from new.doc_type or old.wba_id is distinct from new.wba_id)
+  execute function public.documents_after_change();
 
 -- Evidence passages (evidence_chunks.py): about 120 words each, tagged climate, nature, social,
 -- financial. embedding is filled later, when the embeddings provider is chosen.
@@ -98,6 +140,14 @@ create table if not exists public.load_log (
   rows       int,
   loaded_at  timestamptz not null default now()
 );
+
+-- Where a long job stands (the words backfill, the index build), so a run continues where the last stopped.
+create table if not exists public.load_state (
+  key        text primary key,
+  value      text,
+  updated_at timestamptz not null default now()
+);
+alter table public.load_state enable row level security;
 
 alter table public.documents  enable row level security;
 alter table public.pages      enable row level security;

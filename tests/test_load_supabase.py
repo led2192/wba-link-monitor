@@ -87,7 +87,20 @@ class AgainstPostgres(unittest.TestCase):
         url = os.environ["PG_TEST_URL"]
         with psycopg.connect(url) as c:
             c.execute("drop table if exists public.datapoints, public.passages, public.pages, public.documents, "
-                      "public.load_log, public.search_access cascade")
+                      "public.load_log, public.load_state, public.search_access cascade")
+            c.execute("drop function if exists public.search_pages, public.search_summary, public.search_passages")
+            # the state of the database before this change: pages without stored words, the text-only index
+            c.execute("create table public.documents (library_id text primary key, record_id text, wba_id text, company text, "
+                      "doc_type text, year int, lang text, label text, url text, pages int, chars bigint, text_status text, "
+                      "text_part text, extracted_at text, loaded_at timestamptz not null default now())")
+            c.execute("create table public.pages (library_id text not null references public.documents (library_id), "
+                      "page int not null, body text not null, primary key (library_id, page))")
+            c.execute("create or replace function public.page_words(t text) returns tsvector language sql immutable "
+                      "parallel safe as $$ select to_tsvector('simple'::regconfig, left(t, 200000)) $$")
+            c.execute("create index pages_words on public.pages using gin (public.page_words(body))")
+            c.execute("insert into public.documents (library_id, wba_id, company, year) values ('old', 'WBA9', 'Oldco', 2023)")
+            c.execute("insert into public.pages (library_id, page, body) values ('old', 1, 'net zero target for 2040'), "
+                      "('old', 2, 'water withdrawal fell')")
             # what Supabase provides and a plain Postgres lacks: the auth schema and the API roles
             c.execute("create schema if not exists auth")
             c.execute("create or replace function auth.jwt() returns jsonb language sql stable as "
@@ -106,29 +119,57 @@ class AgainstPostgres(unittest.TestCase):
             L.main()
         with psycopg.connect(url) as c:
             pages = c.execute("select library_id, page, body from public.pages order by 1, 2").fetchall()
-            self.assertEqual(pages, [("a", 1, "new one"), ("a", 2, "new two"), ("b", 1, "net zero by 2050")])
-            self.assertEqual(c.execute("select count(*) from public.documents").fetchone()[0], 3)
+            self.assertEqual(pages, [("a", 1, "new one"), ("a", 2, "new two"), ("b", 1, "net zero by 2050"),
+                                     ("old", 1, "net zero target for 2040"), ("old", 2, "water withdrawal fell")])
+            # the migration: older rows backfilled, new rows filled by the trigger, one index, old one gone
+            self.assertEqual(c.execute("select count(*) from public.pages where words is null or year is null "
+                                       "or doc_type is null or wba_id is null").fetchone()[0], 0)
+            self.assertEqual(c.execute("select year, doc_type, wba_id from public.pages where library_id = 'old' and page = 1").fetchone(),
+                             (2023, "", "WBA9"))
+            self.assertEqual(c.execute("select year, doc_type, wba_id from public.pages where library_id = 'a' and page = 1").fetchone(),
+                             (2025, "Annual Report", "WBA1"))
+            self.assertEqual(c.execute("select value from public.load_state where key = 'words_backfill'").fetchone(), ("done",))
+            self.assertEqual(c.execute("select to_regclass('public.pages_search') is not null, to_regclass('public.pages_words') is null").fetchone(),
+                             (True, True))
+            # a correction in the library (year, type, company) reaches the pages through the trigger
+            c.execute("update public.documents set year = 2026, doc_type = 'Integrated Report' where library_id = 'old'")
+            self.assertEqual(c.execute("select distinct year, doc_type from public.pages where library_id = 'old'").fetchall(),
+                             [(2026, "Integrated Report")])
+            c.execute("update public.documents set year = 2023, doc_type = null where library_id = 'old'")
+            self.assertEqual(c.execute("select distinct year, doc_type from public.pages where library_id = 'old'").fetchall(),
+                             [(2023, "")])
+            self.assertEqual(c.execute("select count(*) from public.documents").fetchone()[0], 4)
             self.assertEqual(c.execute("select company, year from public.documents where library_id='a'").fetchone(),
                              ("Acme", 2025))
             self.assertEqual(c.execute("select library_id, dims, lexicon from public.passages").fetchall(),
                              [("b", ["climate"], "lex1")])
-            hit = c.execute("select library_id from public.pages where public.page_words(body) @@ "
-                            "plainto_tsquery('simple', 'net zero')").fetchall()
-            self.assertEqual(hit, [("b",)])
+            hit = c.execute("select library_id from public.pages where words @@ plainto_tsquery('simple', 'net zero') order by 1").fetchall()
+            self.assertEqual(hit, [("b",), ("old",)])
             self.assertEqual(c.execute("select count(*) from public.load_log").fetchone()[0], 3)
             # search functions (search.sql): a direct session may search; the page's users go through can_search()
-            rows = c.execute("select library_id, page, excerpt from public.search_pages('\"net zero\"')").fetchall()
-            self.assertEqual([(r[0], r[1]) for r in rows], [("b", 1)])
-            self.assertIn("<mark>net</mark>", rows[0][2])
+            # newest documents first (b is 2024, old is 2023), then by company within a year
+            rows = c.execute("select library_id, page, year, excerpt from public.search_pages('\"net zero\"')").fetchall()
+            self.assertEqual([(r[0], r[1], r[2]) for r in rows], [("b", 1, 2024), ("old", 1, 2023)])
+            self.assertIn("⟦net⟧", rows[0][3])
+            self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', max_rows => 1)").fetchall()], ["b"])
+            # filters: year, type, company by name or id; an unknown company finds nothing
+            self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', year_from => 2024)").fetchall()], ["b"])
+            self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('one', type_filter => 'Annual Report')").fetchall()], ["a"])
+            self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', company_filter => 'oldco')").fetchall()], ["old"])
+            self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', company_filter => 'WBA2')").fetchall()], ["b"])
+            self.assertEqual(c.execute("select count(*) from public.search_pages('\"net zero\"', company_filter => 'nobody')").fetchone()[0], 0)
             self.assertEqual(c.execute("select companies, documents, pages, capped from public.search_summary('one')").fetchone(),
                              (1, 1, 1, False))                        # "new one": doc a
+            self.assertEqual(c.execute("select companies, documents, pages from public.search_summary('\"net zero\"')").fetchone(), (2, 2, 2))
+            self.assertEqual(c.execute("select pages from public.search_summary('\"net zero\"', year_to => 2023)").fetchone(), (1,))
             self.assertEqual(c.execute("select library_id, dims from public.search_passages('zero', 'climate')").fetchall(),
                              [("b", ["climate"])])
             self.assertEqual(c.execute("select count(*) from public.search_pages('')").fetchone()[0], 0)
-            # a document with no metadata (out of the library's scope now) is left out of searches
-            c.execute("update public.documents set company = null where library_id = 'b'")
-            self.assertEqual(c.execute("select count(*) from public.search_pages('zero')").fetchone()[0], 0)
-            c.execute("update public.documents set company = 'Beta' where library_id = 'b'")
+            # a document with no company (out of the library's scope now) is left out of searches
+            c.execute("update public.documents set company = null, wba_id = null where library_id = 'b'")
+            self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('zero')").fetchall()], ["old"])
+            self.assertEqual(c.execute("select pages from public.search_summary('zero')").fetchone(), (1,))
+            c.execute("update public.documents set company = 'Beta', wba_id = 'WBA2' where library_id = 'b'")
             # who may search: a WBA address, or one listed in search_access
             may = lambda e: c.execute("select public.email_may_search(%s)", (e,)).fetchone()[0]
             self.assertTrue(may("Someone@WorldBenchmarkingAlliance.org"))
