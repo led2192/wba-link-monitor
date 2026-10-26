@@ -19,6 +19,7 @@ on:
       - "Company coverage"
       - "Fix wrong attachments"
       - "Evidence passages"
+      - "Evidence database load"
       - "Publication dates"
       - "Key reports"
       - "Dedupe report library"

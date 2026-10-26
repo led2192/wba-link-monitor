@@ -1,0 +1,62 @@
+name: Evidence database load
+
+# Copies the full-text store (pages and evidence passages) into the Supabase evidence database
+# (load_supabase.py). Every 6 hours it loads whatever is new, up to 300 minutes a run, and stops when
+# the database reaches SUPABASE_MAX_GB (repository variable; 6 GB when unset, which fits the 8 GB
+# disk a new project starts with). Once nothing is left to load it builds the word index. A pull
+# request touching it runs a dry run (schema checked and rolled back) and posts what is waiting.
+on:
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+      parts:
+        description: "at most this many pages files (0 = all waiting)"
+        default: "0"
+      minutes:
+        description: "time budget in minutes"
+        default: "300"
+  pull_request:
+    paths: [load_supabase.py, supabase/schema.sql, .github/workflows/load_supabase.yml]
+
+concurrency:
+  group: load-supabase
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Load
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          MAX_GB: ${{ vars.SUPABASE_MAX_GB || '6' }}
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--commit --index --minutes 300"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=""
+          else ARGS="--parts ${{ inputs.parts }} --minutes ${{ inputs.minutes }}"
+               [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit --index"; fi
+          python load_supabase.py $ARGS --max-gb "$MAX_GB"
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s load_supabase.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file load_supabase.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Evidence database load: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
