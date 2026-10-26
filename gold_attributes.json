@@ -1,0 +1,39 @@
+{
+  "_about": "Pilot attributes of the extraction evaluation (gold_eval.py): the validated 2025 answers of these attributes are the ground truth. For each one, the search words that should bring up the page the analyst cited; several alternatives are tried and the best rank counts. Edit here to try other words; the next run reports the effect.",
+  "bases": {
+    "ACT Core Climate": "appWuFWIlbffP9vCY",
+    "ACT Core ESGDS": "app22yRgus8TlNxBW"
+  },
+  "attributes": {
+    "GMC_01933.1": {
+      "name": "Climate expertise on the highest governance body",
+      "type": "multiple select",
+      "queries": ["board climate expertise", "board skills climate", "directors climate experience", "board competence climate", "board expertise sustainability"]
+    },
+    "GMC_01936.1": {
+      "name": "Climate policies the company publicly supports",
+      "type": "multiple select",
+      "queries": ["\"Paris Agreement\" support", "climate policy advocacy", "carbon pricing support", "public policy climate engagement", "trade associations climate"]
+    },
+    "GMC_00064.1": {
+      "name": "Total low-carbon capex",
+      "type": "number",
+      "queries": ["taxonomy-aligned capex", "capital expenditure low-carbon", "capex climate solutions", "\"taxonomy-aligned\" \"capital expenditure\"", "green capex"]
+    },
+    "GMC_00001.1": {
+      "name": "Scope 1 emissions",
+      "type": "number",
+      "queries": ["\"scope 1\" emissions tCO2e", "\"scope 1\" \"scope 2\" emissions", "direct emissions scope 1", "GHG emissions scope 1 total"]
+    },
+    "GMC_00133.1": {
+      "name": "Total Scope 2 emissions",
+      "type": "number",
+      "queries": ["\"scope 2\" emissions tCO2e", "\"scope 2\" location-based market-based", "indirect emissions scope 2", "GHG emissions scope 2 total"]
+    },
+    "GMC_00048.1": {
+      "name": "Revenue",
+      "type": "number",
+      "queries": ["total revenue", "revenue net sales", "consolidated revenue year", "turnover"]
+    }
+  }
+}
