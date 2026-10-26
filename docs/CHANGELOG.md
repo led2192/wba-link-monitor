@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-26 Docs: `docs/evidence.md` (the evidence database: layers, tables, searching and access, how it is kept current, setup, the gold evaluation, what comes next), the README index, and runbook sections on searching and on re-dating after a rule change (#93)
 - 2026-10-26 Document years, `redo_future`: a row the rules can no longer date is blanked instead of keeping its wrong year (the dry run of 26 Oct left 145 of 809 rows at 2027 because nothing else was found; blank lets the year formula use its other sources) (#92)
 - 2026-10-26 Gold evaluation: `gold_eval.py` (Gold evaluation workflow, manual) measures the evidence layer against the validated 2025 answers of six pilot attributes (`gold_attributes.json`: board climate expertise, climate policies supported, low-carbon capex, Scope 1, Scope 2, revenue): is the cited document in the library and its text in the database, is the analyst's quote found, and is the cited page among the top 1, 3 or 10 pages for the attribute's search words. Needs the read-only secret GOLD_TOKEN (#90)
 - 2026-10-26 Full text of every year: the nightly build no longer stops at 2021 (about 100,000 older reports join the corpus over the following nights); the queue reads newest documents first, undated next, older years last, so the old backlog never delays today's arrivals (#91)

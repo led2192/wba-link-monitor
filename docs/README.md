@@ -17,6 +17,7 @@ The pipeline that keeps WBA's Disclosure Library current: company pages watched 
 | [decisions.md](decisions.md) | Choices made, why, and what was rejected |
 | [pitfalls.md](pitfalls.md) | Lessons that were costly to learn |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and when, newest first |
+| [evidence.md](evidence.md) | The evidence database: the full text of every disclosure in Supabase, the search page and who may use it, how it is loaded and set up, the gold evaluation, what comes next |
 | [../TEXT_SEARCH.md](../TEXT_SEARCH.md) | The full-text store and mention search |
 
 Field-level documentation lives in Airtable itself: every field in the Disclosure Library and the Pipeline QA base carries a description, kept current with the code. [fields.md](fields.md) lays them out on one page; regenerate it with `field_docs.py` after changing descriptions.
