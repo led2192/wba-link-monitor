@@ -84,6 +84,15 @@ class Decide(unittest.TestCase):
                          (2, D(2026, 6, 1)))
         # targets and old comparatives do not move it
         self.assertIsNone(P.stated_period_end([(9, "reduce emissions over the period to 31 December 2030")], 2025, None))
+        # plans, comparisons and forecasts are not the report's period (26 Oct 2026 dry run removed correct dates)
+        for t in ("the programme runs until 31 December 2025", "net debt at year end compared to 31 December 2025",
+                  "forecast for the fiscal year ending March 31, 2026", "valid from 1 January 2025 to 30 June 2025"):
+            self.assertIsNone(P.stated_period_end([(1, t)], 2025, None), t)
+        self.assertEqual(P.stated_period_end([(39, "This report presents information for the period from 1 January to "
+                                                    "31 December 2025 and serves")], 2025, None), D(2025, 12, 31))
+        # a bond's interest period is not the report's (Hua Xia Bank 2023 annual report)
+        self.assertIsNone(P.stated_period_end([(94, "perpetual bonds. The interest accrual period is from 26 June 2023 to "
+                                                    "25 June 2024 (interest rate at 4.85%)")], 2023, None))
         self.assertEqual(P.stated_period_end([(1, "for the year ended 31 December 2025 and the year ended 31 December 2024")],
                                              2025, None), D(2025, 12, 31))
 

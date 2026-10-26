@@ -92,8 +92,17 @@ APPROVED_BEFORE = re.compile(r"\b(?:on\s+)?(?:" + DATE + r"),?\s+the\s+(?:board|
 # The period the report says it covers: "for the period from 1 January to 31 December 2025", "for the period
 # 1 April 2025 to 31 March 2026", "for the year ended 31 March 2026". Its end is a floor for the publication
 # date when Airtable has no period_end (26 Oct 2026, owner's suggestion after Bank Mandiri and SSE).
-PERIOD_TO = re.compile(r"\b(?:period|year|fy)\b[^.]{0,120}?\b(?:to|until|through|till)\s+(?:" + DATE + ")", re.I)
-YEAR_ENDED = re.compile(r"\byear\s+end(?:ed|ing)\s+(?:on\s+)?(?:" + DATE + ")", re.I)
+DAY_MON = (r"(?P<sd>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?" + MON.replace("(", "(?P<sm>", 1) + r"(?:,?\s+(?P<sy>20\d\d))?")
+# A twelve-month span: "from 1 January to 31 December 2025", "1 April 2025 to 31 March 2026". Both ends must be
+# written out and about a year apart, so "until 31 December 2025" (a plan) or "compared to 31 December 2024"
+# (a comparison) never counts.
+PERIOD_SPAN = re.compile(r"\b(?:from\s+)?" + DAY_MON + r"\s*(?:to|until|through|till|–|-)\s*(?:" + DATE + ")", re.I)
+# The span has to be the report's period, not a bond's interest period or a term of office (Hua Xia Bank 2023:
+# "the interest accrual period ... is from 26 June 2023 to 25 June 2024").
+SPAN_ABOUT_REPORT = re.compile(r"report|covers|reporting|financial\s+year|fiscal\s+year|statements?\b|accounts", re.I)
+SPAN_OTHER = re.compile(r"interest|bond|accrual|coupon|dividend|term\s+of\s+office|supervision|tenure|loan|lease|contract", re.I)
+# "for the year ended 31 March 2026": past tense only; "year ending March 2026" is usually a forecast.
+YEAR_ENDED = re.compile(r"\byear\s+ended\s+(?:on\s+)?(?:" + DATE + ")", re.I)
 FILED = re.compile(r"\(filed (20\d\d-\d\d-\d\d)\)")
 KEYWORDS = re.compile(r"publi|release|issue|authori|approved", re.I)
 
@@ -187,24 +196,37 @@ def find_dates(pages, end, seen, doc_year=None):
 
 
 def stated_period_end(pages, year=None, seen=None):
-    """Latest period end the text states for this report, or None. Only ends in the document's year or the
-    year after (a 2025 report covering April 2025 to March 2026), and not after the robot saw the file, so a
-    target ("for the period to 31 December 2030") or a comparative of an older year cannot move it."""
+    """Latest end of the twelve-month period the text states, or None. Only ends in the document's year or the
+    year after (a 2025 report covering April 2025 to March 2026), and before the robot saw the file."""
     best = None
     for _, text in pages:
         if not text:
             continue
-        for rx in (PERIOD_TO, YEAR_ENDED):
-            for m in rx.finditer(text):
-                d, prec = parse(m)
-                if not d or prec != "day":
-                    continue
-                if year and not (int(year) <= d.year <= int(year) + 1):
-                    continue
-                if seen and d >= seen:
-                    continue
-                if best is None or d > best:
-                    best = d
+        cands = []
+        for m in PERIOD_SPAN.finditer(text):
+            end, prec = parse(m)
+            if not end or prec != "day":
+                continue
+            try:
+                sm = MONTHS[m.group("sm").lower().rstrip(".")]
+                sy = int(m.group("sy")) if m.group("sy") else (end.year if (sm, int(m.group("sd"))) <= (end.month, end.day) else end.year - 1)
+                start = dt.date(sy, sm, int(m.group("sd")))
+            except (ValueError, KeyError, TypeError):
+                continue
+            before = text[max(0, m.start() - 150):m.start()]
+            if 330 <= (end - start).days <= 400 and SPAN_ABOUT_REPORT.search(before) and not SPAN_OTHER.search(before):
+                cands.append(end)
+        for m in YEAR_ENDED.finditer(text):
+            end, prec = parse(m)
+            if end and prec == "day":
+                cands.append(end)
+        for d in cands:
+            if year and not (int(year) <= d.year <= int(year) + 1):
+                continue
+            if seen and d >= seen:
+                continue
+            if best is None or d > best:
+                best = d
     return best
 
 
