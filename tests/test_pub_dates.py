@@ -52,10 +52,50 @@ class Dates(unittest.TestCase):
     def test_period_end(self):
         self.assertEqual(P.period_end_date("2025-03", 2025), D(2025, 3, 31))
         self.assertEqual(P.period_end_date("2024-12", 2024), D(2024, 12, 31))
-        self.assertEqual(P.period_end_date("", 2024), D(2024, 1, 1))
+        self.assertEqual(P.period_end_date("", 2024), D(2024, 1, 1))      # only the year: no tighter floor
+
+
+    def test_a_sentence_about_the_earlier_edition_is_not_this_reports_date(self):
+        # Bank Mandiri, 2025 Sustainability Report (26 Oct 2026): dated March 2025 from its predecessor
+        text = ("Reporting Period This report presents information on the Company's operations across Indonesia for the "
+                "period from 1 January to 31 December 2025 and serves as a continuation of the 2024 Sustainability Report, "
+                "which was published in March 2025.")
+        self.assertIsNone(P.find_dates([(39, text)], D(2025, 12, 31), None, 2025))
+        # the subject rule alone, even when the period end is unknown
+        self.assertIsNone(P.find_dates([(39, "The 2024 Sustainability Report was published in June 2025.")], None, None, 2025))
+        # this edition, named with its own year, still counts
+        t = P.find_dates([(2, "The 2025 Sustainability Report was published on 12 March 2026.")], D(2025, 12, 31), None, 2025)
+        self.assertEqual(t[:2], (2, D(2026, 3, 12)))
+        # a report labelled with its publication year keeps its date (26 Oct 2026: removed by a 31 March floor)
+        t = P.decide({"year": 2026}, [(132, "This report, confirmed by management, was approved by the Board of Directors "
+                                            "on March 30, 2026 and released concurrently.")], None)
+        self.assertEqual(t[:2], (3, D(2026, 3, 30)))
 
 
 class Decide(unittest.TestCase):
+    def test_the_period_the_report_states_is_a_floor(self):
+        # no period_end in Airtable: the text's own period decides what cannot be the publication date
+        pages = [(3, "This Sustainability Report for the period 1 April 2025 to 31 March 2026 provides enhanced disclosure."),
+                 (40, "Our previous report was published in March 2026."), (41, "Published: June 2026")]
+        pages += [(i, "Text") for i in range(36, 40)]
+        self.assertEqual(P.stated_period_end(pages, 2026, None), D(2026, 3, 31))
+        self.assertEqual(P.decide({"year": 2026}, [(3, pages[0][1]), (40, "This report was published in March 2026.")], None), None)
+        self.assertEqual(P.decide({"year": 2026}, [(3, pages[0][1]), (41, "This report was published in June 2026.")], None)[:2],
+                         (2, D(2026, 6, 1)))
+        # targets and old comparatives do not move it
+        self.assertIsNone(P.stated_period_end([(9, "reduce emissions over the period to 31 December 2030")], 2025, None))
+        # plans, comparisons and forecasts are not the report's period (26 Oct 2026 dry run removed correct dates)
+        for t in ("the programme runs until 31 December 2025", "net debt at year end compared to 31 December 2025",
+                  "forecast for the fiscal year ending March 31, 2026", "valid from 1 January 2025 to 30 June 2025"):
+            self.assertIsNone(P.stated_period_end([(1, t)], 2025, None), t)
+        self.assertEqual(P.stated_period_end([(39, "This report presents information for the period from 1 January to "
+                                                    "31 December 2025 and serves")], 2025, None), D(2025, 12, 31))
+        # a bond's interest period is not the report's (Hua Xia Bank 2023 annual report)
+        self.assertIsNone(P.stated_period_end([(94, "perpetual bonds. The interest accrual period is from 26 June 2023 to "
+                                                    "25 June 2024 (interest rate at 4.85%)")], 2023, None))
+        self.assertEqual(P.stated_period_end([(1, "for the year ended 31 December 2025 and the year ended 31 December 2024")],
+                                             2025, None), D(2025, 12, 31))
+
     def test_regulator_filing_first(self):
         f = {"Reviewer notes": "Added from the SEC regulator database (filed 2025-02-21). ", "period_end": "2024-12"}
         self.assertEqual(P.decide(f, [(1, "Published on 1 March 2025")], None)[:3], (1, D(2025, 2, 21), "day"))
