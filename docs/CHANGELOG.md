@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-26 File dates: `file_dates.py` (File dates, daily 03:17, newest first) reads the creation and modification dates written inside each key report's PDF into report_library file_created, file_modified, file_dates_from; a clue for the publication date of reports that state none, used by Publication dates in a following pull request (#85)
 - 2026-10-26 Evidence database, schema and first load: `load_supabase.py` (Evidence database load, every 6 hours) copies the full-text store into Supabase (documents, pages, evidence passages, plus an empty datapoints table for extraction), only what is new each run, and builds a word index in every language once the backlog is in; stops at SUPABASE_MAX_GB so the disk never fills (#83)
 - 2026-10-26 Evidence database: `supabase_check.py` and the Supabase check workflow test, read-only, that the Supabase project answers with the three SUPABASE_* secrets (session pooler address, Postgres, vector and pg_trgm extensions, REST API and secret-level key) before anything is loaded (#82)
 - 2026-10-26 OCR reads each scan with English plus the company's home-country language (Chinese, Japanese, Korean, Russian, Arabic, Thai and others), counts noise as no text, and `--redo` re-reads earlier own-script covers and drops earlier noise, after a Chinese scan read as noise gave Wen's Foodstuff a false year (#81)
