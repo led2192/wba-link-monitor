@@ -14,6 +14,10 @@ on:
       limit:
         description: "At most this many rows (0 = all)"
         default: "0"
+      redo_future:
+        description: "Only the rows dated after this year (re-decided whatever rule dated them)"
+        type: boolean
+        default: false
 
 concurrency:
   group: date-documents
@@ -37,4 +41,5 @@ jobs:
         run: |
           ARGS="--limit ${{ inputs.limit }}"
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          [ "${{ inputs.redo_future }}" = "true" ] && ARGS="$ARGS --redo-future"
           python date_documents.py $ARGS
