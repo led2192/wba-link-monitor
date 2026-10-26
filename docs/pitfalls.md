@@ -23,6 +23,7 @@ Lessons that cost time to learn. Read before changing the area they name.
 - **A purge tombstone is forever.** A wrong duplicate decision, once purged, blocks the real document.
 
 ## Classification and years
+- **"First seen" is when the robot met the file, not when the company published it.** Macy's 10-K for the year ended 31 January 2026 sat on its investor page from March; the robot first harvested it on 18 July 2026, and that became its publication date. EDGAR says filed 27 March 2026. A 10-K or 20-F on a company's own site is still an SEC filing: look it up (CIK in the address or `companies.sec_cik`, then the filing of the same period). Use first seen only when the page had been watched for two weeks and the file's own dates are not older (26 Oct 2026).
 - **Two classifiers disagree on half the corpus.** Never pick one silently; measure on labels.
 - **Non-English documents are not AI-typed.** The classify formula runs on English only; 30,000+ rows rely on the URL guess or nothing.
 - **Years in file names are publication years.** "annual-report-2025.pdf" is usually FY2024. Use the reporting-period evidence.
