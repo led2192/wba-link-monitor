@@ -68,9 +68,18 @@ TEXT_DATE = re.compile(r"(?:\d{1,2}(?:st|nd|rd|th)?\s+)?" + _MON + r"\.?\s+(?:\d
 # years that name something else: a law or standard ("Corporations Act 2001", "ISO 14001:2015") or a
 # Japanese fiscal period ending in a month ("2027年3月期" = the year to March 2027, not a date)
 NOT_DOC_YEAR = re.compile(r"(?:\bact|\biso\b)[^|;\n]{0,14}?20[0-3]\d|20[0-3]\d\s*年\s*\d{1,2}\s*月\s*期", re.I)
-# maturity / due dates are not the document's year ("Notes due 28 June 2028")
-DUE = re.compile(r"(?:due|matur[a-z]*|redeem[a-z]*|redemption|expir[a-z]*|until|callable)[^|;\n]{0,30}?20[0-3]\d", re.I)
-
+# maturity / due / validity dates are not the document's year ("Notes due 28 June 2028", "Scheduled
+# Termination Date of 18 October 2027", a certificate "valid until 2027")
+DUE = re.compile(r"(?:due|matur[a-z]*|redeem[a-z]*|redemption|expir[a-z]*|until|callable|terminat[a-z]*|"
+                 r"valid(?:ity)?|geldig|g[üu]ltig|v[áa]lid[oa])[^|;\n]{0,30}?20[0-3]\d", re.I)
+# The year after this one exists only as a fiscal year the company names ("FY27", "FY2027", "2026-27",
+# "2026/2027", "2027年3月期"): the data of a Japanese or Indian company's quarter to June 2026 belongs to
+# FY2027. A bare next year names something else: a certificate valid until 2027, a bond maturing in
+# 2027, a plan for 2027 (26 Oct 2026: 566 documents dated 2027, most of them certificates, policies and
+# notices with such a year in the file name or title).
+FY_NEXT = (re.compile(r"(?<![a-z])fy[-_ ]?(?:20)?(\d{2})(?!\d)", re.I),                       # FY27, FY2027
+           re.compile(r"(?<!\d)(?:20)?\d{2}\s*[-/–]\s*(?:20)?(\d{2})(?!\d)"),               # 2026-27, 2026/2027
+           re.compile(r"(20[0-3]\d)\s*年\s*\d{1,2}\s*月\s*期"))                              # 2027年3月期
 
 FY2 = re.compile(r"(?<![a-z])fy[-_ ]?(\d{2})(?!\d)", re.I)     # "SGH-FY22-Results.pdf" -> 2022
 
@@ -79,8 +88,22 @@ def _nfkc(t):
     return unicodedata.normalize("NFKC", t or "")    # full-width digits: "２０２４年" -> "2024年"
 
 
-def _ok(y, this_year):
-    return 2000 <= y <= this_year + 1
+def fiscal_next(text, this_year):
+    """True when the text names next year as a fiscal year (FY27, 2026-27, 2027年3月期)."""
+    text = _nfkc(text)
+    for rx in FY_NEXT:
+        for m in rx.finditer(text):
+            y = int(m.group(1))
+            if y < 100:
+                y += 2000
+            if y == this_year + 1:
+                return True
+    return False
+
+
+def _ok(y, this_year, fy_next=False):
+    """A year the document can carry: 2000 to this year, or next year when it is named as a fiscal year."""
+    return 2000 <= y <= this_year or (y == this_year + 1 and fy_next)
 
 
 def url_parts(url, filename=""):
@@ -106,14 +129,15 @@ def decide(url, filename, cover, this_year=None):
     if any(host == h or host.endswith("." + h) for h in FILING_HOSTS):
         return "", "filing"
     plain, dated, folder = url_parts(url, filename)
-    plain = {y for y in plain if _ok(y, this_year)}
-    dated = {y for y in dated if _ok(y, this_year)}
-    folder = {y for y in folder if _ok(y, this_year)}
-    if plain:
-        return str(max(plain)), "file name"
-    cap = min([this_year + 1] + ([max(folder)] if folder else []) + ([max(dated)] if dated else []))
     cover = _nfkc(cover)
     text = cover[:3000]
+    fy = fiscal_next(unquote(url or "") + " " + unquote(filename or "") + " " + text, this_year)
+    plain = {y for y in plain if _ok(y, this_year, fy)}
+    dated = {y for y in dated if _ok(y, this_year, fy)}
+    folder = {y for y in folder if _ok(y, this_year, fy)}
+    if plain:
+        return str(max(plain)), "file name"
+    cap = min([this_year + (1 if fy else 0)] + ([max(folder)] if folder else []) + ([max(dated)] if dated else []))
     # the title line: a year at the very top of the cover that is not a date ("2026 Remuneration
     # policy", "Annual Report 2024") names the document; later phrases may quote other years
     head = TEXT_DATE.sub(" ", NOT_DOC_YEAR.sub(" ", DUE.sub(" ", text[:100])))
@@ -123,12 +147,12 @@ def decide(url, filename, cover, this_year=None):
         head = ""
     for m in YEAR.finditer(head):
         y = int(m.group(1))
-        if _ok(y, this_year) and y <= cap:
+        if _ok(y, this_year, fy) and y <= cap:
             return str(y), "cover"
     for pat in STRONG:
         for m in pat.finditer(text):
             y = int(m.group(1))
-            if _ok(y, this_year) and y <= cap:
+            if _ok(y, this_year, fy) and y <= cap:
                 return str(y), "cover"
     if dated:
         return str(max(dated)), "file name" if cover else NO_COVER_YET
@@ -136,7 +160,7 @@ def decide(url, filename, cover, this_year=None):
         # only dates count here ("September 19, 2005"): a lone year on a cover is as often a law
         # ("Corporations Act 2001") or a standard ("ISO 14001:2015") as the document's year
         ys = [int(y) for d in TEXT_DATE.findall(NOT_DOC_YEAR.sub(" ", DUE.sub(" ", cover[:1000]))) for y in YEAR.findall(d)]
-        ys = [y for y in ys if _ok(y, this_year) and y <= cap]
+        ys = [y for y in ys if _ok(y, this_year, fy) and y <= cap]
         if ys:
             return str(max(ys)), "cover"
     if folder:
@@ -161,6 +185,8 @@ def main():
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--sample", type=int, default=120, help="changes to print in the dry run")
+    ap.add_argument("--redo-future", action="store_true",
+                    help="re-decide the rows whose doc_year is after this year, whatever decided them")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
     if not (token and base):
@@ -171,6 +197,9 @@ def main():
     H = {"Authorization": f"Bearer {token}"}
     formula = (f"AND(NOT({{discard}}), OR({{{F_FROM}}}='', "
                f"AND({{{F_FROM}}}='{NO_COVER_YET}', {{{F_COVER}}}!='')))")
+    if a.redo_future:
+        # rows dated after this year by an earlier version of the rules (26 Oct 2026: 566 rows dated 2027)
+        formula = f"AND(NOT({{discard}}), VALUE({{{F_YEAR}}}&'') > {datetime.date.today().year})"
     params = [("pageSize", "100"), ("filterByFormula", formula)] + \
              [("fields[]", x) for x in (F_URL, F_FILE, F_COVER, F_YEAR, "library_id")]
     rules, moved, sample, done, offset, wrote = collections.Counter(), collections.Counter(), [], 0, None, 0

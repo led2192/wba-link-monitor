@@ -44,5 +44,31 @@ class CoverRule(unittest.TestCase):
                          ("2026", "cover"))
 
 
+class NextYear(unittest.TestCase):
+    """26 Oct 2026: 566 documents dated 2027. Next year exists only as a fiscal year the company names."""
+
+    def test_fiscal_year_labels_keep_next_year(self):
+        self.assertEqual(D.decide("https://x.com/2026-07/ORL - Q1FY27 - Press Release.pdf", "", "", 2026), ("2027", "file name"))
+        self.assertEqual(D.decide("https://x.com/ir/FY27Q1_EarningCall_QA_E.pdf", "", "", 2026), ("2027", "file name"))
+        self.assertEqual(D.decide("https://x.com/investors/fy-2026-2027/Q2-Performance.pdf", "", "Quarterly performance update", 2026),
+                         ("2027", "address"))
+
+    def test_a_bare_next_year_names_something_else(self):
+        # a certificate valid until 2027, a plan for 2027, a bond ending in 2027
+        self.assertEqual(D.decide("https://x.com/she/2022/certificaat-iso-14001-geldig-12-09-2027.pdf", "", "", 2026)[0], "2022")
+        self.assertEqual(D.decide("https://x.com/uploads/2026/02/Strategic-Plan-for-CY-2027.pdf", "", "", 2026), ("2026", "waiting for cover"))
+        cover = ("FirstRand Bank Limited Applicable Pricing Supplement for Index-Linked Notes with Scheduled Termination "
+                 "Date of 18 October 2027. Issue date 9 October 2024")
+        self.assertEqual(D.decide("https://x.com/DI/FRS399 (final).pdf", "", cover, 2026), ("2024", "cover"))
+        self.assertEqual(D.decide("https://x.com/plan.pdf", "", "Strategic Plan 2027 Unlock the future", 2026), ("", "none"))
+
+    def test_fiscal_next(self):
+        self.assertTrue(D.fiscal_next("Annual Report FY2027", 2026))
+        self.assertTrue(D.fiscal_next("results 2026-27", 2026))
+        self.assertTrue(D.fiscal_next("2027年3月期 第1四半期", 2026))
+        self.assertFalse(D.fiscal_next("valid until 2027", 2026))
+        self.assertFalse(D.fiscal_next("FY2026 results", 2026))
+
+
 if __name__ == "__main__":
     unittest.main()
