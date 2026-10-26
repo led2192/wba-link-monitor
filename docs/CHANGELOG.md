@@ -4,6 +4,7 @@ Newest first. One line per change, with the pull request. Every pull request add
 
 ## October 2026
 - 2026-10-26 Documentation conflicts between open pull requests resolve themselves: after every merge, `resolve_doc_conflicts.py` merges main into each open pull request and keeps both sides when only docs/*.md or the re-run list collide (#80)
+- 2026-10-26 Gone report listings are searched for a replacement again: a gone page whose address lists reports counts as covered only by another live listing of its type, not by any page of the type (on 25 Oct, 307 of 317 gone pages were unticked with no search, among them Hanwha's sustainability report list and FrieslandCampina's financial and sustainability reports page); listings unticked that way on 24-25 Oct are searched once more and marked re-checked (#77)
 - 2026-10-26 Each run of the office-network fetch inside its 22-hour job gets its own Pipeline QA row (`QA_RUN_PART`); until now every run overwrote the job's single row, so only the last run of the day was visible (#76)
 - 2026-10-26 Browser monitor: a chunk of pages waits at most 20 minutes, pages that hang are left for the next run with fresh browsers, and the process exits after its last write; every run since at least 16 Oct had been cancelled at the 350-minute job limit (#75)
 - 2026-10-26 base_health counts new and discarded documents for the previous calendar day (UTC) instead of the last 24 hours: two runs a few hours apart counted the same 2,880 documents of 25 Oct twice (#74)
