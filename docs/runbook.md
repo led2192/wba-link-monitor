@@ -27,6 +27,14 @@ Pipeline QA is where problems are found and counted; the Disclosure Library is w
 3. Never fix anything by editing a failure row. The next sync sees the fix in the library and closes the failure itself (`fixed`, or `resolved_silently` after 30 days without recurring).
 4. Only status is yours to set on a failure, if you want: `expected` when the behaviour is correct, `wontfix` when it is not worth fixing.
 
+## Search the full text
+- **A word, a phrase, an acronym, in every disclosure:** the search page (sign in with your WBA email; details and the SQL alternative in [evidence.md](evidence.md)). Results open the PDF at the page.
+- **How many companies mention X, with review:** a row in `mention_searches` ([../TEXT_SEARCH.md](../TEXT_SEARCH.md)); the answer and the hits appear overnight, or run Mention search by hand.
+- **Let someone outside WBA search:** Supabase → SQL Editor: `insert into search_access (email) values ('name@example.com');`
+
+## After a rule changes how documents are dated or typed
+Rows already decided are not re-decided by the nightly runs. Document years (rules) with `redo_future` re-decides only the rows dated after this year; Publication dates with `all` re-reads every key report; Document years (rules) without inputs re-dates the whole backlog. Dry run first (the summary lists the changes), then with `commit`.
+
 ## When something breaks
 - **A GitHub job failed:** it re-runs itself once automatically. If `base_health.failed_jobs` still lists it, it failed twice: the weekly review reads it. You may re-run it from the Actions tab; scripts are idempotent, a re-run never duplicates.
 - **A page "does not open" but works in your browser:** the site blocks robots. Download the report yourself and use `add_file`.
