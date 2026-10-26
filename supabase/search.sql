@@ -1,10 +1,14 @@
 -- Search functions of the evidence database, for the search page and for Claude.
--- Applied by load_supabase.py after schema.sql, only where Supabase's auth schema exists.
--- The tables stay closed (row level security, no policy): the page reaches the data only through these
--- functions, which check who is asking first. Safe to run again.
-
--- Documents with no company are out of the library's current scope (discarded since their text was read:
--- duplicates, wrong rows): the store keeps their text, the searches leave them out.
+-- Applied by load_supabase.py once the pages_search index exists (see schema.sql), only where
+-- Supabase's auth schema exists. The tables stay closed (row level security, no policy): the page reaches
+-- the data only through these functions, which check who is asking first. Safe to run again.
+--
+-- How a search runs (26 Oct 2026, measured on a 1-in-11 copy of the corpus):
+--   every condition (words, year, type, company) is answered inside the index pages_search, so only
+--   pages that match everything are fetched; a phrase is checked against the stored words, not the text;
+--   results come year by year, newest first, stopping as soon as max_rows are found, so a rare phrase
+--   and a common word cost about the same. Documents with no company (out of the library's scope)
+--   are left out: their pages carry wba_id ''.
 
 -- Who may search: a signed-in user with a WBA address, or an address listed in search_access (added by
 -- the owner in the SQL editor: insert into search_access (email) values ('name@example.com');).
@@ -28,18 +32,37 @@ create or replace function public.can_search() returns boolean
     select session_user = 'postgres' or public.email_may_search(auth.jwt() ->> 'email')
   $$;
 
--- Pages that contain the words (websearch syntax: "exact phrase", -excluded, or), newest documents first,
--- with a highlighted extract. Filters are optional. At most 2,000 matching pages are considered before
--- sorting, so a very common word answers quickly; the summary says when there are more.
+-- The companies a company filter means: a WBA id, or part of a name. Null when no filter.
+create or replace function public.companies_matching(company_filter text) returns text[]
+  language sql stable security definer set search_path = public
+  as $$
+    select case when company_filter is null or btrim(company_filter) = '' then null
+                else coalesce((select array_agg(distinct d.wba_id) from public.documents d
+                               where d.wba_id is not null
+                                 and (d.wba_id = btrim(company_filter) or d.company ilike '%' || btrim(company_filter) || '%')),
+                              array['']::text[]) end
+  $$;
+
+-- Pages that contain the words (websearch syntax: "exact phrase", -excluded, or), newest documents
+-- first, with a highlighted extract (⟦ ⟧ around the matched words). Filters are optional.
 create or replace function public.search_pages(
   q text, company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null, max_rows int default 50)
 returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text,
                page int, excerpt text)
-language plpgsql stable security definer set search_path = public, extensions
+language plpgsql stable security definer
+set search_path = public, extensions
+set work_mem = '128MB'
+set statement_timeout = '30s'
+set plan_cache_mode = 'force_custom_plan'
 as $$
 declare
   tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
+  need int := least(greatest(coalesce(max_rows, 50), 1), 200);
+  got int := 0;
+  n int;
+  y int;
+  ids text[] := public.companies_matching(company_filter);
 begin
   if not public.can_search() then
     raise exception 'not allowed to search' using errcode = '42501';
@@ -47,41 +70,48 @@ begin
   if numnode(tsq) = 0 then
     return;
   end if;
-  return query
-    with hits as (
-      select p.library_id, p.page, d.year as y
-      from public.pages p
-      join public.documents d on d.library_id = p.library_id
-      where public.page_words(p.body) @@ tsq
-        and d.company is not null
-        and (company_filter is null or d.company ilike '%' || company_filter || '%' or d.wba_id = company_filter)
-        and (year_from is null or d.year >= year_from)
-        and (year_to is null or d.year <= year_to)
-        and (type_filter is null or d.doc_type = type_filter)
-      limit 2000
-    ), top as (
-      select * from hits order by y desc nulls last, library_id, page limit least(greatest(max_rows, 1), 200)
-    )
-    select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, t.page,
-           ts_headline('simple', left(p.body, 200000), tsq,
-                       'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=<mark>, StopSel=</mark>')
-    from top t
-    join public.documents d on d.library_id = t.library_id
-    join public.pages p on p.library_id = t.library_id and p.page = t.page
-    order by t.y desc nulls last, t.library_id, t.page;
+  for y in select distinct coalesce(d.year, 0) from public.documents d
+            where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+            order by 1 desc
+  loop
+    return query
+      select s.library_id, s.company, s.wba_id, s.year, s.doc_type, s.label, s.url, s.page,
+             ts_headline('simple', left(s.body, 200000), tsq,
+                         'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
+      from (
+        select p.library_id, p.page, p.body, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url
+        from public.pages p
+        join public.documents d on d.library_id = p.library_id
+        where p.words @@ tsq
+          and p.year = y
+          and p.wba_id <> ''
+          and (type_filter is null or p.doc_type = type_filter)
+          and (ids is null or p.wba_id = any(ids))
+        limit need - got
+      ) s
+      order by s.company, s.library_id, s.page;
+    get diagnostics n = row_count;
+    got := got + n;
+    exit when got >= need;
+  end loop;
 end;
 $$;
 
--- How many companies, documents and pages contain the words, with the same filters. Counts stop at
--- 100,000 pages (capped = true) so a common word does not run for minutes.
+-- How many companies, documents and pages contain the words, with the same filters. Counting stops
+-- at 20,000 pages (capped = true), so a common word answers in seconds.
 create or replace function public.search_summary(
   q text, company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null)
 returns table (companies bigint, documents bigint, pages bigint, capped boolean)
-language plpgsql stable security definer set search_path = public, extensions
+language plpgsql stable security definer
+set search_path = public, extensions
+set work_mem = '128MB'
+set statement_timeout = '30s'
+set plan_cache_mode = 'force_custom_plan'
 as $$
 declare
   tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
+  ids text[] := public.companies_matching(company_filter);
 begin
   if not public.can_search() then
     raise exception 'not allowed to search' using errcode = '42501';
@@ -92,18 +122,17 @@ begin
   end if;
   return query
     with hits as (
-      select d.wba_id, p.library_id
+      select p.wba_id, p.library_id
       from public.pages p
-      join public.documents d on d.library_id = p.library_id
-      where public.page_words(p.body) @@ tsq
-        and d.company is not null
-        and (company_filter is null or d.company ilike '%' || company_filter || '%' or d.wba_id = company_filter)
-        and (year_from is null or d.year >= year_from)
-        and (year_to is null or d.year <= year_to)
-        and (type_filter is null or d.doc_type = type_filter)
-      limit 100001
+      where p.words @@ tsq
+        and p.wba_id <> ''
+        and (year_from is null or p.year >= year_from)
+        and (year_to is null or p.year <= year_to)
+        and (type_filter is null or p.doc_type = type_filter)
+        and (ids is null or p.wba_id = any(ids))
+      limit 20001
     )
-    select count(distinct h.wba_id), count(distinct h.library_id), least(count(*), 100000), count(*) > 100000
+    select count(distinct h.wba_id), count(distinct h.library_id), least(count(*), 20000), count(*) > 20000
     from hits h;
 end;
 $$;
@@ -114,10 +143,15 @@ create or replace function public.search_passages(
   year_to int default null, max_rows int default 50)
 returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text,
                page int, dims text[], area text, excerpt text)
-language plpgsql stable security definer set search_path = public, extensions
+language plpgsql stable security definer
+set search_path = public, extensions
+set work_mem = '128MB'
+set statement_timeout = '30s'
+set plan_cache_mode = 'force_custom_plan'
 as $$
 declare
   tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
+  ids text[] := public.companies_matching(company_filter);
 begin
   if not public.can_search() then
     raise exception 'not allowed to search' using errcode = '42501';
@@ -125,17 +159,17 @@ begin
   return query
     select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, ps.page, ps.dims, ps.area,
            case when numnode(tsq) = 0 then left(ps.body, 600)
-                else ts_headline('simple', ps.body, tsq, 'MaxFragments=1, MaxWords=60, MinWords=25, StartSel=<mark>, StopSel=</mark>') end
+                else ts_headline('simple', ps.body, tsq, 'MaxFragments=1, MaxWords=60, MinWords=25, StartSel=⟦, StopSel=⟧') end
     from public.passages ps
     join public.documents d on d.library_id = ps.library_id
     where (numnode(tsq) = 0 or public.page_words(ps.body) @@ tsq)
-      and d.company is not null
       and (dim is null or dim = any(ps.dims))
-      and (company_filter is null or d.company ilike '%' || company_filter || '%' or d.wba_id = company_filter)
+      and d.company is not null
+      and (ids is null or d.wba_id = any(ids))
       and (year_from is null or d.year >= year_from)
       and (year_to is null or d.year <= year_to)
     order by d.year desc nulls last, d.library_id, ps.page, ps.n
-    limit least(greatest(max_rows, 1), 200);
+    limit least(greatest(coalesce(max_rows, 50), 1), 200);
 end;
 $$;
 
@@ -144,6 +178,7 @@ revoke all on function public.search_summary(text, text, int, int, text) from pu
 revoke all on function public.search_passages(text, text, text, int, int, int) from public, anon;
 revoke all on function public.can_search() from public, anon;
 revoke all on function public.email_may_search(text) from public, anon, authenticated;
+revoke all on function public.companies_matching(text) from public, anon, authenticated;
 grant execute on function public.search_pages(text, text, int, int, text, int) to authenticated;
 grant execute on function public.search_summary(text, text, int, int, text) to authenticated;
 grant execute on function public.search_passages(text, text, text, int, int, int) to authenticated;

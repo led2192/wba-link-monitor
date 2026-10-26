@@ -20,7 +20,7 @@ from urllib.parse import urlsplit, unquote
 
 import requests
 
-NEEDED_EXTENSIONS = ("vector", "pg_trgm")
+NEEDED_EXTENSIONS = ("vector", "pg_trgm", "btree_gin")
 
 
 def check_db_url(url):
