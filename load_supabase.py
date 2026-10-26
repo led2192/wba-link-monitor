@@ -14,8 +14,11 @@ What it loads, in this order, each step resumable:
                  pages.
   4. passages    evidence passages from evidence-<run> files not loaded yet (complete only when the
                  matching evidence-docs-<run> exists); a re-tagged document's passages are replaced.
-  5. word index  with --index, once no pages file is left: the full-text index on pages (built once
-                 after the first big load; later inserts keep it up to date).
+  5. words       with --index: the stored words (and the document's year, type and company) of pages
+                 written before those columns existed, in batches, continuing across runs (table load_state).
+  6. index       with --index, once every page has its words and no pages file is left: the search index
+                 pages_search (words with year, type and company), then the search functions that use it,
+                 then the older text-only index is dropped. Built once; inserts keep it up to date.
 
 Safety:
   - Dry run by default: connects, checks the schema inside a transaction that is rolled back, and
@@ -120,14 +123,116 @@ def loaded_names(conn):
         return {r[0] for r in c.fetchall()}
 
 
+def has_auth(conn):
+    """Supabase's auth schema (a plain Postgres, as in the tests, has none)."""
+    with conn.cursor() as c:
+        c.execute("select to_regnamespace('auth') is not null")
+        return c.fetchone()[0]
+
+
+def search_index_exists(conn):
+    with conn.cursor() as c:
+        c.execute("select to_regclass('public.pages_search') is not null")
+        return c.fetchone()[0]
+
+
 def apply_schema(conn, commit):
-    """schema.sql, then search.sql where Supabase's auth schema exists (it is not in a plain Postgres)."""
+    """schema.sql always; search.sql (the search functions) only once the pages_search index exists,
+    because the functions read the stored words and that index. Until then the functions already in the
+    database keep working on the older index."""
     with conn.cursor() as c:
         c.execute(open(SCHEMA, encoding="utf-8").read())
-        c.execute("select to_regnamespace('auth') is not null")
-        if c.fetchone()[0]:
+    if has_auth(conn) and search_index_exists(conn):
+        with conn.cursor() as c:
             c.execute(open(SEARCH_SQL, encoding="utf-8").read())
     (conn.commit if commit else conn.rollback)()
+
+
+def get_state(conn, key):
+    with conn.cursor() as c:
+        c.execute("select to_regclass('public.load_state')")
+        if c.fetchone()[0] is None:
+            return None
+        c.execute("select value from public.load_state where key = %s", (key,))
+        r = c.fetchone()
+        return r[0] if r else None
+
+
+def set_state(conn, key, value):
+    with conn.cursor() as c:
+        c.execute("insert into public.load_state (key, value) values (%s, %s) on conflict (key) do update "
+                  "set value = excluded.value, updated_at = now()", (key, value))
+    conn.commit()
+
+
+BACKFILL_KEY = "words_backfill"            # 'done', or the last (library_id, page) filled, as 'library_id<TAB>page'
+BACKFILL_BATCH = 20000
+
+
+def backfill_words(conn, deadline, max_gb):
+    """Fill words, year, doc_type and wba_id on the pages written before those columns existed, in batches
+    of BACKFILL_BATCH rows in primary-key order, one transaction each, continuing from where the last run
+    stopped. Returns (rows filled, done, why it stopped). Pages written since the columns exist already
+    carry them (the pages_before_write trigger), so a batch that re-fills them is harmless."""
+    state = get_state(conn, BACKFILL_KEY)
+    if state == "done":
+        return 0, True, ""
+    last_id, last_page = (state.split("\t") if state else ("", 0))
+    last_page = int(last_page)
+    filled, k = 0, 0
+    while True:
+        if time.time() > deadline:
+            return filled, False, "time budget reached during the words backfill"
+        if k % 5 == 0:
+            gb = db_gb(conn)
+            if gb >= max_gb:
+                return filled, False, f"database reached {gb:.1f} GB (limit {max_gb:g} GB) during the words backfill"
+        with conn.cursor() as c:
+            c.execute("""
+                with b as (
+                  select library_id, page from public.pages
+                  where (library_id, page) > (%s, %s) order by library_id, page limit %s
+                ), u as (
+                  update public.pages p
+                     set words = public.page_words(p.body), year = coalesce(d.year, 0),
+                         doc_type = coalesce(d.doc_type, ''), wba_id = coalesce(d.wba_id, '')
+                    from b left join public.documents d on d.library_id = b.library_id
+                   where p.library_id = b.library_id and p.page = b.page
+                   returning p.library_id, p.page
+                )
+                select (select count(*) from u), m.library_id, m.page
+                from (select library_id, page from u order by library_id desc, page desc limit 1) m""",
+                      (last_id, last_page, BACKFILL_BATCH))
+            r = c.fetchone()
+        conn.commit()
+        if not r or not r[0]:
+            set_state(conn, BACKFILL_KEY, "done")
+            return filled, True, ""
+        n, last_id, last_page = r
+        filled += n; k += 1
+        set_state(conn, BACKFILL_KEY, f"{last_id}\t{last_page}")
+        if k % 25 == 0:
+            print(f"    backfill: {filled:,} pages filled this run, at {last_id}", flush=True)
+
+
+def build_search_index(conn):
+    """The word index with year, type and company (pages_search), then the search functions that use
+    it, then the older index on the text alone is dropped. Each step is safe to repeat."""
+    with conn.cursor() as c:
+        c.execute("set maintenance_work_mem = '256MB'")
+        c.execute("create index if not exists pages_search on public.pages using gin (words, year, doc_type, wba_id)")
+    conn.commit()
+    if has_auth(conn):
+        with conn.cursor() as c:
+            c.execute(open(SEARCH_SQL, encoding="utf-8").read())
+        conn.commit()
+    with conn.cursor() as c:
+        c.execute("drop index if exists public.pages_words")
+    conn.commit()
+    conn.autocommit = True
+    with conn.cursor() as c:
+        c.execute("analyze public.pages")
+    conn.autocommit = False
 
 
 def upsert_documents(conn, rows):
@@ -187,13 +292,6 @@ def load_passages(conn, name, tagged_ids, rows):
     return kept, n - kept
 
 
-def build_word_index(conn):
-    with conn.cursor() as c:
-        c.execute("set maintenance_work_mem = '512MB'")
-        c.execute("create index if not exists pages_words on public.pages using gin (public.page_words(body))")
-    conn.commit()
-
-
 def table_counts(conn):
     out = {}
     with conn.cursor() as c:
@@ -204,8 +302,12 @@ def table_counts(conn):
                 continue
             c.execute(f"select count(*) from public.{t}")
             out[t] = c.fetchone()[0]
-        c.execute("select to_regclass('public.pages_words')")
-        out["word index"] = "built" if c.fetchone()[0] else "not built"
+        c.execute("select to_regclass('public.pages_search') is not null, to_regclass('public.pages_words') is not null")
+        new, old = c.fetchone()
+    out["word index"] = "pages_search" if new else ("pages_words (older, text only)" if old else "not built")
+    out["words backfill"] = get_state(conn, BACKFILL_KEY) or "not started"
+    if out["words backfill"] not in ("done", "not started"):
+        out["words backfill"] = "in progress"
     return out
 
 
@@ -216,7 +318,7 @@ def main():
     ap.add_argument("--minutes", type=float, default=300, help="time budget for loading pages")
     ap.add_argument("--parts", type=int, default=0, help="at most this many pages files (0 = all pending)")
     ap.add_argument("--max-gb", type=float, default=6.0, help="stop loading pages at this database size")
-    ap.add_argument("--index", action="store_true", help="build the word index on pages when it is missing and no pages file is left")
+    ap.add_argument("--index", action="store_true", help="fill the stored words of older pages and build the search index when it is missing and no pages file is left")
     a = ap.parse_args()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
@@ -277,12 +379,22 @@ def main():
             for n in (ev_name, dd_name):
                 os.remove(os.path.join(work, n))
             c["evidence runs"] += 1; c["passages"] += kept; c["passages without document"] += orphan
-        # built once everything waiting has been copied: building it once is far faster than
-        # updating it row by row through the first big load
-        if a.index and not stopped and len(todo) == len(pending_pages):
-            print(">>> building the word index on pages (if missing)", flush=True)
-            build_word_index(conn)
-            c["word index built"] = 1
+        if a.index and not stopped:
+            # the stored words of pages written before the column existed, within the budget
+            deadline = t0 + a.minutes * 60
+            filled, done, why = backfill_words(conn, deadline, a.max_gb)
+            c["words backfilled"] = filled
+            if not done:
+                stopped = why
+            # the index once every row has its words and nothing waits: building it once is far faster
+            # than updating it row by row; it needs about an hour, so it starts only with time left
+            elif len(todo) == len(pending_pages) and not search_index_exists(conn):
+                if (deadline - time.time()) / 60 >= 60:
+                    print(">>> building the search index on pages", flush=True)
+                    build_search_index(conn)
+                    c["search index built"] = 1
+                else:
+                    stopped = "the search index is left for the next run (it needs an hour of budget)"
     shutil.rmtree(work, ignore_errors=True)
 
     counts = table_counts(conn)
