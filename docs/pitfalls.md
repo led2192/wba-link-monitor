@@ -72,3 +72,6 @@ base_health ran at 16:41 on 25 Oct 2026 (the 12:17 schedule, started late) and a
 
 ## OCR with the wrong language gives noise, and noise gives wrong years
 The English Tesseract model read Chinese scans as "WENS iEt imECBS {it AER GS)". The text had enough letters to count as read, the AI made a title of it, and a year rule found 2016 in it: Wen's Foodstuff lost its recent sustainability report on 26 Oct 2026. `ocr_covers.py` now adds the company's own language model and rejects output that does not read as words; covers read before are re-read with `--redo`.
+
+## Every pull request that adds a changelog line conflicts with the next
+Each pull request adds its line at the top of docs/CHANGELOG.md, so merging one leaves every other open pull request with a conflict on the same lines, and the owner waited for someone to resolve it before the next merge (26 Oct 2026). `resolve_doc_conflicts.py` now merges main into open pull requests after every merge and keeps both sides when only documentation collides. Do not resolve those by hand from a shared working folder while another job uses it: a background resolver using `git checkout -f` in the same folder discarded uncommitted work the same morning; it runs in GitHub now.
