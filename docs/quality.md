@@ -65,7 +65,7 @@ A code whose owner is "to build" is a gap in the design, not a job for a person:
 | CO_MISSED_KNOWN | a document known to exist is not in the library | Source Library matching, research, audits (to build) |
 | RUN_FAILED | a job or a write did not complete | base_health, `qa.record_exception()` |
 
-Document rows are written only for report-shaped documents (a report-family type, or a report word plus a 2023+ year); the rest is counted in the run's counters. Severity is High when the failure hides or costs a 2023+ sustainability or annual report, or blocks a whole domain.
+Document rows are written only for report-shaped documents (a report-family type, or a report word plus a 2023+ year); the rest is counted in the run's counters. Severity is High when the failure hides or costs a 2023+ sustainability or annual report, or blocks a whole domain. For a gone or unreachable page that means a report hub, a sustainability report page, or a sustainability or investor page whose address lists reports (`qa_sync.page_holds_reports`, since 26 Oct 2026); a gone topic page is Medium.
 
 ## Using it from a script
 

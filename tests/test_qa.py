@@ -222,6 +222,19 @@ class SyncDeriveTests(unittest.TestCase):
         self.assertEqual(qa_sync.derive_page(dict(base, type="news", status="dead", http_status=404)), [])
         gone = qa_sync.derive_page(dict(base, status="dead", http_status=404))
         self.assertEqual([(c, d, k, s) for c, d, k, s, _ in gone], [("PAGE_GONE", "404", base["url"], "High")])
+        # real cases of the 26 Oct review: a gone report list is High, a gone topic page Medium
+        lst = qa_sync.derive_page(dict(base, type="sustainability_page", status="dead", http_status=404,
+                                       url="https://www.hanwha.com/sustainability/reports.do"))
+        self.assertEqual(lst[0][3], "High")
+        topic = qa_sync.derive_page(dict(base, type="sustainability_page", status="dead", http_status=404,
+                                         url="https://www.tescoplc.com/sustainability/cocoa"))
+        self.assertEqual(topic[0][3], "Medium")
+        ir = qa_sync.derive_page(dict(base, type="investor_relations", status="dead", http_status=404,
+                                      url="https://www.safaricom.co.ke/investor-relations-category/annual-reports"))
+        self.assertEqual(ir[0][3], "High")
+        news = qa_sync.derive_page(dict(base, type="investor_relations", status="error",
+                                        url="https://www.stifel.com/investor-relations/press-releases"))
+        self.assertEqual(news[0][3], "Medium")
         err = qa_sync.derive_page(dict(base, type="policies", status="error"))
         self.assertEqual([(c, d, s) for c, d, k, s, _ in err], [("PAGE_UNREACHABLE", "no_response", "Medium")])
         blk = qa_sync.derive_page(dict(base, status="blocked", http_status=403))

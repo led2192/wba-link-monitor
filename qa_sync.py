@@ -146,6 +146,18 @@ def days_since(iso, today):
         return None
 
 
+def page_holds_reports(f):
+    """Losing this page can cost a 2023+ sustainability or annual report (High): a report hub or a
+    sustainability report page, or a sustainability or investor page whose address lists reports.
+    A gone sustainability topic page (cocoa, a policy article) is Medium (since 26 Oct 2026: 1,050 of
+    1,400 PAGE_GONE rows were High, most of them topic pages)."""
+    from discover_pages import is_listing
+    t = (f.get("type") or "").lower()
+    if t in ("reports_hub", "sustainability_report"):
+        return True
+    return t in ("sustainability_page", "investor_relations") and is_listing(f.get("url"))
+
+
 def derive_page(f):
     """Failures for one monitored_links row -> list of (code, detail, key, severity, fields)."""
     if not f.get("monitor") or (f.get("type") or "").strip().lower() not in HARVESTED_TYPES:
@@ -156,7 +168,7 @@ def derive_page(f):
     code_s = str(int(code)) if isinstance(code, (int, float)) else (str(code or "").strip())
     ctx = {"wba_id": f.get("wba_id"), "company_name": f.get("company_name"), "page_url": url,
            "record_id": f.get("_id"), "http_status": code_s or None, "stage": "monitor"}
-    hub = (f.get("type") or "").lower() in ("reports_hub", "sustainability_page", "sustainability_report")
+    hub = page_holds_reports(f)
     out = []
     if status == "blocked":
         out.append(("PAGE_BLOCKED", code_s or "challenge", reg_domain(url), "High", ctx))
