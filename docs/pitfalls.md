@@ -60,3 +60,6 @@ On 24 Oct 2026 the office-network workflow (cron every 4 hours) got only two of 
 
 ## A 200 answer is not a file
 Some sites answer a request for a PDF with their home page and status 200. Airtable's own URL fetch then stores the page under the PDF's name, and the row looks attached: on 25 Oct 2026, 79 Asian Development Bank documents held the same 215 KB copy of adb.org's home page (adb-financial-report-2025.pdf, adb-sustainability-report-2024.pdf...). Build cover text marked them not_pdf, but no retry job looked at rows that already had a file. Check the attachment's type, not only its presence; `fix_wrong_attachments.py` now sends such rows back to be fetched.
+
+## Rolling 24-hour counts double count when a job runs twice
+base_health ran at 16:41 on 25 Oct 2026 (the 12:17 schedule, started late) and again at 00:50 on 26 Oct (chained after the nightly coverage). Both counted documents created in the 24 hours before, so the 2,880 documents harvested on the morning of the 25th showed as new on both days, and the second day looked like growth that never reached the base. Count per calendar day.
