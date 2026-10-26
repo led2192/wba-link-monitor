@@ -1,0 +1,54 @@
+name: File dates
+
+# Creation and modification dates written inside each key report's PDF (file_dates.py): a clue to
+# the publication date for reports that state none. Daily, newest reports first, until the backlog is
+# read; then only new files. A pull request touching it reads 40 files and posts what it found.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+      limit:
+        description: "files this run (0 = all waiting)"
+        default: "40"
+  pull_request:
+    paths: [file_dates.py, .github/workflows/file_dates.yml]
+
+concurrency:
+  group: file-dates
+  cancel-in-progress: false
+
+jobs:
+  dates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: File dates
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--commit --minutes 300"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 40"
+          else ARGS="--limit ${{ inputs.limit }} --minutes 300"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; fi
+          python file_dates.py $ARGS
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s file_dates.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file file_dates.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "File dates: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
