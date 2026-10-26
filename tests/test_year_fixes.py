@@ -62,6 +62,13 @@ class NextYear(unittest.TestCase):
         self.assertEqual(D.decide("https://x.com/DI/FRS399 (final).pdf", "", cover, 2026), ("2024", "cover"))
         self.assertEqual(D.decide("https://x.com/plan.pdf", "", "Strategic Plan 2027 Unlock the future", 2026), ("", "none"))
 
+    def test_redo_future_blanks_what_the_rules_cannot_date(self):
+        rec = {"fields": {"doc_year": "2027", "document_url": "https://x.com/plan.pdf", "cover_text": "Strategic Plan 2027"}}
+        upd, (old, new, rule) = D.plan_row(rec, 2026)
+        self.assertNotIn("doc_year", upd)                      # the nightly pass leaves it
+        upd, (old, new, rule) = D.plan_row(rec, 2026, clear_when_none=True)
+        self.assertEqual((upd.get("doc_year", "missing"), new, rule), (None, "blank", "none"))
+
     def test_fiscal_next(self):
         self.assertTrue(D.fiscal_next("Annual Report FY2027", 2026))
         self.assertTrue(D.fiscal_next("results 2026-27", 2026))

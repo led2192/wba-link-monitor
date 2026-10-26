@@ -168,8 +168,10 @@ def decide(url, filename, cover, this_year=None):
     return "", "none"
 
 
-def plan_row(rec, this_year=None):
-    """(fields to write, (old, new, rule)) for one record."""
+def plan_row(rec, this_year=None, clear_when_none=False):
+    """(fields to write, (old, new, rule)) for one record. A row the rules can no longer date keeps its
+    doc_year, except with clear_when_none (the --redo-future pass): there the old value is known to be
+    wrong, so it is blanked and the year formula falls back to its other sources."""
     f = rec.get("fields", {})
     att = (f.get(F_FILE) or [{}])[0]
     old = str(f.get(F_YEAR) or "").strip()
@@ -177,6 +179,9 @@ def plan_row(rec, this_year=None):
     upd = {F_FROM: rule}
     if y and y != old:
         upd[F_YEAR] = y
+    elif not y and old and clear_when_none:
+        upd[F_YEAR] = None
+        return upd, (old, "blank", rule)
     return upd, (old, y or old, rule)
 
 
@@ -213,7 +218,7 @@ def main():
             break
         ups = []
         for r in recs:
-            upd, (old, new, rule) = plan_row(r)
+            upd, (old, new, rule) = plan_row(r, clear_when_none=a.redo_future)
             rules[rule] += 1
             if F_YEAR in upd:
                 moved[f"{old or 'blank'} -> {new}"] += 1
