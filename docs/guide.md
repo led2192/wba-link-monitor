@@ -59,7 +59,7 @@ The same journey runs on demand in 10 to 15 minutes when you tick `scan_now` on 
 1. **Base health** (Disclosure Library, interface "Base health", page Health, or the `base_health` table, top row). Read `status` and `attention`. OK = nothing to do. Check = the base is over 80% full or nothing new arrived. Problem = a job failed twice (it re-runs itself once first; `failed_jobs` links it) or the base is over 90% full. Nothing to do: the weekly review reads it. Average completeness is the headline number.
 2. **Check Claude's answers** (Pipeline QA), after 13:00 Madrid: about 5 cards, one click each (Agree, Disagree, Can't tell). Section 7.4.
 3. **Notifications from Claude.** The 06:46 gap research tells you which companies it researched and which links it pasted. The 12:46 labelling tells you how many cards it labelled, how many it left for you and any pattern it saw.
-4. **Optional:** My queue (interface "Base health", page My queue) when you have time to chase a missing report by hand.
+4. **Optional:** the queue on interface Hoy (Analyst and Action filters) when you have time to chase a missing report by hand.
 
 ### Every Monday
 1. Read the weekly review's notification (08:47 Madrid). It lists the pull requests to merge, the causes found and anything that needs you.
@@ -90,6 +90,9 @@ Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipe
 
 | Interface, page | What it is for |
 | --- | --- |
+| **Hoy** (new, 26 Oct 2026) | The one page to open each day: key reports per company (latest and previous wave), the work queue with Analyst and Action filters (opens the company's to-do page), health over time (companies with both key reports, one, neither), and when companies publish their key reports (section 6.9) |
+| **Empresas** (new, 26 Oct 2026) | One list of the 2,000 companies with key reports as the main measure, filters by analyst and wave status; a Gaps section with tabs (report overdue, key pages not found, no pages watched, neither key report). A company opens its key reports page, where `add_link` and `add_file` are |
+| **Páginas** (new, 26 Oct 2026) | Watched pages in one place: pages that may be missing documents (not harvested, no document links, does not open, scanned by hand) and the on-demand scan (waiting, scanned recently, added this week) |
 | **Base health**, Health | Rebuilt 24 Oct 2026: numbers and charts of the three averages (completeness, disclosure completeness, page completeness), how full the base is, new documents per day; the daily rows; every company with its three scores |
 | **Base health**, My queue | Your work list: companies ordered by `queue_score` (how much fixing them matters), with `queue_item` saying the one thing to do. Snooze a company with `queue_snooze_until` when it really has not published |
 | **Base health**, Overdue reports | Companies whose next report should be out by their own rhythm and is not held |
@@ -99,6 +102,8 @@ Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipe
 | **Source Review**, My portfolio, Add URL | A portfolio view per analyst, and a form to add a page |
 | **Analysts**, Companies, Flagged documents | Shared with analysts (interface-only access). They see each company's documents and pages, may add links and files, and may flag documents that look wrong. A bonus: nothing depends on analysts doing it. A flag never changes a row; you decide |
 | **Mentions**, Review, Searches | The mention searches and their hits, for review |
+
+Hoy, Empresas and Páginas replace Base health (except Health), Coverage, Source Review and the Analysts company list, which measured the same gaps five different ways (`coverage_flags`, `missing_types`, `completeness` with `gap_pages`, `overdue_reports`, `kr_latest_status`). The old interfaces stay until the owner has checked the new ones and removes them by hand; nothing in the pipeline depends on them. Mentions, Pipeline QA and the Analysts interface (documents, flags) stay.
 
 ### 5.3 The few fields you edit
 
@@ -217,6 +222,19 @@ When was a key report published? `pub_date` holds the answer as far as the evide
 4. **first seen**: the day the robot first saw the file on a page it was already watching, so the report was published on or before that day. Only for files first seen after 15 July 2026 (before that, everything was first seen at the initial collection).
 
 Every date must fall after the end of the period the report covers and no later than the day the robot first saw the file. To correct a date, type it and set `pub_date_source` to person: the robot then leaves the row alone. English phrases only for now; PDF metadata (the date the file was made) is a possible next source.
+
+### 6.9 When companies publish their key reports (from 26 Oct 2026)
+Two formula fields on `report_library`: `key_role` (financial, sustainability or both, from the four `key_report_*` links; blank for any other document) and `pub_month` (the month of `pub_date`, "03 Mar"). Interface Hoy charts the month for key reports whose date came from the document, a regulator filing or a board approval; "first seen" dates are left out because they say when the robot found the file (it started in July 2026), not when it was published.
+
+First measurement, 26 Oct 2026 (latest and previous wave together, 3,855 key reports):
+
+| Role | Key reports | With a usable date | Busiest months | Months after a December year-end |
+| --- | --: | --: | --- | --- |
+| Financial | 1,486 | 610 | Feb 214, Mar 171, Apr 72 | 2 to 3 for 197 of 240 |
+| Both in one report | 1,139 | 426 | Mar 143, Feb 97, May 56, Apr 53 | 2 to 3 for 186 of 223 |
+| Sustainability | 1,230 | 103 | Mar 33, Apr 21, Jun 15, Jul 14 | 3 to 6 for 49 of 65, median 4 |
+
+Reading it: annual and integrated reports of December year-end companies come out in February and March; March year-end companies (Japan, India) publish in May and June. Separate sustainability reports come later and are spread from March to July. The sustainability figure rests on 103 reports only: 865 of the 1,230 have no date found (`pub_date_source` not found) because they rarely state one. File dates (`file_created`, `file_modified`, nightly from 27 Oct 2026) are the next source to measure for that gap.
 
 ## 7. Pipeline QA
 
