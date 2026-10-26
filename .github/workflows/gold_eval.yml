@@ -1,0 +1,50 @@
+name: Gold evaluation
+
+# Does the evidence database find the page the analyst cited? (gold_eval.py) Read-only against the
+# gold bases (GOLD_TOKEN), the Disclosure Library and the evidence database. Manual; a pull request
+# touching it runs a sample of 20 answers per attribute and posts the table. Without GOLD_TOKEN it
+# reports that and stops.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "answers per attribute (0 = all validated answers)"
+        default: "0"
+      attributes:
+        description: "GMC codes, comma-separated (blank = all in gold_attributes.json)"
+        default: ""
+  pull_request:
+    paths: [gold_eval.py, gold_attributes.json, .github/workflows/gold_eval.yml]
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 20"
+          else ARGS="--commit --limit ${{ inputs.limit }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"; fi
+          python gold_eval.py $ARGS
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s gold_eval.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file gold_eval.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Gold evaluation: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
