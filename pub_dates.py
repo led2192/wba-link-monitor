@@ -61,11 +61,24 @@ DATE = (r"(?:(?P<d1>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?" + MON.replace("(", "(
 #       Report of X covers 1 January to 31 December 2024 and was published on 19 March 2025"; or
 #   (b) a "Date of publication:" / "Publication date:" / "Published:" label sits on the first COLOPHON_PAGES
 #       or the last COLOPHON_PAGES pages (the imprint), not next to a bond.
-SELF = (r"(?:this|the|our)\s+(?:[\w&'’-]+\s+){0,4}?(?:report|document|publication|review|statement|"
+SELF = (r"(?:this|the|our)\s+(?P<subj>(?:[\w&'’-]+\s+){0,4}?)(?:report|document|publication|review|statement|"
         r"accounts)\b[^.]{0,220}?\b(?:was|is|has\s+been|were)\s+(?:first\s+)?(?:published|released|issued|made\s+available)"
         r"(?:\s+(?:on|in))?\s*")
 PUBLISHED = re.compile(SELF + r"(?:" + DATE + ")", re.I)
 OTHER_REPORT = re.compile(r"\b(?:prior|previous|preceding|last\s+year['’]?s?|next|upcoming|first)\b", re.I)
+# "...and serves as a continuation of the 2024 Sustainability Report, which was published in March 2025"
+# (Bank Mandiri, 2025 report, 26 Oct 2026): the sentence dates the report this one follows.
+FOLLOWS = re.compile(r"\b(?:continuation|continues|follows|following|successor|supersed\w*|replac\w*|update)\s+(?:of|to|on)?\s*$", re.I)
+YEAR = re.compile(r"\b(20\d\d)\b")
+
+
+def names_older_report(subject, doc_year):
+    """True when the report the sentence names carries a year before this document's year ("the 2024
+    Sustainability Report" inside a 2025 report): it is the earlier edition, not this one."""
+    if not doc_year:
+        return False
+    years = [int(y) for y in YEAR.findall(subject or "")]
+    return bool(years) and max(years) < int(doc_year)
 LABEL = re.compile(r"(?:date\s+of\s+publication|publication\s+date|published|release\s+date)\s*[:\-–]\s*(?:" + DATE + ")", re.I)
 COLOPHON_PAGES = 4
 BOND = re.compile(r"bond|notes?\b|issuance|coupon|debenture", re.I)
@@ -100,7 +113,10 @@ def parse(m):
 
 
 def period_end_date(period_end, year):
-    """Last day of the period: '2025-03' -> 2025-03-31; '2025' or a bare year -> 2025-01-01 (only the year is known)."""
+    """Last day of the period: '2025-03' -> 2025-03-31. With only the year known ('2025' or a bare year) the
+    earliest end that is still realistic, 2025-03-31: a report labelled 2025 covers a year ending between
+    March 2025 (Japan, India) and December 2025, so it cannot be published before April 2025. Until 26 Oct 2026
+    this was 1 January, which let Bank Mandiri's 2025 report take its 2024 report's March 2025 date."""
     m = re.match(r"^(20\d\d)(?:-(\d\d))?", str(period_end or ""))
     if m and m.group(2):
         y, mo = int(m.group(1)), int(m.group(2))
@@ -108,7 +124,7 @@ def period_end_date(period_end, year):
             nxt = dt.date(y + (mo == 12), mo % 12 + 1, 1)
             return nxt - dt.timedelta(days=1)
     y = int(m.group(1)) if m else (int(year) if isinstance(year, (int, float)) else None)
-    return dt.date(y, 1, 1) if y else None
+    return dt.date(y, 3, 31) if y else None
 
 
 def plausible(d, end, seen):
@@ -130,7 +146,7 @@ def sentence(text, i, j):
     return re.sub(r"\s+", " ", text[lo:hi]).strip()
 
 
-def find_dates(pages, end, seen):
+def find_dates(pages, end, seen, doc_year=None):
     """Best (tier, date, precision, evidence) from the text, tiers 2 (publication) and 3 (board approval)."""
     found = {}
     nums = sorted(p for p, _ in pages)
@@ -145,6 +161,9 @@ def find_dates(pages, end, seen):
                     continue
                 if rx is PUBLISHED and OTHER_REPORT.search(m.group(0)[:80]):
                     continue            # "the prior 2024 Economic Impact Report, which was published April 2024"
+                if rx is PUBLISHED and (names_older_report(m.group("subj"), doc_year)
+                                        or FOLLOWS.search(text[max(0, m.start() - 40):m.start()])):
+                    continue            # "a continuation of the 2024 Sustainability Report, which was published in March 2025"
                 d, prec = parse(m)
                 if not plausible(d, end, seen):
                     continue
@@ -160,6 +179,13 @@ def find_dates(pages, end, seen):
     return None
 
 
+def doc_year(f):
+    try:
+        return int(str(f.get("year"))[:4])
+    except (TypeError, ValueError):
+        return None
+
+
 def decide(f, pages, seen):
     """(tier, date, precision, evidence) for one row, or None."""
     end = period_end_date(f.get("period_end"), f.get("year"))
@@ -167,7 +193,7 @@ def decide(f, pages, seen):
     if m:
         d = dt.date.fromisoformat(m.group(1))
         return 1, d, "day", "filing date in the regulator database"
-    hit = find_dates(pages, end, seen)
+    hit = find_dates(pages, end, seen, doc_year(f))
     if hit:
         return hit
     if seen and seen >= FIRST_SEEN_FROM and end and 0 < (seen - end).days <= 548:
@@ -277,17 +303,22 @@ def main():
     print(f">>> text: {sum(len(v) for v in want.values()):,} full text, {len(no_text):,} first pages", flush=True)
 
     tiers, prec, ups, gaps, samples = collections.Counter(), collections.Counter(), [], [], collections.defaultdict(list)
+    changed, change_samples = collections.Counter(), []
     for lid, r in lib.items():
         f = r["fields"]
         seen = seen_date(f)
         res = decide(f, texts.get(lid, []), seen)
         if f.get("Reviewer notes") and FILED.search(f["Reviewer notes"]):
-            other = find_dates(texts.get(lid, []), period_end_date(f.get("period_end"), f.get("year")), None)
+            other = find_dates(texts.get(lid, []), period_end_date(f.get("period_end"), f.get("year")), None, doc_year(f))
             if other and other[0] == 3:
                 gaps.append((res[1] - other[1]).days)
         if not res:
             tiers["none"] += 1
             if lid not in no_text and f.get("pub_date_source") != "not found":
+                if f.get("pub_date"):
+                    changed["date removed"] += 1
+                    if len(change_samples) < 15:
+                        change_samples.append(f"{lid}: {f['pub_date']} removed (was: {(f.get('pub_date_evidence') or '')[:140]})")
                 ups.append({"id": r["id"], "fields": {"pub_date_source": "not found", "pub_date_precision": None,
                                                       "pub_date": None, "pub_date_evidence": "full text read, no date found"}})
             continue
@@ -301,6 +332,10 @@ def main():
         new = {"pub_date": d.isoformat(), "pub_date_precision": p, "pub_date_source": SOURCES[tier], "pub_date_evidence": ev}
         if any((f.get(k) or None) != v for k, v in new.items()):
             ups.append({"id": r["id"], "fields": new})
+            if f.get("pub_date") and f["pub_date"] != new["pub_date"]:
+                changed["date changed"] += 1
+                if len(change_samples) < 15:
+                    change_samples.append(f"{lid}: {f['pub_date']} -> {new['pub_date']} ({SOURCES[tier]})")
 
     n = len(lib) or 1
     md = ["### Publication dates of key reports" + ("" if a.commit else " (dry run)"), "",
@@ -316,7 +351,10 @@ def main():
     for t in (2, 3, 4):
         if samples[t]:
             md += [f"Samples, {SOURCES[t]}:", ""] + [f"- {s}" for s in samples[t]] + [""]
-    md += [f"Rows to write: {len(ups):,}.", ""]
+    md += [f"Rows to write: {len(ups):,}. Dates already written that change: {changed['date changed']:,}; "
+           f"that are removed (no date found now): {changed['date removed']:,}.", ""]
+    if change_samples:
+        md += ["Samples of changed dates:", ""] + [f"- {s}" for s in change_samples] + [""]
     open("pub_dates.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
     if a.commit:

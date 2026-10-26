@@ -52,7 +52,25 @@ class Dates(unittest.TestCase):
     def test_period_end(self):
         self.assertEqual(P.period_end_date("2025-03", 2025), D(2025, 3, 31))
         self.assertEqual(P.period_end_date("2024-12", 2024), D(2024, 12, 31))
-        self.assertEqual(P.period_end_date("", 2024), D(2024, 1, 1))
+        self.assertEqual(P.period_end_date("", 2024), D(2024, 3, 31))     # only the year: earliest realistic end
+
+
+    def test_a_sentence_about_the_earlier_edition_is_not_this_reports_date(self):
+        # Bank Mandiri, 2025 Sustainability Report (26 Oct 2026): dated March 2025 from its predecessor
+        text = ("Reporting Period This report presents information on the Company's operations across Indonesia for the "
+                "period from 1 January to 31 December 2025 and serves as a continuation of the 2024 Sustainability Report, "
+                "which was published in March 2025.")
+        self.assertIsNone(P.find_dates([(39, text)], D(2025, 12, 31), None, 2025))
+        # the year rule alone, with only the year known
+        self.assertIsNone(P.find_dates([(39, "The 2024 Sustainability Report was published in June 2025.")],
+                                       P.period_end_date("", 2025), None, 2025))
+        # the subject rule alone, even when the period end is unknown
+        self.assertIsNone(P.find_dates([(39, "The 2024 Sustainability Report was published in June 2025.")], None, None, 2025))
+        # this edition, named with its own year, still counts
+        t = P.find_dates([(2, "The 2025 Sustainability Report was published on 12 March 2026.")], D(2025, 12, 31), None, 2025)
+        self.assertEqual(t[:2], (2, D(2026, 3, 12)))
+        # a 2025 report cannot be published in March 2025 when only its year is known
+        self.assertIsNone(P.find_dates([(1, "This report was published in March 2025.")], P.period_end_date(None, 2025), None, 2025))
 
 
 class Decide(unittest.TestCase):
