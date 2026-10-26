@@ -16,7 +16,9 @@ Scope (which documents are worth reading in full):
     default      the report and policy families: sustainability, ESG, CSR, integrated, impact and
                  social reports, annual reports, engagement, climate and environmental reports,
                  policies, codes of conduct, human rights policies, GRI / SASB / CDP documents and
-                 UNKNOWN; year >= --year-min, plus undated documents.
+                 UNKNOWN; year >= --year-min (0 = every year, the nightly setting since 26 Oct
+                 2026), plus undated documents. The queue reads newest documents first, undated next,
+                 older years last, so old reports never delay what arrived today.
                  Left out on purpose: interim reports, statutory documents, presentations,
                  financial statements, 10-K forms, registration documents, certifications. They
                  are over half of all pages and the least likely home of a benchmark reference.
@@ -405,6 +407,14 @@ def load_index(store, work):
     return tc.load_docs_index(work, docs_files), listing
 
 
+def queue_key(d):
+    """Newest documents first, undated ones next (they are often new arrivals whose year is not known
+    yet), the older years last: the backlog of old reports is read in the background, behind whatever
+    arrived today (26 Oct 2026, owner's decision to read every year)."""
+    y = d["year"] if d["year"] != "" else 2020
+    return (-y, d["id"])
+
+
 def plan(args, store, work):
     types = None if args.types.strip().lower() == "all" else \
         ([t.strip() for t in args.types.split(",") if t.strip()] or CORE_TYPES)
@@ -413,7 +423,7 @@ def plan(args, store, work):
     docs = sweep_scope(types, args.year_min, not args.drop_undated)
     index, listing = load_index(store, work)
     queue = [d for d in docs if needs_work(index.get(d["id"]), d["att"], args.retry_failed)]
-    queue.sort(key=lambda d: d["id"])
+    queue.sort(key=queue_key)
     # What is searchable must not depend on the scope of the LAST run: a narrow manual run would
     # otherwise shrink the metadata snapshot and every search with it. Documents already in the
     # store that this sweep did not return are re-read by record id and kept while they still
@@ -590,7 +600,7 @@ def main():
     ap.add_argument("--shard", default="", help="i/N: extract the i-th of N slices (1-based)")
     ap.add_argument("--queue", default="", help="name of a published queue file (with --shard)")
     ap.add_argument("--types", default="", help='comma-separated types, or "all" (default: report and policy families)')
-    ap.add_argument("--year-min", type=int, default=2021, help="documents dated before this are left out")
+    ap.add_argument("--year-min", type=int, default=0, help="documents dated before this are left out (0 = none)")
     ap.add_argument("--drop-undated", action="store_true", help="leave out documents with no year")
     ap.add_argument("--limit", type=int, default=0, help="cap documents this run (0 = no cap)")
     ap.add_argument("--max-shards", type=int, default=8)

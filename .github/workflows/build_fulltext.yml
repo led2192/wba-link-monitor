@@ -34,8 +34,8 @@ on:
         description: 'Types to read: blank = report and policy families, "all" = every attached PDF, or a comma-separated list'
         default: ""
       year_min:
-        description: "Leave out documents dated before this year (undated ones are kept)"
-        default: "2021"
+        description: "Leave out documents dated before this year (0 = none; undated ones are kept)"
+        default: "0"
       limit:
         description: "Cap documents this run (0 = no cap). Use 50 for a first test."
         default: "0"
@@ -53,7 +53,10 @@ env:
   # because the evidence library needs every disclosure in full, not only the report families.
   # The backlog this adds is read over the following nights (each shard stops inside its budget).
   NIGHTLY_TYPES: "all"
-  NIGHTLY_YEAR_MIN: "2021"
+  # Every year since 26 Oct 2026 (owner's decision): the evidence library holds the whole corpus. The
+  # queue reads newest documents first, so the roughly 100,000 reports before 2021 are read in the
+  # background over the following nights.
+  NIGHTLY_YEAR_MIN: "0"
 
 concurrency:
   group: build-full-text
@@ -96,7 +99,7 @@ jobs:
             ARGS+=(--plan --commit --year-min "$NIGHTLY_YEAR_MIN")
             [ -n "$NIGHTLY_TYPES" ] && ARGS+=(--types "$NIGHTLY_TYPES")
           else
-            ARGS+=(--year-min "${IN_YEAR_MIN:-2021}" --limit "${IN_LIMIT:-0}" --max-shards "${IN_MAX_SHARDS:-8}")
+            ARGS+=(--year-min "${IN_YEAR_MIN:-0}" --limit "${IN_LIMIT:-0}" --max-shards "${IN_MAX_SHARDS:-8}")
             [ -n "$IN_TYPES" ] && ARGS+=(--types "$IN_TYPES")
             [ "$IN_RETRY" = "true" ] && ARGS+=(--retry-failed)
             [ "$IN_MODE" = "commit" ] && ARGS+=(--plan --commit)
