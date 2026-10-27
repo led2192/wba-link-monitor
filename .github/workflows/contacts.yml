@@ -46,6 +46,13 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=(--limit 400)
           else ARGS=(--wba "${{ inputs.wba }}"); [ "${{ inputs.mode }}" = "commit" ] && ARGS+=(--commit); fi
           python contacts.py "${ARGS[@]}"
+      - name: Keep the left-out domains list
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contacts-left-out
+          path: contacts_left_out.csv
+          if-no-files-found: ignore
       - name: Post the result on the pull request
         if: github.event_name == 'pull_request' && always()
         run: |

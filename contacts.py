@@ -9,8 +9,22 @@ rows with a key_role: the latest and previous wave's financial and sustainabilit
 email address, and keeps the ones on the company's own domains:
   - the registered domains of its website (companies.website) and of its watched pages, minus hosts
     watched for more than MAX_COMPANIES_PER_DOMAIN companies (a group site, a government domain, a
-    third-party database), and the domain the report itself was downloaded from when it is not shared.
-Addresses on other domains (auditors, agencies, printers, banks) are counted, never kept.
+    third-party database), and the domain the report itself was downloaded from when it is not shared;
+  - the same brand under another domain (same_brand): the first label of the address's domain equals
+    one of the company's own labels (argos.co and argos.com.co, baywa.com and baywa.de), or starts or
+    ends with an own label of at least 4 letters, or starts with the first word of the company name
+    of at least 5 letters that is not generic (adidas-group.com and adidas.com, hormelfoods.com and
+    hormel.com, woorifg.com and wooribank.com for Woori Financial Group). Only the first brand word
+    counts, at the start of the label, so that a sector word (Foods, Steel) does not take an industry
+    body's domain (foodsafety.org, worldsteel.org).
+    From the first left-out list of 27 Oct 2026: 48 companies without an address in a sample of 400
+    reports, most of them printing their own brand's other domain; the rest auditors (kpmg, pwc, bdo),
+    share registrars (computershare, kfintech, mufg) and webmail (126.com, sohu.com), which this
+    rule does not reach.
+Addresses on other domains (auditors, agencies, printers, banks) are counted, never kept; the dry run
+lists them by company (contacts_left_out.csv, and the summary's two tables) so the owner can see when
+the "own domain" rule misses a company's real mail domain (a group domain unlike its website, 27 Oct
+2026: 860 of 2,000 companies had an address).
 
 For each company and address, one row in company_contacts:
   kind         from the mailbox name (KINDS): investor relations, sustainability, media, general,
@@ -173,6 +187,43 @@ def company_domains(companies, pages):
     return out, owners
 
 
+GENERIC_WORDS = {"group", "groupe", "grupo", "gruppo", "holding", "holdings", "company", "compania", "limited",
+                 "corporation", "corp", "international", "industries", "industrial", "financial", "finance", "services",
+                 "service", "global", "energy", "capital", "partners", "bank", "motor", "motors", "systems", "technologies",
+                 "technology", "enterprises", "enterprise", "resources", "trust", "investment", "investments", "general",
+                 "national", "united", "american", "china", "japan", "india", "korea", "europe", "pacific", "the"}
+MIN_LABEL = 4       # an own domain label this short still counts as a brand start or end (arla in arlafoods)
+MIN_NAME_WORD = 5   # a company name word must be this long to count as a brand (woori, barilla, hormel)
+
+
+def brand_labels(own, name):
+    """The brand tokens of a company: the first label of each own domain (hormelfoods.com -> hormelfoods)
+    and the first word of its name that is long enough and not generic (Woori Financial Group -> woori;
+    the brand comes first, the sector after: Hormel Foods gives hormel, not foods)."""
+    labels = {d.split(".", 1)[0] for d in own if d}
+    words = [w for w in re.findall(r"[a-z0-9]+", (name or "").lower()) if len(w) >= MIN_NAME_WORD and w not in GENERIC_WORDS]
+    return {l for l in labels if l}, set(words[:1])
+
+
+def same_brand(domain, own, name):
+    """True when the address's registered domain is the company's own brand under another domain:
+    its first label equals an own label, starts or ends with an own label of MIN_LABEL letters (or an
+    own label starts with it), or starts with the name's first brand word of MIN_NAME_WORD letters."""
+    label = (domain or "").split(".", 1)[0]
+    if len(label) < 3:
+        return False
+    labels, words = brand_labels(own, name)
+    if label in labels:
+        return True
+    for t in labels:
+        if len(t) >= MIN_LABEL and (label.startswith(t) or label.endswith(t) or (len(label) >= MIN_LABEL and t.startswith(label))):
+            return True
+    for t in words:
+        if label.startswith(t):
+            return True
+    return False
+
+
 def own_domains(w, mine, owners, document_url):
     """The company's own domains, plus the domain its report was downloaded from when no other company's
     pages use it."""
@@ -182,6 +233,39 @@ def own_domains(w, mine, owners, document_url):
     if d and owners.get(d, set()) <= {w}:
         own.add(d)
     return own
+
+
+def left_out_report(left_out, with_address, mine, names, top=40):
+    """Summary lines and CSV rows about the domains of the addresses not kept. left_out:
+    {wba_id: {domain: set(library ids)}}; with_address: the companies that got at least one own-domain
+    address; mine: {wba_id: own domains by the rule}; names: {wba_id: company name}. Two views: the
+    companies with no own-domain address and what their reports print instead (a domain printed by one
+    company only is probably its own), and the domains printed by the most companies (shared services,
+    not anyone's own)."""
+    rows = []
+    for w, ds in left_out.items():
+        for d, lids in ds.items():
+            rows.append((w, names.get(w, ""), d, len(lids), " ".join(sorted(mine.get(w, ()))), w in with_address))
+    rows.sort(key=lambda r: (r[5], -r[3], r[0], r[2]))
+    md = []
+    missing = [r for r in rows if not r[5]]
+    if missing:
+        md += [f"Companies without an own-domain address whose reports print addresses on other domains: "
+               f"{len({r[0] for r in missing}):,} (first {min(top, len(missing))} rows by number of reports; the full list is "
+               f"in the run's contacts_left_out.csv).", "",
+               "| Company | Own domains by the rule | Domain printed | Reports |", "| --- | --- | --- | --: |"]
+        md += [f"| {w} {n} | {own} | {d} | {k} |" for w, n, d, k, own, _ in missing[:top]]
+        md.append("")
+    by_domain = collections.defaultdict(lambda: [set(), 0])
+    for w, _, d, k, _, _ in rows:
+        by_domain[d][0].add(w); by_domain[d][1] += k
+    shared = sorted(((len(ws), k, d) for d, (ws, k) in by_domain.items()), reverse=True)[:25]
+    if shared:
+        md += ["Domains printed by the most companies (shared services, not anyone's own):", "",
+               "| Domain | Companies | Reports |", "| --- | --: | --: |"]
+        md += [f"| {d} | {c:,} | {k:,} |" for c, k, d in shared]
+        md.append("")
+    return md, [("wba_id", "company", "domain", "reports", "own_domains_by_rule", "has_own_address")] + rows
 
 
 def merge(found, today, existing, domain_mail=None):
@@ -260,6 +344,7 @@ def main():
     from monitor_core import reg_domain
     stats = collections.Counter()
     found = collections.defaultdict(list)
+    left_out = collections.defaultdict(lambda: collections.defaultdict(set))
     for i, (part, ids) in enumerate(sorted(want.items()), 1):
         name = f"pages-{part}.jsonl.gz"
         tc.sync_down(store, [name], folder)
@@ -278,11 +363,15 @@ def main():
             if got:
                 stats["documents with an address"] += 1
             for email, (p, sentence) in got.items():
-                if reg_domain("https://" + email.split("@", 1)[1]) in own:
+                dom = reg_domain("https://" + email.split("@", 1)[1])
+                if dom in own or same_brand(dom, own, comps[w]["fields"].get("company_name", "")):
                     found[(w, email)].append((year, rec, p, sentence))
                     stats["own-domain mentions"] += 1
+                    if dom not in own:
+                        stats["kept by brand"] += 1
                 else:
                     stats["other-domain addresses left out"] += 1
+                    left_out[w][email.split("@", 1)[1].lower()].add(lid)
         if i % 25 == 0:
             print(f"  {i}/{len(want)} parts, {len(found):,} addresses so far", flush=True)
 
@@ -314,7 +403,13 @@ def main():
     sample = [c["fields"] for c in creates[:25]]
     if sample:
         md += ["| Company | Address | Kind | Year |", "| --- | --- | --- | --- |"]
-        md += [f"| {f['wba_id']} | {f['email']} | {f['kind']} | {f.get('source_year') or ''} |" for f in sample]
+        md += [f"| {f['wba_id']} | {f['email']} | {f['kind']} | {f.get('source_year') or ''} |" for f in sample] + [""]
+    lines, csv_rows = left_out_report(left_out, {w for w, _ in found}, mine,
+                                      {w: r["fields"].get("company_name", "") for w, r in comps.items()})
+    md += lines
+    import csv
+    with open("contacts_left_out.csv", "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(csv_rows)
     open("contacts.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
     if a.commit:
