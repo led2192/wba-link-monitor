@@ -139,6 +139,26 @@ a { color: var(--accent); }
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
   const sb = window.supabase.createClient(CONFIG.url, CONFIG.key, { auth: { persistSession: true, detectSessionInUrl: true } });
   const $ = (id) => document.getElementById(id);
+
+  // Every search is sent with the signed-in user's token, read fresh from the session (renewed when it has
+  // expired). On 27 Oct 2026 the library's own call went out without it, so the database saw an anonymous
+  // visitor and answered "permission denied for function search_pages".
+  async function rpc(name, args) {
+    const { data } = await sb.auth.getSession();
+    const session = data && data.session;
+    if (!session) {
+      await show();
+      return { data: null, error: { message: "You are signed out. Sign in again to search." } };
+    }
+    const r = await fetch(`${CONFIG.url}/rest/v1/rpc/${name}`, {
+      method: "POST",
+      headers: { apikey: CONFIG.key, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(args || {}),
+    });
+    const body = await r.json().catch(() => null);
+    if (!r.ok) return { data: null, error: { message: (body && (body.message || body.msg)) || `HTTP ${r.status}` } };
+    return { data: body, error: null };
+  }
   let mode = "pages", lastRows = [];
 
   function esc(s) {
@@ -161,7 +181,7 @@ a { color: var(--accent); }
   let companiesLoaded = false;
   async function loadCompanies() {
     if (companiesLoaded) return;
-    const { data, error } = await sb.rpc("search_companies");
+    const { data, error } = await rpc("search_companies");
     if (error || !data) return;                     // older database without the function: typing still works
     $("company-list").innerHTML = data.map((c) => `<option value="${esc(c.company)} (${esc(c.wba_id)})"></option>`).join("");
     companiesLoaded = true;
@@ -224,14 +244,14 @@ a { color: var(--accent); }
       if (mode === "pages") {
         const args = { q, ...f, type_filter: textOrNull($("type").value) };
         const [r, s] = await Promise.all([
-          sb.rpc("search_pages", { ...args, max_rows: 100 }),
-          sb.rpc("search_summary", args),
+          rpc("search_pages", { ...args, max_rows: 100 }),
+          rpc("search_summary", args),
         ]);
         if (r.error) throw r.error;
         rows = r.data || [];
         summary = s.error ? null : (s.data || [])[0];
       } else {
-        const r = await sb.rpc("search_passages", { q, dim: textOrNull($("dim").value), ...f, max_rows: 100 });
+        const r = await rpc("search_passages", { q, dim: textOrNull($("dim").value), ...f, max_rows: 100 });
         if (r.error) throw r.error;
         rows = r.data || [];
       }
