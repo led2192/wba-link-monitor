@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-27 Search page: the sign-in state is drawn by `showSession`; #108 had named it `render`, the name of the function that draws a search result, and the second definition replaced the first, so the app never appeared. Results are shown as soon as they arrive and the counts fill in after; a Cancel button; the CSV holds up to 5,000 pages (new function `export_pages`, without the highlighted extracts); the words of a phrase are highlighted as one (these last changes were pushed to #107 after it was merged and never reached main) (#109)
 - 2026-10-27 Search page: the auth callback no longer calls getSession (the library waits for the callback before finishing its start-up, and the callback waited for the start-up: the page showed "Could not read the saved session" on every load and the owner signed in again and again; this was also the "lock" seen earlier) (#108)
 - 2026-10-27 Search page: no cross-tab session lock (the library's default lock stayed held by an older tab and every new tab showed a blank page), and the sign-in form appears within four seconds even when the saved session cannot be read (#107)
 - 2026-10-27 Company contacts: `domain_mail` and `domain_checked` say whether the address's domain accepts mail (its MX records, read through DNS over HTTPS; nothing is sent): accepts, none, unknown. The mailbox itself cannot be checked from outside (#106)

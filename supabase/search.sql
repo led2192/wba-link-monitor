@@ -117,6 +117,62 @@ begin
 end;
 $$;
 
+-- The same pages, without the highlighted extract and up to 5,000 rows, for the CSV download: the
+-- extract is what makes search_pages slow per row (it re-reads the page's text), so the export gives a
+-- plain window of the text around the first query word instead.
+create or replace function public.export_pages(
+  q text, company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 5000)
+returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text,
+               page int, excerpt text)
+language plpgsql stable security definer
+set search_path = public, extensions
+set work_mem = '128MB'
+set statement_timeout = '120s'
+set plan_cache_mode = 'force_custom_plan'
+as $$
+declare
+  tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
+  need int := least(greatest(coalesce(max_rows, 5000), 1), 5000);
+  got int := 0;
+  n int;
+  y int;
+  ids text[] := public.companies_matching(company_filter);
+  first_word text := lower((regexp_match(coalesce(q, ''), '[[:alnum:]][[:alnum:]''’-]*'))[1]);
+begin
+  if not public.can_search() then
+    raise exception 'not allowed to search' using errcode = '42501';
+  end if;
+  if numnode(tsq) = 0 then
+    return;
+  end if;
+  for y in select distinct coalesce(d.year, 0) from public.documents d
+            where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+            order by 1 desc
+  loop
+    return query
+      select s.library_id, s.company, s.wba_id, s.year, s.doc_type, s.label, s.url, s.page,
+             regexp_replace(substring(s.body from greatest(1, coalesce(nullif(strpos(lower(s.body), first_word), 0), 1) - 120) for 300),
+                            '\s+', ' ', 'g')
+      from (
+        select p.library_id, p.page, p.body, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url
+        from public.pages p
+        join public.documents d on d.library_id = p.library_id
+        where p.words @@ tsq
+          and p.year = y
+          and p.wba_id <> ''
+          and (type_filter is null or p.doc_type = type_filter)
+          and (ids is null or p.wba_id = any(ids))
+        limit need - got
+      ) s
+      order by s.company, s.library_id, s.page;
+    get diagnostics n = row_count;
+    got := got + n;
+    exit when got >= need;
+  end loop;
+end;
+$$;
+
 -- How many companies, documents and pages contain the words, with the same filters. Counting stops
 -- at 20,000 pages (capped = true), so a common word answers in seconds.
 create or replace function public.search_summary(
@@ -199,6 +255,8 @@ revoke all on function public.search_passages(text, text, text, int, int, int) f
 revoke all on function public.can_search() from public, anon;
 revoke all on function public.search_companies() from public, anon;
 grant execute on function public.search_companies() to authenticated;
+revoke all on function public.export_pages(text, text, int, int, text, int) from public, anon;
+grant execute on function public.export_pages(text, text, int, int, text, int) to authenticated;
 revoke all on function public.email_may_search(text) from public, anon, authenticated;
 revoke all on function public.companies_matching(text) from public, anon, authenticated;
 grant execute on function public.search_pages(text, text, int, int, text, int) to authenticated;
