@@ -222,7 +222,12 @@ def backfill_words(conn, deadline, max_gb):
 # build when nothing builds it, does nothing while a build runs, and once the index exists it drops
 # the older text-only index, refreshes the statistics and removes itself.
 INDEX_JOB = "build-pages-search"
+# The two settings come before the block as statements of their own: Supabase gives the postgres role
+# a two-minute statement timeout, and a timeout is armed when a statement starts, so setting it inside
+# the block came too late (27 Oct 2026: every attempt was cancelled after exactly two minutes).
 INDEX_JOB_SQL = """
+set statement_timeout = 0;
+set maintenance_work_mem = '1GB';
 do $b$
 begin
   if to_regclass('public.pages_search') is not null then
@@ -234,8 +239,6 @@ begin
   if exists (select 1 from pg_stat_progress_create_index where relid = 'public.pages'::regclass) then
     return;
   end if;
-  perform set_config('maintenance_work_mem', '1GB', true);
-  perform set_config('statement_timeout', '0', true);
   create index pages_search on public.pages using gin (words, year, doc_type, wba_id);
 end
 $b$;
