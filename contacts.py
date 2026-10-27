@@ -57,7 +57,7 @@ KINDS = [(k, re.compile(rx, re.I)) for k, rx in KINDS]
 def kind_of(local):
     """(kind, personal) from the part before the @."""
     l = local.lower()
-    if len(re.findall(r"[a-z]", l)) < 3:                                # 2645.7085@: a number, not a mailbox
+    if not re.search(r"[a-z]{2}", l):                                   # 2645.7085@: a number, not a mailbox
         return "other", False
     for k, rx in KINDS:
         if rx.search(l):
@@ -77,7 +77,7 @@ def emails_in(pages):
             local, dom = m.group(1).strip("._-"), m.group(2).lower().strip(".")
             if not local or dom.rsplit(".", 1)[-1] in NOT_TLD:
                 continue
-            if len(re.findall(r"[a-z]", local.lower())) < 3:
+            if not re.search(r"[a-z]{2}", local.lower()):
                 continue
             email = f"{local.lower()}@{dom}"
             if email not in out:
