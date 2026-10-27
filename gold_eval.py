@@ -203,12 +203,34 @@ def ranking(cur, lid, query, top=TOP):
     return [r[0] for r in cur.fetchall()]
 
 
+def doc_scores(cur, lid, phrases, queries, top=TOP):
+    """One statement per document instead of one per phrase and per query: every page's tsvector is
+    read once (27 Oct 2026: the first full run, seven statements per answer over thousands of answers,
+    ran past the workflow's two hours). Returns (pages in the database, [pages holding each phrase],
+    [top pages for each query, best first])."""
+    cols = [f"p.words @@ q.ph{i}" for i in range(len(phrases))] + \
+           [f"case when p.words @@ q.s{j} then ts_rank_cd(p.words, q.s{j}) end" for j in range(len(queries))]
+    qs = [f"websearch_to_tsquery('simple', %s) as ph{i}" for i in range(len(phrases))] + \
+         [f"websearch_to_tsquery('simple', %s) as s{j}" for j in range(len(queries))]
+    sql = (f"select p.page{''.join(', ' + c for c in cols)} from public.pages p, (select {', '.join(qs) or '1 as none'}) q "
+           "where p.library_id = %s order by p.page")
+    cur.execute(sql, [f'"{ph}"' for ph in phrases] + list(queries) + [lid])
+    rows = cur.fetchall()
+    found = [[r[0] for r in rows if r[1 + i]] for i in range(len(phrases))]
+    ranks = []
+    for j in range(len(queries)):
+        scored = [(r[1 + len(phrases) + j], r[0]) for r in rows if r[1 + len(phrases) + j] is not None]
+        ranks.append([p for _, p in sorted(scored, key=lambda t: (-t[0], t[1]))[:top]])
+    return len(rows), found, ranks
+
+
 # ----------------------------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="answers per attribute (dry run default 20; 0 = all)")
     ap.add_argument("--attributes", default="", help="comma-separated GMC codes (default: all in gold_attributes.json)")
+    ap.add_argument("--budget", type=int, default=100, help="minutes; stops cleanly and reports on the answers evaluated so far")
     a = ap.parse_args()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
@@ -235,14 +257,24 @@ def main():
         by_attr[g["attribute"]].append(g)
     if limit:
         answers = [g for c in codes for g in by_attr[c][:limit]]
+    # attributes interleaved, so that a run cut by the time budget still covers every attribute evenly
+    queues = [[g for g in answers if g["attribute"] == c] for c in codes]
+    answers = [g for i in range(max((len(q) for q in queues), default=0)) for q in queues if i < len(q) for g in [q[i]]]
 
     rows = library_rows(os.environ["AIRTABLE_TOKEN"], os.environ["AIRTABLE_BASE"], [g["wba"] for g in answers])
     print(f">>> {len(rows):,} library rows of {len({g['wba'] for g in answers}):,} companies", flush=True)
     results, misses = [], collections.defaultdict(list)
+    t0, cut = time.time(), False
     with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '60s'")
-        for g in answers:
+        for i, g in enumerate(answers, 1):
+            if time.time() - t0 > a.budget * 60:
+                cut = True
+                print(f">>> time budget of {a.budget} minutes reached after {i - 1:,} of {len(answers):,} answers", flush=True)
+                break
+            if i % 50 == 0:
+                print(f"  {i:,}/{len(answers):,} answers in {(time.time() - t0) / 60:.0f} min", flush=True)
             r = {"attribute": g["attribute"], "id": g["id"]}
             pairs = match(g["sources"], rows)                      # same company and file
             lid = pairs[0][1]["library_id"] if pairs else None
@@ -250,19 +282,25 @@ def main():
             if not lid:
                 misses[g["attribute"]].append(f"{g['id']}: source not in the library ({(g['sources'] or [{}])[0].get('name', '?')})")
                 results.append(r); continue
-            r["in_db"] = doc_in_db(cur, lid) > 0
+            queries = [or_query(qtext) for qtext in cfg["attributes"][g["attribute"]]["queries"]]
+            try:
+                n_pages, found, ranks = doc_scores(cur, lid, quote_phrases(g["quote"]), queries)
+            except Exception as e:                                  # one slow document must not end the run
+                conn.rollback(); cur.execute("set statement_timeout = '60s'")
+                misses[g["attribute"]].append(f"{g['id']}: the database did not answer for {lid} ({type(e).__name__})")
+                results.append(r); continue
+            r["in_db"] = n_pages > 0
             if not r["in_db"]:
                 misses[g["attribute"]].append(f"{g['id']}: no text in the database for {lid}")
                 results.append(r); continue
-            found = [pages_with_phrase(cur, lid, ph) for ph in quote_phrases(g["quote"])]
             r["quote_found"] = any(found)
             target = locate(found, g["pages"])
             if not r["quote_found"]:
                 misses[g["attribute"]].append(f"{g['id']}: quote not found in {lid} (analyst page {g['pages']})")
             if target:
                 best = None
-                for qtext in cfg["attributes"][g["attribute"]]["queries"]:
-                    rk = rank_of(target, ranking(cur, lid, or_query(qtext)))
+                for rkg in ranks:
+                    rk = rank_of(target, rkg)
                     if rk and (best is None or rk < best):
                         best = rk
                 r["best_rank"] = best
@@ -273,7 +311,8 @@ def main():
     summary = summarize(results)
     md = ["### Gold evaluation: does the search find the page the analyst cited?" + ("" if a.commit else " (dry run, sample)"), "",
           f"Validated answers with a quote and a source: {len(answers):,} across {len(codes)} attributes"
-          + (f" ({limit} per attribute)" if limit else "") + ".", "",
+          + (f" ({limit} per attribute)" if limit else "")
+          + (f"; {len(results):,} evaluated before the time budget of {a.budget} minutes, attributes interleaved" if cut else "") + ".", "",
           "| Attribute | Answers | Source in library | Text in DB | Quote found | Page in top 1 | top 3 | top 10 |",
           "| --- | --: | --: | --: | --: | --: | --: | --: |"]
     for c in codes:
