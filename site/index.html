@@ -99,6 +99,7 @@ a { color: var(--accent); }
       <div class="q">
         <input id="q" type="search" placeholder='e.g. "living wage" supplier' aria-label="Search words" autocomplete="off">
         <button class="primary" type="submit" id="go">Search</button>
+        <button type="button" id="stop" class="hidden">Cancel</button>
       </div>
       <div class="filters">
         <label>Company or WBA id<input id="company" list="company-list" placeholder="any: type a name or id" autocomplete="off"></label>
@@ -148,7 +149,7 @@ a { color: var(--accent); }
   // Every search is sent with the signed-in user's token, read fresh from the session (renewed when it has
   // expired). On 27 Oct 2026 the library's own call went out without it, so the database saw an anonymous
   // visitor and answered "permission denied for function search_pages".
-  async function rpc(name, args) {
+  async function rpc(name, args, signal) {
     const { data } = await sb.auth.getSession();
     const session = data && data.session;
     if (!session) {
@@ -159,18 +160,20 @@ a { color: var(--accent); }
       method: "POST",
       headers: { apikey: CONFIG.key, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
       body: JSON.stringify(args || {}),
+      signal,
     });
     const body = await r.json().catch(() => null);
     if (!r.ok) return { data: null, error: { message: (body && (body.message || body.msg)) || `HTTP ${r.status}` } };
     return { data: body, error: null };
   }
-  let mode = "pages", lastRows = [];
+  let mode = "pages", lastRows = [], lastArgs = null;
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
-  // highlights arrive as ⟦word⟧: the text is escaped first, then only these markers become <mark>
-  function highlight(s) { return esc(s).replace(/⟦/g, "<mark>").replace(/⟧/g, "</mark>"); }
+  // highlights arrive as ⟦word⟧: the text is escaped first, then only these markers become <mark>;
+  // the words of a phrase are marked one by one, so neighbouring marks are joined into one
+  function highlight(s) { return esc(s).replace(/⟧(\s+)⟦/g, "$1").replace(/⟦/g, "<mark>").replace(/⟧/g, "</mark>"); }
   function pdfLink(url, page) {
     if (!url || !/^https?:\/\//i.test(url)) return "";
     return `<a href="${esc(url.split("#")[0])}#page=${Number(page) || 1}" target="_blank" rel="noopener">Open at page ${Number(page) || 1}</a>`;
@@ -238,44 +241,65 @@ a { color: var(--accent); }
     $("q").placeholder = mode === "pages" ? 'e.g. "living wage" supplier' : "words (optional), then pick a group";
   });
 
+  // One search at a time. Cancel stops waiting for the answer (the database's own time limit stops the
+  // work there). The results are shown as soon as they arrive; the counts, which take longer on common
+  // words, fill in afterwards.
+  let current = null;
+  $("stop").onclick = () => { if (current) current.abort(); };
+
+  function statusLine(rows, summary, secs, counting) {
+    const head = summary
+      ? `<span><strong>${Number(summary.companies).toLocaleString()}</strong> companies · <strong>${Number(summary.documents).toLocaleString()}</strong> documents · <strong>${Number(summary.pages).toLocaleString()}${summary.capped ? "+" : ""}</strong> pages</span>`
+      : counting ? `<span>counting…</span>` : `<span><strong>${rows.length}</strong> ${mode === "pages" ? "pages" : "passages"} shown</span>`;
+    const csv = mode === "pages"
+      ? `<button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV (up to 5,000 pages)</button>`
+      : `<button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV</button>`;
+    $("status").innerHTML = `${head}<span>${rows.length ? `showing ${rows.length}, newest first · ` : ""}${secs} s · ${csv}</span>`;
+    $("csv").onclick = mode === "pages" ? downloadAll : downloadCsv;
+  }
+
   $("search-form").onsubmit = async (e) => {
     e.preventDefault();
     const q = $("q").value.trim();
     if (mode === "pages" && !q) { $("q").focus(); return; }
-    const f = { company_filter: companyFilter($("company").value), year_from: intOrNull($("y1").value), year_to: intOrNull($("y2").value) };
-    $("go").disabled = true;
+    if (current) current.abort();
+    const ctl = new AbortController(); current = ctl;
+    lastArgs = { q, company_filter: companyFilter($("company").value), year_from: intOrNull($("y1").value), year_to: intOrNull($("y2").value) };
+    $("go").disabled = true; $("stop").classList.remove("hidden");
     $("status").innerHTML = "Searching…";
     $("results").innerHTML = "";
     const t0 = performance.now();
+    const secs = () => ((performance.now() - t0) / 1000).toFixed(1);
     try {
-      let rows, summary = null;
+      let rows;
       if (mode === "pages") {
-        const args = { q, ...f, type_filter: textOrNull($("type").value) };
-        const [r, s] = await Promise.all([
-          rpc("search_pages", { ...args, max_rows: 100 }),
-          rpc("search_summary", args),
-        ]);
+        const args = { ...lastArgs, type_filter: textOrNull($("type").value) };
+        lastArgs = args;
+        const counting = rpc("search_summary", args, ctl.signal);          // runs alongside, shown when it lands
+        const r = await rpc("search_pages", { ...args, max_rows: 100 }, ctl.signal);
         if (r.error) throw r.error;
         rows = r.data || [];
-        summary = s.error ? null : (s.data || [])[0];
+        lastRows = rows;
+        statusLine(rows, null, secs(), true);
+        $("results").innerHTML = rows.length ? rows.map(render).join("") : `<div class="empty">Nothing found. Check the spelling, or remove a filter.</div>`;
+        const s = await counting;
+        if (ctl.signal.aborted) return;
+        statusLine(rows, s.error ? null : (s.data || [])[0], secs(), false);
+        if (s.error && !/abort/i.test(s.error.message)) $("status").insertAdjacentHTML("beforeend", `<span class="error">counting stopped: ${esc(s.error.message)}</span>`);
       } else {
-        const r = await rpc("search_passages", { q, dim: textOrNull($("dim").value), ...f, max_rows: 100 });
+        const r = await rpc("search_passages", { q, dim: textOrNull($("dim").value), ...lastArgs, max_rows: 100 }, ctl.signal);
         if (r.error) throw r.error;
         rows = r.data || [];
+        lastRows = rows;
+        statusLine(rows, null, secs(), false);
+        $("results").innerHTML = rows.length ? rows.map(render).join("") : `<div class="empty">Nothing found. Check the spelling, or remove a filter.</div>`;
       }
-      lastRows = rows;
-      const secs = ((performance.now() - t0) / 1000).toFixed(1);
-      const head = summary
-        ? `<span><strong>${Number(summary.companies).toLocaleString()}</strong> companies · <strong>${Number(summary.documents).toLocaleString()}</strong> documents · <strong>${Number(summary.pages).toLocaleString()}${summary.capped ? "+" : ""}</strong> pages</span>`
-        : `<span><strong>${rows.length}</strong> passages shown</span>`;
-      $("status").innerHTML = `${head}<span>${rows.length ? `showing ${rows.length}, newest first · ` : ""}${secs} s · <button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV</button></span>`;
-      $("csv").onclick = downloadCsv;
-      $("results").innerHTML = rows.length ? rows.map(render).join("") : `<div class="empty">Nothing found. Check the spelling, or remove a filter.</div>`;
     } catch (err) {
+      if (ctl.signal.aborted || /abort/i.test(err.name || "")) { $("status").innerHTML = "Search cancelled."; return; }
       const msg = /not allowed/i.test(err.message || "") ? "This address is not allowed to search. Ask the owner to add it." : (err.message || String(err));
       $("status").innerHTML = `<span class="error">${esc(msg)}</span>`;
     } finally {
-      $("go").disabled = false;
+      if (current === ctl) { current = null; $("go").disabled = false; $("stop").classList.add("hidden"); }
     }
   };
 
@@ -290,14 +314,32 @@ a { color: var(--accent); }
     </article>`;
   }
 
-  function downloadCsv() {
+  function saveCsv(rows) {
     const cols = ["company", "wba_id", "year", "doc_type", "label", "page", "url", "library_id", "excerpt"];
     const cell = (v) => `"${String(v == null ? "" : v).replace(/⟦|⟧/g, "").replace(/"/g, '""')}"`;
-    const csv = [cols.join(",")].concat(lastRows.map((r) => cols.map((c) => cell(r[c])).join(","))).join("\n");
+    const csv = [cols.join(",")].concat(rows.map((r) => cols.map((c) => cell(r[c])).join(","))).join("\n");
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
     a.download = `evidence-search-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
+  }
+  function downloadCsv() { saveCsv(lastRows); }
+
+  // the CSV of a page search holds up to 5,000 pages, fetched without the highlighted extracts (a plain
+  // window of text around the first word instead), which is what keeps it quick
+  async function downloadAll() {
+    const b = $("csv");
+    b.disabled = true; const label = b.textContent; b.textContent = "Preparing the CSV…";
+    try {
+      const r = await rpc("export_pages", { ...lastArgs, max_rows: 5000 });
+      if (r.error) { saveCsv(lastRows); return; }                 // older database without the function: the rows shown
+      saveCsv(r.data || []);
+      b.textContent = `Downloaded ${(r.data || []).length.toLocaleString()} pages`;
+      setTimeout(() => { b.textContent = label; }, 4000);
+    } finally {
+      b.disabled = false;
+      if (b.textContent === "Preparing the CSV…") b.textContent = label;
+    }
   }
 
   sb.auth.onAuthStateChange(() => show());
