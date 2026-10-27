@@ -42,14 +42,19 @@ KINDS = [
     ("sustainability", r"sustainab|sostenib|sustentab|durab|nachhaltig|duurza|responsab|responsib|verantwortung|"
                        r"climate|environment|umwelt|impact|ethical[._-]?sourcing|"
                        r"(^|[._-])(esg|csr|cr|tcfd|gri|ehs|hse)([._-]|$)|^(esg|csr)"),
-    ("media", r"press|media|presse|prensa|imprensa|news|communication|kommunikation|comunica|pr$|^pr[._-]"),
+    ("media", r"press|media|presse|prensa|imprensa|news|communication|kommunikation|comunica|pr$|^pr[._-]|^humas|"
+              r"(^|[._-])humas([._-]|$)|public[._-]?relations|^corpcomm|corp[._-]?comm"),
     ("ethics and compliance", r"compliance|ethic|ethik|whistle|speak[._-]?up|integrity|integrit|ombuds|"
                               r"hotline|concerns?$|reporting[._-]?line|denuncia|governance"),
     ("privacy", r"privacy|dpo|data[._-]?protection|datenschutz|gdpr|privacidad|privacidade"),
-    ("people", r"^hr$|^hr[._-]|human[._-]?resources|careers?|recruit|jobs?$|talent"),
+    ("people", r"^hr$|^hr[._-]|human[._-]?resources|careers?|recruit|jobs?$|talent|(^|[._-])sdm([._-]|$)"),
     ("general", r"^(info|contact|contacts?us|enquir\w*|inquir\w*|hello|mail|office|general|"
                 r"kontakt|contato|contacto|informacion|service|customer\w*|webmaster|reception)$|^info|"
-                r"cosec|secretar|admin|office|desk|team$|support|service|(^|[._-])group([._-]|$)"),
+                r"cosec|secretar|admin|office|desk|team$|support|service|(^|[._-])group([._-]|$)|"
+                r"call|care|halo|helpdesk|help|cs$|^cs[._-]|customer|client|feedback|complain|"
+                r"legal|procure|purchas|supplier|vendor|tender|sales|marketing|finance|treasury|tax|audit|"
+                r"security|cyber|shareholder[._-]?services|registr|board|governance|corporate|doc$|docs|"
+                r"(^|[._-])(ca|cfo|ceo|coo)([._-]|$)"),
 ]
 KINDS = [(k, re.compile(rx, re.I)) for k, rx in KINDS]
 

@@ -27,6 +27,11 @@ class Kinds(unittest.TestCase):
         self.assertEqual(C.kind_of("eci_administrator"), ("general", False))
         self.assertEqual(C.kind_of("infogrupoacs"), ("general", False))
         self.assertEqual(C.kind_of("2645.7085"), ("other", False))
+        # the first full run (2,143 addresses): service and function mailboxes were taken for people or left as other
+        for local in ("cyber.security", "sola_doc", "bnicall", "mandiricare", "halobca", "callbri", "corporate.secretary"):
+            self.assertEqual(C.kind_of(local), ("general", False), local)
+        self.assertEqual(C.kind_of("humas"), ("media", False))
+        self.assertEqual(C.kind_of("halo_sdm"), ("people", False))      # "Halo SDM": the HR helpline (Indonesian)
         # names that only contain a role word inside are not that role
         self.assertEqual(C.kind_of("desgagne.paul"), ("personal", True))
         self.assertEqual(C.kind_of("grigorios.papa"), ("personal", True))
