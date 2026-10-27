@@ -137,7 +137,12 @@ a { color: var(--accent); }
 <script>
 (function () {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const sb = window.supabase.createClient(CONFIG.url, CONFIG.key, { auth: { persistSession: true, detectSessionInUrl: true } });
+  // No cross-tab lock on the session: the library's default lock (navigator.locks) stays held by a tab that
+  // is busy or frozen, and every other tab of the page then waits for it forever and shows nothing
+  // (27 Oct 2026: a blank page with the lock held by an older tab). One person, one session: no lock needed.
+  const sb = window.supabase.createClient(CONFIG.url, CONFIG.key, {
+    auth: { persistSession: true, detectSessionInUrl: true, lock: async (name, acquireTimeout, fn) => fn() },
+  });
   const $ = (id) => document.getElementById(id);
 
   // Every search is sent with the signed-in user's token, read fresh from the session (renewed when it has
@@ -188,8 +193,11 @@ a { color: var(--accent); }
   }
 
   async function show() {
-    const { data } = await sb.auth.getSession();
+    // never leave the page blank: if the session cannot be read within a few seconds, show the sign-in
+    const timeout = new Promise((r) => setTimeout(() => r({ data: { session: null }, timedOut: true }), 4000));
+    const { data, timedOut } = await Promise.race([sb.auth.getSession().catch(() => ({ data: { session: null } })), timeout]);
     const session = data.session;
+    if (timedOut) $("signin-msg").textContent = "Could not read the saved session; sign in again.";
     $("signin").classList.toggle("hidden", !!session);
     $("app").classList.toggle("hidden", !session);
     $("who").innerHTML = session
