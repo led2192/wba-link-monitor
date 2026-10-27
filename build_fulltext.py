@@ -400,9 +400,15 @@ def needs_work(d, att, retry_failed):
     return d.get("attempts", 1) < MAX_ATTEMPTS            # transient failure: try again, a few times
 
 
-def load_index(store, work):
+def load_index(store, work, only_run=None):
+    """The docs index of the store. only_run: read only the parts written by that workflow run (a
+    shard needs nothing else: the plan's queue already left out what earlier runs finished, so a
+    shard only has to skip what an earlier attempt of the same run stored). Eight shards each
+    downloading every docs file (597 on 27 Oct 2026) spent the token's hourly GitHub allowance."""
     listing = store.assets(refresh=True)
     docs_files, _ = tc.complete_parts(listing)
+    if only_run:
+        docs_files = [n for n in docs_files if f"-r{only_run}a" in n]
     tc.sync_down(store, docs_files, work)
     return tc.load_docs_index(work, docs_files), listing
 
@@ -538,7 +544,8 @@ def run_sample(queue, n, workers):
 def run_extract(args, store, work, queue, shard, shards):
     run = os.environ.get("GITHUB_RUN_ID") or f"local{os.getpid()}"
     run = f"r{run}a{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
-    index, _ = load_index(store, work)                    # a re-run skips what a previous attempt stored
+    # a re-run skips what a previous attempt of this run stored; earlier runs are already out of the queue
+    index, _ = load_index(store, work, os.environ.get("GITHUB_RUN_ID") or f"local{os.getpid()}")
     mine = [d for d in queue if shard_of(d["id"], shards) == shard
             and needs_work(index.get(d["id"]), d.get("att"), args.retry_failed)]
     if args.limit:

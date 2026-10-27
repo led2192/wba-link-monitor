@@ -2,6 +2,9 @@
 
 Lessons that cost time to learn. Read before changing the area they name.
 
+## The text store and GitHub's limits
+- **Every job that reads the text store spends the same hourly allowance.** The store is one private repository and one token: 5,000 GitHub calls an hour across every job that uses it. Each docs file is one call, and the number of files grows every night (597 on 27 Oct 2026). Eight full-text shards each downloading all of them, while the evidence database load read the store, spent the allowance at 01:18 UTC and the night's text jobs failed together. A shard reads only the parts of its own run, and a spent allowance is waited out, not retried for two minutes. Next step if the store keeps growing: one combined index file instead of hundreds of small ones.
+
 ## Airtable
 - **0 equals blank in formulas.** `{page_count} = BLANK()` is true for 0, so a failure marked with 0 stays in the queue forever. Queue on a text status field.
 - **`typecast` fabricates.** A string sent to a link field with `typecast: true` creates an empty row in the linked table when nothing matches. Resolve record ids first; never send strings to link fields.
