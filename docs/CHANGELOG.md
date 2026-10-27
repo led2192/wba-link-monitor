@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-27 Company contacts: `domain_mail` and `domain_checked` say whether the address's domain accepts mail (its MX records, read through DNS over HTTPS; nothing is sent): accepts, none, unknown. The mailbox itself cannot be checked from outside (#106)
 - 2026-10-27 Company contacts: more mailbox names recognised after the first full run (2,143 addresses, 860 companies; 642 "other" and 350 "personal"): service lines (call, care, halo, helpdesk), functions (legal, procurement, security, corporate secretary), Indonesian humas (media) and sdm (people) (#105)
 - 2026-10-27 Search page: every search is sent with the signed-in user's token read fresh from the session; the first signed-in searches reached the database as an anonymous visitor ("permission denied for function search_pages") (#104)
 - 2026-10-27 Search page: the company filter offers the list of companies in the database ("Name (PT_00123)", from the new function `search_companies`); typing part of a name or an id still works. Sign-in by the code in the email as well as the link: the link signs in only the browser that opens it, and Outlook opens links in Edge (#102, #103)
