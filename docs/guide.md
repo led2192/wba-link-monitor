@@ -87,7 +87,7 @@ Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipe
 | `webpage_library` | web page printed to PDF (pages ticked `capture_page`) | captured every Sunday |
 | `mention_searches`, `mention_hits` | a saved "which companies mention X" question, and each matching document | see `TEXT_SEARCH.md` |
 | `base_health` | night | the daily health row |
-| `company_contacts` | company and email address printed in its own key reports (from 27 Oct 2026) | `email`, `kind` (investor relations, sustainability, media, general, ethics and compliance, privacy, people, personal, other), `personal`, `evidence` (page and sentence), `last_seen`. Written by `contacts.py`; never deleted. Prefer the role mailboxes: a personal address is a person's data the company published for contact |
+| `company_contacts` | company and email address printed in its own key reports (from 27 Oct 2026) | `email`, `kind` (investor relations, sustainability, media, general, ethics and compliance, privacy, people, personal, other), `personal`, `evidence` (page and sentence), `last_seen`, `domain_mail` (does the domain accept mail at all, from DNS; the mailbox itself cannot be checked without writing). Written by `contacts.py`; never deleted. Prefer the role mailboxes: a personal address is a person's data the company published for contact |
 
 ### 5.2 Interfaces
 
