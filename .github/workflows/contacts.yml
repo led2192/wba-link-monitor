@@ -1,0 +1,55 @@
+name: Company contacts
+
+# The email addresses companies publish in their own key reports (contacts.py), into the
+# company_contacts table. Manual for now; a pull request touching it runs a dry run on 400 key reports
+# and posts the result.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run lists what would be written; commit writes"
+        type: choice
+        default: "dry-run"
+        options: [dry-run, commit]
+      wba:
+        description: "Only these companies (comma-separated wba_ids). Blank = all."
+        default: ""
+  pull_request:
+    paths: [contacts.py, .github/workflows/contacts.yml]
+
+concurrency:
+  group: contacts
+  cancel-in-progress: false
+
+jobs:
+  contacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Company contacts
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=(--limit 400)
+          else ARGS=(--wba "${{ inputs.wba }}"); [ "${{ inputs.mode }}" = "commit" ] && ARGS+=(--commit); fi
+          python contacts.py "${ARGS[@]}"
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s contacts.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file contacts.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Company contacts: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
