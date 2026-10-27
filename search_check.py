@@ -19,6 +19,8 @@ SEARCHES = [
     ("phrase: \"scope 3\"", "pages", ('"scope 3"',)),
     ("common word: climate", "pages", ("climate",)),
     ("very common word: revenue", "pages", ("revenue",)),
+    ("documents view: revenue", "documents", ("revenue",)),
+    ("documents view: \"living wage\"", "documents", ('"living wage"',)),
     ("two words, 2025 reports only: grievance mechanism", "pages", ("grievance mechanism", None, 2025, 2025)),
     ("company filter: \"net zero\" at Unilever", "pages", ('"net zero"', "Unilever")),
     ("other language: \"développement durable\"", "pages", ('"développement durable"',)),
@@ -51,6 +53,10 @@ def run(cur, fn, args, exact_companies=False):
             cur.execute("select public.search_company_count(%s, %s, %s, %s, %s)", a)
             exact = (cur.fetchone()[0], time.time() - t2)
         return summary, rows, t1 - t0, t2 - t1, exact
+    if fn == "documents":
+        a = list(args) + [None] * (5 - len(args))
+        cur.execute("select company, year, pages from public.search_documents(%s, %s, %s, %s, %s, 50)", a)
+        return None, cur.fetchall(), 0.0, time.time() - t0, None
     cur.execute("select company, year, page from public.search_passages(%s, %s, null, null, null, 50)", list(args))
     return None, cur.fetchall(), 0.0, time.time() - t0, None
 
@@ -68,7 +74,10 @@ def main():
         cur = conn.cursor()
         cur.execute("set statement_timeout = '120s'")
         exact_ok = has_function(cur, "search_company_count")
+        docs_ok = has_function(cur, "search_documents")
         for label, fn, args in SEARCHES:
+            if fn == "documents" and not docs_ok:
+                continue
             try:
                 s, rows, tc, tr, exact = run(cur, fn, args, exact_ok)
                 first = f"{rows[0][0]} {rows[0][1]} p.{rows[0][2]}" if rows else "none"
