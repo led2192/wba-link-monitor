@@ -87,6 +87,7 @@ Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipe
 | `webpage_library` | web page printed to PDF (pages ticked `capture_page`) | captured every Sunday |
 | `mention_searches`, `mention_hits` | a saved "which companies mention X" question, and each matching document | see `TEXT_SEARCH.md` |
 | `base_health` | night | the daily health row |
+| `company_contacts` | company and email address printed in its own key reports (from 27 Oct 2026) | `email`, `kind` (investor relations, sustainability, media, general, ethics and compliance, privacy, people, personal, other), `personal`, `evidence` (page and sentence), `last_seen`. Written by `contacts.py`; never deleted. Prefer the role mailboxes: a personal address is a person's data the company published for contact |
 
 ### 5.2 Interfaces
 
@@ -170,6 +171,8 @@ The year is the year in which the reporting period **ends** (April 2024 to March
 7. `year_rules`: a year in the AI title (ignoring bond maturity dates and years after `doc_year` + 1), else `doc_year` from the file name, cover or address.
 
 `year_evidence` holds the sentence that decided `fiscal_year`, so a year can be checked without opening the PDF. Comparison periods ("the preceding year ended ...") and ten-year tables are ignored as evidence.
+
+**The fiscal year for research (from 27 Oct 2026).** The attribute research team counts a fiscal year that ends January to June as the previous year, and one that ends July to December as that year: the year ended 31 January 2026 is FY2025, the year ended 30 June 2025 is FY2024, the year ended 31 March 2026 is FY2025, the year ended 31 December 2025 is FY2025. `fiscal_year_wba` on each document follows that rule for the fiscal year the document belongs to: the company's usual year-end month (`companies.fy_end_month`, written nightly by key_reports.py from its long annual reports) places the document's `period_end` in a fiscal year, so a half-year report ending June 2025 of a December company belongs to FY2025, not FY2024 (ACCIONA's first-semester sustainability report, 27 Oct 2026). Until that month is known the document's own period end is used; documents with no month in `period_end` use `year` with the company's month. `year` itself stays the year the period ends, because the completeness checks, the key report waves and the analysts' views were built on it; use `fiscal_year_wba` wherever a benchmark year is meant. The key report waves already match the rule: wave P (periods ending July P-1 to June P) holds fiscal year P-1.
 
 ### 6.3 Title
 `doc_label` (year, company, title) uses `curated_doc_title` when you set one, else the AI's title (`ai_title`: `source_title` unless the AI answered with a sentence such as "I don't have access to the document text"), else the robot's `auto_title`. An "[auto]" prefix means a title was constructed, not read.

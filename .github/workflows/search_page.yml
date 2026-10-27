@@ -1,0 +1,44 @@
+name: Search page
+
+# Publishes site/index.html (the evidence search page) on GitHub Pages, with the Supabase project
+# address and its publishable key filled in. The page holds no data: it signs people in with Supabase
+# and calls the search functions, which allow WBA addresses and the addresses in search_access only.
+# Needs: Settings > Pages > Source = GitHub Actions; repository variable SUPABASE_PUBLISHABLE_KEY.
+on:
+  push:
+    branches: [main]
+    paths: [site/**, .github/workflows/search_page.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fill in the project address and the publishable key
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          test -n "$KEY" || { echo "Set the repository variable SUPABASE_PUBLISHABLE_KEY first"; exit 1; }
+          mkdir -p public
+          sed -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" site/index.html > public/index.html
+          grep -q "__SUPABASE_" public/index.html && { echo "placeholders left"; exit 1; } || true
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v4

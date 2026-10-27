@@ -24,6 +24,9 @@ jobs:
       - name: Check search
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: "true"
         run: python search_check.py
       - name: Post the result on the pull request
         if: github.event_name == 'pull_request' && always()
