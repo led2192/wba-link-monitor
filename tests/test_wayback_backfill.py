@@ -206,7 +206,7 @@ class Helpers(unittest.TestCase):
         sess.get.side_effect = [mock.Mock(status_code=503), ok]
         with mock.patch.object(W.time, "sleep"):
             self.assertEqual(W.cdx_rows("x.com", sess), [("20150905084903", "http://x/a.pdf", 1)])
-        self.assertEqual(sess.get.call_count, 3)
+        self.assertEqual(sess.get.call_count, 6)                          # 1 timeout + 3 slow-downs + 503, 200
 
 
 if __name__ == "__main__":
