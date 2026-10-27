@@ -33,14 +33,25 @@ create or replace function public.can_search() returns boolean
   $$;
 
 -- The companies a company filter means: a WBA id, or part of a name. Null when no filter.
+-- Several companies at once, separated by ";" (the page sends the picked companies' ids this way); each
+-- part is a WBA id or part of a name. An unknown company gives [''] so that nothing matches.
 create or replace function public.companies_matching(company_filter text) returns text[]
   language sql stable security definer set search_path = public
   as $$
     select case when company_filter is null or btrim(company_filter) = '' then null
                 else coalesce((select array_agg(distinct d.wba_id) from public.documents d
                                where d.wba_id is not null
-                                 and (d.wba_id = btrim(company_filter) or d.company ilike '%' || btrim(company_filter) || '%')),
+                                 and exists (select 1 from unnest(string_to_array(company_filter, ';')) part
+                                             where btrim(part) <> ''
+                                               and (d.wba_id = btrim(part) or d.company ilike '%' || btrim(part) || '%'))),
                               array['']::text[]) end
+  $$;
+
+-- Several document types at once, separated by ";"; null when none given.
+create or replace function public.types_matching(type_filter text) returns text[]
+  language sql immutable
+  as $$
+    select nullif(array(select btrim(t) from unnest(string_to_array(coalesce(type_filter, ''), ';')) t where btrim(t) <> ''), '{}')
   $$;
 
 -- The companies that can be searched, for the company picker on the search page: WBA id, name and how many
@@ -64,10 +75,13 @@ end;
 $$;
 
 -- Pages that contain the words (websearch syntax: "exact phrase", -excluded, or), newest documents
--- first, with a highlighted extract (⟦ ⟧ around the matched words). Filters are optional.
+-- first, with a highlighted extract (⟦ ⟧ around the matched words). Filters are optional; doc_filter
+-- (a library_id) gives the pages of that one document in page order, which the page uses to open a
+-- document from the documents view.
+drop function if exists public.search_pages(text, text, int, int, text, int);
 create or replace function public.search_pages(
   q text, company_filter text default null, year_from int default null, year_to int default null,
-  type_filter text default null, max_rows int default 50)
+  type_filter text default null, max_rows int default 50, doc_filter text default null)
 returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text,
                page int, excerpt text)
 language plpgsql stable security definer
@@ -83,11 +97,24 @@ declare
   n int;
   y int;
   ids text[] := public.companies_matching(company_filter);
+  types text[] := public.types_matching(type_filter);
 begin
   if not public.can_search() then
     raise exception 'not allowed to search' using errcode = '42501';
   end if;
   if numnode(tsq) = 0 then
+    return;
+  end if;
+  if doc_filter is not null and btrim(doc_filter) <> '' then
+    return query
+      select p.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, p.page,
+             ts_headline('simple', left(p.body, 200000), tsq,
+                         'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
+      from public.pages p
+      join public.documents d on d.library_id = p.library_id
+      where p.library_id = btrim(doc_filter) and p.words @@ tsq
+      order by p.page
+      limit need;
     return;
   end if;
   for y in select distinct coalesce(d.year, 0) from public.documents d
@@ -105,11 +132,81 @@ begin
         where p.words @@ tsq
           and p.year = y
           and p.wba_id <> ''
-          and (type_filter is null or p.doc_type = type_filter)
+          and (types is null or p.doc_type = any(types))
           and (ids is null or p.wba_id = any(ids))
         limit need - got
       ) s
       order by s.company, s.library_id, s.page;
+    get diagnostics n = row_count;
+    got := got + n;
+    exit when got >= need;
+  end loop;
+end;
+$$;
+
+-- One line per document: the documents that contain the words, newest first, each with how many of
+-- its pages match and the highlighted extract of its best page (ts_rank). A common word fills the
+-- pages view with one long questionnaire (27 Oct 2026: "revenue" showed 100 pages of one CDP answer);
+-- this view shows the documents and opens the pages of one on request (search_pages with doc_filter).
+-- Per year, the first `window_rows` matching pages are grouped; when a year has more, its counts are
+-- lower bounds (pages_capped).
+create or replace function public.search_documents(
+  q text, company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 50)
+returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text,
+               pages int, pages_capped boolean, best_page int, excerpt text)
+language plpgsql stable security definer
+set search_path = public, extensions
+set work_mem = '128MB'
+set statement_timeout = '30s'
+set plan_cache_mode = 'force_custom_plan'
+as $$
+declare
+  tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
+  need int := least(greatest(coalesce(max_rows, 50), 1), 200);
+  got int := 0;
+  n int;
+  y int;
+  ids text[] := public.companies_matching(company_filter);
+  types text[] := public.types_matching(type_filter);
+  window_rows constant int := 3000;
+begin
+  if not public.can_search() then
+    raise exception 'not allowed to search' using errcode = '42501';
+  end if;
+  if numnode(tsq) = 0 then
+    return;
+  end if;
+  for y in select distinct coalesce(d.year, 0) from public.documents d
+            where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+            order by 1 desc
+  loop
+    return query
+      with hits as (
+        select p.library_id, p.page, ts_rank(p.words, tsq) as r
+        from public.pages p
+        where p.words @@ tsq
+          and p.year = y
+          and p.wba_id <> ''
+          and (types is null or p.doc_type = any(types))
+          and (ids is null or p.wba_id = any(ids))
+        limit window_rows
+      ),
+      grouped as (
+        select h.library_id, count(*)::int as hits, (array_agg(h.page order by h.r desc, h.page))[1] as best
+        from hits h
+        group by h.library_id
+      ),
+      capped as (select count(*) >= window_rows as c from hits)
+      select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url,
+             g.hits, (select c.c from capped c), g.best,
+             ts_headline('simple', left(p.body, 200000), tsq,
+                         'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
+      from grouped g
+      join public.documents d on d.library_id = g.library_id
+      join public.pages p on p.library_id = g.library_id and p.page = g.best
+      order by d.company, d.library_id
+      limit need - got;
     get diagnostics n = row_count;
     got := got + n;
     exit when got >= need;
@@ -138,6 +235,7 @@ declare
   n int;
   y int;
   ids text[] := public.companies_matching(company_filter);
+  types text[] := public.types_matching(type_filter);
   first_word text := lower((regexp_match(coalesce(q, ''), '[[:alnum:]][[:alnum:]''’-]*'))[1]);
 begin
   if not public.can_search() then
@@ -161,7 +259,7 @@ begin
         where p.words @@ tsq
           and p.year = y
           and p.wba_id <> ''
-          and (type_filter is null or p.doc_type = type_filter)
+          and (types is null or p.doc_type = any(types))
           and (ids is null or p.wba_id = any(ids))
         limit need - got
       ) s
@@ -188,6 +286,7 @@ as $$
 declare
   tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
   ids text[] := public.companies_matching(company_filter);
+  types text[] := public.types_matching(type_filter);
 begin
   if not public.can_search() then
     raise exception 'not allowed to search' using errcode = '42501';
@@ -204,7 +303,7 @@ begin
         and p.wba_id <> ''
         and (year_from is null or p.year >= year_from)
         and (year_to is null or p.year <= year_to)
-        and (type_filter is null or p.doc_type = type_filter)
+        and (types is null or p.doc_type = any(types))
         and (ids is null or p.wba_id = any(ids))
       limit 20001
     )
@@ -233,6 +332,7 @@ as $$
 declare
   tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
   ids text[] := public.companies_matching(company_filter);
+  types text[] := public.types_matching(type_filter);
   n bigint := 0;
   c record;
 begin
@@ -248,7 +348,7 @@ begin
                where p.wba_id = c.wba_id and p.words @@ tsq
                  and (year_from is null or p.year >= year_from)
                  and (year_to is null or p.year <= year_to)
-                 and (type_filter is null or p.doc_type = type_filter)) then
+                 and (types is null or p.doc_type = any(types))) then
       n := n + 1;
     end if;
   end loop;
@@ -292,7 +392,7 @@ begin
 end;
 $$;
 
-revoke all on function public.search_pages(text, text, int, int, text, int) from public, anon;
+revoke all on function public.search_pages(text, text, int, int, text, int, text) from public, anon;
 revoke all on function public.search_summary(text, text, int, int, text) from public, anon;
 revoke all on function public.search_company_count(text, text, int, int, text) from public, anon;
 grant execute on function public.search_company_count(text, text, int, int, text) to authenticated;
@@ -304,7 +404,10 @@ revoke all on function public.export_pages(text, text, int, int, text, int) from
 grant execute on function public.export_pages(text, text, int, int, text, int) to authenticated;
 revoke all on function public.email_may_search(text) from public, anon, authenticated;
 revoke all on function public.companies_matching(text) from public, anon, authenticated;
-grant execute on function public.search_pages(text, text, int, int, text, int) to authenticated;
+grant execute on function public.search_pages(text, text, int, int, text, int, text) to authenticated;
+revoke all on function public.search_documents(text, text, int, int, text, int) from public, anon;
+grant execute on function public.search_documents(text, text, int, int, text, int) to authenticated;
+revoke all on function public.types_matching(text) from public, anon, authenticated;
 grant execute on function public.search_summary(text, text, int, int, text) to authenticated;
 grant execute on function public.search_passages(text, text, text, int, int, int) to authenticated;
 grant execute on function public.can_search() to authenticated;

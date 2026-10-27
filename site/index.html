@@ -64,6 +64,14 @@ a { color: var(--accent); }
 .results { padding: 4px 18px; }
 .empty { color: var(--muted); padding: 18px 0; }
 .hidden { display: none !important; }
+.picked { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.picked button { font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--chip); border-color: transparent; }
+.picked button::after { content: " ×"; color: var(--muted); }
+.doc .pages-of { margin: 8px 0 0 14px; border-left: 2px solid var(--line); padding-left: 12px; }
+.doc .pages-of .result { padding: 10px 0; }
+.doc .open { font-size: 13px; padding: 3px 9px; }
+.options { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--muted); align-items: center; }
+.options label { display: flex; gap: 5px; align-items: center; }
 @media (max-width: 560px) { form.search .q { flex-direction: column; } }
 </style>
 </head>
@@ -102,7 +110,8 @@ a { color: var(--accent); }
         <button type="button" id="stop" class="hidden">Cancel</button>
       </div>
       <div class="filters">
-        <label>Company or WBA id<input id="company" list="company-list" placeholder="any: type a name or id" autocomplete="off"></label>
+        <label>Company or WBA id<input id="company" list="company-list" placeholder="any: pick one or more, or type" autocomplete="off">
+          <span class="picked" id="company-picked"></span></label>
         <datalist id="company-list"></datalist>
         <label>Year from<input id="y1" type="number" min="2000" max="2100" placeholder="any"></label>
         <label>Year to<input id="y2" type="number" min="2000" max="2100" placeholder="any"></label>
@@ -116,6 +125,7 @@ a { color: var(--accent); }
             <option>Policy Documents</option><option>Human Rights Policy</option><option>Code of Conduct</option>
             <option>CDP Report</option><option>Company Presentations</option><option>Statutory Documents</option>
           </select>
+          <span class="picked" id="type-picked"></span>
         </label>
         <label id="dim-wrap" class="hidden">Group
           <select id="dim">
@@ -124,9 +134,12 @@ a { color: var(--accent); }
           </select>
         </label>
       </div>
+      <div class="options" id="options">
+        <label><input type="checkbox" id="group" checked> one line per document (open a document to see its pages)</label>
+      </div>
       <div class="hint">
         Words match exactly as written, in any language: <code>"exact phrase"</code>, <code>-word</code> to exclude,
-        <code>or</code> between alternatives. Results are pages, newest documents first.
+        <code>or</code> between alternatives. Newest documents first. Several companies or types: pick them one after the other.
       </div>
     </form>
 
@@ -186,6 +199,34 @@ a { color: var(--accent); }
     const m = /\((PT_\d+)\)\s*$/.exec(v || "");
     return m ? m[1] : textOrNull(v);
   }
+  // Several companies and several types: each pick becomes a chip; the filters go to the database as
+  // one string with ";" between the values (companies_matching, types_matching). A company typed by hand
+  // and not picked still counts, as part of a name or an id.
+  const picked = { company: [], type: [] };
+  function drawPicked(kind) {
+    $(`${kind}-picked`).innerHTML = picked[kind].map((v, i) =>
+      `<button type="button" data-kind="${kind}" data-i="${i}" title="remove">${esc(v.label || v)}</button>`).join("");
+  }
+  document.querySelectorAll(".picked").forEach((el) => el.onclick = (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    picked[b.dataset.kind].splice(Number(b.dataset.i), 1); drawPicked(b.dataset.kind);
+  });
+  $("company").onchange = () => {                       // a pick from the list ends with "(PT_xxxxx)"
+    const m = /^(.*)\((PT_\d+)\)\s*$/.exec($("company").value);
+    if (m && !picked.company.some((c) => c.id === m[2])) { picked.company.push({ id: m[2], label: m[1].trim() }); drawPicked("company"); $("company").value = ""; }
+  };
+  $("type").onchange = () => {
+    const v = $("type").value;
+    if (v && !picked.type.includes(v)) { picked.type.push(v); drawPicked("type"); }
+    $("type").value = "";
+  };
+  function companyFilterAll() {
+    const parts = picked.company.map((c) => c.id);
+    const typed = companyFilter($("company").value);
+    if (typed) parts.push(typed);
+    return parts.length ? parts.join(";") : null;
+  }
+  function typeFilterAll() { return picked.type.length ? picked.type.join(";") : textOrNull($("type").value); }
   let companiesLoaded = false;
   async function loadCompanies() {
     if (companiesLoaded) return;
@@ -248,6 +289,7 @@ a { color: var(--accent); }
     mode = b.dataset.mode;
     document.querySelectorAll(".tabs button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
     $("type-wrap").classList.toggle("hidden", mode !== "pages");
+    $("options").classList.toggle("hidden", mode !== "pages");
     $("dim-wrap").classList.toggle("hidden", mode !== "passages");
     $("q").placeholder = mode === "pages" ? 'e.g. "living wage" supplier' : "words (optional), then pick a group";
   });
@@ -262,7 +304,7 @@ a { color: var(--accent); }
   // the companies (27 Oct 2026: "revenue" showed 363 where the whole corpus holds 1,385), so a capped
   // count carries "+" and a tooltip, and the exact number of companies is asked for separately and
   // fills in when it lands (company by company in the database: fast whatever the word).
-  function statusLine(rows, summary, secs, counting) {
+  function statusLine(rows, summary, secs, counting, byDoc) {
     const plus = summary && summary.capped ? "+" : "";
     const note = summary && summary.capped ? ` title="counted in the first 20,000 pages that match"` : "";
     const head = summary
@@ -271,7 +313,7 @@ a { color: var(--accent); }
     const csv = mode === "pages"
       ? `<button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV (up to 5,000 pages)</button>`
       : `<button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV</button>`;
-    $("status").innerHTML = `${head}<span>${rows.length ? `showing ${rows.length}, newest first · ` : ""}${secs} s · ${csv}</span>`;
+    $("status").innerHTML = `${head}<span>${rows.length ? `showing ${rows.length}${byDoc ? (rows.length === 1 ? " document" : " documents") : ""}, newest first · ` : ""}${secs} s · ${csv}</span>`;
     $("csv").onclick = mode === "pages" ? downloadAll : downloadCsv;
   }
 
@@ -281,7 +323,7 @@ a { color: var(--accent); }
     if (mode === "pages" && !q) { $("q").focus(); return; }
     if (current) current.abort();
     const ctl = new AbortController(); current = ctl;
-    lastArgs = { q, company_filter: companyFilter($("company").value), year_from: intOrNull($("y1").value), year_to: intOrNull($("y2").value) };
+    lastArgs = { q, company_filter: companyFilterAll(), year_from: intOrNull($("y1").value), year_to: intOrNull($("y2").value) };
     $("go").disabled = true; $("stop").classList.remove("hidden");
     $("status").innerHTML = "Searching…";
     $("results").innerHTML = "";
@@ -290,19 +332,23 @@ a { color: var(--accent); }
     try {
       let rows;
       if (mode === "pages") {
-        const args = { ...lastArgs, type_filter: textOrNull($("type").value) };
+        const args = { ...lastArgs, type_filter: typeFilterAll() };
         lastArgs = args;
+        let byDoc = $("group").checked;
         const counting = rpc("search_summary", args, ctl.signal);          // runs alongside, shown when it lands
-        const r = await rpc("search_pages", { ...args, max_rows: 100 }, ctl.signal);
+        let r = await rpc(byDoc ? "search_documents" : "search_pages", { ...args, max_rows: 100 }, ctl.signal);
+        if (r.error && byDoc && /search_documents/.test(r.error.message)) {   // database not yet loaded with the function
+          byDoc = false; r = await rpc("search_pages", { ...args, max_rows: 100 }, ctl.signal);
+        }
         if (r.error) throw r.error;
         rows = r.data || [];
-        lastRows = rows;
-        statusLine(rows, null, secs(), true);
-        $("results").innerHTML = rows.length ? rows.map(render).join("") : `<div class="empty">Nothing found. Check the spelling, or remove a filter.</div>`;
+        lastRows = byDoc ? [] : rows;
+        statusLine(rows, null, secs(), true, byDoc);
+        $("results").innerHTML = rows.length ? rows.map(byDoc ? renderDoc : render).join("") : `<div class="empty">Nothing found. Check the spelling, or remove a filter.</div>`;
         const s = await counting;
         if (ctl.signal.aborted) return;
         const summary = s.error ? null : (s.data || [])[0];
-        statusLine(rows, summary, secs(), false);
+        statusLine(rows, summary, secs(), false, byDoc);
         if (s.error && !/abort/i.test(s.error.message)) $("status").insertAdjacentHTML("beforeend", `<span class="error">counting stopped: ${esc(s.error.message)}</span>`);
         if (summary && summary.capped) {
           const exact = await rpc("search_company_count", args, ctl.signal);
@@ -325,6 +371,33 @@ a { color: var(--accent); }
     } finally {
       if (current === ctl) { current = null; $("go").disabled = false; $("stop").classList.add("hidden"); }
     }
+  };
+
+  // one document: its best page's extract, how many pages match, and its pages on request
+  function renderDoc(r) {
+    const n = `${Number(r.pages).toLocaleString()}${r.pages_capped ? "+" : ""} page${Number(r.pages) === 1 && !r.pages_capped ? "" : "s"} match`;
+    return `<article class="result doc" data-id="${esc(r.library_id)}">
+      <div class="meta"><span class="co">${esc(r.company)}</span><span>${esc(r.year || "no year")}</span>
+        <span class="chip">${esc(r.doc_type || "untyped")}</span><span>${n}</span>
+        <span>best: page ${Number(r.best_page)}</span>${pdfLink(r.url, r.best_page)}
+        <button type="button" class="open">Show pages</button></div>
+      <div class="title">${esc(r.label || r.library_id)}</div>
+      <p class="excerpt">${highlight(r.excerpt)}</p>
+      <div class="pages-of hidden"></div>
+    </article>`;
+  }
+  $("results").onclick = async (e) => {
+    const b = e.target.closest("button.open"); if (!b) return;
+    const art = b.closest(".doc"), box = art.querySelector(".pages-of");
+    if (!box.classList.contains("hidden")) { box.classList.add("hidden"); b.textContent = "Show pages"; return; }
+    if (!box.innerHTML) {
+      b.disabled = true; b.textContent = "Loading…";
+      const r = await rpc("search_pages", { q: lastArgs.q, doc_filter: art.dataset.id, max_rows: 200 });
+      b.disabled = false;
+      box.innerHTML = r.error ? `<span class="error">${esc(r.error.message)}</span>`
+        : (r.data || []).map((p) => `<div class="result"><div class="meta"><span>page ${Number(p.page)}</span>${pdfLink(p.url, p.page)}</div><p class="excerpt">${highlight(p.excerpt)}</p></div>`).join("");
+    }
+    box.classList.remove("hidden"); b.textContent = "Hide pages";
   };
 
   function render(r) {
