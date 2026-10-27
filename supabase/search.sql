@@ -213,6 +213,49 @@ begin
 end;
 $$;
 
+-- The exact number of companies with at least one page that contains the words. search_summary counts
+-- inside its first 20,000 pages, which for a common word ("revenue": over 300,000 pages) is a few hundred
+-- companies out of the real figure (27 Oct 2026: the page said 363 where the Disclosure Library's
+-- mention search said 1,385). This asks the question company by company: each probe is an index
+-- intersection of the word with the company (a handful of index pages, one heap page), and stops at
+-- the first page found. Measured on a 300,000-page corpus with the word on 30% of pages: 2,000 probes
+-- in 0.1 s. A plpgsql loop on purpose: written as one EXISTS join, the planner scans every matching
+-- page once instead (the slow path this avoids).
+create or replace function public.search_company_count(
+  q text, company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null)
+returns bigint
+language plpgsql stable security definer
+set search_path = public, extensions
+set work_mem = '64MB'
+set statement_timeout = '60s'
+as $$
+declare
+  tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
+  ids text[] := public.companies_matching(company_filter);
+  n bigint := 0;
+  c record;
+begin
+  if not public.can_search() then
+    raise exception 'not allowed to search' using errcode = '42501';
+  end if;
+  if numnode(tsq) = 0 then
+    return 0;
+  end if;
+  for c in select distinct d.wba_id from public.documents d
+           where d.wba_id is not null and d.wba_id <> '' and (ids is null or d.wba_id = any(ids)) loop
+    if exists (select 1 from public.pages p
+               where p.wba_id = c.wba_id and p.words @@ tsq
+                 and (year_from is null or p.year >= year_from)
+                 and (year_to is null or p.year <= year_to)
+                 and (type_filter is null or p.doc_type = type_filter)) then
+      n := n + 1;
+    end if;
+  end loop;
+  return n;
+end;
+$$;
+
 -- Evidence passages (climate, nature, social, financial) that contain the words, optionally one group.
 create or replace function public.search_passages(
   q text, dim text default null, company_filter text default null, year_from int default null,
@@ -251,6 +294,8 @@ $$;
 
 revoke all on function public.search_pages(text, text, int, int, text, int) from public, anon;
 revoke all on function public.search_summary(text, text, int, int, text) from public, anon;
+revoke all on function public.search_company_count(text, text, int, int, text) from public, anon;
+grant execute on function public.search_company_count(text, text, int, int, text) to authenticated;
 revoke all on function public.search_passages(text, text, text, int, int, int) from public, anon;
 revoke all on function public.can_search() from public, anon;
 revoke all on function public.search_companies() from public, anon;

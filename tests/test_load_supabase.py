@@ -162,6 +162,12 @@ class AgainstPostgres(unittest.TestCase):
                              (1, 1, 1, False))                        # "new one": doc a
             self.assertEqual(c.execute("select companies, documents, pages from public.search_summary('\"net zero\"')").fetchone(), (2, 2, 2))
             self.assertEqual(c.execute("select pages from public.search_summary('\"net zero\"', year_to => 2023)").fetchone(), (1,))
+            # the exact company count, probed company by company, with the same filters
+            self.assertEqual(c.execute("select public.search_company_count('\"net zero\"')").fetchone()[0], 2)
+            self.assertEqual(c.execute("select public.search_company_count('\"net zero\"', year_to => 2023)").fetchone()[0], 1)
+            self.assertEqual(c.execute("select public.search_company_count('\"net zero\"', company_filter => 'oldco')").fetchone()[0], 1)
+            self.assertEqual(c.execute("select public.search_company_count('\"net zero\"', company_filter => 'nobody')").fetchone()[0], 0)
+            self.assertEqual(c.execute("select public.search_company_count('')").fetchone()[0], 0)
             self.assertEqual(c.execute("select library_id, dims from public.search_passages('zero', 'climate')").fetchall(),
                              [("b", ["climate"])])
             self.assertEqual(c.execute("select count(*) from public.search_pages('')").fetchone()[0], 0)
