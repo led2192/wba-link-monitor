@@ -258,9 +258,15 @@ a { color: var(--accent); }
   let current = null;
   $("stop").onclick = () => { if (current) current.abort(); };
 
+  // The summary counts inside its first 20,000 matching pages. For a common word that is a fraction of
+  // the companies (27 Oct 2026: "revenue" showed 363 where the whole corpus holds 1,385), so a capped
+  // count carries "+" and a tooltip, and the exact number of companies is asked for separately and
+  // fills in when it lands (company by company in the database: fast whatever the word).
   function statusLine(rows, summary, secs, counting) {
+    const plus = summary && summary.capped ? "+" : "";
+    const note = summary && summary.capped ? ` title="counted in the first 20,000 pages that match"` : "";
     const head = summary
-      ? `<span><strong>${Number(summary.companies).toLocaleString()}</strong> companies · <strong>${Number(summary.documents).toLocaleString()}</strong> documents · <strong>${Number(summary.pages).toLocaleString()}${summary.capped ? "+" : ""}</strong> pages</span>`
+      ? `<span><strong id="n-companies"${note}>${Number(summary.companies).toLocaleString()}${plus}</strong> companies · <strong${note}>${Number(summary.documents).toLocaleString()}${plus}</strong> documents · <strong${note}>${Number(summary.pages).toLocaleString()}${plus}</strong> pages</span>`
       : counting ? `<span>counting…</span>` : `<span><strong>${rows.length}</strong> ${mode === "pages" ? "pages" : "passages"} shown</span>`;
     const csv = mode === "pages"
       ? `<button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV (up to 5,000 pages)</button>`
@@ -295,8 +301,15 @@ a { color: var(--accent); }
         $("results").innerHTML = rows.length ? rows.map(render).join("") : `<div class="empty">Nothing found. Check the spelling, or remove a filter.</div>`;
         const s = await counting;
         if (ctl.signal.aborted) return;
-        statusLine(rows, s.error ? null : (s.data || [])[0], secs(), false);
+        const summary = s.error ? null : (s.data || [])[0];
+        statusLine(rows, summary, secs(), false);
         if (s.error && !/abort/i.test(s.error.message)) $("status").insertAdjacentHTML("beforeend", `<span class="error">counting stopped: ${esc(s.error.message)}</span>`);
+        if (summary && summary.capped) {
+          const exact = await rpc("search_company_count", args, ctl.signal);
+          if (ctl.signal.aborted) return;
+          const el = $("n-companies");
+          if (!exact.error && el) { el.textContent = Number(exact.data).toLocaleString(); el.removeAttribute("title"); }
+        }
       } else {
         const r = await rpc("search_passages", { q, dim: textOrNull($("dim").value), ...lastArgs, max_rows: 100 }, ctl.signal);
         if (r.error) throw r.error;
