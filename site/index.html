@@ -78,10 +78,14 @@ a { color: var(--accent); }
 <main class="wrap">
   <section id="signin" class="card hidden" aria-labelledby="signin-title">
     <h1 id="signin-title">Sign in</h1>
-    <p>Enter your WBA email address. We send you a link; open it on this device to sign in.</p>
+    <p>Enter your WBA email address. We send you an email with a code: type it here (the link in the same email works too, but only in the browser it opens in). You stay signed in on this browser until you sign out.</p>
     <form id="signin-form" class="row">
       <input type="email" id="email" required placeholder="name@worldbenchmarkingalliance.org" autocomplete="email" aria-label="Email address">
-      <button class="primary" type="submit">Send link</button>
+      <button class="primary" type="submit">Send code</button>
+    </form>
+    <form id="code-form" class="row hidden">
+      <input id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" required placeholder="code from the email" aria-label="Code from the email">
+      <button class="primary" type="submit">Sign in</button>
     </form>
     <p id="signin-msg" class="hint" role="status"></p>
   </section>
@@ -178,8 +182,24 @@ a { color: var(--accent); }
     const email = $("email").value.trim();
     $("signin-msg").textContent = "Sending…";
     const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
-    $("signin-msg").textContent = error ? `Could not send the link: ${error.message}` : `Link sent to ${email}. Open it on this device.`;
+    $("signin-msg").textContent = error
+      ? (/rate limit/i.test(error.message) ? "Too many emails sent in the last hour; try again later. If you already have a code from an earlier email, type it below."
+                                           : `Could not send the code: ${error.message}`)
+      : `Code sent to ${email}. Type it below (or open the link in this browser).`;
     $("signin-msg").classList.toggle("error", !!error);
+    $("code-form").classList.remove("hidden");
+    $("code").focus();
+  };
+
+  // the code in the email signs in on any browser or device, unlike the link, which signs in only the
+  // browser that opens it (Outlook opens links in Edge, 27 Oct 2026)
+  $("code-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const email = $("email").value.trim(), token = $("code").value.trim();
+    const { error } = await sb.auth.verifyOtp({ email, token, type: "email" });
+    $("signin-msg").textContent = error ? `That code did not work: ${error.message}` : "";
+    $("signin-msg").classList.toggle("error", !!error);
+    if (!error) show();
   };
 
   document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
