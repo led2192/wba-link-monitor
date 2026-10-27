@@ -103,16 +103,32 @@ class LinkText(unittest.TestCase):
 
 
 class Sites(unittest.TestCase):
+    ROWS = [{"fields": {"wba_id": "PT_01912", "url": "https://www.sib.wa.gov/financial/reports.html", "type": "reports_hub"}},
+            {"fields": {"wba_id": "PT_01912", "url": "https://www.sib.wa.gov/about", "type": "other"}},
+            {"fields": {"wba_id": "PT_01912", "url": "https://lobbymap.org/company/x", "type": "other"}},
+            {"fields": {"wba_id": "PT_00117", "url": "https://www.apax.com/responsibility/", "type": "sustainability_page"}},
+            {"fields": {"wba_id": "PT_00117", "url": "https://www.apax.com/reports/", "type": "reports_hub"}},
+            {"fields": {"wba_id": "PT_00117", "url": "https://esgbook.com/apax", "type": "other"}}]
+    OWNERS = {"sib.wa.gov": {"PT_01912"}, "lobbymap.org": {"A", "B", "C", "PT_01912"}, "apax.com": {"PT_00117"},
+              "esgbook.com": {"PT_00117"}}
+
     def test_hosts_not_registered_domains_and_shared_hosts_left_out(self):
-        rows = [{"fields": {"wba_id": "PT_01912", "url": "https://www.sib.wa.gov/financial/reports.html", "type": "reports_hub"}},
-                {"fields": {"wba_id": "PT_01912", "url": "https://lobbymap.org/company/x", "type": "other"}},
-                {"fields": {"wba_id": "PT_00117", "url": "https://www.apax.com/responsibility/", "type": "sustainability_page"}},
-                {"fields": {"wba_id": "PT_00117", "url": "https://www.apax.com/reports/", "type": "reports_hub"}}]
-        owners = {"sib.wa.gov": {"PT_01912"}, "lobbymap.org": {"A", "B", "C", "PT_01912"}, "apax.com": {"PT_00117"}}
-        hosts, hubs = W.sites_from(rows, {"PT_01912", "PT_00117"}, owners)
-        self.assertEqual(hosts, {"PT_01912": ["sib.wa.gov"], "PT_00117": ["apax.com"]})
+        hosts, hubs = W.sites_from(self.ROWS, {"PT_01912", "PT_00117"}, self.OWNERS)
+        self.assertEqual(hosts, {"PT_01912": ["sib.wa.gov"], "PT_00117": ["apax.com"]})   # one page on esgbook.com: a listing
         self.assertEqual(hubs, {"PT_01912": ["https://www.sib.wa.gov/financial/reports.html"],
                                 "PT_00117": ["https://www.apax.com/reports/"]})
+
+    def test_website_host_counts_even_with_no_watched_page_and_comes_first(self):
+        hosts, _ = W.sites_from(self.ROWS, {"PT_01912", "PT_00117", "PT_09999"}, self.OWNERS,
+                                websites={"PT_00117": "apaxglobalalpha.com", "PT_09999": "new.example", "PT_01912": "sib.wa.gov"})
+        self.assertEqual(hosts["PT_00117"], ["apaxglobalalpha.com", "apax.com"])
+        self.assertEqual(hosts["PT_09999"], ["new.example"])
+        self.assertEqual(hosts["PT_01912"], ["sib.wa.gov"])                               # not twice
+
+    def test_at_most_max_domains_and_a_shared_website_host_is_skipped(self):
+        rows = [{"fields": {"wba_id": "P", "url": f"https://h{i}.example/p{j}", "type": "other"}} for i in range(5) for j in range(2 + i)]
+        hosts, _ = W.sites_from(rows, {"P"}, {f"h{i}.example": {"P"} for i in range(5)}, websites={"P": "sites.google.com"})
+        self.assertEqual(hosts["P"], ["h4.example", "h3.example", "h2.example"])
 
 
 class Helpers(unittest.TestCase):
@@ -140,11 +156,25 @@ class Helpers(unittest.TestCase):
         self.assertEqual(W.cdx_rows("x.com", sess), [("20150905084903", "http://x/a.pdf", 123)])
         params = sess.get.call_args.kwargs["params"]
         self.assertEqual(params["matchType"], "host")
-        self.assertTrue(any(f.startswith("original:(?i)") and "sustainab" in f for f in params["filter"]))
+        self.assertEqual(params["filter"], ["mimetype:application/pdf", "statuscode:200"])   # no regex: it only slowed the scan
+        self.assertEqual(params["limit"], str(W.CDX_LIMIT))
         sess.get.return_value = R(200, [])
         self.assertEqual(W.cdx_rows("x.com", sess), [])
         sess.get.return_value = R(404)
         self.assertEqual(W.cdx_rows("x.com", sess), [])
+
+    def test_a_timeout_is_not_tried_again_but_a_slow_down_answer_is(self):
+        import requests
+        sess = mock.Mock()
+        sess.get.side_effect = requests.exceptions.ReadTimeout()
+        with mock.patch.object(W.time, "sleep"):
+            self.assertEqual(W.cdx_rows("x.com", sess), [])
+        self.assertEqual(sess.get.call_count, 1)
+        ok = mock.Mock(status_code=200); ok.json.return_value = [["t", "o", "l"], ["20150905084903", "http://x/a.pdf", "1"]]
+        sess.get.side_effect = [mock.Mock(status_code=503), ok]
+        with mock.patch.object(W.time, "sleep"):
+            self.assertEqual(W.cdx_rows("x.com", sess), [("20150905084903", "http://x/a.pdf", 1)])
+        self.assertEqual(sess.get.call_count, 3)
 
 
 if __name__ == "__main__":

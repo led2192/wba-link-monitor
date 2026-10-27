@@ -12,12 +12,15 @@ after finding Apax Partners' sustainability reports Edition 2 to 8 there while t
 
 For each company with a gap (default: no key report in the latest or the previous wave, see
 key_reports.py; --all for every company; --wba for a list), two routes:
-  A. Addresses. The hosts of its watched pages (monitored_links; each host on its own, "www." dropped),
-     minus shared hosts (CDNs, asset managers, and any host watched for more than
-     MAX_COMPANIES_PER_HOST companies, such as a government domain or a third-party database). Every
-     PDF captured under those hosts whose address contains a report word (REPORT_WORDS, filtered by
-     the archive itself), earliest capture first; kept when the harvester's URL classifier types the
-     address as one of the key families (REPORT_TYPES).
+  A. Addresses. The host of the company's website (companies.website) and the hosts with at least
+     two of its watched pages (monitored_links; each host on its own, "www." dropped), at most
+     MAX_DOMAINS, minus shared hosts (CDNs, asset managers, and any host watched for more than
+     MAX_COMPANIES_PER_HOST companies, such as a government domain or a third-party database). A host
+     with one watched page is usually a database or an index the company is listed in, and each host
+     costs an archive query that can take a minute. Every PDF captured under those hosts (up to
+     CDX_LIMIT addresses, earliest capture of each); kept when the harvester's URL classifier types
+     the address as one of the key families (REPORT_TYPES). The archive's own word filter (regex on
+     the address) was dropped in the fourth version: it made the index scan slower, not smaller.
   B. Archived report pages. The company's watched reports pages (type reports_hub, at most
      MAX_HUB_PAGES), one archived snapshot per year; the harvester's own link extraction reads each
      snapshot, and a PDF link is kept when its link text or its address names a key report
@@ -51,17 +54,14 @@ REPORT_TYPES = {"Annual Report", "Integrated Report", "Sustainability Report", "
                 "Impact Report"}
 MIN_KB = 150                      # a report is bigger than a certificate or a press release
 MAX_PER_COMPANY = 40
-MAX_DOMAINS = 4
+MAX_DOMAINS = 3
+MIN_PAGES_PER_HOST = 2            # a host with fewer watched pages is not the company's own site (unless it is its website)
 MAX_COMPANIES_PER_HOST = 2        # a host watched for more companies is not one company's own site
+CDX_LIMIT = 5000                  # PDF addresses read per host; a host with more is logged as capped
 MAX_HUB_PAGES = 2
 MAX_SNAPSHOTS = 12                # yearly snapshots read per reports page
 COMPANY_BUDGET = 240              # seconds per company; the rest waits for the next run
-TIMEOUT = 60
-# words a report's address usually holds, in the languages of the universe; the archive applies this
-# filter before sending anything, which keeps the answer small on big domains
-REPORT_WORDS = ("annual|sustainab|esg|csr|integrated|impact|report|review|rapport|bericht|informe|"
-                "relatorio|relazione|jaarverslag|duurzaam|nachhaltig|durable|sostenib|responsab|"
-                "verantwortung|bilan|memoria|ar20|ar_20|ar-20")
+TIMEOUT = 60                      # one try per query: a host that took longer once takes as long again
 SHARED_HOSTS = ("cloudfront.net", "amazonaws.com", "q4cdn.com", "q4web.com", "windows.net", "googleapis.com",
                 "akamaized.net", "akamaihd.net", "azureedge.net", "cloudinary.com", "box.com", "dropbox.com",
                 "sharepoint.com", "google.com", "youtube.com", "linkedin.com", "sec.gov", "xbrl.org",
@@ -99,15 +99,16 @@ def at_write(table, method, records):
 
 
 def gap_companies(wbas, everything):
-    """[(record id, wba_id, company_name)] of the companies to look at."""
+    """[(record id, wba_id, company_name, website host)] of the companies to look at."""
     if wbas:
         formula = "OR(" + ",".join(f"{{wba_id}}='{w}'" for w in wbas) + ")"
     elif everything:
         formula = None
     else:
         formula = "OR({kr_latest_status}='None', {kr_prev_status}='None', {kr_latest_status}='', {kr_prev_status}='')"
-    rows = at_get("companies", ["wba_id", "company_name", "kr_latest_status", "kr_prev_status"], formula)
-    return [(r["id"], r["fields"]["wba_id"], r["fields"].get("company_name", "")) for r in rows if r["fields"].get("wba_id")]
+    rows = at_get("companies", ["wba_id", "company_name", "website", "kr_latest_status", "kr_prev_status"], formula)
+    return [(r["id"], r["fields"]["wba_id"], r["fields"].get("company_name", ""), site_host(r["fields"].get("website")))
+            for r in rows if r["fields"].get("wba_id")]
 
 
 def site_host(url):
@@ -115,10 +116,10 @@ def site_host(url):
     return host[4:] if host.startswith("www.") else host
 
 
-def company_sites(wbas):
-    """({wba_id: [hosts of its watched pages, most watched first]}, {wba_id: [reports pages]}).
-    Every watched page is read once to count how many companies share a host (a government domain, a
-    third-party database), so those hosts are left out."""
+def company_sites(wbas, websites=None):
+    """({wba_id: [its website host, then the hosts of its watched pages, most watched first]},
+    {wba_id: [reports pages]}). Every watched page is read once to count how many companies share a
+    host (a government domain, a third-party database), so those hosts are left out."""
     from monitor_core import is_dam_host, is_framework_host
     rows = at_get("monitored_links", ["wba_id", "url", "type"])
     owners = collections.defaultdict(set)
@@ -126,10 +127,14 @@ def company_sites(wbas):
         f = r["fields"]
         if f.get("wba_id") and f.get("url"):
             owners[site_host(f["url"])].add(f["wba_id"].strip())
-    return sites_from(rows, wbas, owners, is_dam_host, is_framework_host)
+    return sites_from(rows, wbas, owners, websites, is_dam_host, is_framework_host)
 
 
-def sites_from(rows, wbas, owners, is_dam_host=lambda h: False, is_framework_host=lambda h: False):
+def sites_from(rows, wbas, owners, websites=None, is_dam_host=lambda h: False, is_framework_host=lambda h: False):
+    """websites: {wba_id: host of companies.website}. A host counts when it is the website or holds at
+    least MIN_PAGES_PER_HOST watched pages (one page on a host is usually a listing elsewhere), unless
+    shared or watched for more than MAX_COMPANIES_PER_HOST companies."""
+    websites = websites or {}
     counts = collections.defaultdict(collections.Counter)
     hubs = collections.defaultdict(list)
     for r in rows:
@@ -143,7 +148,14 @@ def sites_from(rows, wbas, owners, is_dam_host=lambda h: False, is_framework_hos
         counts[w][host] += 1
         if (f.get("type") or "").strip().lower() == "reports_hub" and len(hubs[w]) < MAX_HUB_PAGES:
             hubs[w].append(u)
-    return {w: [h for h, _ in c.most_common(MAX_DOMAINS)] for w, c in counts.items()}, dict(hubs)
+    out = {}
+    for w in wbas:
+        site = websites.get(w) or ""
+        hosts = [site] if site and not shared_host(site) else []
+        hosts += [h for h, n in counts[w].most_common() if n >= MIN_PAGES_PER_HOST and h != site]
+        if hosts:
+            out[w] = hosts[:MAX_DOMAINS]
+    return out, dict(hubs)
 
 
 def shared_host(host):
@@ -181,12 +193,14 @@ def held_docs(wbas):
 
 # ---------------------------------------------------------------------------------------------- the archive
 def cdx(sess, params, attempts=3):
-    """One CDX query: the rows after the header, [] when the archive does not answer in time."""
+    """One CDX query: the rows after the header; [] when the archive does not answer within TIMEOUT
+    (one try: the third dry run of 27 Oct 2026 spent 130 to 210 s per host on three tries that all
+    timed out). Only "slow down" answers (429, 503, 504) are tried again."""
     for attempt in range(attempts):
         try:
             r = sess.get(CDX, params=params, headers=UA, timeout=TIMEOUT)
         except Exception:
-            time.sleep(5 * (attempt + 1)); continue
+            return []
         if r.status_code == 200:
             try:
                 rows = r.json()
@@ -199,12 +213,11 @@ def cdx(sess, params, attempts=3):
     return []
 
 
-def cdx_rows(host, sess, since=2005, limit=2000):
+def cdx_rows(host, sess, since=2005, limit=CDX_LIMIT):
     """[(timestamp, original url, length)] of the PDFs captured under a host (that host only: a watched
-    page on sib.wa.gov must not bring in every agency of the state, 27 Oct 2026) whose address holds a
-    report word, one row per address (its earliest capture that answered 200)."""
-    params = {"url": host, "matchType": "host",
-              "filter": ["mimetype:application/pdf", "statuscode:200", f"original:(?i).*({REPORT_WORDS}).*"],
+    page on sib.wa.gov must not bring in every agency of the state, 27 Oct 2026), one row per address
+    (its earliest capture that answered 200), at most `limit` addresses in the archive's order."""
+    params = {"url": host, "matchType": "host", "filter": ["mimetype:application/pdf", "statuscode:200"],
               "collapse": "urlkey", "fl": "timestamp,original,length", "output": "json", "from": str(since),
               "limit": str(limit)}
     return [(t, u, int(n) if str(n).isdigit() else 0) for t, u, n in cdx(sess, params)]
@@ -220,7 +233,7 @@ def page_snapshots(page, sess, since=2005):
 def first_capture(url, sess):
     """(timestamp, length) of the earliest capture of a file that answered 200, or None."""
     params = {"url": url, "filter": "statuscode:200", "fl": "timestamp,length", "output": "json", "limit": "1"}
-    rows = cdx(sess, params, attempts=2)
+    rows = cdx(sess, params)
     if not rows:
         return None
     t, n = rows[0]
@@ -334,14 +347,14 @@ def main():
     comps = gap_companies(wbas, a.all)
     if a.max:
         comps = comps[:a.max]
-    sel = {w for _, w, _ in comps}
+    sel = {w for _, w, _, _ in comps}
     print(f">>> {len(comps)} companies ({'listed' if wbas else 'all' if a.all else 'with a key report gap'}); "
           f"reading their pages and documents ...", flush=True)
-    domains, hubs = company_sites(sel)
+    domains, hubs = company_sites(sel, {w: site for _, w, _, site in comps})
     have = held_docs(sel)
     sess = requests.Session()
     stats = collections.Counter(); new_rows = []; per_company = []
-    for rec_id, w, name in comps:
+    for rec_id, w, name, _ in comps:
         ds = domains.get(w) or []
         if not ds:
             stats["companies without a domain"] += 1
@@ -352,9 +365,11 @@ def main():
             got = cdx_rows(d, sess, a.since)
             rows += got
             stats["archive requests"] += 1
-            log.append(f"{d} {len(got)} in {time.time() - t:.0f}s")
+            log.append(f"{d} {len(got)}{' (capped)' if len(got) >= CDX_LIMIT else ''} in {time.time() - t:.0f}s")
             if not got:
                 stats["hosts with nothing"] += 1
+            elif len(got) >= CDX_LIMIT:
+                stats["hosts capped at CDX_LIMIT"] += 1
             time.sleep(PAUSE)
             if time.time() - t_start > COMPANY_BUDGET:
                 cut = True
