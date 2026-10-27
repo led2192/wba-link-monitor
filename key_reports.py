@@ -32,7 +32,8 @@ Whose report is it? (entity_check, written on the candidate documents)
 
 Writes (with --commit):
     report_library  entity_check, entity_name           (candidates only, when changed)
-    companies       kr_latest_status, kr_prev_status    (Both in one report / Financial and sustainability,
+    companies       fy_end_month (the usual fiscal-year-end month, December when no document states one),
+                    kr_latest_status, kr_prev_status    (Both in one report / Financial and sustainability,
                                                          separate / Financial only / Sustainability only / None)
                     kr_latest_fin, kr_latest_sust, kr_prev_fin, kr_prev_sust   (links to report_library)
                     kr_note                             (what was chosen and what was left out, in words)
@@ -264,7 +265,7 @@ def entity_check(cover, company_name, head=1200, title=""):
 def companies(wbas=None):
     out = {}
     for rec in CC.sweep(CC.COMP, [CC.C_WBA, "company_name", "kr_latest_status", "kr_prev_status", "kr_latest_fin",
-                                  "kr_latest_sust", "kr_prev_fin", "kr_prev_sust", "kr_note"],
+                                  "kr_latest_sust", "kr_prev_fin", "kr_prev_sust", "kr_note", "fy_end_month"],
                         "companies", CC.wba_formula(wbas)):
         w = (rec["fields"].get(CC.C_WBA) or "").strip()
         if w:
@@ -343,9 +344,9 @@ def main():
             rows[w].append(rec)
 
     # candidates of the two waves, before the entity check
-    cand = {}
+    cand, fyes = {}, {}
     for w, recs in rows.items():
-        fye = company_fye([end_month(r["fields"].get("period_end"))[1] for r in recs])
+        fye = fyes[w] = company_fye([end_month(r["fields"].get("period_end"))[1] for r in recs])
         for rec in recs:
             f = rec["fields"]
             t = CC.eff_type(f)
@@ -393,7 +394,9 @@ def main():
                   "kr_latest_sust": [best["latest"]["sust"]["id"]] if "sust" in best["latest"] else [],
                   "kr_prev_fin": [best["previous"]["fin"]["id"]] if "fin" in best["previous"] else [],
                   "kr_prev_sust": [best["previous"]["sust"]["id"]] if "sust" in best["previous"] else [],
-                  "kr_note": note_for(a.wave, best, key, left)}
+                  "kr_note": note_for(a.wave, best, key, left),
+                  # the usual year-end month, for report_library.fiscal_year_wba on rows without a month
+                  "fy_end_month": fyes.get(w, 12)}
         cur = rec["fields"]
         if any(CC._norm(cur.get(k)) != CC._norm(v) for k, v in target.items()):
             comp_updates.append({"id": rec["id"], "fields": target})
