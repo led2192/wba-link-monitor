@@ -192,18 +192,27 @@ a { color: var(--accent); }
     companiesLoaded = true;
   }
 
-  async function show() {
-    // never leave the page blank: if the session cannot be read within a few seconds, show the sign-in
-    const timeout = new Promise((r) => setTimeout(() => r({ data: { session: null }, timedOut: true }), 4000));
-    const { data, timedOut } = await Promise.race([sb.auth.getSession().catch(() => ({ data: { session: null } })), timeout]);
-    const session = data.session;
-    if (timedOut) $("signin-msg").textContent = "Could not read the saved session; sign in again.";
+  function render(session) {
     $("signin").classList.toggle("hidden", !!session);
     $("app").classList.toggle("hidden", !session);
     $("who").innerHTML = session
       ? `${esc(session.user.email)} <button type="button" id="out">Sign out</button>` : "";
-    if (session) { $("out").onclick = async () => { await sb.auth.signOut(); show(); }; loadCompanies(); }
+    if (session) { $("signin-msg").textContent = ""; $("out").onclick = async () => { await sb.auth.signOut(); render(null); }; loadCompanies(); }
   }
+
+  async function show() {
+    // never leave the page blank: if the session cannot be read within a few seconds, show the sign-in
+    const timeout = new Promise((r) => setTimeout(() => r({ data: { session: null }, timedOut: true }), 8000));
+    const { data, timedOut } = await Promise.race([sb.auth.getSession().catch(() => ({ data: { session: null } })), timeout]);
+    if (timedOut) $("signin-msg").textContent = "Could not read the saved session; sign in again.";
+    render(data.session);
+  }
+
+  // The library hands the session to this callback and WAITS for the callback to finish before it
+  // completes its own start-up; calling getSession() in here waited for that start-up in turn, so the
+  // page sat on the sign-in form until the time limit above (27 Oct 2026: "Could not read the saved
+  // session" on every load). The callback only renders what it is given, after the library has moved on.
+  sb.auth.onAuthStateChange((event, session) => { setTimeout(() => render(session), 0); });
 
   $("signin-form").onsubmit = async (e) => {
     e.preventDefault();
@@ -300,7 +309,6 @@ a { color: var(--accent); }
     a.click();
   }
 
-  sb.auth.onAuthStateChange(() => show());
   show();
 })();
 </script>
