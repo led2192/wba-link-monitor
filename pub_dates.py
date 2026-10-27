@@ -26,7 +26,10 @@ period the report covers and no later than the day the robot first saw the docum
                          "approved by the Board on ...". Usually the publication day or a few weeks
                          before it; pub_date_source says so, and the measurement on regulator filings
                          (below) says by how much.
-    4 first seen         the day the robot first saw the document on a page it was already watching:
+    4 first seen         for a document from the Wayback Machine (wayback_backfill.py, "(captured
+                         YYYY-MM-DD)" in Reviewer notes): the day the archive first captured the file,
+                         an upper bound on the publication day; else the day the robot first saw the
+                         document on a page it was already watching:
                          an upper bound, used only for documents first seen after FIRST_SEEN_FROM (before
                          that date everything was first seen at the initial collection), within 18 months
                          of the period end, and found on a watched page (source_page) that had been
@@ -122,6 +125,7 @@ SPAN_OTHER = re.compile(r"interest|bond|accrual|coupon|dividend|term\s+of\s+offi
 # "for the year ended 31 March 2026": past tense only; "year ending March 2026" is usually a forecast.
 YEAR_ENDED = re.compile(r"\byear\s+ended\s+(?:on\s+)?(?:" + DATE + ")", re.I)
 FILED = re.compile(r"\(filed (20\d\d-\d\d-\d\d)\)")
+CAPTURED = re.compile(r"\(captured (20\d\d-\d\d-\d\d)\)")
 # SEC filings named in a document's address or title: the company (CIK) and the filing (accession number).
 CIK_IN_URL = re.compile(r"(?:CIK[-_=]?|/edgar/data/)0*(\d{1,10})(?!\d)", re.I)
 ACCESSION = re.compile(r"(?<!\d)(\d{10})-?(\d{2})-?(\d{6})(?!\d)")
@@ -355,6 +359,12 @@ def decide(f, pages, seen, filings=None, page_added=None):
     hit = find_dates(pages, end, seen, doc_year(f))
     if hit:
         return hit
+    m = CAPTURED.search(f.get("Reviewer notes") or "")
+    if m:
+        cap = dt.date.fromisoformat(m.group(1))
+        if end is None or cap > end:
+            return 4, cap, "day", "first captured by the Wayback Machine on this day (published on or before it)"
+        return None
     if (seen and seen >= FIRST_SEEN_FROM and end and 0 < (seen - end).days <= 548
             and page_added and (seen - page_added).days >= PAGE_WATCHED_DAYS
             and not file_older_than_seen(f, seen)):
