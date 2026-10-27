@@ -5,9 +5,12 @@ does each sample search answer, how many companies, documents and pages it finds
 Prints counts, timings and the first result's company and page, never page text (the logs are public).
 
 Run by the Search check workflow on pull requests that touch the search functions, and by hand.
-Env: SUPABASE_DB_URL.
+Records its timings in the Pipeline QA runs table (counters), so a manual run can be read without the logs.
+Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN (optional; QA_COMMIT=true writes the run row).
 """
 import os, sys, time, traceback
+
+import qa
 
 SEARCHES = [
     # (label, function, arguments)
@@ -42,6 +45,8 @@ def run(cur, fn, args):
 
 def main():
     import psycopg
+    qrun = qa.Run("search_check.py")
+    timings = {}
     md = ["### Search check", "", "Read-only. Times are seconds from GitHub's servers to Frankfurt, network included.", "",
           "| Search | Companies | Documents | Pages | Count time | Results shown | Results time | First result |",
           "| --- | --: | --: | --: | --: | --: | --: | --- |"]
@@ -53,6 +58,8 @@ def main():
             try:
                 s, rows, tc, tr = run(cur, fn, args)
                 first = f"{rows[0][0]} {rows[0][1]} p.{rows[0][2]}" if rows else "none"
+                timings[label] = {"rows": len(rows), "results_s": round(tr, 2), "count_s": round(tc, 2) if s else None,
+                                  "companies": s[0] if s else None, "pages": s[2] if s else None}
                 if s:
                     co, do, pa, capped = s
                     md.append(f"| {label} | {co:,} | {do:,} | {pa:,}{'+' if capped else ''} | {tc:.1f} | {len(rows)} | {tr:.1f} | {first} |")
@@ -62,10 +69,12 @@ def main():
                 conn.rollback()
                 cur.execute("set statement_timeout = '120s'")
                 bad += 1
+                timings[label] = {"failed": f"{type(e).__name__}"}
                 md.append(f"| {label} | failed: {type(e).__name__}: {str(e).splitlines()[0][:120]} | | | | | | |")
     md.append("")
     open("search_check.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
+    qrun.finish("failed" if bad else "ok", rows_in=len(SEARCHES), rows_out=len(SEARCHES) - bad, counters=timings)
     return 1 if bad else 0
 
 

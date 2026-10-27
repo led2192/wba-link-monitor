@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evidence Search</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1f1c; --muted: #646860; --line: #dddbd3;
+  --accent: #1f5c4a; --accent-ink: #ffffff; --mark: #f4dd7a; --mark-ink: #1d1f1c; --error: #a33a2a;
+  --chip: #ebe9e2;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151715; --panel: #1d201d; --ink: #e9e8e2; --muted: #9da197; --line: #2f332e;
+    --accent: #6fbf9f; --accent-ink: #0f1a15; --mark: #6b5a17; --mark-ink: #fff6d6; --error: #e48b78; --chip: #272b26;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 "IBM Plex Sans", system-ui, sans-serif; }
+header { border-bottom: 1px solid var(--line); background: var(--panel); }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 14px; }
+.brand { font-weight: 600; letter-spacing: .01em; }
+.brand small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+.who { color: var(--muted); font-size: 13px; display: flex; gap: 10px; align-items: center; }
+button, .btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+button:disabled { opacity: .5; cursor: default; }
+input, select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; min-width: 0; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+main { padding-block: 22px 60px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+#signin { max-width: 440px; margin: 40px auto; }
+#signin h1 { font-size: 20px; margin: 0 0 6px; }
+#signin p { color: var(--muted); margin: 0 0 14px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row > input[type=email] { flex: 1 1 220px; }
+form.search .q { display: flex; gap: 8px; }
+form.search .q input { flex: 1; font-size: 17px; padding: 10px 12px; }
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
+.filters label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.tabs button { border-radius: 999px; padding: 5px 14px; }
+.tabs button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
+.hint code { font-family: "IBM Plex Mono", monospace; background: var(--chip); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+#status { margin: 18px 2px 10px; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+#status strong { color: var(--ink); font-weight: 600; }
+.error { color: var(--error); }
+.result { padding: 14px 0; border-top: 1px solid var(--line); }
+.result:first-child { border-top: 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; font-size: 13px; color: var(--muted); }
+.meta .co { color: var(--ink); font-weight: 600; font-size: 15px; }
+.chip { background: var(--chip); border-radius: 4px; padding: 0 6px; font-size: 12px; }
+.title { margin: 2px 0 6px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.excerpt { margin: 0; overflow-wrap: anywhere; }
+mark { background: var(--mark); color: var(--mark-ink); padding: 0 1px; border-radius: 2px; }
+a { color: var(--accent); }
+.results { padding: 4px 18px; }
+.empty { color: var(--muted); padding: 18px 0; }
+.hidden { display: none !important; }
+@media (max-width: 560px) { form.search .q { flex-direction: column; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap top">
+    <div class="brand">Evidence Search<small>full text of company disclosures</small></div>
+    <div class="who" id="who"></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="signin" class="card hidden" aria-labelledby="signin-title">
+    <h1 id="signin-title">Sign in</h1>
+    <p>Enter your WBA email address. We send you a link; open it on this device to sign in.</p>
+    <form id="signin-form" class="row">
+      <input type="email" id="email" required placeholder="name@worldbenchmarkingalliance.org" autocomplete="email" aria-label="Email address">
+      <button class="primary" type="submit">Send link</button>
+    </form>
+    <p id="signin-msg" class="hint" role="status"></p>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="tabs" role="group" aria-label="What to search">
+      <button type="button" data-mode="pages" aria-pressed="true">All text</button>
+      <button type="button" data-mode="passages" aria-pressed="false">Evidence passages</button>
+    </div>
+    <form class="search card" id="search-form">
+      <div class="q">
+        <input id="q" type="search" placeholder='e.g. "living wage" supplier' aria-label="Search words" autocomplete="off">
+        <button class="primary" type="submit" id="go">Search</button>
+      </div>
+      <div class="filters">
+        <label>Company or WBA id<input id="company" placeholder="any"></label>
+        <label>Year from<input id="y1" type="number" min="2000" max="2100" placeholder="any"></label>
+        <label>Year to<input id="y2" type="number" min="2000" max="2100" placeholder="any"></label>
+        <label id="type-wrap">Document type
+          <select id="type">
+            <option value="">any</option>
+            <option>Annual Report</option><option>Integrated Report</option><option>Sustainability Report</option>
+            <option>ESG Report</option><option>CSR Report</option><option>Impact Report</option><option>Climate Report</option>
+            <option>Environmental Reports</option><option>Social Reports</option><option>10K Form</option>
+            <option>Registration Document</option><option>Financial Statement</option><option>Interim Reports</option>
+            <option>Policy Documents</option><option>Human Rights Policy</option><option>Code of Conduct</option>
+            <option>CDP Report</option><option>Company Presentations</option><option>Statutory Documents</option>
+          </select>
+        </label>
+        <label id="dim-wrap" class="hidden">Group
+          <select id="dim">
+            <option value="">any</option><option value="climate">Climate</option><option value="nature">Nature</option>
+            <option value="social">Social</option><option value="financial">Financial</option>
+          </select>
+        </label>
+      </div>
+      <div class="hint">
+        Words match exactly as written, in any language: <code>"exact phrase"</code>, <code>-word</code> to exclude,
+        <code>or</code> between alternatives. Results are pages, newest documents first.
+      </div>
+    </form>
+
+    <div id="status" role="status" aria-live="polite"></div>
+    <div class="card results" id="results"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
+  const sb = window.supabase.createClient(CONFIG.url, CONFIG.key, { auth: { persistSession: true, detectSessionInUrl: true } });
+  const $ = (id) => document.getElementById(id);
+  let mode = "pages", lastRows = [];
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  // highlights arrive as ⟦word⟧: the text is escaped first, then only these markers become <mark>
+  function highlight(s) { return esc(s).replace(/⟦/g, "<mark>").replace(/⟧/g, "</mark>"); }
+  function pdfLink(url, page) {
+    if (!url || !/^https?:\/\//i.test(url)) return "";
+    return `<a href="${esc(url.split("#")[0])}#page=${Number(page) || 1}" target="_blank" rel="noopener">Open at page ${Number(page) || 1}</a>`;
+  }
+  function intOrNull(v) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; }
+  function textOrNull(v) { v = (v || "").trim(); return v ? v : null; }
+
+  async function show() {
+    const { data } = await sb.auth.getSession();
+    const session = data.session;
+    $("signin").classList.toggle("hidden", !!session);
+    $("app").classList.toggle("hidden", !session);
+    $("who").innerHTML = session
+      ? `${esc(session.user.email)} <button type="button" id="out">Sign out</button>` : "";
+    if (session) $("out").onclick = async () => { await sb.auth.signOut(); show(); };
+  }
+
+  $("signin-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const email = $("email").value.trim();
+    $("signin-msg").textContent = "Sending…";
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+    $("signin-msg").textContent = error ? `Could not send the link: ${error.message}` : `Link sent to ${email}. Open it on this device.`;
+    $("signin-msg").classList.toggle("error", !!error);
+  };
+
+  document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll(".tabs button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    $("type-wrap").classList.toggle("hidden", mode !== "pages");
+    $("dim-wrap").classList.toggle("hidden", mode !== "passages");
+    $("q").placeholder = mode === "pages" ? 'e.g. "living wage" supplier' : "words (optional), then pick a group";
+  });
+
+  $("search-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const q = $("q").value.trim();
+    if (mode === "pages" && !q) { $("q").focus(); return; }
+    const f = { company_filter: textOrNull($("company").value), year_from: intOrNull($("y1").value), year_to: intOrNull($("y2").value) };
+    $("go").disabled = true;
+    $("status").innerHTML = "Searching…";
+    $("results").innerHTML = "";
+    const t0 = performance.now();
+    try {
+      let rows, summary = null;
+      if (mode === "pages") {
+        const args = { q, ...f, type_filter: textOrNull($("type").value) };
+        const [r, s] = await Promise.all([
+          sb.rpc("search_pages", { ...args, max_rows: 100 }),
+          sb.rpc("search_summary", args),
+        ]);
+        if (r.error) throw r.error;
+        rows = r.data || [];
+        summary = s.error ? null : (s.data || [])[0];
+      } else {
+        const r = await sb.rpc("search_passages", { q, dim: textOrNull($("dim").value), ...f, max_rows: 100 });
+        if (r.error) throw r.error;
+        rows = r.data || [];
+      }
+      lastRows = rows;
+      const secs = ((performance.now() - t0) / 1000).toFixed(1);
+      const head = summary
+        ? `<span><strong>${Number(summary.companies).toLocaleString()}</strong> companies · <strong>${Number(summary.documents).toLocaleString()}</strong> documents · <strong>${Number(summary.pages).toLocaleString()}${summary.capped ? "+" : ""}</strong> pages</span>`
+        : `<span><strong>${rows.length}</strong> passages shown</span>`;
+      $("status").innerHTML = `${head}<span>${rows.length ? `showing ${rows.length}, newest first · ` : ""}${secs} s · <button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV</button></span>`;
+      $("csv").onclick = downloadCsv;
+      $("results").innerHTML = rows.length ? rows.map(render).join("") : `<div class="empty">Nothing found. Check the spelling, or remove a filter.</div>`;
+    } catch (err) {
+      const msg = /not allowed/i.test(err.message || "") ? "This address is not allowed to search. Ask the owner to add it." : (err.message || String(err));
+      $("status").innerHTML = `<span class="error">${esc(msg)}</span>`;
+    } finally {
+      $("go").disabled = false;
+    }
+  };
+
+  function render(r) {
+    const groups = (r.dims || []).map((d) => `<span class="chip">${esc(d)}</span>`).join(" ");
+    return `<article class="result">
+      <div class="meta"><span class="co">${esc(r.company)}</span><span>${esc(r.year || "no year")}</span>
+        <span class="chip">${esc(r.doc_type || "untyped")}</span>${groups}${r.area ? `<span>${esc(r.area)}</span>` : ""}
+        <span>page ${Number(r.page)}</span>${pdfLink(r.url, r.page)}</div>
+      <div class="title">${esc(r.label || r.library_id)}</div>
+      <p class="excerpt">${highlight(r.excerpt)}</p>
+    </article>`;
+  }
+
+  function downloadCsv() {
+    const cols = ["company", "wba_id", "year", "doc_type", "label", "page", "url", "library_id", "excerpt"];
+    const cell = (v) => `"${String(v == null ? "" : v).replace(/⟦|⟧/g, "").replace(/"/g, '""')}"`;
+    const csv = [cols.join(",")].concat(lastRows.map((r) => cols.map((c) => cell(r[c])).join(","))).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `evidence-search-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  }
+
+  sb.auth.onAuthStateChange(() => show());
+  show();
+})();
+</script>
+</body>
+</html>
