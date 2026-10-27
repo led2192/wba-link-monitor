@@ -62,6 +62,36 @@ class Finding(unittest.TestCase):
         self.assertNotIn("lobbymap.org", own)
 
 
+class DomainMail(unittest.TestCase):
+    def test_verdicts_from_dns(self):
+        from unittest import mock
+        class R:
+            def __init__(self, body, status=200):
+                self.status_code, self._b = status, body
+            def json(self):
+                return self._b
+        sess = mock.Mock()
+        sess.get.return_value = R({"Status": 0, "Answer": [{"type": 15, "data": "10 mx1.example.com."}]})
+        self.assertEqual(C.domain_accepts_mail("example.com", sess), "accepts")
+        sess.get.return_value = R({"Status": 3})
+        self.assertEqual(C.domain_accepts_mail("gone.example", sess), "none")
+        sess.get.return_value = R({"Status": 0, "Answer": [{"type": 15, "data": "0 ."}]})
+        self.assertEqual(C.domain_accepts_mail("nomail.example", sess), "none")      # null MX
+        sess.get.return_value = R({"Status": 0})
+        self.assertEqual(C.domain_accepts_mail("web-only.example", sess), "none")    # no MX published
+        sess.get.return_value = R({}, status=500)
+        self.assertEqual(C.domain_accepts_mail("x.example", sess), "unknown")
+        sess.get.side_effect = Exception("timeout")
+        self.assertEqual(C.domain_accepts_mail("x.example", sess), "unknown")
+
+    def test_verdict_written_with_the_row(self):
+        found = {("PT_1", "ir@example.com"): [(2025, "recB", 5, "new")]}
+        creates, _ = C.merge(found, "2026-10-27", {}, {"example.com": "accepts"})
+        self.assertEqual((creates[0]["fields"]["domain_mail"], creates[0]["fields"]["domain_checked"]), ("accepts", "2026-10-27"))
+        creates, _ = C.merge(found, "2026-10-27", {})
+        self.assertNotIn("domain_mail", creates[0]["fields"])                        # --no-dns: untouched
+
+
 class Writing(unittest.TestCase):
     def test_create_then_update_never_twice(self):
         found = {("PT_1", "ir@example.com"): [(2024, "recA", 3, "old"), (2025, "recB", 5, "new")]}
