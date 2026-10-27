@@ -97,7 +97,8 @@ a { color: var(--accent); }
         <button class="primary" type="submit" id="go">Search</button>
       </div>
       <div class="filters">
-        <label>Company or WBA id<input id="company" placeholder="any"></label>
+        <label>Company or WBA id<input id="company" list="company-list" placeholder="any: type a name or id" autocomplete="off"></label>
+        <datalist id="company-list"></datalist>
         <label>Year from<input id="y1" type="number" min="2000" max="2100" placeholder="any"></label>
         <label>Year to<input id="y2" type="number" min="2000" max="2100" placeholder="any"></label>
         <label id="type-wrap">Document type
@@ -147,6 +148,20 @@ a { color: var(--accent); }
   }
   function intOrNull(v) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; }
   function textOrNull(v) { v = (v || "").trim(); return v ? v : null; }
+  // a company picked from the list reads "Name (PT_00123)": search by its id; anything typed by hand is
+  // matched as part of a name or an id, as before
+  function companyFilter(v) {
+    const m = /\((PT_\d+)\)\s*$/.exec(v || "");
+    return m ? m[1] : textOrNull(v);
+  }
+  let companiesLoaded = false;
+  async function loadCompanies() {
+    if (companiesLoaded) return;
+    const { data, error } = await sb.rpc("search_companies");
+    if (error || !data) return;                     // older database without the function: typing still works
+    $("company-list").innerHTML = data.map((c) => `<option value="${esc(c.company)} (${esc(c.wba_id)})"></option>`).join("");
+    companiesLoaded = true;
+  }
 
   async function show() {
     const { data } = await sb.auth.getSession();
@@ -155,7 +170,7 @@ a { color: var(--accent); }
     $("app").classList.toggle("hidden", !session);
     $("who").innerHTML = session
       ? `${esc(session.user.email)} <button type="button" id="out">Sign out</button>` : "";
-    if (session) $("out").onclick = async () => { await sb.auth.signOut(); show(); };
+    if (session) { $("out").onclick = async () => { await sb.auth.signOut(); show(); }; loadCompanies(); }
   }
 
   $("signin-form").onsubmit = async (e) => {
@@ -179,7 +194,7 @@ a { color: var(--accent); }
     e.preventDefault();
     const q = $("q").value.trim();
     if (mode === "pages" && !q) { $("q").focus(); return; }
-    const f = { company_filter: textOrNull($("company").value), year_from: intOrNull($("y1").value), year_to: intOrNull($("y2").value) };
+    const f = { company_filter: companyFilter($("company").value), year_from: intOrNull($("y1").value), year_to: intOrNull($("y2").value) };
     $("go").disabled = true;
     $("status").innerHTML = "Searching…";
     $("results").innerHTML = "";
