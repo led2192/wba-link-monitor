@@ -3,7 +3,9 @@ name: Evidence database load
 # Copies the full-text store (pages and evidence passages) into the Supabase evidence database
 # (load_supabase.py). Every 6 hours it loads whatever is new, up to 300 minutes a run, and stops when
 # the database reaches SUPABASE_MAX_GB (repository variable; 6 GB when unset, which fits the 8 GB
-# disk a new project starts with). Once nothing is left to load it builds the word index. A pull
+# disk a new project starts with). Once nothing is left to load it hands the word index build to the
+# database (pg_cron job build-pages-search: over three hours on the full corpus, longer than a job may
+# run). A pull
 # request touching it runs a dry run (schema checked and rolled back) and posts what is waiting.
 on:
   schedule:

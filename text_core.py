@@ -773,6 +773,14 @@ class ReleaseStore:
             limited = r.status_code == 429 or (r.status_code == 403 and (
                 r.headers.get("Retry-After") or r.headers.get("X-RateLimit-Remaining") == "0"
                 or "rate limit" in r.text.lower()))
+            reset = self.hourly_reset_wait(r)
+            if reset is not None and attempt < tries:
+                # The token's hourly allowance (5,000 calls) is spent: backing off for two minutes
+                # cannot help, the allowance only returns at the reset (27 Oct 2026: eight shards,
+                # the evidence load and the mention search failed together at 01:18 UTC).
+                print(f"    text store: GitHub's hourly limit reached; waiting {reset / 60:.0f} min for the reset", flush=True)
+                time.sleep(reset)
+                continue
             if (r.status_code >= 500 or limited) and attempt < tries:
                 wait = r.headers.get("Retry-After")
                 time.sleep(min(int(wait), 120) if wait and wait.isdigit() else delay)
@@ -783,6 +791,20 @@ class ReleaseStore:
                         "Contents read and write on this repository only.")
             raise StoreError(f"GitHub {method} {url}: HTTP {r.status_code} {r.text[:300]}{hint}")
         return r
+
+    MAX_RESET_WAIT = 65 * 60
+
+    @classmethod
+    def hourly_reset_wait(cls, r):
+        """Seconds until the token's hourly allowance returns, when this response says it is spent
+        (HTTP 403 or 429 with X-RateLimit-Remaining 0); None otherwise or beyond MAX_RESET_WAIT."""
+        if r.status_code not in (403, 429) or r.headers.get("X-RateLimit-Remaining") != "0":
+            return None
+        try:
+            wait = int(r.headers.get("X-RateLimit-Reset", "")) - time.time() + 5
+        except ValueError:
+            return None
+        return max(wait, 5) if wait <= cls.MAX_RESET_WAIT else None
 
     def _paged(self, url):
         page = 1

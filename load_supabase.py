@@ -215,13 +215,66 @@ def backfill_words(conn, deadline, max_gb):
             print(f"    backfill: {filled:,} pages filled this run, at {last_id}", flush=True)
 
 
+# The search index is built by the database itself (pg_cron), not by this script: on the full corpus
+# (6.6 million pages, Small compute) it takes over three hours, longer than a GitHub job may run. On
+# 27 Oct 2026 the job was cancelled at its limit while the build ran inside an open transaction, so the
+# finished index would have been rolled back. The job below checks every two minutes: it starts the
+# build when nothing builds it, does nothing while a build runs, and once the index exists it drops
+# the older text-only index, refreshes the statistics and removes itself.
+INDEX_JOB = "build-pages-search"
+INDEX_JOB_SQL = """
+do $b$
+begin
+  if to_regclass('public.pages_search') is not null then
+    drop index if exists public.pages_words;
+    analyze public.pages;
+    perform cron.unschedule('build-pages-search');
+    return;
+  end if;
+  if exists (select 1 from pg_stat_progress_create_index where relid = 'public.pages'::regclass) then
+    return;
+  end if;
+  perform set_config('maintenance_work_mem', '1GB', true);
+  perform set_config('statement_timeout', '0', true);
+  create index pages_search on public.pages using gin (words, year, doc_type, wba_id);
+end
+$b$;
+"""
+
+
+def has_pg_cron(conn):
+    with conn.cursor() as c:
+        c.execute("select exists (select 1 from pg_available_extensions where name = 'pg_cron')")
+        return c.fetchone()[0]
+
+
+def schedule_search_index(conn):
+    """Hand the index build to the database (pg_cron job INDEX_JOB). Returns 'scheduled', 'already
+    scheduled' or 'building'. Safe to call on every run."""
+    with conn.cursor() as c:
+        c.execute("create extension if not exists pg_cron")
+        c.execute("select exists (select 1 from cron.job where jobname = %s)", (INDEX_JOB,))
+        if c.fetchone()[0]:
+            conn.commit()
+            return "already scheduled"
+        c.execute("select exists (select 1 from pg_stat_progress_create_index "
+                  "where relid = 'public.pages'::regclass)")
+        building = c.fetchone()[0]
+        c.execute("select cron.schedule(%s, '*/2 * * * *', %s)", (INDEX_JOB, INDEX_JOB_SQL))
+    conn.commit()
+    return "building" if building else "scheduled"
+
+
 def build_search_index(conn):
-    """The word index with year, type and company (pages_search), then the search functions that use
-    it, then the older index on the text alone is dropped. Each step is safe to repeat."""
+    """Without pg_cron (a plain Postgres, as in the tests): the word index with year, type and company
+    (pages_search), the search functions that use it, then the older text-only index is dropped. The
+    index is created outside a transaction, so a client that disappears cannot roll it back."""
+    conn.commit()
+    conn.autocommit = True
     with conn.cursor() as c:
         c.execute("set maintenance_work_mem = '256MB'")
         c.execute("create index if not exists pages_search on public.pages using gin (words, year, doc_type, wba_id)")
-    conn.commit()
+    conn.autocommit = False
     if has_auth(conn):
         with conn.cursor() as c:
             c.execute(open(SEARCH_SQL, encoding="utf-8").read())
@@ -388,6 +441,11 @@ def main():
                 stopped = why
             # the index once every row has its words and nothing waits: building it once is far faster
             # than updating it row by row; it needs about an hour, so it starts only with time left
+            elif len(todo) == len(pending_pages) and not search_index_exists(conn) and has_pg_cron(conn):
+                state = schedule_search_index(conn)
+                c["search index " + state] = 1
+                stopped = f"the search index is being built by the database (pg_cron job {INDEX_JOB}, {state})"
+                print(f">>> {stopped}", flush=True)
             elif len(todo) == len(pending_pages) and not search_index_exists(conn):
                 if (deadline - time.time()) / 60 >= 60:
                     print(">>> building the search index on pages", flush=True)

@@ -101,9 +101,72 @@ class Decide(unittest.TestCase):
         self.assertEqual(P.decide(f, [(1, "Published on 1 March 2025")], None)[:3], (1, D(2025, 2, 21), "day"))
 
     def test_first_seen_only_after_the_initial_collection(self):
-        self.assertEqual(P.decide({"period_end": "2026-03"}, [], D(2026, 8, 10))[:2], (4, D(2026, 8, 10)))
-        self.assertIsNone(P.decide({"period_end": "2025-12"}, [], D(2026, 3, 10)))      # initial collection
-        self.assertIsNone(P.decide({"period_end": "2024-12"}, [], D(2026, 6, 20)))
+        watched = D(2026, 6, 10)
+        self.assertEqual(P.decide({"period_end": "2026-03"}, [], D(2026, 8, 10), page_added=watched)[:2], (4, D(2026, 8, 10)))
+        self.assertIsNone(P.decide({"period_end": "2025-12"}, [], D(2026, 3, 10), page_added=watched))      # initial collection
+        self.assertIsNone(P.decide({"period_end": "2024-12"}, [], D(2026, 6, 20), page_added=watched))
+
+    def test_first_seen_needs_a_page_watched_before_and_a_fresh_file(self):
+        f = {"period_end": "2026-03"}
+        self.assertIsNone(P.decide(f, [], D(2026, 8, 10)))                                   # no source page
+        self.assertIsNone(P.decide(f, [], D(2026, 8, 10), page_added=D(2026, 8, 5)))         # page just added
+        old_file = dict(f, file_created="2026-05-02", file_modified="2026-05-20")
+        self.assertIsNone(P.decide(old_file, [], D(2026, 8, 10), page_added=D(2026, 6, 10)))  # file made in May
+        fresh = dict(f, file_modified="2026-08-01")
+        self.assertEqual(P.decide(fresh, [], D(2026, 8, 10), page_added=D(2026, 6, 10))[0], 4)
+
+
+# Macy's 10-K for the year ended 31 January 2026 on its investor site (Q4 hosting, CIK in the address):
+# first seen 18 July 2026; EDGAR: filed 27 March 2026, accession 0001628280-26-021721 (26 Oct 2026).
+MACYS = {"period_end": "2026-01", "source_type_check": "10K Form", "year": 2026,
+         "document_url": "https://d18rn0p25nwr6d.cloudfront.net/CIK-0000794367/1e901e63-ca0e-4c09-9a79-f2eba09e87e7.pdf",
+         "doc_label": "2026 | Macy's | Macy's, Inc. Form 10-K Annual Report for the Fiscal Year Ended January 31, 2026"}
+MACYS_FILINGS = [("10-Q", "0001628280-26-050001", "2026-08-01", "2026-09-05"),
+                 ("8-K", "0001628280-26-021000", "2026-03-26", "2026-03-26"),
+                 ("10-K", "0001628280-26-021721", "2026-01-31", "2026-03-27"),
+                 ("10-K", "0000794367-25-000010", "2025-02-01", "2025-03-21")]
+
+
+class SecFilings(unittest.TestCase):
+    def test_cik_from_the_address_or_the_company(self):
+        self.assertEqual(P.sec_cik(MACYS), "794367")
+        self.assertEqual(P.sec_cik({"document_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/a.htm"}), "320193")
+        self.assertEqual(P.sec_cik({"document_url": "https://example.com/ar.pdf"}, "1234"), "1234")
+        self.assertIsNone(P.sec_cik({"document_url": "https://example.com/ar.pdf"}, "none"))
+
+    def test_annual_filing_of_the_same_period_gives_the_date(self):
+        t = P.decide(MACYS, [(1, "FORM 10-K")], D(2026, 7, 18), MACYS_FILINGS, D(2026, 6, 10))
+        self.assertEqual(t[:3], (1, D(2026, 3, 27), "day"))
+        self.assertIn("0001628280-26-021721", t[3])
+
+    def test_accession_named_in_the_title_wins(self):
+        f = dict(MACYS, period_end="2026", doc_label="0001628280-26-021721")
+        t = P.decide(f, [], None, MACYS_FILINGS)
+        self.assertEqual(t[:2], (1, D(2026, 3, 27)))
+
+    def test_no_filing_of_that_period_is_no_date_from_edgar(self):
+        f = dict(MACYS, period_end="2024-02")
+        self.assertIsNone(P.sec_match(f, P.period_end_date("2024-02", 2024), MACYS_FILINGS, None))
+        # a year-only period end cannot pick a filing by month
+        self.assertIsNone(P.sec_match(dict(MACYS, period_end="2026"), P.period_end_date("2026", 2026), MACYS_FILINGS, None))
+
+    def test_signature_date_when_edgar_has_nothing(self):
+        pages = [(1, "UNITED STATES SECURITIES AND EXCHANGE COMMISSION Washington, D.C. 20549 FORM 10-K"),
+                 (104, "Pursuant to the requirements of Section 13 or 15(d) of the Securities Exchange Act of 1934, the "
+                       "registrant has duly caused this report to be signed on its behalf by the undersigned, thereunto duly "
+                       "authorized. MACY'S, INC. By: /s/ Tony Spring Chairman and Chief Executive Officer Date: March 27, 2026")]
+        f = {"period_end": "2026-01", "source_type": "Annual Report", "document_url": "https://example.com/10k.pdf"}
+        t = P.decide(f, pages, D(2026, 7, 18), [], D(2026, 6, 10))
+        self.assertEqual(t[:3], (5, D(2026, 3, 27), "day"))
+        f20 = {"period_end": "2025-12", "source_type_check": "10K Form"}
+        t = P.decide(f20, [(210, "The registrant hereby certifies that it meets all of the requirements for filing on Form 20-F "
+                                 "and that it has duly caused and authorized the undersigned to sign this annual report on its "
+                                 "behalf. Date: 2 April 2026")], None)
+        self.assertEqual(t[:2], (5, D(2026, 4, 2)))
+
+    def test_signature_rule_is_only_for_sec_forms(self):
+        f = {"period_end": "2025-12", "source_type": "Sustainability Report"}
+        self.assertIsNone(P.decide(f, [(9, "the registrant has duly caused this report to be signed. Date: March 2, 2026")], None))
 
 
 if __name__ == "__main__":

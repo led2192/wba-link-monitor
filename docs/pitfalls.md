@@ -2,6 +2,12 @@
 
 Lessons that cost time to learn. Read before changing the area they name.
 
+## Long database work and GitHub's job limit
+- **A GitHub job stops at six hours; a database statement does not.** The search index on 6.6 million pages took over three hours on Small compute (the 1-in-11 rehearsal suggested well under one). The load job was cancelled at its limit while `create index` kept running in the database, inside a transaction only the vanished script could commit, so the finished index would have been rolled back. Work that may outlast a job goes to the database's own scheduler (pg_cron), and anything a client starts that must survive it runs outside a transaction (autocommit) (27 Oct 2026).
+
+## The text store and GitHub's limits
+- **Every job that reads the text store spends the same hourly allowance.** The store is one private repository and one token: 5,000 GitHub calls an hour across every job that uses it. Each docs file is one call, and the number of files grows every night (597 on 27 Oct 2026). Eight full-text shards each downloading all of them, while the evidence database load read the store, spent the allowance at 01:18 UTC and the night's text jobs failed together. A shard reads only the parts of its own run, and a spent allowance is waited out, not retried for two minutes. Next step if the store keeps growing: one combined index file instead of hundreds of small ones.
+
 ## Airtable
 - **0 equals blank in formulas.** `{page_count} = BLANK()` is true for 0, so a failure marked with 0 stays in the queue forever. Queue on a text status field.
 - **`typecast` fabricates.** A string sent to a link field with `typecast: true` creates an empty row in the linked table when nothing matches. Resolve record ids first; never send strings to link fields.
@@ -23,6 +29,7 @@ Lessons that cost time to learn. Read before changing the area they name.
 - **A purge tombstone is forever.** A wrong duplicate decision, once purged, blocks the real document.
 
 ## Classification and years
+- **"First seen" is when the robot met the file, not when the company published it.** Macy's 10-K for the year ended 31 January 2026 sat on its investor page from March; the robot first harvested it on 18 July 2026, and that became its publication date. EDGAR says filed 27 March 2026. A 10-K or 20-F on a company's own site is still an SEC filing: look it up (CIK in the address or `companies.sec_cik`, then the filing of the same period). Use first seen only when the page had been watched for two weeks and the file's own dates are not older (26 Oct 2026).
 - **Two classifiers disagree on half the corpus.** Never pick one silently; measure on labels.
 - **Non-English documents are not AI-typed.** The classify formula runs on English only; 30,000+ rows rely on the URL guess or nothing.
 - **Years in file names are publication years.** "annual-report-2025.pdf" is usually FY2024. Use the reporting-period evidence.
