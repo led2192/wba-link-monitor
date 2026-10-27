@@ -61,6 +61,20 @@ class Finding(unittest.TestCase):
         own = C.own_domains("PT_1", mine, owners, "https://lobbymap.org/x.pdf")
         self.assertNotIn("lobbymap.org", own)
 
+    def test_left_out_report_names_the_likely_own_domains_and_the_shared_ones(self):
+        left_out = {"PT_1": {"example-holding.com": {"a", "b", "c"}, "bigaudit.com": {"a"}},
+                    "PT_2": {"bigaudit.com": {"d"}, "agency.io": {"d"}},
+                    "PT_3": {"bigaudit.com": {"e"}}}
+        md, rows = C.left_out_report(left_out, {"PT_3"}, {"PT_1": {"example.com"}}, {"PT_1": "Example", "PT_2": "Two"})
+        self.assertEqual(rows[0], ("wba_id", "company", "domain", "reports", "own_domains_by_rule", "has_own_address"))
+        self.assertEqual(rows[1], ("PT_1", "Example", "example-holding.com", 3, "example.com", False))   # most reports first
+        self.assertEqual([r[0] for r in rows[1:]], ["PT_1", "PT_1", "PT_2", "PT_2", "PT_3"])                # companies with an address last
+        text = "\n".join(md)
+        self.assertIn("without an own-domain address", text)
+        self.assertIn("| PT_1 Example | example.com | example-holding.com | 3 |", text)
+        self.assertNotIn("| PT_3", text)                                                                  # it has an address already
+        self.assertIn("| bigaudit.com | 3 | 3 |", text)                                                   # printed by three companies
+
 
 class DomainMail(unittest.TestCase):
     def test_verdicts_from_dns(self):
