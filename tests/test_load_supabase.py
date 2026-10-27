@@ -158,6 +158,18 @@ class AgainstPostgres(unittest.TestCase):
             self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', company_filter => 'oldco')").fetchall()], ["old"])
             self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', company_filter => 'WBA2')").fetchall()], ["b"])
             self.assertEqual(c.execute("select count(*) from public.search_pages('\"net zero\"', company_filter => 'nobody')").fetchone()[0], 0)
+            # several companies and types at once, separated by ";"
+            self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', company_filter => 'oldco; WBA2')").fetchall()], ["b", "old"])
+            self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('one', type_filter => 'Annual Report; CSR Report')").fetchall()], ["a"])
+            self.assertEqual(c.execute("select count(*) from public.search_pages('one', type_filter => 'CSR Report')").fetchone()[0], 0)
+            # the pages of one document, in page order
+            self.assertEqual([(r[0], r[1]) for r in c.execute("select library_id, page from public.search_pages('new', doc_filter => 'a')").fetchall()], [("a", 1), ("a", 2)])
+            # one line per document, with its matching pages counted and its best page
+            docs = c.execute("select library_id, pages, pages_capped, best_page, excerpt from public.search_documents('new')").fetchall()
+            self.assertEqual([(d[0], d[1], d[2]) for d in docs], [("a", 2, False)])
+            self.assertIn("⟦new⟧", docs[0][4])
+            self.assertEqual([d[0] for d in c.execute("select library_id from public.search_documents('\"net zero\"')").fetchall()], ["b", "old"])
+            self.assertEqual(c.execute("select count(*) from public.search_documents('\"net zero\"', year_to => 2023)").fetchone()[0], 1)
             self.assertEqual(c.execute("select companies, documents, pages, capped from public.search_summary('one')").fetchone(),
                              (1, 1, 1, False))                        # "new one": doc a
             self.assertEqual(c.execute("select companies, documents, pages from public.search_summary('\"net zero\"')").fetchone(), (2, 2, 2))
