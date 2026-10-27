@@ -43,6 +43,26 @@ create or replace function public.companies_matching(company_filter text) return
                               array['']::text[]) end
   $$;
 
+-- The companies that can be searched, for the company picker on the search page: WBA id, name and how many
+-- documents with text the database holds for each.
+create or replace function public.search_companies()
+returns table (wba_id text, company text, documents bigint)
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if not public.can_search() then
+    raise exception 'not allowed to search' using errcode = '42501';
+  end if;
+  return query
+    select d.wba_id, max(d.company), count(*)
+    from public.documents d
+    where d.wba_id is not null and d.wba_id <> '' and d.company is not null
+    group by d.wba_id
+    order by max(d.company);
+end;
+$$;
+
 -- Pages that contain the words (websearch syntax: "exact phrase", -excluded, or), newest documents
 -- first, with a highlighted extract (⟦ ⟧ around the matched words). Filters are optional.
 create or replace function public.search_pages(
@@ -177,6 +197,8 @@ revoke all on function public.search_pages(text, text, int, int, text, int) from
 revoke all on function public.search_summary(text, text, int, int, text) from public, anon;
 revoke all on function public.search_passages(text, text, text, int, int, int) from public, anon;
 revoke all on function public.can_search() from public, anon;
+revoke all on function public.search_companies() from public, anon;
+grant execute on function public.search_companies() to authenticated;
 revoke all on function public.email_may_search(text) from public, anon, authenticated;
 revoke all on function public.companies_matching(text) from public, anon, authenticated;
 grant execute on function public.search_pages(text, text, int, int, text, int) to authenticated;

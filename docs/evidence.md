@@ -31,7 +31,7 @@ The word index is `pages_search`: a GIN index on the words together with year, t
 ## 3. Searching
 
 ### The search page
-`site/index.html`, published on GitHub Pages by the Search page workflow. Sign in with an email link; search all text or the evidence passages; filter by company or WBA id, year, type or group; each result shows company, year, type, title, page, a highlighted extract and a link that opens the PDF at that page; counts of companies, documents and pages; CSV download. Words match as written: `"exact phrase"`, `-word` to exclude, `or` between alternatives. Results come newest first.
+`site/index.html`, published on GitHub Pages by the Search page workflow. Sign in with an email link; search all text or the evidence passages; filter by company (a list of the companies in the database to pick from, function `search_companies`, or any part of a name or id typed by hand), year, type or group; each result shows company, year, type, title, page, a highlighted extract and a link that opens the PDF at that page; counts of companies, documents and pages; CSV download. Words match as written: `"exact phrase"`, `-word` to exclude, `or` between alternatives. Results come newest first.
 
 ### Who may search
 Every search runs through a database function that first checks the caller: a signed-in address at worldbenchmarkingalliance.org, an address listed in `search_access` (owner, SQL editor: `insert into search_access (email) values ('name@example.com');`), or a direct database session (the loader, the checks, the SQL editor). The tables themselves are closed to the API (row level security, no policy), and the key in the page is the publishable one, which is meant to be public.
