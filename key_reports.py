@@ -346,7 +346,10 @@ def main():
     # candidates of the two waves, before the entity check
     cand, fyes = {}, {}
     for w, recs in rows.items():
-        fye = fyes[w] = company_fye([end_month(r["fields"].get("period_end"))[1] for r in recs])
+        # the usual year-end month from the long annual reports only: half-year and quarterly reports end in
+        # June or September every year and would outvote a December year-end (ACCIONA, 27 Oct 2026)
+        annual = [r for r in recs if roles(r["fields"], CC.eff_type(r["fields"]))]
+        fye = fyes[w] = company_fye([end_month(r["fields"].get("period_end"))[1] for r in (annual or recs)])
         for rec in recs:
             f = rec["fields"]
             t = CC.eff_type(f)
