@@ -203,14 +203,16 @@ def held_docs(wbas):
 
 # ---------------------------------------------------------------------------------------------- the archive
 def cdx(sess, params, attempts=3):
-    """One CDX query: the rows after the header; [] when the archive does not answer within TIMEOUT
-    (one try: the third dry run of 27 Oct 2026 spent 130 to 210 s per host on three tries that all
-    timed out). Only "slow down" answers (429, 503, 504) are tried again."""
+    """One CDX query: the rows after the header; None when the archive did not answer (a timeout, one
+    try: the third dry run of 27 Oct 2026 spent 130 to 210 s per host on three tries that all timed
+    out; or "slow down" answers 429, 503, 504 on every try), [] when it answered with nothing. The
+    difference matters to the caller: a company the archive did not answer for is not stamped as
+    checked (the fifth dry run found nothing for two companies that had 76 rows an hour earlier)."""
     for attempt in range(attempts):
         try:
             r = sess.get(CDX, params=params, headers=UA, timeout=TIMEOUT)
         except Exception:
-            return []
+            return None
         if r.status_code == 200:
             try:
                 rows = r.json()
@@ -220,7 +222,7 @@ def cdx(sess, params, attempts=3):
         if r.status_code in (429, 503, 504):
             time.sleep(20 * (attempt + 1)); continue
         return []
-    return []
+    return None
 
 
 def cdx_rows(host, sess, since=2005, limit=CDX_LIMIT):
@@ -230,14 +232,17 @@ def cdx_rows(host, sess, since=2005, limit=CDX_LIMIT):
     params = {"url": host, "matchType": "host", "filter": ["mimetype:application/pdf", "statuscode:200"],
               "collapse": "urlkey", "fl": "timestamp,original,length", "output": "json", "from": str(since),
               "limit": str(limit)}
-    return [(t, u, int(n) if str(n).isdigit() else 0) for t, u, n in cdx(sess, params)]
+    rows = cdx(sess, params)
+    if rows is None:
+        return None
+    return [(t, u, int(n) if str(n).isdigit() else 0) for t, u, n in rows]
 
 
 def page_snapshots(page, sess, since=2005):
     """[timestamp] of one archived snapshot per year of a page (the first of each year that answered 200)."""
     params = {"url": page, "filter": "statuscode:200", "collapse": "timestamp:4", "fl": "timestamp",
               "output": "json", "from": str(since)}
-    return [row[0] for row in cdx(sess, params)][-MAX_SNAPSHOTS:]
+    return [row[0] for row in (cdx(sess, params) or [])][-MAX_SNAPSHOTS:]
 
 
 def first_capture(url, sess):
@@ -378,12 +383,18 @@ def main():
             if a.commit:
                 at_write("companies", "PATCH", [{"id": rec_id, "fields": {"wayback_checked": today}}])
             continue
-        rows, texts, t_start, cut, log = [], {}, time.time(), False, []
+        rows, texts, t_start, cut, log, unanswered = [], {}, time.time(), False, [], False
         for d in ds:
             t = time.time()
             got = cdx_rows(d, sess, a.since)
-            rows += got
             stats["archive requests"] += 1
+            if got is None:
+                unanswered = True
+                stats["hosts the archive did not answer for"] += 1
+                log.append(f"{d} no answer in {time.time() - t:.0f}s")
+                time.sleep(PAUSE)
+                continue
+            rows += got
             log.append(f"{d} {len(got)}{' (capped)' if len(got) >= CDX_LIMIT else ''} in {time.time() - t:.0f}s")
             if not got:
                 stats["hosts with nothing"] += 1
@@ -418,8 +429,10 @@ def main():
         stats["archived pdfs seen"] += len(rows)
         years = sorted({r.get("doc_year", "?") for r in cand})
         # one line per company whatever the outcome, so a run can be read in the log
+        if unanswered:
+            stats["companies the archive did not fully answer for (not stamped)"] += 1
         print(f"    {w} {name}: {len(cand)} rows, {len(rows)} archived pdfs, {time.time() - t_start:.0f}s"
-              f"{' (cut by the time budget)' if cut else ''} | " + "; ".join(log)
+              f"{' (cut by the time budget)' if cut else ''}{' (archive did not answer: not stamped)' if unanswered else ''} | " + "; ".join(log)
               + (f" | years {' '.join(years)}" if cand else ""), flush=True)
         if cand:
             stats["companies with something to add"] += 1
@@ -433,7 +446,8 @@ def main():
             # written now, not at the end: a run killed at the workflow's limit keeps what it did
             created = at_write("report_library", "POST", [{"fields": r} for r in cand]) if cand else []
             stats["rows written"] += len(created)
-            at_write("companies", "PATCH", [{"id": rec_id, "fields": {"wayback_checked": today}}])
+            if not unanswered:           # an unanswered host means the company is looked at again next run
+                at_write("companies", "PATCH", [{"id": rec_id, "fields": {"wayback_checked": today}}])
             if created:
                 touched.append(w)
         if stats.get("stopped at --max-rows"):
@@ -446,7 +460,8 @@ def main():
           f"{stats['companies looked at']:,} companies looked at, {stats['companies with something to add']:,} with "
           f"reports to add; {len(new_rows):,} rows {verb}. "
           f"Archived PDFs seen: {stats['archived pdfs seen']:,}; companies without a usable domain: "
-          f"{stats['companies without a domain']:,}."
+          f"{stats['companies without a domain']:,}; companies the archive did not answer for: "
+          f"{stats['companies the archive did not fully answer for (not stamped)']:,} (looked at again next run)."
           + (f" Stopped at the run budget of {a.budget} minutes: {left:,} of the {len(comps):,} selected companies "
              f"are left for the next run." if stats.get("stopped at the run budget") else ""), "",
           "By type: " + ", ".join(f"{t} {n:,}" for t, n in by_type.most_common()), "",

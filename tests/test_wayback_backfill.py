@@ -187,7 +187,7 @@ class Helpers(unittest.TestCase):
         self.assertEqual(params["filter"], ["mimetype:application/pdf", "statuscode:200"])   # no regex: it only slowed the scan
         self.assertEqual(params["limit"], str(W.CDX_LIMIT))
         sess.get.return_value = R(200, [])
-        self.assertEqual(W.cdx_rows("x.com", sess), [])
+        self.assertEqual(W.cdx_rows("x.com", sess), [])                  # answered: nothing there
         sess.get.return_value = R(404)
         self.assertEqual(W.cdx_rows("x.com", sess), [])
 
@@ -196,8 +196,12 @@ class Helpers(unittest.TestCase):
         sess = mock.Mock()
         sess.get.side_effect = requests.exceptions.ReadTimeout()
         with mock.patch.object(W.time, "sleep"):
-            self.assertEqual(W.cdx_rows("x.com", sess), [])
+            self.assertIsNone(W.cdx_rows("x.com", sess))                 # no answer, not "nothing": not stamped
         self.assertEqual(sess.get.call_count, 1)
+        sess.get.side_effect = [mock.Mock(status_code=503)] * 3
+        with mock.patch.object(W.time, "sleep"):
+            self.assertIsNone(W.cdx_rows("x.com", sess))
+        self.assertEqual(sess.get.call_count, 4)
         ok = mock.Mock(status_code=200); ok.json.return_value = [["t", "o", "l"], ["20150905084903", "http://x/a.pdf", "1"]]
         sess.get.side_effect = [mock.Mock(status_code=503), ok]
         with mock.patch.object(W.time, "sleep"):
