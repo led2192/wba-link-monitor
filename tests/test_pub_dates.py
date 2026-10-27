@@ -164,6 +164,15 @@ class SecFilings(unittest.TestCase):
                                  "behalf. Date: 2 April 2026")], None)
         self.assertEqual(t[:2], (5, D(2026, 4, 2)))
 
+    def test_archive_capture_is_an_upper_bound(self):
+        f = {"period_end": "2014-12", "Reviewer notes": "Added from the Wayback Machine (captured 2015-09-05). Original address: http://x/a.pdf"}
+        self.assertEqual(P.decide(f, [], D(2026, 10, 27))[:3], (4, D(2015, 9, 5), "day"))
+        f = {"period_end": "2016-12", "Reviewer notes": "Added from the Wayback Machine (captured 2015-09-05). Original address: http://x/a.pdf"}
+        self.assertIsNone(P.decide(f, [], D(2026, 10, 27)))                       # captured before the period ended
+        f = {"period_end": "2014-12", "Reviewer notes": "Added from the Wayback Machine (captured 2015-09-05). Original address: http://x/a.pdf"}
+        t = P.decide(f, [(3, "This report was published on 20 March 2015.")], D(2026, 10, 27))
+        self.assertEqual(t[:2], (2, D(2015, 3, 20)))                               # a stated date still wins
+
     def test_signature_rule_is_only_for_sec_forms(self):
         f = {"period_end": "2025-12", "source_type": "Sustainability Report"}
         self.assertIsNone(P.decide(f, [(9, "the registrant has duly caused this report to be signed. Date: March 2, 2026")], None))

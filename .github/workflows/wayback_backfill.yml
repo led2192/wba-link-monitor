@@ -1,0 +1,70 @@
+name: Wayback backfill
+
+# Reports the Internet Archive kept that the company's site no longer offers (wayback_backfill.py):
+# for companies with a key report gap (or every company with scope "all"), the PDFs of the report
+# families captured under their domains are added to report_library as archived copies. Manual until
+# the first runs are reviewed; a pull request touching it runs a dry run on eight gap companies and posts
+# the result.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run lists what would be added; commit adds it"
+        type: choice
+        default: "dry-run"
+        options: [dry-run, commit]
+      scope:
+        description: "gaps = companies without a key report in a wave; all = every company"
+        type: choice
+        default: "gaps"
+        options: [gaps, all]
+      wba:
+        description: "Only these companies (comma-separated wba_ids). Blank = the scope."
+        default: ""
+      max:
+        description: "Companies this run (0 = all selected)"
+        default: "0"
+  pull_request:
+    paths: [wayback_backfill.py, .github/workflows/wayback_backfill.yml]
+
+concurrency:
+  # one dry run per pull request, the newest push wins; manual runs never cancel each other
+  group: wayback-backfill-${{ github.event.pull_request.number || 'manual' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Wayback backfill
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          # the same eight gap companies on every pull request, so runs can be compared: the four of the
+          # first dry runs (Achmea, TIAA, Washington State Investment Board, Swiss Life) and four more
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=(--wba PT_00018,PT_01785,PT_01912,PT_01709,PT_02307,PT_00397,PT_01484,PT_01819)
+          else
+            ARGS=(--wba "${{ inputs.wba }}" --max "${{ inputs.max || '0' }}")
+            [ "${{ inputs.scope }}" = "all" ] && ARGS+=(--all)
+            [ "${{ inputs.mode }}" = "commit" ] && ARGS+=(--commit)
+          fi
+          python wayback_backfill.py "${ARGS[@]}"
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s wayback_backfill.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file wayback_backfill.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Wayback backfill: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
