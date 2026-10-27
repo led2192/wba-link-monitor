@@ -22,6 +22,11 @@ class Kinds(unittest.TestCase):
         self.assertEqual(C.kind_of("jane.doe"), ("personal", True))
         self.assertEqual(C.kind_of("maria_garcia_lopez"), ("personal", True))
         self.assertEqual(C.kind_of("x7a9"), ("other", False))
+        # first dry run (27 Oct 2026): role mailboxes with a dot were taken for people
+        self.assertEqual(C.kind_of("cosec.admin"), ("general", False))
+        self.assertEqual(C.kind_of("eci_administrator"), ("general", False))
+        self.assertEqual(C.kind_of("infogrupoacs"), ("general", False))
+        self.assertEqual(C.kind_of("2645.7085"), ("other", False))
         # names that only contain a role word inside are not that role
         self.assertEqual(C.kind_of("desgagne.paul"), ("personal", True))
         self.assertEqual(C.kind_of("grigorios.papa"), ("personal", True))
@@ -29,7 +34,7 @@ class Kinds(unittest.TestCase):
 
 class Finding(unittest.TestCase):
     def test_addresses_and_their_sentence(self):
-        pages = [(3, "Contact Investor Relations at IR@Example.com or +44 20 1234. Images: logo@2x.png"),
+        pages = [(3, "Contact Investor Relations at IR@Example.com or +44 20 1234. Images: logo@2x.png. Ref 2645.7085@example.com"),
                  (88, "For questions about this report please write to sustainability@example.com."),
                  (90, "Auditor: KPMG, audit.contact@kpmg.co.uk. Again ir@example.com.")]
         got = C.emails_in(pages)

@@ -48,7 +48,8 @@ KINDS = [
     ("privacy", r"privacy|dpo|data[._-]?protection|datenschutz|gdpr|privacidad|privacidade"),
     ("people", r"^hr$|^hr[._-]|human[._-]?resources|careers?|recruit|jobs?$|talent"),
     ("general", r"^(info|contact|contacts?us|enquir\w*|inquir\w*|hello|mail|office|general|"
-                r"kontakt|contato|contacto|informacion|service|customer\w*|webmaster|reception)$"),
+                r"kontakt|contato|contacto|informacion|service|customer\w*|webmaster|reception)$|^info|"
+                r"cosec|secretar|admin|office|desk|team$|support|service|(^|[._-])group([._-]|$)"),
 ]
 KINDS = [(k, re.compile(rx, re.I)) for k, rx in KINDS]
 
@@ -56,6 +57,8 @@ KINDS = [(k, re.compile(rx, re.I)) for k, rx in KINDS]
 def kind_of(local):
     """(kind, personal) from the part before the @."""
     l = local.lower()
+    if len(re.findall(r"[a-z]", l)) < 3:                                # 2645.7085@: a number, not a mailbox
+        return "other", False
     for k, rx in KINDS:
         if rx.search(l):
             return k, False
@@ -73,6 +76,8 @@ def emails_in(pages):
         for m in EMAIL.finditer(text):
             local, dom = m.group(1).strip("._-"), m.group(2).lower().strip(".")
             if not local or dom.rsplit(".", 1)[-1] in NOT_TLD:
+                continue
+            if len(re.findall(r"[a-z]", local.lower())) < 3:
                 continue
             email = f"{local.lower()}@{dom}"
             if email not in out:
