@@ -66,6 +66,55 @@ class Candidates(unittest.TestCase):
         self.assertEqual(len(W.candidates("X", "X", rows, set(), 2026)), W.MAX_PER_COMPANY)
 
 
+class LinkText(unittest.TestCase):
+    def test_link_text_types_a_file_whose_address_says_nothing(self):
+        rows = [("20140701102437", "http://www.apax.com/media/485644/001125_sustainability.pdf", 3_000_000),
+                ("20140701102437", "http://www.apax.com/media/485645/001126.pdf", 3_000_000)]
+        texts = {"http://www.apax.com/media/485645/001126.pdf": "Sustainability Report 2013 (PDF, 3 MB)"}
+        out = W.candidates("PT_00117", "Apax", rows, set(), 2026, link_text=texts)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["source_type"], "Sustainability Report")
+        self.assertEqual(out[0]["match_confidence"], "wayback (link text)")
+        self.assertEqual(out[0]["doc_year"], "2013")
+        self.assertIn("Link text on the archived page: Sustainability Report 2013", out[0]["Reviewer notes"])
+
+    def test_text_type(self):
+        self.assertEqual(W.text_type("Annual Report 2012"), "Annual Report")
+        self.assertEqual(W.text_type("ESG Report"), "ESG Report")
+        self.assertEqual(W.text_type("Download"), "")
+        self.assertEqual(W.text_type("Privacy policy"), "")
+
+    def test_archived_reports_page_is_read_with_the_harvester_extraction(self):
+        html = ('<html><body><a href="/media/1/001125.pdf">Sustainability Report 2014</a>'
+                '<a href="/about">About us</a><a href="/media/2/q1.pdf">Q1 results</a></body></html>')
+        class R:
+            def __init__(self, status, body=None, text="", ctype="text/html"):
+                self.status_code, self._b, self.text, self.headers = status, body, text, {"Content-Type": ctype}
+            def json(self):
+                return self._b
+        sess = mock.Mock()
+        sess.get.side_effect = [R(200, [["timestamp"], ["20150101000000"]]), R(200, text=html)]
+        with mock.patch.object(W.time, "sleep"):
+            got = W.hub_links("https://www.apax.com/reports", sess)
+        self.assertEqual(got, {"https://www.apax.com/media/1/001125.pdf": ("Sustainability Report 2014", "20150101000000"),
+                               "https://www.apax.com/media/2/q1.pdf": ("Q1 results", "20150101000000")})
+        self.assertEqual(sess.get.call_args_list[1].args[0],
+                         "https://web.archive.org/web/20150101000000id_/https://www.apax.com/reports")
+
+
+class Sites(unittest.TestCase):
+    def test_hosts_not_registered_domains_and_shared_hosts_left_out(self):
+        rows = [{"fields": {"wba_id": "PT_01912", "url": "https://www.sib.wa.gov/financial/reports.html", "type": "reports_hub"}},
+                {"fields": {"wba_id": "PT_01912", "url": "https://lobbymap.org/company/x", "type": "other"}},
+                {"fields": {"wba_id": "PT_00117", "url": "https://www.apax.com/responsibility/", "type": "sustainability_page"}},
+                {"fields": {"wba_id": "PT_00117", "url": "https://www.apax.com/reports/", "type": "reports_hub"}}]
+        owners = {"sib.wa.gov": {"PT_01912"}, "lobbymap.org": {"A", "B", "C", "PT_01912"}, "apax.com": {"PT_00117"}}
+        hosts, hubs = W.sites_from(rows, {"PT_01912", "PT_00117"}, owners)
+        self.assertEqual(hosts, {"PT_01912": ["sib.wa.gov"], "PT_00117": ["apax.com"]})
+        self.assertEqual(hubs, {"PT_01912": ["https://www.sib.wa.gov/financial/reports.html"],
+                                "PT_00117": ["https://www.apax.com/reports/"]})
+
+
 class Helpers(unittest.TestCase):
     def test_archive_url_round_trip(self):
         u = W.archive_url("20150905084903", "http://www.apax.com/a.pdf")
@@ -89,7 +138,9 @@ class Helpers(unittest.TestCase):
         sess = mock.Mock()
         sess.get.return_value = R(200, [["timestamp", "original", "length"], ["20150905084903", "http://x/a.pdf", "123"]])
         self.assertEqual(W.cdx_rows("x.com", sess), [("20150905084903", "http://x/a.pdf", 123)])
-        self.assertEqual(sess.get.call_args.kwargs["params"]["matchType"], "domain")
+        params = sess.get.call_args.kwargs["params"]
+        self.assertEqual(params["matchType"], "domain")
+        self.assertTrue(any(f.startswith("original:(?i)") and "sustainab" in f for f in params["filter"]))
         sess.get.return_value = R(200, [])
         self.assertEqual(W.cdx_rows("x.com", sess), [])
         sess.get.return_value = R(404)

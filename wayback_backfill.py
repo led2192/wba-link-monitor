@@ -11,12 +11,21 @@ after finding Apax Partners' sustainability reports Edition 2 to 8 there while t
 2019 and 2023.
 
 For each company with a gap (default: no key report in the latest or the previous wave, see
-key_reports.py; --all for every company; --wba for a list):
-  1. the domains of its watched pages (monitored_links), minus shared hosts (CDNs, asset managers);
-  2. every PDF captured under those domains, earliest capture first (one row per address);
-  3. keep the ones whose address names a report of the key families (REPORT_TYPES, by the same URL
-     classifier the harvester uses), of at least MIN_KB, and not already in the library under the
-     original address or the archived one (discarded rows and purge tombstones included);
+key_reports.py; --all for every company; --wba for a list), two routes:
+  A. Addresses. The hosts of its watched pages (monitored_links; "www." dropped, so subdomains are
+     included), minus shared hosts (CDNs, asset managers, and any host watched for more than
+     MAX_COMPANIES_PER_HOST companies, such as a government domain or a third-party database). Every
+     PDF captured under those hosts whose address contains a report word (REPORT_WORDS, filtered by
+     the archive itself), earliest capture first; kept when the harvester's URL classifier types the
+     address as one of the key families (REPORT_TYPES).
+  B. Archived report pages. The company's watched reports pages (type reports_hub, at most
+     MAX_HUB_PAGES), one archived snapshot per year; the harvester's own link extraction reads each
+     snapshot, and a PDF link is kept when its link text or its address names a key report
+     ("Sustainability Report 2015" types 001125_sustainability.pdf, which route A cannot). Only links
+     the archive captured are used.
+  Then for both:
+  3. keep files of at least MIN_KB (when the archive knows the size), not already in the library under
+     the original address or the archived one (discarded rows and purge tombstones included);
   4. propose a report_library row whose document_url is the archived copy
      (https://web.archive.org/web/<timestamp>id_/<original>: the file itself, no archive banner),
      typed and dated from the address, with Reviewer notes saying where it came from and when it was
@@ -43,6 +52,16 @@ REPORT_TYPES = {"Annual Report", "Integrated Report", "Sustainability Report", "
 MIN_KB = 150                      # a report is bigger than a certificate or a press release
 MAX_PER_COMPANY = 40
 MAX_DOMAINS = 4
+MAX_COMPANIES_PER_HOST = 2        # a host watched for more companies is not one company's own site
+MAX_HUB_PAGES = 2
+MAX_SNAPSHOTS = 12                # yearly snapshots read per reports page
+COMPANY_BUDGET = 240              # seconds per company; the rest waits for the next run
+TIMEOUT = 60
+# words a report's address usually holds, in the languages of the universe; the archive applies this
+# filter before sending anything, which keeps the answer small on big domains
+REPORT_WORDS = ("annual|sustainab|esg|csr|integrated|impact|report|review|rapport|bericht|informe|"
+                "relatorio|relazione|jaarverslag|duurzaam|nachhaltig|durable|sostenib|responsab|"
+                "verantwortung|bilan|memoria|ar20|ar_20|ar-20")
 SHARED_HOSTS = ("cloudfront.net", "amazonaws.com", "q4cdn.com", "q4web.com", "windows.net", "googleapis.com",
                 "akamaized.net", "akamaihd.net", "azureedge.net", "cloudinary.com", "box.com", "dropbox.com",
                 "sharepoint.com", "google.com", "youtube.com", "linkedin.com", "sec.gov", "xbrl.org",
@@ -91,23 +110,40 @@ def gap_companies(wbas, everything):
     return [(r["id"], r["fields"]["wba_id"], r["fields"].get("company_name", "")) for r in rows if r["fields"].get("wba_id")]
 
 
-def company_domains(wbas):
-    """{wba_id: [registered domains of its watched pages]}, shared hosts left out, at most MAX_DOMAINS."""
-    from monitor_core import reg_domain, is_dam_host, is_framework_host
-    formula = None
-    if len(wbas) <= 40:
-        formula = "OR(" + ",".join(f"{{wba_id}}='{w}'" for w in wbas) + ")"
+def site_host(url):
+    host = (urlsplit(url or "").hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def company_sites(wbas):
+    """({wba_id: [hosts of its watched pages, most watched first]}, {wba_id: [reports pages]}).
+    Every watched page is read once to count how many companies share a host (a government domain, a
+    third-party database), so those hosts are left out."""
+    from monitor_core import is_dam_host, is_framework_host
+    rows = at_get("monitored_links", ["wba_id", "url", "type"])
+    owners = collections.defaultdict(set)
+    for r in rows:
+        f = r["fields"]
+        if f.get("wba_id") and f.get("url"):
+            owners[site_host(f["url"])].add(f["wba_id"].strip())
+    return sites_from(rows, wbas, owners, is_dam_host, is_framework_host)
+
+
+def sites_from(rows, wbas, owners, is_dam_host=lambda h: False, is_framework_host=lambda h: False):
     counts = collections.defaultdict(collections.Counter)
-    for r in at_get("monitored_links", ["wba_id", "url"], formula):
+    hubs = collections.defaultdict(list)
+    for r in rows:
         f = r["fields"]; w = (f.get("wba_id") or "").strip(); u = f.get("url") or ""
         if w not in wbas or not u:
             continue
-        host = (urlsplit(u).hostname or "").lower()
-        d = reg_domain(u)
-        if not d or shared_host(host) or is_dam_host(host) or is_framework_host(host):
+        host = site_host(u)
+        if (not host or shared_host(host) or is_dam_host(host) or is_framework_host(host)
+                or len(owners.get(host, ())) > MAX_COMPANIES_PER_HOST):
             continue
-        counts[w][d] += 1
-    return {w: [d for d, _ in c.most_common(MAX_DOMAINS)] for w, c in counts.items()}
+        counts[w][host] += 1
+        if (f.get("type") or "").strip().lower() == "reports_hub" and len(hubs[w]) < MAX_HUB_PAGES:
+            hubs[w].append(u)
+    return {w: [h for h, _ in c.most_common(MAX_DOMAINS)] for w, c in counts.items()}, dict(hubs)
 
 
 def shared_host(host):
@@ -144,27 +180,80 @@ def held_docs(wbas):
 
 
 # ---------------------------------------------------------------------------------------------- the archive
-def cdx_rows(domain, sess, since=2005, limit=3000):
-    """[(timestamp, original url, length)] of the PDFs captured under a domain and its subdomains,
-    one row per address (its earliest capture that answered 200). [] when the archive does not answer."""
-    params = {"url": domain, "matchType": "domain", "filter": ["mimetype:application/pdf", "statuscode:200"],
-              "collapse": "urlkey", "fl": "timestamp,original,length", "output": "json", "from": str(since),
-              "limit": str(limit)}
-    for attempt in range(4):
+def cdx(sess, params, attempts=3):
+    """One CDX query: the rows after the header, [] when the archive does not answer in time."""
+    for attempt in range(attempts):
         try:
-            r = sess.get(CDX, params=params, headers=UA, timeout=120)
+            r = sess.get(CDX, params=params, headers=UA, timeout=TIMEOUT)
         except Exception:
-            time.sleep(10 * (attempt + 1)); continue
+            time.sleep(5 * (attempt + 1)); continue
         if r.status_code == 200:
             try:
                 rows = r.json()
             except ValueError:
                 return []
-            return [(t, u, int(n) if str(n).isdigit() else 0) for t, u, n in rows[1:]] if rows else []
+            return rows[1:] if rows else []
         if r.status_code in (429, 503, 504):
-            time.sleep(30 * (attempt + 1)); continue
+            time.sleep(20 * (attempt + 1)); continue
         return []
     return []
+
+
+def cdx_rows(host, sess, since=2005, limit=2000):
+    """[(timestamp, original url, length)] of the PDFs captured under a host and its subdomains whose
+    address holds a report word, one row per address (its earliest capture that answered 200)."""
+    params = {"url": host, "matchType": "domain",
+              "filter": ["mimetype:application/pdf", "statuscode:200", f"original:(?i).*({REPORT_WORDS}).*"],
+              "collapse": "urlkey", "fl": "timestamp,original,length", "output": "json", "from": str(since),
+              "limit": str(limit)}
+    return [(t, u, int(n) if str(n).isdigit() else 0) for t, u, n in cdx(sess, params)]
+
+
+def page_snapshots(page, sess, since=2005):
+    """[timestamp] of one archived snapshot per year of a page (the first of each year that answered 200)."""
+    params = {"url": page, "filter": "statuscode:200", "collapse": "timestamp:4", "fl": "timestamp",
+              "output": "json", "from": str(since)}
+    return [row[0] for row in cdx(sess, params)][-MAX_SNAPSHOTS:]
+
+
+def first_capture(url, sess):
+    """(timestamp, length) of the earliest capture of a file that answered 200, or None."""
+    params = {"url": url, "filter": "statuscode:200", "fl": "timestamp,length", "output": "json", "limit": "1"}
+    rows = cdx(sess, params, attempts=2)
+    if not rows:
+        return None
+    t, n = rows[0]
+    return t, int(n) if str(n).isdigit() else 0
+
+
+def text_type(text):
+    """The key-family type a link text names ("Sustainability Report 2015"), by the URL classifier's
+    own words, or ''."""
+    from classify_library import classify
+    words = re.sub(r"[^\w]+", "-", (text or "").lower()).strip("-")
+    if not words:
+        return ""
+    typ, _ = classify(f"https://x/{words}")
+    return typ if typ in REPORT_TYPES else ""
+
+
+def hub_links(page, sess, since=2005):
+    """{original pdf url: (link text, snapshot timestamp)} from the archived snapshots of a reports
+    page, read with the harvester's own link extraction; the first snapshot that shows a link wins."""
+    from monitor_core import doc_links
+    out = {}
+    for ts in page_snapshots(page, sess, since):
+        time.sleep(PAUSE)
+        try:
+            r = sess.get(archive_url(ts, page), headers=UA, timeout=TIMEOUT)
+        except Exception:
+            continue
+        if r.status_code != 200 or "html" not in r.headers.get("Content-Type", "html"):
+            continue
+        for _, (u, text) in doc_links(r.text, page).items():
+            if urlsplit(u).path.lower().endswith(".pdf") and u not in out:
+                out[u] = (text, ts)
+    return out
 
 
 def archive_url(timestamp, original):
@@ -181,11 +270,13 @@ def capture_date(timestamp):
     return date(int(timestamp[:4]), int(timestamp[4:6]), int(timestamp[6:8]))
 
 
-def candidates(wba, name, rows, have, this_year=None):
-    """report_library rows to add for one company from its CDX rows: report-family addresses, big
-    enough, not held; oldest capture first; at most MAX_PER_COMPANY."""
+def candidates(wba, name, rows, have, this_year=None, link_text=None):
+    """report_library rows to add for one company from its archived PDFs: rows are (timestamp, original,
+    length); link_text {original: text} comes from archived reports pages. Kept when the address or the
+    link text names a key report, big enough, not held; oldest capture first; at most MAX_PER_COMPANY."""
     from classify_library import classify, year_from
     from ids import doc_id
+    link_text = link_text or {}
     out, seen = [], set()
     for ts, orig, length in sorted(rows):
         if not orig.lower().startswith(("http://", "https://")):
@@ -193,6 +284,9 @@ def candidates(wba, name, rows, have, this_year=None):
         if length and length < MIN_KB * 1024:
             continue
         typ, conf = classify(orig)
+        text = link_text.get(orig, "")
+        if typ not in REPORT_TYPES:
+            typ, conf = text_type(text), "link text"
         if typ not in REPORT_TYPES:
             continue
         arch = archive_url(ts, orig)
@@ -202,14 +296,14 @@ def candidates(wba, name, rows, have, this_year=None):
         seen |= ids
         fname = urlsplit(orig).path.rsplit("/", 1)[-1]
         cap = capture_date(ts)
-        year = year_from(fname, "", this_year)
+        year = year_from(fname, "", this_year) or year_from(re.sub(r"\s+", "-", text), "", this_year)
         if year and int(year) > cap.year:
             year = ""                                  # a file name year after the capture is not the report's year
         row = {"library_id": f"{wba}-{hashlib.sha1(arch.strip().lower().encode()).hexdigest()[:10]}",
                "wba_id": wba, "company_name": name, "document_url": arch, "source_type": typ,
                "match_confidence": f"wayback ({conf})", "first_seen": date.today().isoformat(),
                "Reviewer notes": f"Added from the Wayback Machine (captured {cap.isoformat()}). "
-                                 f"Original address: {orig}"}
+                                 f"Original address: {orig}" + (f" Link text on the archived page: {text}" if text else "")}
         if year:
             row["doc_year"] = year
         out.append(row)
@@ -242,7 +336,7 @@ def main():
     sel = {w for _, w, _ in comps}
     print(f">>> {len(comps)} companies ({'listed' if wbas else 'all' if a.all else 'with a key report gap'}); "
           f"reading their pages and documents ...", flush=True)
-    domains = company_domains(sel)
+    domains, hubs = company_sites(sel)
     have = held_docs(sel)
     sess = requests.Session()
     stats = collections.Counter(); new_rows = []; per_company = []
@@ -251,20 +345,38 @@ def main():
         if not ds:
             stats["companies without a domain"] += 1
             continue
-        rows = []
+        rows, texts, t_start = [], {}, time.time()
         for d in ds:
             got = cdx_rows(d, sess, a.since)
             rows += got
             stats["archive requests"] += 1
             if not got:
-                stats["domains with nothing"] += 1
+                stats["hosts with nothing"] += 1
             time.sleep(PAUSE)
-        cand = candidates(w, name, rows, have[w])
+            if time.time() - t_start > COMPANY_BUDGET:
+                stats["companies cut by the time budget"] += 1
+                break
+        known = {u for _, u, _ in rows}
+        for page in hubs.get(w, []):
+            if time.time() - t_start > COMPANY_BUDGET:
+                break
+            for u, (text, _) in hub_links(page, sess, a.since).items():
+                if u in known or not text_type(text) and not text_type(u):
+                    continue
+                cap = first_capture(u, sess)
+                time.sleep(PAUSE)
+                if cap:
+                    rows.append((cap[0], u, cap[1])); texts[u] = text; known.add(u)
+                    stats["files found through archived report pages"] += 1
+                if time.time() - t_start > COMPANY_BUDGET:
+                    break
+        cand = candidates(w, name, rows, have[w], link_text=texts)
         stats["companies looked at"] += 1
         stats["archived pdfs seen"] += len(rows)
         if cand:
             stats["companies with something to add"] += 1
             years = sorted({r.get("doc_year", "?") for r in cand})
+            stats["rows typed by link text"] += sum(1 for r in cand if r["match_confidence"] == "wayback (link text)")
             per_company.append((w, name, len(cand), ", ".join(ds), " ".join(years)))
             print(f"    {w} {name}: {len(cand)} from {', '.join(ds)} (years {' '.join(years)})", flush=True)
         new_rows += cand
