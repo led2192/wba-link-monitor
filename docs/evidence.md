@@ -70,7 +70,7 @@ Every condition (words, year, type, company) is answered inside the index, so on
 | Supabase check | manual, and on pull requests that touch it | Read-only test that the three secrets reach the project |
 | Gold evaluation | manual | Does the search find the page the analyst cited? (section 6) |
 
-Two triggers in the database keep the page copies in step: a page written gets its document's year, type and company; a document whose year, type or company changes (a correction in the library) updates its pages. Scripts: [scripts.md](scripts.md). Schema: `supabase/schema.sql`; search functions: `supabase/search.sql`; both applied by the loader and safe to run again.
+The search index `pages_search` is built by the database itself, through the pg_cron job `build-pages-search` that the load hands it to (it takes over three hours, longer than a GitHub job may run); the job removes itself once the index exists. Progress, in the SQL editor: `select phase, blocks_done, blocks_total from pg_stat_progress_create_index;`. Two triggers in the database keep the page copies in step: a page written gets its document's year, type and company; a document whose year, type or company changes (a correction in the library) updates its pages. Scripts: [scripts.md](scripts.md). Schema: `supabase/schema.sql`; search functions: `supabase/search.sql`; both applied by the loader and safe to run again.
 
 ## 5. Setting it up (owner)
 
