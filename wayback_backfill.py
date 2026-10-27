@@ -39,9 +39,13 @@ The attachment, cover, classification, year and completeness jobs then treat the
 At most MAX_PER_COMPANY rows per company and run, oldest reports first, so one company cannot flood a
 run; a later run adds the rest.
 
-Dry run by default: prints and summarises what would be added. --commit writes the rows and refreshes
-the companies' coverage. Env: AIRTABLE_TOKEN, AIRTABLE_BASE. Options: --all, --wba ids, --max N
-companies, --max-rows N, --since YYYY (captures from that year, default 2005).
+Dry run by default: prints and summarises what would be added. --commit writes each company's rows as
+soon as they are known and stamps companies.wayback_checked, so a run cut short keeps what it did and
+the next run carries on: a company checked in the last RECHECK_DAYS is skipped unless named with --wba.
+The run stops cleanly at --budget minutes (default 270, under the workflow's 300) with its summary and
+the coverage refresh of the companies it touched. 649 companies had a gap on 27 Oct 2026 at about 80 s
+each: three runs. Env: AIRTABLE_TOKEN, AIRTABLE_BASE. Options: --all, --wba ids, --max N companies,
+--max-rows N, --since YYYY (captures from that year, default 2005), --budget minutes.
 """
 import argparse, collections, hashlib, json, os, re, sys, time
 from datetime import date
@@ -61,6 +65,8 @@ CDX_LIMIT = 5000                  # PDF addresses read per host; a host with mor
 MAX_HUB_PAGES = 2
 MAX_SNAPSHOTS = 12                # yearly snapshots read per reports page
 COMPANY_BUDGET = 240              # seconds per company; the rest waits for the next run
+RUN_BUDGET = 270                  # minutes per run (the workflow allows 300); the next run carries on
+RECHECK_DAYS = 90                 # a company checked more recently is skipped (unless named with --wba)
 TIMEOUT = 60                      # one try per query: a host that took longer once takes as long again
 SHARED_HOSTS = ("cloudfront.net", "amazonaws.com", "q4cdn.com", "q4web.com", "windows.net", "googleapis.com",
                 "akamaized.net", "akamaihd.net", "azureedge.net", "cloudinary.com", "box.com", "dropbox.com",
@@ -99,14 +105,18 @@ def at_write(table, method, records):
 
 
 def gap_companies(wbas, everything):
-    """[(record id, wba_id, company_name, website host)] of the companies to look at."""
+    """[(record id, wba_id, company_name, website host)] of the companies to look at: the ones named,
+    else every company (--all) or the ones with a key report gap, minus those checked in the last
+    RECHECK_DAYS (companies.wayback_checked, stamped by a commit run)."""
+    fresh = f"OR({{wayback_checked}}='', IS_BEFORE({{wayback_checked}}, DATEADD(TODAY(), -{RECHECK_DAYS}, 'days')))"
     if wbas:
         formula = "OR(" + ",".join(f"{{wba_id}}='{w}'" for w in wbas) + ")"
     elif everything:
-        formula = None
+        formula = fresh
     else:
-        formula = "OR({kr_latest_status}='None', {kr_prev_status}='None', {kr_latest_status}='', {kr_prev_status}='')"
-    rows = at_get("companies", ["wba_id", "company_name", "website", "kr_latest_status", "kr_prev_status"], formula)
+        gap = "OR({kr_latest_status}='None', {kr_prev_status}='None', {kr_latest_status}='', {kr_prev_status}='')"
+        formula = f"AND({gap}, {fresh})"
+    rows = at_get("companies", ["wba_id", "company_name", "website", "kr_latest_status", "kr_prev_status", "wayback_checked"], formula)
     return [(r["id"], r["fields"]["wba_id"], r["fields"].get("company_name", ""), site_host(r["fields"].get("website")))
             for r in rows if r["fields"].get("wba_id")]
 
@@ -335,6 +345,7 @@ def main():
     ap.add_argument("--max", type=int, default=0, help="companies this run (0 = all selected)")
     ap.add_argument("--max-rows", type=int, default=0, help="stop after this many rows (0 = no cap)")
     ap.add_argument("--since", type=int, default=2005)
+    ap.add_argument("--budget", type=int, default=RUN_BUDGET, help="minutes for this run; the next run carries on")
     a = ap.parse_args()
     if not (os.environ.get("AIRTABLE_TOKEN") and os.environ.get("AIRTABLE_BASE")):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
@@ -353,11 +364,19 @@ def main():
     domains, hubs = company_sites(sel, {w: site for _, w, _, site in comps})
     have = held_docs(sel)
     sess = requests.Session()
-    stats = collections.Counter(); new_rows = []; per_company = []
+    stats = collections.Counter(); new_rows = []; per_company = []; touched = []
+    today = date.today().isoformat(); run_start = time.time()
     for rec_id, w, name, _ in comps:
+        if time.time() - run_start > a.budget * 60:
+            stats["stopped at the run budget"] = 1
+            print(f">>> run budget of {a.budget} minutes reached after {stats['companies looked at']} companies; "
+                  f"the next run carries on with the rest.", flush=True)
+            break
         ds = domains.get(w) or []
         if not ds:
             stats["companies without a domain"] += 1
+            if a.commit:
+                at_write("companies", "PATCH", [{"id": rec_id, "fields": {"wayback_checked": today}}])
             continue
         rows, texts, t_start, cut, log = [], {}, time.time(), False, []
         for d in ds:
@@ -406,19 +425,30 @@ def main():
             stats["companies with something to add"] += 1
             stats["rows typed by link text"] += sum(1 for r in cand if r["match_confidence"] == "wayback (link text)")
             per_company.append((w, name, len(cand), ", ".join(ds), " ".join(years)))
-        new_rows += cand
-        if a.max_rows and len(new_rows) >= a.max_rows:
-            new_rows = new_rows[:a.max_rows]
+        if a.max_rows and len(new_rows) + len(cand) > a.max_rows:
+            cand = cand[:max(0, a.max_rows - len(new_rows))]
             stats["stopped at --max-rows"] = 1
+        new_rows += cand
+        if a.commit:
+            # written now, not at the end: a run killed at the workflow's limit keeps what it did
+            created = at_write("report_library", "POST", [{"fields": r} for r in cand]) if cand else []
+            stats["rows written"] += len(created)
+            at_write("companies", "PATCH", [{"id": rec_id, "fields": {"wayback_checked": today}}])
+            if created:
+                touched.append(w)
+        if stats.get("stopped at --max-rows"):
             break
     by_type = collections.Counter(r["source_type"] for r in new_rows)
     by_year = collections.Counter(r.get("doc_year", "undated") for r in new_rows)
     verb = "added" if a.commit else "would be added (dry run)"
+    left = len(comps) - stats["companies looked at"] - stats["companies without a domain"]
     md = [f"### Wayback Machine backfill{'' if a.commit else ' (dry run)'}", "",
           f"{stats['companies looked at']:,} companies looked at, {stats['companies with something to add']:,} with "
           f"reports to add; {len(new_rows):,} rows {verb}. "
           f"Archived PDFs seen: {stats['archived pdfs seen']:,}; companies without a usable domain: "
-          f"{stats['companies without a domain']:,}.", "",
+          f"{stats['companies without a domain']:,}."
+          + (f" Stopped at the run budget of {a.budget} minutes: {left:,} of the {len(comps):,} selected companies "
+             f"are left for the next run." if stats.get("stopped at the run budget") else ""), "",
           "By type: " + ", ".join(f"{t} {n:,}" for t, n in by_type.most_common()), "",
           "By year: " + ", ".join(f"{y} {n:,}" for y, n in sorted(by_year.items(), key=lambda kv: str(kv[0]))), ""]
     if per_company:
@@ -435,14 +465,12 @@ def main():
         print(">>> dry run, nothing written.", flush=True)
         run.finish("ok", rows_in=len(comps), rows_out=0, counters=dict(stats))
         return
-    created = at_write("report_library", "POST", [{"fields": r} for r in new_rows])
-    print(f">>> added {len(created)} rows to report_library.", flush=True)
-    touched = sorted({r["wba_id"] for r in new_rows})
+    print(f">>> added {stats['rows written']} rows to report_library.", flush=True)
     import subprocess
     for i in range(0, len(touched), 40):
         subprocess.run([sys.executable, "company_coverage.py", "--commit", "--wba", ",".join(touched[i:i + 40])],
                        check=False)
-    run.finish("ok", rows_in=len(comps), rows_out=len(created), counters=dict(stats))
+    run.finish("ok", rows_in=len(comps), rows_out=stats["rows written"], counters=dict(stats))
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ Day-to-day operation through the Airtable interfaces, and what to do when someth
 - **A report or page you found:** paste the link in `companies.add_link` (one per line). Within minutes the robot checks it is new, files it, scans it and answers in `add_result`.
 - **A PDF the site will not let the robot download:** drop it in `companies.add_file`.
 - **A new company:** fill `website`. The robot proposes report pages in `suggested_links`; delete wrong lines, tick `approve_suggestions`.
+- **Reports the company removed from its site (the Internet Archive):** Actions → Wayback backfill, mode dry-run, scope gaps, then read the summary it posts; run it again in commit mode. Each run stops after 270 minutes and the next one carries on with the companies not yet checked (`companies.wayback_checked`), so run it once a day until the summary says nothing is left. For one company, put its wba_id in `wba`.
 - **Scan a page now:** tick `monitored_links.scan_now`. If you suspect it, write what you see in `scan_concern`; the weekly review answers in `audit_reply`.
 
 ## Fix things

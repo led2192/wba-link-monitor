@@ -131,6 +131,34 @@ class Sites(unittest.TestCase):
         self.assertEqual(hosts["P"], ["h4.example", "h3.example", "h2.example"])
 
 
+class Selection(unittest.TestCase):
+    def formula(self, wbas, everything):
+        seen = {}
+        def fake(table, fields, formula=None):
+            seen["formula"] = formula; seen["fields"] = fields
+            return [{"id": "rec1", "fields": {"wba_id": "PT_1", "company_name": "One", "website": "https://www.one.example/x"}}]
+        with mock.patch.object(W, "at_get", fake):
+            rows = W.gap_companies(wbas, everything)
+        self.assertEqual(rows, [("rec1", "PT_1", "One", "one.example")])
+        return seen
+
+    def test_named_companies_are_always_looked_at(self):
+        seen = self.formula(["PT_1", "PT_2"], False)
+        self.assertEqual(seen["formula"], "OR({wba_id}='PT_1',{wba_id}='PT_2')")
+
+    def test_gap_scope_skips_companies_checked_recently(self):
+        seen = self.formula([], False)
+        self.assertTrue(seen["formula"].startswith("AND(OR({kr_latest_status}='None'"))
+        self.assertIn("IS_BEFORE({wayback_checked}, DATEADD(TODAY(), -90, 'days'))", seen["formula"])
+        self.assertIn("{wayback_checked}=''", seen["formula"])
+        self.assertIn("wayback_checked", seen["fields"])
+
+    def test_all_scope_still_skips_companies_checked_recently(self):
+        seen = self.formula([], True)
+        self.assertTrue(seen["formula"].startswith("OR({wayback_checked}=''"))
+        self.assertNotIn("kr_latest_status", seen["formula"])
+
+
 class Helpers(unittest.TestCase):
     def test_archive_url_round_trip(self):
         u = W.archive_url("20150905084903", "http://www.apax.com/a.pdf")
