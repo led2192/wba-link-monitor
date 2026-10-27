@@ -22,6 +22,12 @@ For each company and address, one row in company_contacts:
 Rows are never deleted: an address the newer reports no longer print keeps its row and an older
 last_seen.
 
+Does the domain accept mail? For each distinct domain, its MX records are read through DNS over HTTPS
+(Google's resolver; no email is sent): domain_mail = accepts (mail servers published), none (no mail
+servers, a null MX or no such domain: the address cannot receive anything) or unknown (no answer), with
+domain_checked. That is as far as a check without sending goes: whether the mailbox itself exists cannot
+be told from outside, because most companies' mail servers accept every address and refuse the probe.
+
 Dry run by default (prints counts and a sample, writes contacts.md); --commit writes.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, TEXT_STORE_REPO, TEXT_STORE_TOKEN. Options: --wba ids, --limit N.
 """
@@ -115,6 +121,39 @@ def at_write(table, method, records):
         time.sleep(0.22)
 
 
+DNS_API = "https://dns.google/resolve"
+
+
+def domain_accepts_mail(domain, sess):
+    """'accepts', 'none' or 'unknown' from the domain's MX records (DNS over HTTPS; nothing is sent)."""
+    try:
+        r = sess.get(DNS_API, params={"name": domain, "type": "MX"}, timeout=20)
+        if r.status_code != 200:
+            return "unknown"
+        j = r.json()
+    except Exception:
+        return "unknown"
+    status = j.get("Status")
+    if status == 3:
+        return "none"                                           # no such domain
+    if status != 0:
+        return "unknown"
+    hosts = [a["data"].split()[-1].rstrip(".") for a in j.get("Answer", [])
+             if a.get("type") == 15 and isinstance(a.get("data"), str) and a["data"].split()]
+    if hosts and all(h == "" for h in hosts):
+        return "none"                                           # "null MX" (RFC 7505): mail refused on purpose
+    return "accepts" if hosts else "none"                       # no mail servers published for the domain
+
+
+def check_domains(domains, sess, pause=0.1):
+    """{domain: verdict} for every domain, one DNS query each."""
+    out = {}
+    for d in sorted(domains):
+        out[d] = domain_accepts_mail(d, sess)
+        time.sleep(pause)
+    return out
+
+
 def company_domains(companies, pages):
     """({wba_id: set(registered domains that are the company's own)}, {domain: set(wba_ids watching it)})."""
     from monitor_core import reg_domain
@@ -145,10 +184,12 @@ def own_domains(w, mine, owners, document_url):
     return own
 
 
-def merge(found, today, existing):
+def merge(found, today, existing, domain_mail=None):
     """Rows to write from found {(wba, email): [(year, record id of the document, page, sentence)]} and the
-    rows already in the table {contact_key: (record id, fields)}. Returns (creates, updates)."""
+    rows already in the table {contact_key: (record id, fields)}; domain_mail {domain: verdict} when the
+    domains were checked this run. Returns (creates, updates)."""
     creates, updates = [], []
+    domain_mail = domain_mail or {}
     for (w, email), hits in sorted(found.items()):
         hits.sort(key=lambda h: (-(h[0] or 0), h[1]))
         year, doc_rec, page, sentence = hits[0]
@@ -156,6 +197,10 @@ def merge(found, today, existing):
         fields = {"email": email, "wba_id": w, "kind": kind, "personal": personal,
                   "evidence": f"p.{page}: {sentence}"[:1000], "source_document": [doc_rec],
                   "source_year": year or None, "reports_with_it": len({h[1] for h in hits}), "last_seen": today}
+        verdict = domain_mail.get(email.split("@", 1)[1])
+        if verdict:
+            fields["domain_mail"] = verdict
+            fields["domain_checked"] = today
         key = f"{w}|{email}"
         if key in existing:
             rid, old = existing[key]
@@ -172,6 +217,7 @@ def main():
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--wba", default="", help="comma-separated wba_ids")
     ap.add_argument("--limit", type=int, default=0, help="at most this many documents (0 = all)")
+    ap.add_argument("--no-dns", action="store_true", help="skip the domain mail check")
     a = ap.parse_args()
     if not (os.environ.get("AIRTABLE_TOKEN") and os.environ.get("AIRTABLE_BASE")):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
@@ -242,8 +288,17 @@ def main():
 
     existing = {r["fields"]["contact_key"]: (r["id"], r["fields"]) for r in
                 at_get(TABLE, ["contact_key", "email", "wba_id", "kind", "personal", "evidence", "source_document",
-                               "source_year", "reports_with_it", "last_seen"]) if r["fields"].get("contact_key")}
-    creates, updates = merge(found, date.today().isoformat(), existing)
+                               "source_year", "reports_with_it", "last_seen", "domain_mail", "domain_checked"])
+                if r["fields"].get("contact_key")}
+    domain_mail = {}
+    if not a.no_dns:
+        import requests
+        domains = {e.split("@", 1)[1] for _, e in found}
+        domain_mail = check_domains(domains, requests.Session())
+        verdicts = collections.Counter(domain_mail.values())
+        stats.update({f"domains {k}": v for k, v in verdicts.items()})
+        print(f">>> {len(domains):,} domains checked in DNS: {dict(verdicts)}", flush=True)
+    creates, updates = merge(found, date.today().isoformat(), existing, domain_mail)
     kinds = collections.Counter(kind_of(e.split("@", 1)[0])[0] for _, e in found)
     n_comp = len({w for w, _ in found})
     md = [f"### Company contacts from key reports{'' if a.commit else ' (dry run)'}", "",
@@ -252,6 +307,10 @@ def main():
           f"{stats['other-domain addresses left out']:,} addresses on other domains left out.", "",
           "By kind: " + ", ".join(f"{k} {v:,}" for k, v in kinds.most_common()), "",
           f"Rows to create: {len(creates):,}; to update: {len(updates):,}.", ""]
+    if domain_mail:
+        v = collections.Counter(domain_mail.values())
+        md += [f"Domains checked in DNS: {len(domain_mail):,}; accept mail {v['accepts']:,}, none {v['none']:,}, "
+               f"unknown {v['unknown']:,}.", ""]
     sample = [c["fields"] for c in creates[:25]]
     if sample:
         md += ["| Company | Address | Kind | Year |", "| --- | --- | --- | --- |"]
