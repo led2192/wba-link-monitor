@@ -139,7 +139,7 @@ class Helpers(unittest.TestCase):
         sess.get.return_value = R(200, [["timestamp", "original", "length"], ["20150905084903", "http://x/a.pdf", "123"]])
         self.assertEqual(W.cdx_rows("x.com", sess), [("20150905084903", "http://x/a.pdf", 123)])
         params = sess.get.call_args.kwargs["params"]
-        self.assertEqual(params["matchType"], "domain")
+        self.assertEqual(params["matchType"], "host")
         self.assertTrue(any(f.startswith("original:(?i)") and "sustainab" in f for f in params["filter"]))
         sess.get.return_value = R(200, [])
         self.assertEqual(W.cdx_rows("x.com", sess), [])

@@ -12,8 +12,8 @@ after finding Apax Partners' sustainability reports Edition 2 to 8 there while t
 
 For each company with a gap (default: no key report in the latest or the previous wave, see
 key_reports.py; --all for every company; --wba for a list), two routes:
-  A. Addresses. The hosts of its watched pages (monitored_links; "www." dropped, so subdomains are
-     included), minus shared hosts (CDNs, asset managers, and any host watched for more than
+  A. Addresses. The hosts of its watched pages (monitored_links; each host on its own, "www." dropped),
+     minus shared hosts (CDNs, asset managers, and any host watched for more than
      MAX_COMPANIES_PER_HOST companies, such as a government domain or a third-party database). Every
      PDF captured under those hosts whose address contains a report word (REPORT_WORDS, filtered by
      the archive itself), earliest capture first; kept when the harvester's URL classifier types the
@@ -200,9 +200,10 @@ def cdx(sess, params, attempts=3):
 
 
 def cdx_rows(host, sess, since=2005, limit=2000):
-    """[(timestamp, original url, length)] of the PDFs captured under a host and its subdomains whose
-    address holds a report word, one row per address (its earliest capture that answered 200)."""
-    params = {"url": host, "matchType": "domain",
+    """[(timestamp, original url, length)] of the PDFs captured under a host (that host only: a watched
+    page on sib.wa.gov must not bring in every agency of the state, 27 Oct 2026) whose address holds a
+    report word, one row per address (its earliest capture that answered 200)."""
+    params = {"url": host, "matchType": "host",
               "filter": ["mimetype:application/pdf", "statuscode:200", f"original:(?i).*({REPORT_WORDS}).*"],
               "collapse": "urlkey", "fl": "timestamp,original,length", "output": "json", "from": str(since),
               "limit": str(limit)}
@@ -345,40 +346,51 @@ def main():
         if not ds:
             stats["companies without a domain"] += 1
             continue
-        rows, texts, t_start = [], {}, time.time()
+        rows, texts, t_start, cut, log = [], {}, time.time(), False, []
         for d in ds:
+            t = time.time()
             got = cdx_rows(d, sess, a.since)
             rows += got
             stats["archive requests"] += 1
+            log.append(f"{d} {len(got)} in {time.time() - t:.0f}s")
             if not got:
                 stats["hosts with nothing"] += 1
             time.sleep(PAUSE)
             if time.time() - t_start > COMPANY_BUDGET:
-                stats["companies cut by the time budget"] += 1
+                cut = True
                 break
         known = {u for _, u, _ in rows}
         for page in hubs.get(w, []):
             if time.time() - t_start > COMPANY_BUDGET:
+                cut = True
                 break
+            t, found = time.time(), 0
             for u, (text, _) in hub_links(page, sess, a.since).items():
                 if u in known or not text_type(text) and not text_type(u):
                     continue
                 cap = first_capture(u, sess)
                 time.sleep(PAUSE)
                 if cap:
-                    rows.append((cap[0], u, cap[1])); texts[u] = text; known.add(u)
+                    rows.append((cap[0], u, cap[1])); texts[u] = text; known.add(u); found += 1
                     stats["files found through archived report pages"] += 1
                 if time.time() - t_start > COMPANY_BUDGET:
+                    cut = True
                     break
+            log.append(f"page {site_host(page)}: {found} new in {time.time() - t:.0f}s")
+        if cut:
+            stats["companies cut by the time budget"] += 1
         cand = candidates(w, name, rows, have[w], link_text=texts)
         stats["companies looked at"] += 1
         stats["archived pdfs seen"] += len(rows)
+        years = sorted({r.get("doc_year", "?") for r in cand})
+        # one line per company whatever the outcome, so a run can be read in the log
+        print(f"    {w} {name}: {len(cand)} rows, {len(rows)} archived pdfs, {time.time() - t_start:.0f}s"
+              f"{' (cut by the time budget)' if cut else ''} | " + "; ".join(log)
+              + (f" | years {' '.join(years)}" if cand else ""), flush=True)
         if cand:
             stats["companies with something to add"] += 1
-            years = sorted({r.get("doc_year", "?") for r in cand})
             stats["rows typed by link text"] += sum(1 for r in cand if r["match_confidence"] == "wayback (link text)")
             per_company.append((w, name, len(cand), ", ".join(ds), " ".join(years)))
-            print(f"    {w} {name}: {len(cand)} from {', '.join(ds)} (years {' '.join(years)})", flush=True)
         new_rows += cand
         if a.max_rows and len(new_rows) >= a.max_rows:
             new_rows = new_rows[:a.max_rows]

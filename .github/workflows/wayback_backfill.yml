@@ -3,7 +3,7 @@ name: Wayback backfill
 # Reports the Internet Archive kept that the company's site no longer offers (wayback_backfill.py):
 # for companies with a key report gap (or every company with scope "all"), the PDFs of the report
 # families captured under their domains are added to report_library as archived copies. Manual until
-# the first runs are reviewed; a pull request touching it runs a dry run on 15 gap companies and posts
+# the first runs are reviewed; a pull request touching it runs a dry run on eight gap companies and posts
 # the result.
 on:
   workflow_dispatch:
@@ -28,8 +28,9 @@ on:
     paths: [wayback_backfill.py, .github/workflows/wayback_backfill.yml]
 
 concurrency:
-  group: wayback-backfill
-  cancel-in-progress: false
+  # one dry run per pull request, the newest push wins; manual runs never cancel each other
+  group: wayback-backfill-${{ github.event.pull_request.number || 'manual' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backfill:
@@ -51,7 +52,9 @@ jobs:
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=(--max 15)
+          # the same eight gap companies on every pull request, so runs can be compared: the four of the
+          # first dry runs (Achmea, TIAA, Washington State Investment Board, Swiss Life) and four more
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=(--wba PT_00018,PT_01785,PT_01912,PT_01709,PT_02307,PT_00397,PT_01484,PT_01819)
           else
             ARGS=(--wba "${{ inputs.wba }}" --max "${{ inputs.max || '0' }}")
             [ "${{ inputs.scope }}" = "all" ] && ARGS+=(--all)
