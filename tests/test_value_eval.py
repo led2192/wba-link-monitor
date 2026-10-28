@@ -17,7 +17,9 @@ class Reading(unittest.TestCase):
                  ("Total Operating Revenue 27,554,827,451.25 63,238", 27554827451.25),
                  ("$9.83 Billion Total Sales.", 9.83),
                  ("$M Revenue 30,142.0.", 30142.0),
-                 ("Revenue 2.561.249", 2561249)]
+                 ("Revenue 2.561.249", 2561249),
+                 ("Total Scope 1 emissions Metric tonnes of CO2 equivalent 7,50,616", 750616),   # Indian grouping
+                 ("Scopes 1) tCO2e 248,248.44 245,133.97", 248248.44)]
         for text, r in cases:
             self.assertTrue(V.found_on(text, r), text)
 
@@ -38,11 +40,15 @@ class Forms(unittest.TestCase):
         self.assertIn((513727.0, 6, 0), forms)                         # in millions
         self.assertIn((9.83, 3, 2), V.printed_forms(9830000000, V.CURRENCY_SCALES))   # in billions
         self.assertEqual(V.printed_forms(858000, V.EMISSION_SCALES), [(858000.0, 3, 0), (858.0, 3, 0)])
+        forms = V.printed_forms(248248.44, V.EMISSION_SCALES)                # the decimals are kept as a form
+        self.assertIn((248248.44, 8, 2), forms)
+        self.assertIn((248248.0, 6, 0), forms)
 
     def test_index_query(self):
         self.assertEqual(V.tsquery_for(513727, 0),
-                         "(513 <-> 727) | 513727 | (513 <-> 727.0) | 513727.0 | (513 <-> 727.00) | 513727.00 | 513.727")
-        self.assertEqual(V.tsquery_for(799366.15, 2), "(799 <-> 366.15) | 799366.15")
+                         "(513 <-> 727) | 513727 | (513 <-> 727.0) | 513727.0 | (513 <-> 727.00) | 513727.00 | 513.727 | (5 <-> 13 <-> 727)")
+        self.assertEqual(V.tsquery_for(799366.15, 2), "(799 <-> 366.15) | 799366.15 | (7 <-> 99 <-> 366.15)")
+        self.assertIn("(7 <-> 50 <-> 616)", V.tsquery_for(750616, 0))
 
     def test_attribute_words(self):
         cfg = {"attributes": {"R": {"name": "Revenue"}, "S": {"name": "Scope 1 emissions"}}}
