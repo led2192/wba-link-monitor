@@ -87,7 +87,9 @@ def main():
                     timings[label].update({"exact_companies": exact[0], "exact_s": round(exact[1], 2)})
                 if s:
                     co, do, pa, capped = s
-                    co_txt = f"{co:,}{'+' if capped else ''}" + (f", exact {exact[0]:,} ({exact[1]:.1f} s)" if exact else "")
+                    co_txt = f"{co:,}{'+' if capped else ''}" + (
+                        f", exact {exact[0]:,} ({exact[1]:.1f} s)" if exact and exact[0] >= 0 else
+                        f", at least {-exact[0]:,} ({exact[1]:.1f} s, stopped)" if exact else "")
                     md.append(f"| {label} | {co_txt} | {do:,}{'+' if capped else ''} | {pa:,}{'+' if capped else ''} | {tc:.1f} | {len(rows)} | {tr:.1f} | {first} |")
                 else:
                     md.append(f"| {label} | | | | | {len(rows)} | {tr:.1f} | {first} |")
