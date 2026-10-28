@@ -356,6 +356,23 @@ begin
 end;
 $$;
 
+-- The web interface (PostgREST) returns at most 1,000 rows of any set-returning function, silently.
+-- The company list stopped at 1,000 of the companies, alphabetically, so QAFCO and Syngenta were
+-- not offered (28 Oct 2026), and the CSV stopped at 1,000 pages instead of 5,000. These two return
+-- the same rows as one JSON value, which the cap does not touch.
+create or replace function public.search_companies_json() returns jsonb
+language sql stable security definer set search_path = public
+as $$ select coalesce(jsonb_agg(to_jsonb(c) order by c.company), '[]'::jsonb) from public.search_companies() c $$;
+
+create or replace function public.export_pages_json(
+  q text, company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 5000)
+returns jsonb
+language sql stable security definer set search_path = public
+set statement_timeout = '120s'
+as $$ select coalesce(jsonb_agg(to_jsonb(e)), '[]'::jsonb)
+      from public.export_pages(q, company_filter, year_from, year_to, type_filter, max_rows) e $$;
+
 -- Evidence passages (climate, nature, social, financial) that contain the words, optionally one group.
 create or replace function public.search_passages(
   q text, dim text default null, company_filter text default null, year_from int default null,
@@ -400,6 +417,10 @@ revoke all on function public.search_passages(text, text, text, int, int, int) f
 revoke all on function public.can_search() from public, anon;
 revoke all on function public.search_companies() from public, anon;
 grant execute on function public.search_companies() to authenticated;
+revoke all on function public.search_companies_json() from public, anon;
+grant execute on function public.search_companies_json() to authenticated;
+revoke all on function public.export_pages_json(text, text, int, int, text, int) from public, anon;
+grant execute on function public.export_pages_json(text, text, int, int, text, int) to authenticated;
 revoke all on function public.export_pages(text, text, int, int, text, int) from public, anon;
 grant execute on function public.export_pages(text, text, int, int, text, int) to authenticated;
 revoke all on function public.email_may_search(text) from public, anon, authenticated;

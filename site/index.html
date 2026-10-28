@@ -230,7 +230,9 @@ a { color: var(--accent); }
   let companiesLoaded = false;
   async function loadCompanies() {
     if (companiesLoaded) return;
-    const { data, error } = await rpc("search_companies");
+    // the JSON form: a list of rows is capped at 1,000 by the database's web interface (28 Oct 2026)
+    let { data, error } = await rpc("search_companies_json");
+    if (error) ({ data, error } = await rpc("search_companies"));
     if (error || !data) return;                     // older database without the function: typing still works
     $("company-list").innerHTML = data.map((c) => `<option value="${esc(c.company)} (${esc(c.wba_id)})"></option>`).join("");
     companiesLoaded = true;
@@ -428,7 +430,8 @@ a { color: var(--accent); }
     const b = $("csv");
     b.disabled = true; const label = b.textContent; b.textContent = "Preparing the CSV…";
     try {
-      const r = await rpc("export_pages", { ...lastArgs, max_rows: 5000 });
+      let r = await rpc("export_pages_json", { ...lastArgs, max_rows: 5000 });   // not capped at 1,000 rows
+      if (r.error) r = await rpc("export_pages", { ...lastArgs, max_rows: 5000 });
       if (r.error) { saveCsv(lastRows); return; }                 // older database without the function: the rows shown
       saveCsv(r.data || []);
       b.textContent = `Downloaded ${(r.data || []).length.toLocaleString()} pages`;
