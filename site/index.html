@@ -311,7 +311,7 @@ a { color: var(--accent); }
     const note = summary && summary.capped ? ` title="counted in the first 20,000 pages that match"` : "";
     const head = summary
       ? `<span><strong id="n-companies"${note}>${Number(summary.companies).toLocaleString()}${plus}</strong> companies · <strong${note}>${Number(summary.documents).toLocaleString()}${plus}</strong> documents · <strong${note}>${Number(summary.pages).toLocaleString()}${plus}</strong> pages</span>`
-      : counting ? `<span>counting…</span>` : `<span><strong>${rows.length}</strong> ${mode === "pages" ? "pages" : "passages"} shown</span>`;
+      : counting ? `<span>counting…</span>` : `<span><strong>${rows.length}</strong> ${byDoc ? "documents" : mode === "pages" ? "pages" : "passages"} shown</span>`;
     const csv = mode === "pages"
       ? `<button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV (up to 5,000 pages)</button>`
       : `<button type="button" id="csv"${rows.length ? "" : " disabled"}>Download CSV</button>`;
@@ -351,7 +351,10 @@ a { color: var(--accent); }
         if (ctl.signal.aborted) return;
         const summary = s.error ? null : (s.data || [])[0];
         statusLine(rows, summary, secs(), false, byDoc);
-        if (s.error && !/abort/i.test(s.error.message)) $("status").insertAdjacentHTML("beforeend", `<span class="error">counting stopped: ${esc(s.error.message)}</span>`);
+        // the counts are a second query; when it hits its time limit the results above are still complete
+        if (s.error && !/abort/i.test(s.error.message)) $("status").insertAdjacentHTML("beforeend",
+          /timeout/i.test(s.error.message) ? `<span>totals not available: too many matches to count in 30 s (the results are complete; narrow by company, year or type for totals)</span>`
+                                           : `<span class="error">counting stopped: ${esc(s.error.message)}</span>`);
         if (summary && summary.capped) {
           const exact = await rpc("search_company_count", args, ctl.signal);
           if (ctl.signal.aborted) return;
