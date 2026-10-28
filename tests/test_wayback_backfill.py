@@ -159,6 +159,24 @@ class Selection(unittest.TestCase):
         self.assertNotIn("kr_latest_status", seen["formula"])
 
 
+class Writing(unittest.TestCase):
+    def test_a_refused_batch_goes_row_by_row_and_skips_the_bad_row(self):
+        import collections
+        calls = []
+        def fake(table, method, records):
+            calls.append(len(records))
+            if len(records) > 1 or records[0]["fields"]["document_url"] == "bad":
+                raise RuntimeError("500")
+            return [{"id": "rec" + records[0]["fields"]["document_url"]}]
+        stats = collections.Counter()
+        with mock.patch.object(W, "at_write", fake):
+            created, refused = W.write_rows([{"document_url": "a"}, {"document_url": "bad"}, {"document_url": "c"}], stats)
+        self.assertEqual([c["id"] for c in created], ["reca", "recc"])
+        self.assertEqual(refused, [{"document_url": "bad"}])
+        self.assertEqual(stats["rows Airtable refused"], 1)
+        self.assertEqual(calls, [3, 1, 1, 1])
+
+
 class Helpers(unittest.TestCase):
     def test_archive_url_round_trip(self):
         u = W.archive_url("20150905084903", "http://www.apax.com/a.pdf")
