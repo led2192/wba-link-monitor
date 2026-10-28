@@ -39,6 +39,7 @@ MAX_PAGES = 40                                            # candidate pages read
 # (French, South African and Swiss style), and a plain number; tables put numbers side by side with
 # spaces, so the spaced form is read apart from the others ("7 102,502 106,848" holds 102,502)
 NUMBERS = [re.compile(r"(?<![\w.,])\d{1,3}(?:[,.'’]\d{3})+(?:[.,]\d+)?(?!\d)"),
+           re.compile(r"(?<![\w.,])\d{1,2}(?:,\d{2})+,\d{3}(?:\.\d+)?(?!\d)"),     # Indian grouping: 7,50,616
            re.compile(r"(?<![\w.,])\d{1,3}(?:[ \u00a0\u202f]\d{3})+(?:[.,]\d+)?(?![\d,.]\d)"),
            re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)?(?!\d)")]
 
@@ -64,13 +65,13 @@ def printed_forms(value, scales):
         x = value / s
         if x < 1:
             continue
+        # every rounding within the tolerance, not only the first: 248,248.44 is printed with its
+        # decimals although 248,248 is within 0.05 % of it (28 Oct 2026: such values were searched
+        # without their decimals and missed)
         for d in (0, 1, 2):
             r = round(x, d)
-            if r and abs(r - x) / x <= 0.0005:
-                sig = len(f"{r:.{d}f}".replace(".", "").strip("0"))
-                if (r, d) not in [(o[0], o[2]) for o in out]:
-                    out.append((r, sig, d))
-                break
+            if r and abs(r - x) / x <= 0.0005 and r not in [o[0] for o in out]:
+                out.append((r, len(f"{r:.{d}f}".replace(".", "").strip("0")), d))
     return out
 
 
@@ -88,6 +89,11 @@ def tsquery_for(r, d=0):
         alts.append(ip + ("." + dd if dd else ""))
     if not dec and len(groups) > 1:
         alts.append(".".join(groups))
+    if len(ip) > 5:                                     # Indian grouping: 7,50,616 / 1,25,00,000
+        head, tail3 = ip[:-3], ip[-3:]
+        ind = [head[max(0, i - 2):i] for i in range(len(head), 0, -2)][::-1] + [tail3]
+        last = ind[-1] + ("." + dec if dec else "")
+        alts.append(" <-> ".join(ind[:-1] + [last]))
     alts = list(dict.fromkeys(alts))
     return " | ".join(f"({a})" if "<->" in a else a for a in alts)
 
