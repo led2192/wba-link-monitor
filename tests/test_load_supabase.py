@@ -158,6 +158,11 @@ class AgainstPostgres(unittest.TestCase):
             self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', company_filter => 'oldco')").fetchall()], ["old"])
             self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', company_filter => 'WBA2')").fetchall()], ["b"])
             self.assertEqual(c.execute("select count(*) from public.search_pages('\"net zero\"', company_filter => 'nobody')").fetchone()[0], 0)
+            # the JSON forms return the same rows as one value (not capped by the web interface)
+            self.assertEqual(c.execute("select jsonb_array_length(public.search_companies_json())").fetchone()[0],
+                             c.execute("select count(*) from public.search_companies()").fetchone()[0])
+            self.assertEqual(c.execute("select jsonb_array_length(public.export_pages_json('\"net zero\"'))").fetchone()[0],
+                             c.execute("select count(*) from public.export_pages('\"net zero\"')").fetchone()[0])
             # several companies and types at once, separated by ";"
             self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('\"net zero\"', company_filter => 'oldco; WBA2')").fetchall()], ["b", "old"])
             self.assertEqual([r[0] for r in c.execute("select library_id from public.search_pages('one', type_filter => 'Annual Report; CSR Report')").fetchall()], ["a"])
