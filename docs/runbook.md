@@ -30,7 +30,7 @@ Pipeline QA is where problems are found and counted; the Disclosure Library is w
 
 ## Search the full text
 
-Sign-in emails: Supabase → Authentication → Emails → Magic Link template must print the code, `{{ .Token }}`, next to the link (the page asks for the code). Supabase's built-in mail service sends about two emails an hour and only to the organization's members; for more, Authentication → Emails → SMTP Settings (a Gmail app password for tests, WBA's own mail service or a provider such as Resend for colleagues).
+Sign-in emails: Supabase → Authentication → Emails → Magic Link template prints the code, `{{ .Token }}`, and no link: mail scanners open links and use up the code (28 Oct 2026). Authentication → Rate Limits: emails sent per hour (raise it when several colleagues sign in the same hour). Supabase's built-in mail service sends about two emails an hour and only to the organization's members; for more, Authentication → Emails → SMTP Settings (a Gmail app password for tests, WBA's own mail service or a provider such as Resend for colleagues).
 
 - **A word, a phrase, an acronym, in every disclosure:** the search page (sign in with your WBA email; details and the SQL alternative in [evidence.md](evidence.md)). Results open the PDF at the page.
 - **How many companies mention X, with review:** a row in `mention_searches` ([../TEXT_SEARCH.md](../TEXT_SEARCH.md)); the answer and the hits appear overnight, or run Mention search by hand.

@@ -86,7 +86,7 @@ a { color: var(--accent); }
 <main class="wrap">
   <section id="signin" class="card hidden" aria-labelledby="signin-title">
     <h1 id="signin-title">Sign in</h1>
-    <p>Enter your WBA email address. We send you an email with a code: type it here (the link in the same email works too, but only in the browser it opens in). You stay signed in on this browser until you sign out.</p>
+    <p>Enter your WBA email address. We send you an email with a code: type it here. Press "Send code" once and use the code of the latest email (a new email makes the earlier code invalid). You stay signed in on this browser until you sign out.</p>
     <form id="signin-form" class="row">
       <input type="email" id="email" required placeholder="name@worldbenchmarkingalliance.org" autocomplete="email" aria-label="Email address">
       <button class="primary" type="submit">Send code</button>
@@ -270,7 +270,7 @@ a { color: var(--accent); }
     $("signin-msg").textContent = error
       ? (/rate limit/i.test(error.message) ? "Too many emails sent in the last hour; try again later. If you already have a code from an earlier email, type it below."
                                            : `Could not send the code: ${error.message}`)
-      : `Code sent to ${email}. Type it below (or open the link in this browser).`;
+      : `Code sent to ${email}. Type it below. It can take a minute; look in quarantine or junk if it does not come.`;
     $("signin-msg").classList.toggle("error", !!error);
     $("code-form").classList.remove("hidden");
     $("code").focus();
