@@ -104,6 +104,24 @@ def at_write(table, method, records):
     return out
 
 
+def write_rows(rows, stats):
+    """POST rows in tens; when Airtable refuses a batch after its retries (27 Oct 2026: a persistent 500
+    ended the first commit run after 62 companies), the rows go one by one and a row it still refuses
+    is logged and skipped. Returns (created records, rows refused)."""
+    try:
+        return at_write("report_library", "POST", [{"fields": r} for r in rows]), []
+    except Exception:
+        created, refused = [], []
+        for r in rows:
+            try:
+                created += at_write("report_library", "POST", [{"fields": r}])
+            except Exception as e:
+                refused.append(r)
+                stats["rows Airtable refused"] += 1
+                print(f"    refused by Airtable ({type(e).__name__}): {r.get('document_url', '')[:200]}", flush=True)
+        return created, refused
+
+
 def gap_companies(wbas, everything):
     """[(record id, wba_id, company_name, website host)] of the companies to look at: the ones named,
     else every company (--all) or the ones with a key report gap, minus those checked in the last
@@ -444,9 +462,9 @@ def main():
         new_rows += cand
         if a.commit:
             # written now, not at the end: a run killed at the workflow's limit keeps what it did
-            created = at_write("report_library", "POST", [{"fields": r} for r in cand]) if cand else []
+            created, refused = write_rows(cand, stats) if cand else ([], [])
             stats["rows written"] += len(created)
-            if not unanswered:           # an unanswered host means the company is looked at again next run
+            if not unanswered and not refused:   # looked at again next run: an unanswered host or a refused row
                 at_write("companies", "PATCH", [{"id": rec_id, "fields": {"wayback_checked": today}}])
             if created:
                 touched.append(w)
