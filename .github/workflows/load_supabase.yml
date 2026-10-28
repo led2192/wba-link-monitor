@@ -1,7 +1,9 @@
 name: Evidence database load
 
 # Copies the full-text store (pages and evidence passages) into the Supabase evidence database
-# (load_supabase.py). Every 6 hours it loads whatever is new, up to 300 minutes a run, and stops when
+# (load_supabase.py). Twice a night (19:41 and 01:41 UTC) it loads whatever is new, until 06:00 UTC at
+# the latest: a load slows every search (28 Oct 2026: the morning load of the night's new text ran
+# from 07:14 to 11:04 Madrid and searches timed out), so it stays out of working hours. It stops when
 # the database reaches SUPABASE_MAX_GB (repository variable; 6 GB when unset, which fits the 8 GB
 # disk a new project starts with). Once nothing is left to load it hands the word index build to the
 # database (pg_cron job build-pages-search: over three hours on the full corpus, longer than a job may
@@ -9,7 +11,7 @@ name: Evidence database load
 # request touching it runs a dry run (schema checked and rolled back) and posts what is waiting.
 on:
   schedule:
-    - cron: "41 */6 * * *"
+    - cron: "41 19,1 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -19,7 +21,7 @@ on:
         description: "at most this many pages files (0 = all waiting)"
         default: "0"
       minutes:
-        description: "time budget in minutes"
+        description: "time budget in minutes (0 = install the search functions and refresh documents only, no pages: quick)"
         default: "300"
   pull_request:
     paths: [load_supabase.py, supabase/schema.sql, .github/workflows/load_supabase.yml]
@@ -50,7 +52,11 @@ jobs:
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           MAX_GB: ${{ vars.SUPABASE_MAX_GB || '6' }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then ARGS="--commit --index --minutes 300"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+               # never past 06:00 UTC (07:00 Madrid in winter): loading slows every search
+               LEFT=$(( ( $(date -u -d 'tomorrow 06:00' +%s) - $(date -u +%s) ) / 60 % 1440 ))
+               [ "$LEFT" -gt 300 ] && LEFT=300
+               ARGS="--commit --index --minutes $LEFT"
           elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=""
           else ARGS="--parts ${{ inputs.parts }} --minutes ${{ inputs.minutes }}"
                [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit --index"; fi
