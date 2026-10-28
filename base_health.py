@@ -201,6 +201,30 @@ def failed_jobs(now):
     return [f"{w['name']} ({w['created_at'][:16].replace('T', ' ')} UTC): {w['html_url']}" for w in bad]
 
 
+def evidence_backlog():
+    """(pages files of the text store not yet in the evidence database, their size in MB, day of the last
+    file loaded) or None when the store or the database cannot be read. 28 Oct 2026: 216 files (about
+    2.3 million pages) waited for days while loads were cancelled or cut short, and searches missed
+    reports the library holds."""
+    if not (os.environ.get("SUPABASE_DB_URL") and os.environ.get("TEXT_STORE_TOKEN")):
+        return None
+    try:
+        import text_core as tc
+        from load_supabase import connect, loaded_names, plan
+        listing = tc.open_store().assets()
+        conn = connect(os.environ["SUPABASE_DB_URL"])
+        loaded = loaded_names(conn)
+        with conn.cursor() as c:
+            c.execute("select max(loaded_at)::date from public.load_log")
+            last = c.fetchone()[0]
+        conn.close()
+        pending, _ = plan(listing, loaded)
+        return len(pending), sum(listing[n]["size"] for n in pending) / 1e6, last
+    except Exception as e:
+        print(f"    could not read the evidence backlog: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
 def previous_avg(today):
     rows = list(sweep(HEALTH, ["date", "completeness_avg"], formula=f"IS_BEFORE({{date}}, '{today}')"))
     rows.sort(key=lambda r: r.get("fields", {}).get("date", ""))
@@ -230,6 +254,7 @@ def main():
     fails = failed_jobs(now)
     prev = previous_avg(today)
     qs = qa_stats()
+    eb = evidence_backlog()
 
     total = sum(counts.values())
     full = total / RECORD_LIMIT
@@ -254,6 +279,11 @@ def main():
         status = "Check" if status == "OK" else status
         attention.append(f"Average completeness fell from {float(prev):.1%} to {co['avg']:.1%}. "
                          "Look at which gap counts went up.")
+    if eb and (eb[0] >= 50 or (eb[2] and (now.date() - eb[2]).days >= 2 and eb[0])):
+        status = "Check" if status == "OK" else status
+        attention.append(f"{eb[0]:,} pages files ({eb[1]:,.0f} MB) of text are waiting to load into the evidence "
+                         f"database (last file loaded {eb[2]}); searches miss them. Run 'Evidence database load' "
+                         "(commit) in the evening.")
     if fails is None:
         attention.append("Failed-job check skipped (no GitHub token in this run).")
     if qs:
@@ -283,6 +313,9 @@ def main():
     if qs:
         row.update({"qa_records_total": qs["total"], "qa_base_full": round(qs["total"] / RECORD_LIMIT, 4),
                     "qa_open_failures": qs["open"], "qa_labels_reviewed": qs["reviewed"]})
+    if eb:
+        row.update({"evidence_files_waiting": eb[0], "evidence_mb_waiting": round(eb[1]),
+                    "evidence_last_load": eb[2].isoformat() if eb[2] else None})
     for tag, field in CHECKS:
         row[field] = co["miss"].get(tag, 0)
 
