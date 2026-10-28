@@ -93,6 +93,10 @@ The 2025 benchmarks left a validated answer per company and attribute (the golde
 2. is the analyst's quote in our text, found as a six-word phrase inside the document, which also gives the page in our numbering (extraction; analysts often write the printed folio);
 3. with the attribute's search words, is that page among the document's top 1, 3 or 10 pages (retrieval).
 
+The first full run (27 Oct 2026, 5,266 answers): about half the cited documents were not matched in the library; when the text was there, the cited page was in the top 10 for 62% (board climate expertise) to 97% (Scope 1) of answers.
+
+What matters is the right value, not the analyst's document (owner's rule, 28 Oct). For the number attributes, `value_eval.py` measures that ceiling directly: is the validated number on any page of the company's documents, printed at any scale ("513,727" in millions, "9.83" billion, "65 534", "2.561.249"), in that year's documents, and on a page that names the attribute. Extraction is scored the same way, by value.
+
 Whatever model reads the passages later cannot be right about a page that is not among them, so this is the floor. Reads the gold bases with the read-only secret `GOLD_TOKEN`; writes nothing anywhere but `gold_eval.md` and the run's counters in Pipeline QA. Two things the gold data showed: some validated answers are calculated, not copied (a board share worked out from "1 of 12"), which is why `datapoints.method` distinguishes stated from calculated; and of 480 validated low-carbon capex answers only 29 carry a quote, so attributes with many quotes weigh more.
 
 ## 7. Where this is going

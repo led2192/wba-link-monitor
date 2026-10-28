@@ -25,10 +25,15 @@
       "type": "number",
       "queries": ["\"scope 1\" emissions tCO2e", "\"scope 1\" \"scope 2\" emissions", "direct emissions scope 1", "GHG emissions scope 1 total"]
     },
-    "GMC_00133.1": {
-      "name": "Total Scope 2 emissions",
+    "GMC_00002.1": {
+      "name": "Scope 2 emissions, location-based",
       "type": "number",
-      "queries": ["\"scope 2\" emissions tCO2e", "\"scope 2\" location-based market-based", "indirect emissions scope 2", "GHG emissions scope 2 total"]
+      "queries": ["\"scope 2\" emissions tCO2e", "\"scope 2\" location-based", "indirect emissions scope 2", "GHG emissions scope 2 total"]
+    },
+    "GMC_00003.1": {
+      "name": "Scope 2 emissions, market-based",
+      "type": "number",
+      "queries": ["\"scope 2\" emissions tCO2e", "\"scope 2\" market-based", "indirect emissions scope 2", "GHG emissions scope 2 total"]
     },
     "GMC_00048.1": {
       "name": "Revenue",
