@@ -81,6 +81,7 @@ L_ID = "library_id"; L_WBA = "wba_id"; L_NAME = "company_name"; L_TYPE_AI = "sou
 L_TYPE_KW = "source_type"; L_YEAR = "year"; L_LABEL = "doc_label"; L_URL = "document_url"
 L_COVER = "cover_text"; L_DISCARD = "discard"; L_PAGES = "page_count"
 
+BATCH_MB = 2500                   # compressed pages files downloaded at a time (the runner's disk holds about 14 GB)
 LOOK_TEXT = "Full text"; LOOK_COVER = "First pages"
 COVER_PAGES = "first pages"   # what the `pages` cell says on a row found in first-pages mode
 MAX_HITS = 5000              # more matching documents than this is a search that needs narrowing
@@ -216,13 +217,31 @@ class TextSource:
               f"{len(self.page_files)} part(s), metadata {metas[-1]}", flush=True)
 
     def run(self, queries):
+        # in batches of about BATCH_MB compressed, each deleted once scanned: the whole store no longer fits
+        # on a GitHub runner's disk (28 Oct 2026: 895 parts, "Disk quota exceeded" mid-download)
         t0 = time.time()
-        got = tc.sync_down(self.store, self.page_files, self.work)
+        res = {i: {} for i in range(len(queries))}
+        batches, cur, cur_mb = [], [], 0.0
+        for n in sorted(self.page_files):
+            mb = self.listing[n]["size"] / 1e6
+            if cur and cur_mb + mb > BATCH_MB:
+                batches.append(cur); cur, cur_mb = [], 0.0
+            cur.append(n); cur_mb += mb
+        if cur:
+            batches.append(cur)
         size = sum(self.listing[n]["size"] for n in self.page_files) / 1e6
-        print(f"    parts ready ({got} downloaded, {size:,.0f} MB compressed) in {time.time() - t0:.0f}s", flush=True)
-        t0 = time.time()
-        res = tc.scan_store(self.work, self.page_files, queries, self.meta, self.owner, self.workers)
-        print(f"    scanned in {time.time() - t0:.0f}s", flush=True)
+        for bi, batch in enumerate(batches, 1):
+            tc.sync_down(self.store, batch, self.work)
+            part = tc.scan_store(self.work, batch, queries, self.meta, self.owner, self.workers)
+            for qi, hits in part.items():
+                res[qi].update(hits)
+            for n in batch:
+                try:
+                    os.remove(os.path.join(self.work, n))
+                except OSError:
+                    pass
+            print(f"    batch {bi}/{len(batches)} scanned ({len(batch)} parts) at {time.time() - t0:.0f}s", flush=True)
+        print(f"    {len(self.page_files)} parts, {size:,.0f} MB compressed, downloaded and scanned in {time.time() - t0:.0f}s", flush=True)
         out = []
         for qi, q in enumerate(queries):
             scope = [i for i in self.owner if q.in_scope(self.meta[i])]
