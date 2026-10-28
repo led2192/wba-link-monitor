@@ -356,7 +356,12 @@ a { color: var(--accent); }
           const exact = await rpc("search_company_count", args, ctl.signal);
           if (ctl.signal.aborted) return;
           const el = $("n-companies");
-          if (!exact.error && el) { el.textContent = Number(exact.data).toLocaleString(); el.removeAttribute("title"); }
+          // a negative answer is a lower bound: the database stopped counting after 25 s
+          if (!exact.error && el) {
+            const n = Number(exact.data), more = n < 0;
+            if (Math.abs(n) > Number(summary.companies)) { el.textContent = Math.abs(n).toLocaleString() + (more ? "+" : ""); }
+            if (!more) el.removeAttribute("title"); else el.title = "at least this many: counting stopped after 25 seconds";
+          }
         }
       } else {
         const r = await rpc("search_passages", { q, dim: textOrNull($("dim").value), ...lastArgs, max_rows: 100 }, ctl.signal);

@@ -335,6 +335,7 @@ declare
   types text[] := public.types_matching(type_filter);
   n bigint := 0;
   c record;
+  t0 timestamptz := clock_timestamp();
 begin
   if not public.can_search() then
     raise exception 'not allowed to search' using errcode = '42501';
@@ -350,6 +351,12 @@ begin
                  and (year_to is null or p.year <= year_to)
                  and (types is null or p.doc_type = any(types))) then
       n := n + 1;
+    end if;
+    -- On the full database each probe of a very common word reads its long index entry again: "climate"
+    -- and "revenue" passed 60 s (28 Oct 2026). After 25 s the count so far is returned as a lower
+    -- bound, written as a negative number (-1200 means "at least 1,200"); the page shows "1,200+".
+    if clock_timestamp() - t0 > interval '25 seconds' then
+      return -n;
     end if;
   end loop;
   return n;
