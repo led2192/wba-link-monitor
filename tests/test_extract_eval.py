@@ -76,6 +76,20 @@ class Ranking(unittest.TestCase):
         self.assertIn("small", [r[1] for r in kept])
 
 
+class RetrievalMiss(unittest.TestCase):
+    def test_kinds(self):
+        from value_eval import printed_forms, EMISSION_SCALES
+        forms = printed_forms(24442, EMISSION_SCALES)
+        holding = [("d1", 7, "Gross direct emissions tCO2e 24,442 25,100")]
+        rows = [(3.0, "d1", 2, "", None), (2.0, "d1", 7, "", None)]
+        self.assertEqual(X.retrieval_miss(holding, rows, forms)["kind"], "ranked too low")
+        self.assertEqual(X.retrieval_miss(holding, rows, forms)["rank"], 2)
+        self.assertEqual(X.retrieval_miss(holding, [(1.0, "d1", 6, "", None)], forms)["kind"], "label on the next or previous page")
+        m = X.retrieval_miss(holding, [(1.0, "d9", 1, "", None)], forms)
+        self.assertEqual(m["kind"], "no label on the page")
+        self.assertIn("gross direct emissions", m["phrases"])
+
+
 class PagesForModel(unittest.TestCase):
     def test_candidates_first_then_rank(self):
         scored = [(-99.0, None, "a", 1, ""), (0.5 - 0.05, ("c",), "a", 2, ""), (-99.1, None, "a", 3, ""),
