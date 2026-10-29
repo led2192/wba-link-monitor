@@ -87,6 +87,7 @@ Nothing by hand. On the 1st the QA archive moves old closed failures out of Pipe
 | `webpage_library` | web page printed to PDF (pages ticked `capture_page`) | captured every Sunday |
 | `mention_searches`, `mention_hits` | a saved "which companies mention X" question, and each matching document | see `TEXT_SEARCH.md` |
 | `base_health` | night | the daily health row |
+| `attribute_values` | company, attribute, year and method (from 29 Oct 2026) | `value`, `unit`, `method`, `status` (yours: accepted or rejected, never overwritten), `matches_validated`, `source_url`. See [attributes.md](attributes.md) |
 | `company_contacts` | company and email address printed in its own key reports (from 27 Oct 2026) | `email`, `kind` (investor relations, sustainability, media, general, ethics and compliance, privacy, people, personal, other), `personal`, `evidence` (page and sentence), `last_seen`, `domain_mail` (does the domain accept mail at all, from DNS; the mailbox itself cannot be checked without writing). Written by `contacts.py`; never deleted. Prefer the role mailboxes: a personal address is a person's data the company published for contact |
 
 ### 5.2 Interfaces
@@ -241,6 +242,9 @@ First measurement, 26 Oct 2026 (latest and previous wave together, 3,855 key rep
 | Sustainability | 1,230 | 103 | Mar 33, Apr 21, Jun 15, Jul 14 | 3 to 6 for 49 of 65, median 4 |
 
 Reading it: annual and integrated reports of December year-end companies come out in February and March; March year-end companies (Japan, India) publish in May and June. Separate sustainability reports come later and are spread from March to July. The sustainability figure rests on 103 reports only: 865 of the 1,230 have no date found (`pub_date_source` not found) because they rarely state one. File dates (`file_created`, `file_modified`, nightly from 27 Oct 2026) are the next source to measure for that gap.
+
+### 6.10 Attribute values (from 29 Oct 2026)
+Values of benchmark attributes proposed by the robot for review, starting with revenue from SEC and ESEF filings for every company that has them, 2018 to last year. Each route is first scored against the validated answers (SEC 89 %, ESEF 83 % right). Review the `differs` rows first and set `status`. How the routes work, their scores and what comes next: [attributes.md](attributes.md).
 
 ## 7. Pipeline QA
 
