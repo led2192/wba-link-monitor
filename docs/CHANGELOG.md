@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## October 2026
+- 2026-10-29 Documentation: new `docs/attributes.md` (the attribute specification, the routes and their scores, the `attribute_values` review loop, how to run it, what comes next), linked from the README, the guide (tables, section 6.10), the architecture and the runbook (#134)
 - 2026-10-29 Bank revenue: the ESEF and SEC revenue rules no longer take gross interest income (`ifrs-full:RevenueFromInterest`, `InterestRevenueCalculatedUsingEffectiveInterestMethod`, `us-gaap:InterestAndDividendIncomeOperating`) as a bank's revenue. The analysts' bank answers are income net of interest expense (SEC `RevenuesNetOfInterestExpense` matched them; the interest concepts differed from 5 of 5). Propose values now marks a row it no longer proposes (still `proposed`, same method and year, full run) as `superseded`, never deleting it (#133)
 - 2026-10-29 Propose values: years default to 2018 to last year (`--years 2018-`, also a single year or a list), so a run includes the latest reporting year as soon as it is filed. 2025 values have no validated answer to compare with yet; the trust comes from the same rule's score on earlier years (#132)
 - 2026-10-29 Label mining keeps the digits that belong to a label: a lone 1, 2 or 3 ("Scope 1", "Scope 2") and words with digits ("tCO2e"). The first run merged every scope into "scope" and cut CO2e to "co" (#131)

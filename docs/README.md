@@ -17,6 +17,7 @@ The pipeline that keeps WBA's Disclosure Library current: company pages watched 
 | [decisions.md](decisions.md) | Choices made, why, and what was rejected |
 | [pitfalls.md](pitfalls.md) | Lessons that were costly to learn |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and when, newest first |
+| [attributes.md](attributes.md) | Attribute values (revenue, Scope 1 and 2, capex...): the specification, the routes (XBRL filings, rules reader, model reader), how each is scored against the validated answers, the `attribute_values` table analysts review |
 | [evidence.md](evidence.md) | The evidence database: the full text of every disclosure in Supabase, the search page and who may use it, how it is loaded and set up, the gold evaluation, what comes next |
 | [../TEXT_SEARCH.md](../TEXT_SEARCH.md) | The full-text store and mention search |
 
