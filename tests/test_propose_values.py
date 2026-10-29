@@ -40,6 +40,20 @@ class Propose(unittest.TestCase):
         _, updates, _ = P.plan(rows, existing, NOW, in_scope)
         self.assertEqual(updates, [("recB", {"status": "superseded", "last_run": NOW})])
 
+    def test_model_row(self):
+        got = {"value": 2804e6, "printed": 2804.0, "scale": 1e6, "library_id": "PT_1-abc", "page": 57, "unit": "EUR"}
+        doc = {"id": "recDoc", "url": "https://example.com/ar.pdf", "label": "2024 | Testco | Annual Report"}
+        gold = {("PT_1", "GMC_00048.1", 2024): {"value": 2804e6, "unit": "EUR"}}
+        f = P.model_row("PT_1", "GMC_00048.1", {"name": "Revenue"}, 2024, got, doc, gold, "recCo", NOW)
+        self.assertEqual(f["value_id"], "PT_1|GMC_00048.1|2024|model reader")
+        self.assertEqual((f["method"], f["page"], f["document"], f["company"]), ("model reader", 57, ["recDoc"], ["recCo"]))
+        self.assertEqual(f["source_url"], "https://example.com/ar.pdf#page=57")
+        self.assertIn("Printed as 2,804 (millions) on page 57 of 2024 | Testco | Annual Report", f["detail"])
+        self.assertEqual(f["matches_validated"], "match")
+        f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1", "unit_family": "tco2e"}, 2024, dict(got, unit=""), {}, {}, None, NOW)
+        self.assertEqual((f["unit"], f["source_url"], f["matches_validated"]), ("tCO2e", None, "no validated answer"))
+        self.assertNotIn("document", f)
+
     def test_years(self):
         from datetime import datetime
         t = datetime(2026, 10, 29)

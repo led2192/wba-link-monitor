@@ -48,11 +48,14 @@ One row per company, attribute, year and method (`value_id` = `PT_00001|GMC_0004
 
 First full run (29 Oct 2026, 2022 to 2024): 1,324 revenue values; SEC 1,014 (288 match, 34 differ, 692 with no validated answer), ESEF 310 (72 match, 22 differ, 216 with no validated answer). Years now default to 2018 to last year.
 
+Model reader rows (from 29 Oct 2026): method `model reader`, `document` linked, `page`, `source_url` opening the PDF at that page, and `detail` saying what was printed at which scale. To check one: open the link, find the number on that page.
+
 ## Running it
 
 | To | Do |
 | --- | --- |
 | Fill or refresh revenue from filings | Actions, Propose values, tick commit (years default to 2018 to last year) |
+| Values read from reports by the model | Actions, Propose values, methods `model`, model years (2024), companies or limit, cost limit; tick commit after a dry run |
 | Score a route against the validated answers | Actions: SEC revenue, ESEF revenue, Generic reader (reader rules or model), Value evaluation |
 | Improve an attribute's labels | Actions, Label mining; copy the phrases worth having into `labels` in `attributes.json` (pull request), then run Generic reader again |
 | Change the methodology of an attribute | Edit its entry in `attributes.json` (pull request); the pull request's checks score it again |
