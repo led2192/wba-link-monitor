@@ -1,9 +1,10 @@
 name: Generic reader
 
 # The generic reader of number attributes (extract_eval.py), driven by attributes.json, scored stage by
-# stage against the validated 2025 answers: documents, pages, reading, right value. No model. Read-only
-# against the gold bases (GOLD_TOKEN) and the evidence database. Manual; a pull request touching it runs
-# 40 answers per attribute and posts the table.
+# stage against the validated 2025 answers: documents, pages, reading, right value. The last step is read
+# by rules or, with reader "model", by a language model (model_reader.py, ANTHROPIC_API_KEY, READER_MODEL).
+# Read-only against the gold bases (GOLD_TOKEN) and the evidence database. Manual; a pull request touching
+# it runs 40 answers per attribute with both readers and posts both tables (the model run costs cents).
 on:
   workflow_dispatch:
     inputs:
@@ -13,8 +14,16 @@ on:
       attributes:
         description: "GMC codes, comma-separated (blank = all in gold_attributes.json)"
         default: ""
+      reader:
+        description: "who reads the chosen pages: rules (free) or model (Anthropic API, billed)"
+        type: choice
+        options: [rules, model]
+        default: rules
+      model:
+        description: "model for the model reader"
+        default: "claude-haiku-5-5"
   pull_request:
-    paths: [extract_eval.py, attributes.json, .github/workflows/extract_eval.yml]
+    paths: [extract_eval.py, model_reader.py, attributes.json, .github/workflows/extract_eval.yml]
 
 jobs:
   evaluate:
@@ -37,10 +46,18 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          READER_MODEL: ${{ inputs.model || 'claude-haiku-5-5' }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 40"
-          else ARGS="--commit --limit ${{ inputs.limit }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"; fi
-          python extract_eval.py $ARGS
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python extract_eval.py --limit 40 --reader rules; mv extract_eval.md rules.md
+            python extract_eval.py --limit 40 --reader model || true
+            cat rules.md extract_eval.md > both.md && mv both.md extract_eval.md
+          else
+            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }}"
+            [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
+            python extract_eval.py $ARGS
+          fi
       - name: Keep the result
         if: always()
         uses: actions/upload-artifact@v4
