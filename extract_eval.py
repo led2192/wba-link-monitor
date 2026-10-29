@@ -248,8 +248,10 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
     if reader == "model":
         from model_reader import read_with_model
         best_pages = pages_for_model(scored, MODEL_PAGES)
-        got = read_with_model(g, attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage)
+        note = {}
+        got = read_with_model(g, attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
         r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
+        r["declined_why"] = note.get("why")
         if got:
             r["proposal"] = True
             r["right"] = right(got["value"], g["value"])
@@ -301,6 +303,7 @@ def main():
     print(f">>> {len(todo):,} answers to read ({', '.join(f'{c} {len(q)}' for c, q in zip(codes, queues))})", flush=True)
 
     stats = {c: collections.Counter() for c in codes}
+    declined = []
     wrong = collections.defaultdict(list)
     t0, cut = time.time(), False
     with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
@@ -322,6 +325,10 @@ def main():
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
+            if r.get("model_pages_have_number") and not r["proposal"]:
+                s["declined with the number on its pages"] += 1
+                if len(declined) < 20:
+                    declined.append(f"{g['id']}: \"{r.get('declined_why') or 'no reason given'}\"")
             if r["proposal"] and not r["right"] and len(wrong[g["attribute"]]) < 12:
                 (v, raw, sc, lab), lid, page = r["got"]
                 wrong[g["attribute"]].append(f"{g['id']}: validated {g['value']:,.2f} {g['unit']}; read {raw:,.2f} × {sc:g} "
@@ -345,7 +352,10 @@ def main():
                f"output tokens {usage['output_tokens']:,}; cost about ${cost(usage):.2f} "
                f"(${cost(usage) / (usage['calls'] or 1) * 1000:.2f} per 1,000 answers). "
                f"Proposals dropped because the named page does not print the number: {usage['quote_not_on_page']:,}. "
-               f"The model's pages hold the validated number for {sum(s['model_pages'] for s in stats.values()):,} answers.", ""]
+               f"The model's pages hold the validated number for {sum(s['model_pages'] for s in stats.values()):,} answers; "
+               f"it gave no figure for {sum(s['declined with the number on its pages'] for s in stats.values()):,} of them.", ""]
+        if declined:
+            md += ["No figure although its pages print the validated number (first 20, with the model's reason):", ""] + [f"- {d}" for d in declined] + [""]
     for c in codes:
         if wrong[c]:
             md += [f"Wrong proposals, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]

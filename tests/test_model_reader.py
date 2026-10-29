@@ -67,6 +67,13 @@ class ModelReader(unittest.TestCase):
             with self.assertRaises(M.ModelRefused):
                 M.read_with_model(G, REV, PAGES, usage, Sess((code, "")))
 
+    def test_the_reason_for_no_figure_is_kept(self):
+        note = {}
+        self.assertIsNone(M.read_with_model(G, REV, PAGES, X.collections.Counter(),
+                                            Sess((200, '{"page": null, "why": "only segment revenue is shown"}')), note=note))
+        self.assertEqual(note["why"], "only segment revenue is shown")
+        self.assertIn("none of the pages prints it", M.prompt(G, REV, PAGES))
+
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)
         self.assertAlmostEqual(M.cost(u), 0.10 + 0.05)

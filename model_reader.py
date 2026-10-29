@@ -48,13 +48,17 @@ def prompt(g, attr, pages):
              f"Period: {attr['period']}." if attr.get("period") else "",
              f"Scope: {attr['scope']}." if attr.get("scope") else "",
              "Take the figure for that year, for the whole company or group, not a segment, a region or a target.",
+             "The labels above are examples: if a page prints the figure under another name (\"Gross Scope 1\", "
+             "\"Net sales\", \"Direct emissions\"), give it. A figure in a table whose year columns are headed further up "
+             "the page counts. Reply with no figure only when none of the pages prints it.",
              "", "Pages:"]
     for i, (_, _, body) in enumerate(pages, 1):
         lines += [f"<page id=\"P{i}\">", (body or "")[:PAGE_CHARS], "</page>"]
     lines += ["", "Reply with JSON: {\"page\": \"P1\", \"printed\": \"12,345.6\", \"scale\": one of "
               + ", ".join(f'"{s}"' for s in SCALES) + " (the unit the page states for that number, e.g. "
               "\"in millions\", \"€m\", \"'000\", \"ktCO2e\"), \"unit\": \"EUR\" or \"tCO2e\" etc., "
-              "\"year\": 2024}. If the pages do not give the figure for that year, reply {\"page\": null}."]
+              "\"year\": 2024}. If none of the pages prints the figure for that year, reply {\"page\": null, \"why\": \"...\"} "
+              "with the reason in ten words or fewer."]
     return "\n".join(l for l in lines if l is not None)
 
 
@@ -114,14 +118,18 @@ def call(messages, usage, sess=None, model=None):
     return ""
 
 
-def read_with_model(g, attr, pages, usage, sess=None):
-    """The model's proposal for one answer, checked against the pages, or None."""
+def read_with_model(g, attr, pages, usage, sess=None, note=None):
+    """The model's proposal for one answer, checked against the pages, or None. note (a dict), when given,
+    receives the model's reason when it gives no figure ("why")."""
     if not pages:
         return None
     from extract_eval import to_number
     from value_eval import numbers_on
     text = call([{"role": "user", "content": prompt(g, attr, pages)}], usage, sess)
-    got = check(parse_reply(text), pages, to_number, numbers_on)
+    reply = parse_reply(text)
+    if note is not None and reply and not reply.get("page"):
+        note["why"] = str(reply.get("why") or "")[:120]
+    got = check(reply, pages, to_number, numbers_on)
     if got is False:
         usage["quote_not_on_page"] += 1
         return None
