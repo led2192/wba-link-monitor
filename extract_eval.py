@@ -217,6 +217,27 @@ def page_score(text_rank, cand, body, year, labels, exclude, doc_weight):
     return 1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight
 
 
+def retrieval_miss(holding, rows, forms):
+    """Why the pages that print the validated number were not kept: {"kind", "rank", "phrases"}.
+    kind: "no label on the page" (the word index never offered it), "label on the next or previous page"
+    (a table split over two pages), or "ranked too low" (offered, scored below the kept pages; rank = its
+    best position). phrases: the words printed just before the number on those pages, for new labels."""
+    from label_mining import label_window, number_spans, phrases
+    order = {(r[1], r[2]): i for i, r in enumerate(sorted(rows, key=lambda r: -r[0]))}
+    ranked = [order[(lid, p)] for lid, p, _ in holding if (lid, p) in order]
+    near = [p for lid, p, _ in holding if (lid, p - 1) in order or (lid, p + 1) in order]
+    ph = set()
+    for _, _, body in holding:
+        for v, _, d in forms:
+            for s in number_spans(body, v, d):
+                ph |= phrases(label_window(body, s))
+    if ranked:
+        return {"kind": "ranked too low", "rank": min(ranked) + 1, "phrases": ph}
+    if near:
+        return {"kind": "label on the next or previous page", "rank": None, "phrases": ph}
+    return {"kind": "no label on the page", "rank": None, "phrases": ph}
+
+
 def keep_pages(rows, n=MAX_PAGES, per_doc=PER_DOC):
     """The n best-scored pages, at most per_doc from one document. rows: [(score, library_id, ...)]."""
     out, per = [], collections.Counter()
@@ -264,8 +285,11 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
     forms = printed_forms(g["value"], scales)
     if forms:
         q = " | ".join(f"({tsquery_for(v, d)})" for v, _, d in forms)
-        cur.execute("select body from public.pages where library_id = any(%s) and words @@ to_tsquery('simple', %s) limit 40", (ids, q))
-        r["in_docs"] = any(found_on(b, v) for (b,) in cur.fetchall() for v, _, _ in forms)
+        cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and words @@ to_tsquery('simple', %s) limit 40", (ids, q))
+        holding = [(lid, page, body) for lid, page, body in cur.fetchall() if any(found_on(body, v) for v, _, _ in forms)]
+        r["in_docs"] = bool(holding)
+    else:
+        holding = []
     cur.execute("select library_id, page, body, ts_rank_cd(words, websearch_to_tsquery('simple', %s), 32) as rk from public.pages "
                 "where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s) "
                 "order by rk desc limit %s",
@@ -278,6 +302,8 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
         rows.append((sc, lid, page, body, top))
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
+    if r["in_docs"] and not r["in_pages"]:
+        r["miss"] = retrieval_miss(holding, rows, forms)
     # each kept page's best rule candidate, used by the rule reader and to pick the model's pages
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
     r["model_pages_have_number"] = any(found_on(b, v) for *_, b in pages_for_model(scored, MODEL_PAGES) for v, _, _ in forms)
@@ -339,6 +365,8 @@ def main():
 
     stats = {c: collections.Counter() for c in codes}
     declined = []
+    miss_ranks = collections.defaultdict(list)
+    miss_phrases = {c: collections.Counter() for c in codes}
     wrong = collections.defaultdict(list)
     t0, cut = time.time(), False
     with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
@@ -360,6 +388,12 @@ def main():
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
+            if r.get("miss"):
+                s["miss: " + r["miss"]["kind"]] += 1
+                if r["miss"]["rank"]:
+                    miss_ranks[g["attribute"]].append(r["miss"]["rank"])
+                if r["miss"]["kind"] != "ranked too low":
+                    miss_phrases[g["attribute"]].update(r["miss"]["phrases"])
             if r.get("model_pages_have_number") and not r["proposal"]:
                 s["declined with the number on its pages"] += 1
                 if len(declined) < 20:
@@ -392,6 +426,17 @@ def main():
                f"it gave no figure for {sum(s['declined with the number on its pages'] for s in stats.values()):,} of them.", ""]
         if declined:
             md += ["No figure although its pages print the validated number (first 20, with the model's reason):", ""] + [f"- {d}" for d in declined] + [""]
+    md += ["Pages that print the validated number but were not kept (answers where the number is in the documents and not on the 25 ranked pages):", "",
+           "| Attribute | Missed | No label on the page | Label on the next or previous page | Ranked too low | Their best rank (median) | Words printed before the number where no label matched |",
+           "| --- | --: | --: | --: | --: | --: | --- |"]
+    for c in codes:
+        s = stats[c]; rk = sorted(miss_ranks[c])
+        n_miss = s["miss: no label on the page"] + s["miss: label on the next or previous page"] + s["miss: ranked too low"]
+        top = ", ".join(p for p, k in miss_phrases[c].most_common(40) if k >= 2 and len(p) > 3)[:300]
+        md.append(f"| {c} {spec['attributes'][c]['name']} | {n_miss:,} | {s['miss: no label on the page']:,} | "
+                  f"{s['miss: label on the next or previous page']:,} | {s['miss: ranked too low']:,} | "
+                  f"{rk[len(rk) // 2] if rk else ''} | {top} |")
+    md.append("")
     for c in codes:
         if wrong[c]:
             md += [f"Wrong proposals, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]
