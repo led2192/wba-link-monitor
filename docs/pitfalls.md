@@ -110,3 +110,6 @@ The search page listed documents from 2027 above everything else: 566 rows carri
 ## A word pattern of letters only loses the labels that are numbered
 Label mining first split words on letters only, so "Scope 1" and "Scope 2" both became "scope" and "tCO2e" became "tco". Labels that carry a number (scopes, categories) or a chemical formula need the digit kept: label_mining.py keeps a lone 1 to 3 and any word that mixes letters and digits, and still drops figures, years and percentages (29 Oct 2026).
 
+## A bank's "revenue" is not its interest income
+The first full Propose values run (29 Oct 2026) took `ifrs-full:RevenueFromInterest` as revenue for European banks (one large Spanish bank: 61.7 billion EUR of interest income, against 35.5 billion EUR of gross income). WBA's validated bank answers are income net of interest expense ("gross income", "total operating income"; `us-gaap:RevenuesNetOfInterestExpense` for SEC filers), and every ESEF interest-income pick differed from them (5 of 5). Interest-income concepts are out of the revenue lists; a bank gets no ESEF revenue until its net-income concept is identified, usually a company extension rather than an IFRS concept.
+

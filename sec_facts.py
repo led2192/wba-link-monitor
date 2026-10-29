@@ -42,7 +42,6 @@ REVENUE_CONCEPTS = [
     ("us-gaap", "RevenuesNetOfInterestExpense"),
     ("ifrs-full", "Revenue"),
     ("ifrs-full", "RevenueFromContractsWithCustomers"),
-    ("us-gaap", "InterestAndDividendIncomeOperating"),
     ("ifrs-full", "InsuranceRevenue"),
 ]
 
