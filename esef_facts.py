@@ -29,6 +29,12 @@ ESEF = "https://filings.xbrl.org"
 ESEF_CONCEPTS = ["ifrs-full:Revenue", "ifrs-full:RevenueFromContractsWithCustomers", "ifrs-full:InsuranceRevenue",
                  "ifrs-full:RevenueFromInterest", "ifrs-full:InterestRevenueCalculatedUsingEffectiveInterestMethod"]
 CORE_DIMS = {"concept", "entity", "period", "unit", "language"}
+# ISIN prefixes of the countries whose listed companies file in ESEF (the EU and the EEA) or in the UK's
+# equivalent format, which filings.xbrl.org also collects. A company with an LEI elsewhere (most of the
+# universe: the US, Japan, China) has no ESEF report; the first sample of 28 Oct 2026 took 300 such
+# companies and found filings for 4.
+ESEF_ISIN = {"AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT",
+             "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "IS", "LI", "NO", "GB"}
 
 
 def period_days(period):
@@ -87,17 +93,18 @@ def filings(lei, sess, years):
 
 
 def company_leis(token, base):
-    """{wba_id: lei} for companies with an LEI."""
+    """{wba_id: lei} for companies with an LEI and an ISIN of an ESEF country."""
     from monitor_core import airtable_request
     H = {"Authorization": f"Bearer {token}"}
-    params = [("pageSize", "100"), ("filterByFormula", "{lei}!=''"), ("fields[]", "wba_id"), ("fields[]", "lei")]
+    params = [("pageSize", "100"), ("filterByFormula", "AND({lei}!='', {isin}!='')"), ("fields[]", "wba_id"),
+              ("fields[]", "lei"), ("fields[]", "isin")]
     out, offset = {}, None
     while True:
         p = params + ([("offset", offset)] if offset else [])
         j = airtable_request("GET", f"https://api.airtable.com/v0/{base}/companies", H, params=p).json()
         for r in j.get("records", []):
             f = r["fields"]
-            if f.get("wba_id") and (f.get("lei") or "").strip():
+            if f.get("wba_id") and (f.get("lei") or "").strip() and (f.get("isin") or "")[:2].upper() in ESEF_ISIN:
                 out[f["wba_id"]] = f["lei"].strip()
         offset = j.get("offset")
         if not offset:
@@ -125,7 +132,7 @@ def main():
     todo = [g for g in answers if g["wba"] in leis]
     if a.limit:
         todo = todo[:a.limit]
-    print(f">>> {len(answers):,} revenue answers with a value; {len(todo):,} of companies with an LEI", flush=True)
+    print(f">>> {len(answers):,} revenue answers with a value; {len(todo):,} of companies listed in an ESEF country", flush=True)
     sess = requests.Session()
     years = collections.defaultdict(set)
     for g in todo:
@@ -164,7 +171,7 @@ def main():
                 wrong.append(f"{g['id']}: validated {g['value']:,.0f} {g['unit']}; ESEF {f[4]:,.0f} {f[5]} ({f[1]}, period ending {f[3]}, added {f[7]})")
     n = c["fact for the year"] or 1
     md = ["### ESEF revenue against the validated answers (no model)", "",
-          f"Revenue answers with a value: {len(answers):,}; of companies with an LEI: {c['answers']:,} ({len(cache):,} companies).", "",
+          f"Revenue answers with a value: {len(answers):,}; of companies listed in an ESEF country (ISIN) with an LEI: {c['answers']:,} ({len(cache):,} companies).", "",
           "| | Answers | Share of answers with a fact |", "| --- | --: | --: |",
           f"| ESEF has an annual revenue fact for the year | {c['fact for the year']:,} | |",
           f"| the rule's choice matches (0.5 %) | {c['match']:,} | {c['match'] / n:.0%} |",
