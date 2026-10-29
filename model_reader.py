@@ -90,7 +90,7 @@ def call(messages, usage, sess=None, model=None):
     import requests
     sess = sess or requests
     body = {"model": model or os.environ.get("READER_MODEL", DEFAULT_MODEL), "max_tokens": MAX_TOKENS,
-            "temperature": 0, "system": SYSTEM, "messages": messages}
+            "system": SYSTEM, "messages": messages}
     headers = {"x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(), "anthropic-version": "2023-06-01",
                "content-type": "application/json"}
     for attempt in range(3):

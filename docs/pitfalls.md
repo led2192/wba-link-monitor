@@ -113,3 +113,6 @@ The first model-reader check (29 Oct 2026) reported 134 failed calls and nothing
 ## A word pattern of letters only loses the labels that are numbered
 Label mining first split words on letters only, so "Scope 1" and "Scope 2" both became "scope" and "tCO2e" became "tco". Labels that carry a number (scopes, categories) or a chemical formula need the digit kept: label_mining.py keeps a lone 1 to 3 and any word that mixes letters and digits, and still drops figures, years and percentages (29 Oct 2026).
 
+## Newer models refuse sampling settings
+The first model-reader call sent `temperature: 0` (the usual way to ask for a repeatable answer) and Haiku 5.5 answered HTTP 400 "`temperature` is deprecated for this model" (29 Oct 2026). model_reader.py sends no sampling settings; repeatability comes from the closed reply format and the check that the number is on the page.
+
