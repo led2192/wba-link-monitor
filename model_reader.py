@@ -26,12 +26,12 @@ class ModelRefused(RuntimeError):
     """The API refused the call for a reason a retry won't fix (key, credit, model name): stop the run."""
 DEFAULT_MODEL = "claude-haiku-5-5"
 PAGE_CHARS = 8000                       # per page; a long page is cut, tables sit near the top in practice
-MAX_TOKENS = 300
+MAX_TOKENS = 1000                   # 300 cut replies off before their JSON (average reply 236 tokens, 29 Oct 2026)
 SCALES = {"units": 1, "thousands": 1e3, "lakhs": 1e5, "millions": 1e6, "crores": 1e7, "hundred millions": 1e8,
           "billions": 1e9}
 
 SYSTEM = ("You read pages of company reports and find one reported figure. Answer with one JSON object and "
-          "nothing else. Copy the number exactly as printed on the page. Never compute, convert or round.")
+          "nothing else: no explanation before or after it. Copy the number exactly as printed on the page. Never compute, convert or round.")
 
 
 def prompt(g, attr, pages):
@@ -48,13 +48,17 @@ def prompt(g, attr, pages):
              f"Period: {attr['period']}." if attr.get("period") else "",
              f"Scope: {attr['scope']}." if attr.get("scope") else "",
              "Take the figure for that year, for the whole company or group, not a segment, a region or a target.",
+             "The labels above are examples: if a page prints the figure under another name (\"Gross Scope 1\", "
+             "\"Net sales\", \"Direct emissions\"), give it. A figure in a table whose year columns are headed further up "
+             "the page counts. Reply with no figure only when none of the pages prints it.",
              "", "Pages:"]
     for i, (_, _, body) in enumerate(pages, 1):
         lines += [f"<page id=\"P{i}\">", (body or "")[:PAGE_CHARS], "</page>"]
     lines += ["", "Reply with JSON: {\"page\": \"P1\", \"printed\": \"12,345.6\", \"scale\": one of "
               + ", ".join(f'"{s}"' for s in SCALES) + " (the unit the page states for that number, e.g. "
               "\"in millions\", \"€m\", \"'000\", \"ktCO2e\"), \"unit\": \"EUR\" or \"tCO2e\" etc., "
-              "\"year\": 2024}. If the pages do not give the figure for that year, reply {\"page\": null}."]
+              "\"year\": 2024}. If none of the pages prints the figure for that year, reply {\"page\": null, \"why\": \"...\"} "
+              "with the reason in ten words or fewer."]
     return "\n".join(l for l in lines if l is not None)
 
 
@@ -110,18 +114,29 @@ def call(messages, usage, sess=None, model=None):
         usage["calls"] += 1
         usage["input_tokens"] += j.get("usage", {}).get("input_tokens", 0)
         usage["output_tokens"] += j.get("usage", {}).get("output_tokens", 0)
+        if j.get("stop_reason") == "max_tokens":
+            usage["cut_at_token_limit"] += 1
         return "".join(c.get("text", "") for c in j.get("content", []) if c.get("type") == "text")
     return ""
 
 
-def read_with_model(g, attr, pages, usage, sess=None):
-    """The model's proposal for one answer, checked against the pages, or None."""
+def read_with_model(g, attr, pages, usage, sess=None, note=None):
+    """The model's proposal for one answer, checked against the pages, or None. note (a dict), when given,
+    receives the model's reason when it gives no figure ("why")."""
     if not pages:
         return None
     from extract_eval import to_number
     from value_eval import numbers_on
     text = call([{"role": "user", "content": prompt(g, attr, pages)}], usage, sess)
-    got = check(parse_reply(text), pages, to_number, numbers_on)
+    reply = parse_reply(text)
+    if note is not None:
+        if reply is None:
+            note["why"] = "(no JSON in the reply)" if text else "(empty reply)"
+        elif not reply.get("page"):
+            note["why"] = str(reply.get("why") or "")[:120]
+        elif not reply.get("printed"):
+            note["why"] = "(named a page but no number)"
+    got = check(reply, pages, to_number, numbers_on)
     if got is False:
         usage["quote_not_on_page"] += 1
         return None

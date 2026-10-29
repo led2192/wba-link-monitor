@@ -29,6 +29,8 @@ Retrieval and rules first, a model only for what they cannot read, and every rou
 
 The model's misses on the first sample: the neighbouring year's column (fiscal-year labels such as FY25 for a year ending March 2025, which is reporting year 2024), a restated figure next to the validated one, and pages that never reached it (the validated number was on its 3 pages for 34 % of the answers, on the 25 ranked pages for 50 to 60 %). The second version gives it 6 pages, half by rule candidates and half by rank, and spells out the fiscal-year labels.
 
+Second version (6 pages, 29 Oct 2026): revenue 30 %, Scope 1 28 %, Scope 2 location 18 %, market 25 %, capex 5 % (its ranked pages now hold the value for 20 % of answers, against 0 % before the mined labels); right for 71 to 88 % of its answers; $0.12 per 200 answers. The model now saw the number for 77 answers but declined many of them, so the third version loosens the prompt and records the reason for each decline.
+
 Reading the reader's table: "Number in those documents" is the ceiling (the value is printed somewhere in the year's documents: about 60 to 80 %), "Number on the ranked pages" is what the reader was given (32 to 60 %), and "Right" is what it got. The loss between the last two is reading; the loss between the first two is retrieval, which `label_mining.py` addresses.
 
 Banks: revenue for WBA is income net of interest expense (SEC `RevenuesNetOfInterestExpense`, "gross income" or "total operating income" in European reports), never gross interest income. Interest-income concepts were removed from the rules on 29 Oct 2026 (pitfalls.md).
