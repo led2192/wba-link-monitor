@@ -229,7 +229,7 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     usage, got_rows = collections.Counter(), []
     with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
         cur = conn.cursor()
-        cur.execute("set statement_timeout = '30s'")
+        cur.execute("set statement_timeout = '90s'")
         for wba in companies:
             for y in years:
                 for code in codes:
@@ -248,7 +248,7 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                             traceback.print_exc()
                             c[f"model reader: first error {type(e).__name__}: {str(e)[:120]}"] = 1
                         c["model reader: errors"] += 1
-                        conn.rollback(); cur.execute("set statement_timeout = '30s'")
+                        conn.rollback(); cur.execute("set statement_timeout = '90s'")
                         continue
                     if got:
                         got_rows.append((wba, code, y, got))
