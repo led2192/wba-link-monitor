@@ -1,0 +1,66 @@
+name: Propose values
+
+# Proposed attribute values in the Disclosure Library table attribute_values (propose_values.py): revenue
+# from SEC and ESEF XBRL filings for every company with the identifier, compared with the validated 2025
+# answers. Writes only with commit ticked; never touches a row a person accepted or rejected. A pull
+# request touching it runs a dry run on 30 companies per method and posts the counts.
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "write to attribute_values (unticked = dry run)"
+        type: boolean
+        default: false
+      years:
+        description: "WBA years, comma-separated"
+        default: "2022,2023,2024"
+      methods:
+        description: "sec, esef or both"
+        default: "sec,esef"
+      limit:
+        description: "companies per method (0 = all)"
+        default: "0"
+  pull_request:
+    paths: [propose_values.py, .github/workflows/propose_values.yml]
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Propose
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 30"
+          else
+            ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }}"
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          fi
+          python propose_values.py $ARGS
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: propose-values
+          path: propose_values.md
+          if-no-files-found: ignore
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s propose_values.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file propose_values.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Propose values: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
