@@ -31,6 +31,15 @@ class Propose(unittest.TestCase):
         self.assertEqual([u[0] for u in updates], ["recC"]); self.assertNotIn("status", updates[0][1])
         self.assertEqual(kept, 1)
 
+    def test_rows_no_longer_proposed_are_superseded(self):
+        rows = [P.row("A", "GMC_00048.1", "Revenue", 2024, FACT, "SEC XBRL", "u", {}, None, NOW)]
+        existing = {"B|GMC_00048.1|2024|SEC XBRL": {"id": "recB", "status": "proposed"},
+                    "C|GMC_00048.1|2024|SEC XBRL": {"id": "recC", "status": "accepted"},
+                    "D|GMC_00048.1|2019|SEC XBRL": {"id": "recD", "status": "proposed"}}
+        in_scope = lambda vid: vid.endswith("|2024|SEC XBRL")
+        _, updates, _ = P.plan(rows, existing, NOW, in_scope)
+        self.assertEqual(updates, [("recB", {"status": "superseded", "last_run": NOW})])
+
     def test_years(self):
         from datetime import datetime
         t = datetime(2026, 10, 29)
