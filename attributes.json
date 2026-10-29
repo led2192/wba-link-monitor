@@ -1,0 +1,304 @@
+{
+  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes).",
+  "unit_families": {
+    "currency": {
+      "scales": {
+        "thousand": 1000.0,
+        "thousands": 1000.0,
+        "000": 1000.0,
+        "'000": 1000.0,
+        "k": 1000.0,
+        "tsd": 1000.0,
+        "milliers": 1000.0,
+        "lakh": 100000.0,
+        "lakhs": 100000.0,
+        "million": 1000000.0,
+        "millions": 1000000.0,
+        "mn": 1000000.0,
+        "mio": 1000000.0,
+        "m": 1000000.0,
+        "mm": 1000000.0,
+        "millones": 1000000.0,
+        "milhões": 1000000.0,
+        "milioni": 1000000.0,
+        "百万円": 1000000.0,
+        "百万": 1000000.0,
+        "crore": 10000000.0,
+        "crores": 10000000.0,
+        "亿": 100000000.0,
+        "億円": 100000000.0,
+        "billion": 1000000000.0,
+        "billions": 1000000000.0,
+        "bn": 1000000000.0,
+        "mrd": 1000000000.0,
+        "milliards": 1000000000.0,
+        "bln": 1000000000.0,
+        "t": 1000.0
+      }
+    },
+    "tco2e": {
+      "scales": {
+        "tco2e": 1,
+        "tco2": 1,
+        "tonnes": 1,
+        "tons": 1,
+        "metric tons": 1,
+        "ktco2e": 1000.0,
+        "kt": 1000.0,
+        "thousand tonnes": 1000.0,
+        "thousand tons": 1000.0,
+        "'000 t": 1000.0,
+        "000 tco2e": 1000.0,
+        "mtco2e": 1000000.0,
+        "mt": 1000000.0,
+        "million tonnes": 1000000.0,
+        "million tons": 1000000.0
+      }
+    }
+  },
+  "attributes": {
+    "GMC_00048.1": {
+      "name": "Revenue",
+      "definition": "What is the total revenue of the company in the reporting year?",
+      "type": "number",
+      "unit_family": "currency",
+      "labels": [
+        "total revenues",
+        "total revenue",
+        "revenues",
+        "revenue",
+        "net sales",
+        "total net sales",
+        "turnover",
+        "sales",
+        "operating revenue",
+        "total operating revenue",
+        "net revenues",
+        "chiffre d'affaires",
+        "umsatzerlöse",
+        "umsatz",
+        "ingresos",
+        "ventas netas",
+        "receita líquida",
+        "ricavi",
+        "omzet",
+        "売上高",
+        "营业收入",
+        "營業收入"
+      ],
+      "exclude": [
+        "per share",
+        "cost of",
+        "growth",
+        "%",
+        "segment",
+        "by region",
+        "deferred",
+        "unearned"
+      ],
+      "doc_types": [
+        "Annual Report",
+        "10K Form",
+        "Financial Statement",
+        "Integrated Report",
+        "Registration Document"
+      ],
+      "period": "fiscal_year",
+      "scope": "group",
+      "xbrl": [
+        "us-gaap:Revenues",
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "ifrs-full:Revenue",
+        "ifrs-full:RevenueFromContractsWithCustomers"
+      ]
+    },
+    "GMC_00001.1": {
+      "name": "Scope 1 emissions",
+      "definition": "Total scope 1 emissions in tCO2(e) for the reporting year.",
+      "type": "number",
+      "unit_family": "tco2e",
+      "labels": [
+        "total scope 1 emissions",
+        "scope 1 emissions",
+        "scope 1 ghg emissions",
+        "scope 1",
+        "direct ghg emissions",
+        "direct emissions",
+        "émissions directes",
+        "scope-1",
+        "范围一",
+        "スコープ1"
+      ],
+      "exclude": [
+        "intensity",
+        "per ",
+        "target",
+        "reduction",
+        "% ",
+        "scope 1 and 2",
+        "scope 1+2",
+        "scopes 1 and 2"
+      ],
+      "doc_types": [
+        "Sustainability Report",
+        "ESG Report",
+        "CDP Report",
+        "Climate Report",
+        "Integrated Report",
+        "Annual Report"
+      ],
+      "period": "fiscal_year",
+      "scope": "group"
+    },
+    "GMC_00002.1": {
+      "name": "Scope 2 emissions, location-based",
+      "definition": "Total scope 2 emissions in tCO2(e) location-based for the reporting year.",
+      "type": "number",
+      "unit_family": "tco2e",
+      "labels": [
+        "scope 2 emissions (location-based)",
+        "scope 2 location-based",
+        "scope 2 (location-based)",
+        "location-based scope 2",
+        "scope 2 emissions location-based",
+        "location-based"
+      ],
+      "exclude": [
+        "intensity",
+        "per ",
+        "target",
+        "reduction",
+        "market-based",
+        "% "
+      ],
+      "doc_types": [
+        "Sustainability Report",
+        "ESG Report",
+        "CDP Report",
+        "Climate Report",
+        "Integrated Report",
+        "Annual Report"
+      ],
+      "period": "fiscal_year",
+      "scope": "group"
+    },
+    "GMC_00003.1": {
+      "name": "Scope 2 emissions, market-based",
+      "definition": "Total scope 2 emissions in tCO2(e) market-based for the reporting year.",
+      "type": "number",
+      "unit_family": "tco2e",
+      "labels": [
+        "scope 2 emissions (market-based)",
+        "scope 2 market-based",
+        "scope 2 (market-based)",
+        "market-based scope 2",
+        "scope 2 emissions market-based",
+        "market-based",
+        "scope 2 emissions",
+        "scope 2"
+      ],
+      "exclude": [
+        "intensity",
+        "per ",
+        "target",
+        "reduction",
+        "location-based",
+        "% "
+      ],
+      "doc_types": [
+        "Sustainability Report",
+        "ESG Report",
+        "CDP Report",
+        "Climate Report",
+        "Integrated Report",
+        "Annual Report"
+      ],
+      "period": "fiscal_year",
+      "scope": "group"
+    },
+    "GMC_00064.1": {
+      "name": "Low-carbon capital expenditure",
+      "definition": "What is the total CapEx or investments allocated to climate solutions/enabler activities? (a currency amount or a percentage of total CapEx)",
+      "type": "number",
+      "unit_family": "currency",
+      "labels": [
+        "taxonomy-aligned capex",
+        "taxonomy aligned capex",
+        "aligned capex",
+        "low-carbon capex",
+        "green capex",
+        "capex aligned",
+        "climate capex",
+        "capital expenditure aligned"
+      ],
+      "exclude": [
+        "opex",
+        "turnover"
+      ],
+      "doc_types": [
+        "Annual Report",
+        "Sustainability Report",
+        "Integrated Report",
+        "Climate Report"
+      ],
+      "period": "fiscal_year",
+      "scope": "group"
+    },
+    "GMC_01933.1": {
+      "name": "Climate expertise on the highest governance body",
+      "definition": "What expertises/competences related to climate change and the low-carbon transition are represented among the members of the highest governance body?",
+      "type": "options",
+      "options": [
+        "Academic qualifications",
+        "Professional training",
+        "Prior relevant experience",
+        "Demonstrated technical knowledge",
+        "Professional experience",
+        "Recent active membership of relevant organisations"
+      ],
+      "labels": [
+        "board skills matrix",
+        "climate expertise",
+        "climate competence",
+        "sustainability expertise",
+        "board expertise",
+        "climate-related expertise"
+      ],
+      "doc_types": [
+        "Annual Report",
+        "Integrated Report",
+        "Sustainability Report",
+        "Registration Document"
+      ],
+      "period": "fiscal_year",
+      "scope": "group"
+    },
+    "GMC_01936.1": {
+      "name": "Climate policies the company publicly supports",
+      "definition": "What climate policies does the company publicly support? Paris Agreement commitment; net zero commitment; regional climate policies.",
+      "type": "options",
+      "options": [
+        "Paris Agreement commitment",
+        "Net zero commitment",
+        "Regional climate policies"
+      ],
+      "labels": [
+        "paris agreement",
+        "net zero",
+        "net-zero",
+        "climate policy",
+        "policy engagement",
+        "carbon pricing"
+      ],
+      "doc_types": [
+        "Sustainability Report",
+        "Climate Report",
+        "CDP Report",
+        "Policy Documents",
+        "Annual Report"
+      ],
+      "period": "fiscal_year",
+      "scope": "group"
+    }
+  }
+}
