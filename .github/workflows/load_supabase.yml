@@ -56,6 +56,10 @@ jobs:
                # never past 06:00 UTC (07:00 Madrid in winter): loading slows every search
                LEFT=$(( ( $(date -u -d 'tomorrow 06:00' +%s) - $(date -u +%s) ) / 60 % 1440 ))
                [ "$LEFT" -gt 300 ] && LEFT=300
+               # GitHub starts scheduled runs late, sometimes by hours (29 Oct 2026: the 01:41 run started at
+               # 07:40 and would have loaded for 300 minutes into working hours): a scheduled run that starts
+               # between 06:00 and 18:00 UTC loads nothing (it still refreshes documents and functions)
+               H=$(date -u +%-H); if [ "$H" -ge 6 ] && [ "$H" -lt 18 ]; then LEFT=0; fi
                ARGS="--commit --index --minutes $LEFT"
           elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=""
           else ARGS="--parts ${{ inputs.parts }} --minutes ${{ inputs.minutes }}"
