@@ -40,7 +40,11 @@ def prompt(g, attr, pages):
     lines = [f"Find: {attr['name']}.",
              f"Definition: {attr.get('definition', '').strip()}" if attr.get("definition") else "",
              f"Labels it may appear under: {labels}." if labels else "",
-             f"Reporting year: {g['year']} (a fiscal year ending January to June of {g['year'] + 1} also counts as {g['year']}).",
+             f"Reporting year: {g['year']}. A fiscal year ending between January and June of {g['year'] + 1} is also "
+             f"reporting year {g['year']}: a column headed FY{g['year'] + 1}, FY{str(g['year'] + 1)[2:]} or {g['year']}/{str(g['year'] + 1)[2:]} "
+             f"for such a year is the one to take, not the column headed {g['year'] - 1} or FY{g['year']} of a company "
+             f"whose year ends in March. When several year columns are printed, take the one for this reporting year, "
+             f"even if a later year is also printed.",
              f"Period: {attr['period']}." if attr.get("period") else "",
              f"Scope: {attr['scope']}." if attr.get("scope") else "",
              "Take the figure for that year, for the whole company or group, not a segment, a region or a target.",
