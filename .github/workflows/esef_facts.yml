@@ -1,0 +1,52 @@
+name: ESEF revenue
+
+# Revenue from the European machine-readable annual reports (ESEF, via filings.xbrl.org), scored against
+# the validated 2025 answers (esef_facts.py). Read-only: the gold bases (GOLD_TOKEN), the companies' lei,
+# filings.xbrl.org. Manual; a pull request touching it runs the first 300 answers and posts the table.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "answers (0 = all revenue answers of companies with an LEI)"
+        default: "0"
+  pull_request:
+    paths: [esef_facts.py, sec_facts.py, .github/workflows/esef_facts.yml]
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Score
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 300"
+          else ARGS="--commit --limit ${{ inputs.limit }}"; fi
+          python esef_facts.py $ARGS
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esef-facts
+          path: esef_facts.md
+          if-no-files-found: ignore
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s esef_facts.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file esef_facts.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "ESEF revenue: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
