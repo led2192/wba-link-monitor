@@ -4,7 +4,8 @@ extract_eval.py: the generic reader of number attributes, scored against the val
 
 Everything attribute-specific comes from attributes.json (labels, exclusions, document types, unit family
 and scales); the code is the same for every attribute, so a methodology change is an edit of that file and a
-rerun of this script (owner's rule, 29 Oct 2026). No model.
+rerun of this script (owner's rule, 29 Oct 2026). No model, unless --reader model: then the stages up to
+the pages are the same and a language model reads the best MODEL_PAGES pages (model_reader.py).
 
 For every validated 2025-benchmark answer of a number attribute, the reader works as an extractor would,
 without looking at the answer, and each stage is scored against it:
@@ -25,7 +26,7 @@ the right digits at the wrong scale (a scale-reading miss, the cheapest to fix).
 
 Read-only: the gold bases (GOLD_TOKEN), the evidence database (SUPABASE_DB_URL). Writes extract_eval.md
 (also a run artifact) and the run's counters in Pipeline QA. Options: --limit N answers per attribute
-(dry run default 40), --attributes codes, --budget minutes (100), --commit.
+(dry run default 40), --attributes codes, --budget minutes (100), --reader rules|model, --commit.
 """
 import argparse, collections, json, os, re, sys, time, traceback
 
@@ -34,6 +35,7 @@ from value_eval import CURRENCY_SCALES, EMISSION_SCALES, found_on, printed_forms
 
 SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attributes.json")
 MAX_DOCS, MAX_PAGES = 4, 25
+MODEL_PAGES = 3                     # pages given to the model reader
 MATCH = 0.005
 # a printed number: Indian grouping, comma/dot/apostrophe groups, space groups (never followed by another
 # separator and three digits: "7 102,502" is a note 7 then 102,502), or plain digits; an optional decimal part
@@ -197,8 +199,9 @@ def label_query(labels):
 
 
 # ----------------------------------------------------------------------------------------------
-def evaluate(cur, g, attr, spec):
-    """Stage results for one answer."""
+def evaluate(cur, g, attr, spec, reader="rules", usage=None):
+    """Stage results for one answer. reader "rules": the best-scored labelled row on the ranked pages;
+    "model": a language model reads the MODEL_PAGES pages whose rule candidates scored best."""
     r = {"docs": False, "in_docs": False, "in_pages": False, "proposal": False, "right": False, "scale_miss": False}
     ranks = {t: i for i, t in enumerate(attr.get("doc_types", []))}
     cur.execute("select library_id, coalesce(doc_type, ''), coalesce(year, 0) from public.documents "
@@ -220,14 +223,26 @@ def evaluate(cur, g, attr, spec):
                 (label_query(attr["labels"]), ids, label_query(attr["labels"])))
     pages = sorted(cur.fetchall(), key=lambda p: (order[p[0]], -p[3]))[:MAX_PAGES]
     r["in_pages"] = any(found_on(p[2], v) for p in pages for v, _, _ in forms)
-    best = None
+    # each page's best rule candidate, used by the rule reader and to pick the model's pages
+    scored = []
     for i, (lid, page, body, _) in enumerate(pages):
-        for c in candidates(body, g["year"], attr, spec):
-            sc = c[0] - 0.05 * i                       # earlier (better ranked) pages break ties
-            if best is None or sc > best[0]:
-                best = (sc, c[1:], lid, page)
+        cs = candidates(body, g["year"], attr, spec)
+        top = max(cs, key=lambda c: c[0]) if cs else None
+        scored.append(((top[0] if top else -99) - 0.05 * i, top, lid, page, body))
+    if reader == "model":
+        from model_reader import read_with_model
+        best_pages = sorted(scored, key=lambda x: -x[0])[:MODEL_PAGES]
+        got = read_with_model(g, attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage)
+        r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
+        if got:
+            r["proposal"] = True
+            r["right"] = right(got["value"], g["value"])
+            r["scale_miss"] = not r["right"] and any(right(got["printed"] * s, g["value"]) for s in scales)
+            r["got"] = ((got["value"], got["printed"], got["scale"], "the model"), got["library_id"], got["page"])
+        return r
+    best = max((x for x in scored if x[1]), key=lambda x: x[0], default=None)
     if best:
-        got = best[1]
+        got = best[1][1:]
         r["proposal"] = True
         r["right"] = right(got[0], g["value"])
         r["scale_miss"] = not r["right"] and any(right(got[1] * s, g["value"]) for s in scales)
@@ -241,7 +256,12 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--attributes", default="")
     ap.add_argument("--budget", type=int, default=100)
+    ap.add_argument("--reader", default="rules", choices=["rules", "model"])
     a = ap.parse_args()
+    if a.reader == "model" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        open("extract_eval.md", "w").write("### Extraction: the model reader needs ANTHROPIC_API_KEY (a repository secret); nothing run.\n")
+        return 0
+    usage = collections.Counter()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
     limit = a.limit or (0 if a.commit else 40)
@@ -277,18 +297,22 @@ def main():
                 print(f"  {i:,}/{len(todo):,} in {(time.time() - t0) / 60:.0f} min", flush=True)
             s = stats[g["attribute"]]; s["answers"] += 1
             try:
-                r = evaluate(cur, g, spec["attributes"][g["attribute"]], spec)
+                r = evaluate(cur, g, spec["attributes"][g["attribute"]], spec, a.reader, usage)
             except Exception as e:
+                if type(e).__name__ == "ModelRefused":           # the API said no: stop and say why
+                    raise
                 conn.rollback(); cur.execute("set statement_timeout = '30s'")
                 s["database did not answer"] += 1; continue
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):
                 s[k] += bool(r[k])
+            s["model_pages"] += bool(r.get("model_pages_have_number"))
             if r["proposal"] and not r["right"] and len(wrong[g["attribute"]]) < 12:
                 (v, raw, sc, lab), lid, page = r["got"]
                 wrong[g["attribute"]].append(f"{g['id']}: validated {g['value']:,.2f} {g['unit']}; read {raw:,.2f} × {sc:g} "
                                              f"after \"{lab}\" ({lid} p.{page})")
 
-    md = ["### Generic reader against the validated answers (no model)" + ("" if a.commit else " (dry run, sample)"), "",
+    title = "model reader (" + os.environ.get("READER_MODEL", "claude-haiku-5-5") + ")" if a.reader == "model" else "generic reader (no model)"
+    md = [f"### The {title} against the validated answers" + ("" if a.commit else " (dry run, sample)"), "",
           f"{sum(s['answers'] for s in stats.values()):,} answers with a value" + (f" ({limit} per attribute)" if limit else "")
           + ("; stopped at the time budget" if cut else "") + ". Shares of those answers; the reader never sees the answer.", "",
           "| Attribute | Answers | Document for the year | Number in those documents | Number on the ranked pages | Proposal | Right | Right among proposals | Right digits, wrong scale |",
@@ -299,6 +323,13 @@ def main():
         md.append(f"| {c} {spec['attributes'][c]['name']} | {s['answers']:,} | {pct('docs')} | {pct('in_docs')} | {pct('in_pages')} | "
                   f"{pct('proposal')} | **{pct('right')}** | {s['right'] / (s['proposal'] or 1):.0%} | {pct('scale_miss')} |")
     md.append("")
+    if a.reader == "model":
+        from model_reader import cost
+        md += [f"Model calls: {usage['calls']:,} ({usage['model_errors']:,} failed); input tokens {usage['input_tokens']:,}; "
+               f"output tokens {usage['output_tokens']:,}; cost about ${cost(usage):.2f} "
+               f"(${cost(usage) / (usage['calls'] or 1) * 1000:.2f} per 1,000 answers). "
+               f"Proposals dropped because the named page does not print the number: {usage['quote_not_on_page']:,}. "
+               f"The model's pages hold the validated number for {sum(s['model_pages'] for s in stats.values()):,} answers.", ""]
     for c in codes:
         if wrong[c]:
             md += [f"Wrong proposals, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]
