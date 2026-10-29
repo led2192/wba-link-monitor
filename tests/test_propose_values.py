@@ -31,6 +31,13 @@ class Propose(unittest.TestCase):
         self.assertEqual([u[0] for u in updates], ["recC"]); self.assertNotIn("status", updates[0][1])
         self.assertEqual(kept, 1)
 
+    def test_years(self):
+        from datetime import datetime
+        t = datetime(2026, 10, 29)
+        self.assertEqual(P.parse_years("2018-", t), list(range(2018, 2026)))
+        self.assertEqual(P.parse_years("2024", t), [2024])
+        self.assertEqual(P.parse_years("2022,2020-2021", t), [2020, 2021, 2022])
+
     def test_sec_accession_and_url(self):
         cf = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": [
             {"end": "2024-12-31", "filed": "2025-02-20", "val": 102502e6, "accn": "0000123456-25-000010"}]}}}}}
