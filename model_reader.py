@@ -26,12 +26,12 @@ class ModelRefused(RuntimeError):
     """The API refused the call for a reason a retry won't fix (key, credit, model name): stop the run."""
 DEFAULT_MODEL = "claude-haiku-5-5"
 PAGE_CHARS = 8000                       # per page; a long page is cut, tables sit near the top in practice
-MAX_TOKENS = 300
+MAX_TOKENS = 1000                   # 300 cut replies off before their JSON (average reply 236 tokens, 29 Oct 2026)
 SCALES = {"units": 1, "thousands": 1e3, "lakhs": 1e5, "millions": 1e6, "crores": 1e7, "hundred millions": 1e8,
           "billions": 1e9}
 
 SYSTEM = ("You read pages of company reports and find one reported figure. Answer with one JSON object and "
-          "nothing else. Copy the number exactly as printed on the page. Never compute, convert or round.")
+          "nothing else: no explanation before or after it. Copy the number exactly as printed on the page. Never compute, convert or round.")
 
 
 def prompt(g, attr, pages):
@@ -114,6 +114,8 @@ def call(messages, usage, sess=None, model=None):
         usage["calls"] += 1
         usage["input_tokens"] += j.get("usage", {}).get("input_tokens", 0)
         usage["output_tokens"] += j.get("usage", {}).get("output_tokens", 0)
+        if j.get("stop_reason") == "max_tokens":
+            usage["cut_at_token_limit"] += 1
         return "".join(c.get("text", "") for c in j.get("content", []) if c.get("type") == "text")
     return ""
 
@@ -127,8 +129,13 @@ def read_with_model(g, attr, pages, usage, sess=None, note=None):
     from value_eval import numbers_on
     text = call([{"role": "user", "content": prompt(g, attr, pages)}], usage, sess)
     reply = parse_reply(text)
-    if note is not None and reply and not reply.get("page"):
-        note["why"] = str(reply.get("why") or "")[:120]
+    if note is not None:
+        if reply is None:
+            note["why"] = "(no JSON in the reply)" if text else "(empty reply)"
+        elif not reply.get("page"):
+            note["why"] = str(reply.get("why") or "")[:120]
+        elif not reply.get("printed"):
+            note["why"] = "(named a page but no number)"
     got = check(reply, pages, to_number, numbers_on)
     if got is False:
         usage["quote_not_on_page"] += 1

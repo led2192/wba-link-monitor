@@ -118,3 +118,6 @@ The first model-reader call sent `temperature: 0` (the usual way to ask for a re
 ## A bank's "revenue" is not its interest income
 The first full Propose values run (29 Oct 2026) took `ifrs-full:RevenueFromInterest` as revenue for European banks (one large Spanish bank: 61.7 billion EUR of interest income, against 35.5 billion EUR of gross income). WBA's validated bank answers are income net of interest expense ("gross income", "total operating income"; `us-gaap:RevenuesNetOfInterestExpense` for SEC filers), and every ESEF interest-income pick differed from them (5 of 5). Interest-income concepts are out of the revenue lists; a bank gets no ESEF revenue until its net-income concept is identified, usually a company extension rather than an IFRS concept.
 
+## A reply cut at the token limit looks like a refusal
+The model reader allowed 300 output tokens. Replies averaged 236, and the model often explains before giving its JSON, so a long explanation was cut before the JSON began; the reader saw no figure and counted a decline (most of the 30 declines with the number on the page, 29 Oct 2026, had no reason because there was no JSON at all). The limit is now 1,000, the instruction says JSON only, and the report counts replies cut at the limit and names a reply with no JSON.
+

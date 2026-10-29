@@ -352,6 +352,7 @@ def main():
                f"output tokens {usage['output_tokens']:,}; cost about ${cost(usage):.2f} "
                f"(${cost(usage) / (usage['calls'] or 1) * 1000:.2f} per 1,000 answers). "
                f"Proposals dropped because the named page does not print the number: {usage['quote_not_on_page']:,}. "
+               f"Replies cut at the token limit: {usage['cut_at_token_limit']:,}. "
                f"The model's pages hold the validated number for {sum(s['model_pages'] for s in stats.values()):,} answers; "
                f"it gave no figure for {sum(s['declined with the number on its pages'] for s in stats.values()):,} of them.", ""]
         if declined:
