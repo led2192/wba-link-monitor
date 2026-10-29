@@ -25,7 +25,9 @@ Retrieval and rules first, a model only for what they cannot read, and every rou
 | SEC XBRL | revenue | 326 validated answers of companies with an SEC CIK | 89 % of those with a fact (288 of 323) |
 | ESEF XBRL | revenue | 265 validated answers of European companies | 83 % of those with a fact (48 of 58); filings.xbrl.org has a filing for about 1 in 5 |
 | Rules reader | number attributes | 40 answers per attribute | 8 to 12 %; capex 0 % (its labels did not lead to the right pages) |
-| Model reader | number attributes | same 40 answers | first measurement pending |
+| Model reader (Haiku 5.5, 3 pages) | number attributes | same 40 answers | revenue 30 %, Scope 1 30 %, Scope 2 location 20 %, market 28 %, capex 0 %; right for 57 to 85 % of its answers; $0.07 per 200 answers ($0.50 per 1,000) |
+
+The model's misses on the first sample: the neighbouring year's column (fiscal-year labels such as FY25 for a year ending March 2025, which is reporting year 2024), a restated figure next to the validated one, and pages that never reached it (the validated number was on its 3 pages for 34 % of the answers, on the 25 ranked pages for 50 to 60 %). The second version gives it 6 pages, half by rule candidates and half by rank, and spells out the fiscal-year labels.
 
 Reading the reader's table: "Number in those documents" is the ceiling (the value is printed somewhere in the year's documents: about 60 to 80 %), "Number on the ranked pages" is what the reader was given (32 to 60 %), and "Right" is what it got. The loss between the last two is reading; the loss between the first two is retrieval, which `label_mining.py` addresses.
 
@@ -56,7 +58,7 @@ The model reader uses the repository secret `ANTHROPIC_API_KEY` (prepaid credit 
 ## What comes next
 
 1. Measure the model reader on the same 200 answers and compare with the rules reader.
-2. Put the mined labels into `attributes.json` (capex first) and score again.
+2. Score the mined labels (in `attributes.json` since 29 Oct 2026: the EU Taxonomy wording for capex, "gross" scope figures, operating and consolidated revenue) and the wider document types.
 3. Write the readers' values to `attribute_values` (methods "rules reader" and "model reader", with the page link).
 4. Current-year completeness: check that each company's latest reports are in, using the prior-year figures they repeat.
 5. The non-number attributes (board climate expertise, climate policies supported): options from the specification, same scoring.

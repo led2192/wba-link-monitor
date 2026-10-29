@@ -35,7 +35,7 @@ from value_eval import CURRENCY_SCALES, EMISSION_SCALES, found_on, printed_forms
 
 SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attributes.json")
 MAX_DOCS, MAX_PAGES = 4, 25
-MODEL_PAGES = 3                     # pages given to the model reader
+MODEL_PAGES = 6                     # pages given to the model reader: half by the rule candidates, half by rank
 MATCH = 0.005
 # a printed number: Indian grouping, comma/dot/apostrophe groups, space groups (never followed by another
 # separator and three digits: "7 102,502" is a note 7 then 102,502), or plain digits; an optional decimal part
@@ -198,10 +198,26 @@ def label_query(labels):
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
 
+def pages_for_model(scored, n):
+    """Up to n of the ranked pages for the model: first the pages with the best rule candidates (half of n,
+    those that have a candidate), then the best-ranked pages not yet taken. scored: [(score, candidate or
+    None, library_id, page, body)] in rank order. On the first sample (29 Oct 2026) the validated number was
+    on the 3 best-candidate pages for 34 % of the answers and on the 25 ranked pages for 50 to 60 %."""
+    by_candidate = sorted((x for x in scored if x[1]), key=lambda x: -x[0])[:max(1, n // 2)]
+    out = list(by_candidate)
+    for x in scored:
+        if len(out) >= n:
+            break
+        if x not in out:
+            out.append(x)
+    return out
+
+
 # ----------------------------------------------------------------------------------------------
 def evaluate(cur, g, attr, spec, reader="rules", usage=None):
     """Stage results for one answer. reader "rules": the best-scored labelled row on the ranked pages;
-    "model": a language model reads the MODEL_PAGES pages whose rule candidates scored best."""
+    "model": a language model reads MODEL_PAGES pages: the ones whose rule candidates scored best, then the
+    best-ranked ones not yet taken (pages_for_model)."""
     r = {"docs": False, "in_docs": False, "in_pages": False, "proposal": False, "right": False, "scale_miss": False}
     ranks = {t: i for i, t in enumerate(attr.get("doc_types", []))}
     cur.execute("select library_id, coalesce(doc_type, ''), coalesce(year, 0) from public.documents "
@@ -231,7 +247,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
         scored.append(((top[0] if top else -99) - 0.05 * i, top, lid, page, body))
     if reader == "model":
         from model_reader import read_with_model
-        best_pages = sorted(scored, key=lambda x: -x[0])[:MODEL_PAGES]
+        best_pages = pages_for_model(scored, MODEL_PAGES)
         got = read_with_model(g, attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage)
         r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
         if got:

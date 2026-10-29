@@ -60,6 +60,16 @@ class Reader(unittest.TestCase):
         self.assertEqual(X.page_scale("Revenue 1,234", "currency", SPEC), 1)
 
 
+class PagesForModel(unittest.TestCase):
+    def test_candidates_first_then_rank(self):
+        scored = [(-99.0, None, "a", 1, ""), (0.5 - 0.05, ("c",), "a", 2, ""), (-99.1, None, "a", 3, ""),
+                  (0.9 - 0.15, ("c",), "a", 4, ""), (-99.2, None, "a", 5, ""), (-99.25, None, "a", 6, "")]
+        got = [x[3] for x in X.pages_for_model(scored, 4)]
+        self.assertEqual(got, [4, 2, 1, 3])                 # best candidates, then rank order, no repeats
+        self.assertEqual([x[3] for x in X.pages_for_model(scored, 10)], [4, 2, 1, 3, 5, 6])
+        self.assertEqual(X.pages_for_model([], 6), [])
+
+
 @unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres (after tests/test_load_supabase.py)")
 class AgainstPostgres(unittest.TestCase):
     def test_one_answer_end_to_end(self):

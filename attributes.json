@@ -84,7 +84,11 @@
         "omzet",
         "売上高",
         "营业收入",
-        "營業收入"
+        "營業收入",
+        "operating revenues",
+        "consolidated revenue",
+        "revenue from external customers",
+        "total revenues and other income"
       ],
       "exclude": [
         "per share",
@@ -101,7 +105,9 @@
         "10K Form",
         "Financial Statement",
         "Integrated Report",
-        "Registration Document"
+        "Registration Document",
+        "Statutory Documents",
+        "Sustainability Report"
       ],
       "period": "fiscal_year",
       "scope": "group",
@@ -127,7 +133,10 @@
         "émissions directes",
         "scope-1",
         "范围一",
-        "スコープ1"
+        "スコープ1",
+        "gross scope 1",
+        "scope 1 direct",
+        "emissions scope 1"
       ],
       "exclude": [
         "intensity",
@@ -161,7 +170,10 @@
         "scope 2 (location-based)",
         "location-based scope 2",
         "scope 2 emissions location-based",
-        "location-based"
+        "location-based",
+        "gross location-based",
+        "gross location-based scope 2",
+        "scope 2 indirect location-based"
       ],
       "exclude": [
         "intensity",
@@ -177,7 +189,9 @@
         "CDP Report",
         "Climate Report",
         "Integrated Report",
-        "Annual Report"
+        "Annual Report",
+        "10K Form",
+        "Statutory Documents"
       ],
       "period": "fiscal_year",
       "scope": "group"
@@ -195,7 +209,9 @@
         "scope 2 emissions market-based",
         "market-based",
         "scope 2 emissions",
-        "scope 2"
+        "scope 2",
+        "gross market-based",
+        "gross market-based scope 2"
       ],
       "exclude": [
         "intensity",
@@ -211,7 +227,8 @@
         "CDP Report",
         "Climate Report",
         "Integrated Report",
-        "Annual Report"
+        "Annual Report",
+        "10K Form"
       ],
       "period": "fiscal_year",
       "scope": "group"
@@ -222,6 +239,13 @@
       "type": "number",
       "unit_family": "currency",
       "labels": [
+        "capex of environmentally sustainable activities",
+        "environmentally sustainable activities",
+        "sustainable activities taxonomy-aligned",
+        "taxonomy-aligned",
+        "taxonomy aligned",
+        "capex kpi",
+        "capex",
         "taxonomy-aligned capex",
         "taxonomy aligned capex",
         "aligned capex",
@@ -233,13 +257,19 @@
       ],
       "exclude": [
         "opex",
-        "turnover"
+        "turnover",
+        "revenue",
+        "ebitda",
+        "total capex"
       ],
       "doc_types": [
         "Annual Report",
         "Sustainability Report",
         "Integrated Report",
-        "Climate Report"
+        "ESG Report",
+        "Climate Report",
+        "Statutory Documents",
+        "Interim Reports"
       ],
       "period": "fiscal_year",
       "scope": "group"
