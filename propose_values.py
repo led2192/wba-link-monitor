@@ -244,8 +244,12 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                     except Exception as e:
                         if type(e).__name__ == "ModelRefused":
                             raise
+                        if not c["model reader: errors"]:
+                            traceback.print_exc()
+                            c[f"model reader: first error {type(e).__name__}: {str(e)[:120]}"] = 1
+                        c["model reader: errors"] += 1
                         conn.rollback(); cur.execute("set statement_timeout = '30s'")
-                        c["model reader: database did not answer"] += 1; continue
+                        continue
                     if got:
                         got_rows.append((wba, code, y, got))
     docs = library_docs(H, base, [g["library_id"] for *_, g in got_rows])
