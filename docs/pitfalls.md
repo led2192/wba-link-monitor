@@ -120,4 +120,6 @@ The first full Propose values run (29 Oct 2026) took `ifrs-full:RevenueFromInter
 
 ## A reply cut at the token limit looks like a refusal
 The model reader allowed 300 output tokens. Replies averaged 236, and the model often explains before giving its JSON, so a long explanation was cut before the JSON began; the reader saw no figure and counted a decline (most of the 30 declines with the number on the page, 29 Oct 2026, had no reason because there was no JSON at all). The limit is now 1,000, the instruction says JSON only, and the report counts replies cut at the limit and names a reply with no JSON.
+## A link that proves the value is not a link anyone can check it with
+The first `attribute_values` rows (29 Oct 2026) pointed SEC values at the filing's folder on sec.gov: correct, but a list of twenty files (exhibits, XBRL schemas, images) with no hint of which one to open or what to look for. The analyst asked to check them could not. A source link for review must open the readable report, and the row must say what to search for in it.
 

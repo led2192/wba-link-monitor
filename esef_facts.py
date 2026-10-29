@@ -75,7 +75,8 @@ def annual_facts(oim, filed=""):
 
 
 def filings(lei, sess, years):
-    """[(period end, json url, date added)] of the LEI's ESEF filings whose period ends in the given years."""
+    """[(period end, json url, date added, viewer url)] of the LEI's ESEF filings whose period ends in the given
+    years. The viewer is the readable report, with the tagged figures highlighted."""
     flt = json.dumps([{"name": "entity.identifier", "op": "eq", "val": lei},
                       {"name": "period_end", "op": "ge", "val": f"{min(years)}-01-01"}])
     try:
@@ -91,7 +92,9 @@ def filings(lei, sess, years):
         a = d.get("attributes", {})
         pe, ju = a.get("period_end") or "", a.get("json_url") or ""
         if pe and ju and int(pe[:4]) <= max(years) + 1:
-            out.append((pe, ju if ju.startswith("http") else ESEF + "/" + ju.lstrip("/"), (a.get("date_added") or "")[:10]))
+            vu = a.get("viewer_url") or a.get("report_url") or ""
+            out.append((pe, ju if ju.startswith("http") else ESEF + "/" + ju.lstrip("/"), (a.get("date_added") or "")[:10],
+                        (vu if vu.startswith("http") else ESEF + "/" + vu.lstrip("/")) if vu else ""))
     return out
 
 
@@ -146,7 +149,7 @@ def main():
         if w not in cache:
             facts = []
             fl = filings(leis[w], sess, years[w])
-            for pe, ju, added in fl:
+            for pe, ju, added, _ in fl:
                 try:
                     r = sess.get(ju, timeout=120)
                     if r.ok:
