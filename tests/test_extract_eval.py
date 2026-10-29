@@ -32,6 +32,15 @@ class Reader(unittest.TestCase):
             got = X.propose(text, year, A[code], SPEC)
             self.assertTrue(got and X.right(got[0], gold), f"{code} {year}: {got} for {text[:60]}")
 
+    def test_the_table_row_beats_the_prose(self):
+        page = ("Our climate strategy covers scope 1, 2 and 3. We aim to reduce Scope 1 and 2 emissions by 42% by 2030 "
+                "and to reach 100% renewable electricity. GHG emissions (tCO2e) 2024 2023 Scope 1 24,442 25,100 "
+                "Scope 2 (market-based) 53,335 61,020")
+        got = X.propose(page, 2024, A["GMC_00001.1"], SPEC)
+        self.assertEqual(got[1], 24442)
+        got = X.propose(page, 2023, A["GMC_00003.1"], SPEC)
+        self.assertEqual(got[1], 61020)
+
     def test_excluded_neighbours(self):
         self.assertIsNone(X.propose("Scope 1 emissions intensity 0.45 tCO2e per tonne", 2024, A["GMC_00001.1"], SPEC))
         self.assertIsNone(X.propose("Revenue per share 3.10", 2024, A["GMC_00048.1"], SPEC))

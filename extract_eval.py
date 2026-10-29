@@ -33,7 +33,7 @@ import qa
 from value_eval import CURRENCY_SCALES, EMISSION_SCALES, found_on, printed_forms, tsquery_for
 
 SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attributes.json")
-MAX_DOCS, MAX_PAGES = 4, 15
+MAX_DOCS, MAX_PAGES = 4, 25
 MATCH = 0.005
 # a printed number: Indian grouping, comma/dot/apostrophe groups, space groups (never followed by another
 # separator and three digits: "7 102,502" is a note 7 then 102,502), or plain digits; an optional decimal part
@@ -83,7 +83,9 @@ def numbers_after(text, start, limit=160):
             continue                                          # part of a date: 12.31.2023, 31/12/2024
         if v < 100 and "." not in tok and "," not in tok and not out and len(seg) > m.end() + 2 and NUM.search(seg[m.end():m.end() + 25]):
             continue                                          # a note number before the figures
-        out.append(v)
+        if re.match(r"\s?%", seg[m.end():m.end() + 2]):          # a percentage
+            continue
+        out.append((v, tok, m.start()))
     return out
 
 
@@ -140,18 +142,48 @@ def label_positions(text, labels, exclude):
     return out
 
 
-def propose(text, year, attr, spec):
-    """(value, raw number, scale, label) read from a page, or None."""
+NARRATIVE = re.compile(r"\b(?:reduc\w*|target\w*|goal|aim\w*|commit\w*|by 20\d\d|compared|versus|increase\w*|decrease\w*)\b")
+
+
+def candidates(text, year, attr, spec):
+    """[(score, value, raw, scale, label)] for every label mention followed by numbers on a page. The first
+    mention is often prose ("Scope 1 and 2", "reduce Scope 2 by 2030"); the figure is in a table row. So
+    every mention is scored (sample of 29 Oct 2026: reading the first mention was right for 0 to 8 % of
+    answers): up for a table row (several numbers, thousands separators or four digits or more, a year
+    header on the page, the number right after the label, a specific label), down for small integers and
+    prose around it."""
     family = attr.get("unit_family", "currency")
+    labels = attr.get("labels", [])
     col = year_header(text, year)
     scale = page_scale(text, family, spec)
-    for pos, lab in label_positions(text, attr.get("labels", []), attr.get("exclude", [])):
+    low = text.lower()
+    out = []
+    for pos, lab in label_positions(text, labels, attr.get("exclude", [])):
         nums = numbers_after(text, pos)
         if not nums:
             continue
-        raw = nums[col] if col is not None and col < len(nums) else nums[0]
-        return raw * scale, raw, scale, lab
-    return None
+        v, tok, off = nums[col] if col is not None and col < len(nums) else nums[0]
+        digits = len(re.sub(r"\D", "", re.split(r"[.,](?=\d{1,2}$)", tok)[0]))
+        score = 2.0 * (len(labels) - labels.index(lab)) / len(labels)
+        score += 1.0 if len(nums) >= 2 else 0.0
+        score += 0.5 if len(nums) >= 3 else 0.0
+        score += 2.0 if re.search(r"\d[,.' \u00a0\u202f]\d{3}", tok) or digits >= 4 else 0.0
+        score += 1.0 if col is not None else 0.0
+        score += 1.0 if nums[0][2] <= 20 else 0.0
+        score -= 3.0 if v < 10 and not re.search(r"[.,]\d", tok) else 0.0
+        score -= 1.0 if v < 100 and digits <= 2 else 0.0
+        score -= 2.0 if NARRATIVE.search(low[pos:pos + 80]) else 0.0
+        out.append((score, v * scale, v, scale, lab))
+    return out
+
+
+def propose(text, year, attr, spec):
+    """(value, raw number, scale, label) of the best-scored candidate on a page, or None."""
+    c = candidates(text, year, attr, spec)
+    if not c:
+        return None
+    best = max(c, key=lambda x: x[0])
+    return best[1:]
 
 
 def right(v, gold):
@@ -188,14 +220,18 @@ def evaluate(cur, g, attr, spec):
                 (label_query(attr["labels"]), ids, label_query(attr["labels"])))
     pages = sorted(cur.fetchall(), key=lambda p: (order[p[0]], -p[3]))[:MAX_PAGES]
     r["in_pages"] = any(found_on(p[2], v) for p in pages for v, _, _ in forms)
-    for lid, page, body, _ in pages:
-        got = propose(body, g["year"], attr, spec)
-        if got:
-            r["proposal"] = True
-            r["right"] = right(got[0], g["value"])
-            r["scale_miss"] = not r["right"] and any(right(got[1] * s, g["value"]) for s in scales)
-            r["got"] = (got, lid, page)
-            break
+    best = None
+    for i, (lid, page, body, _) in enumerate(pages):
+        for c in candidates(body, g["year"], attr, spec):
+            sc = c[0] - 0.05 * i                       # earlier (better ranked) pages break ties
+            if best is None or sc > best[0]:
+                best = (sc, c[1:], lid, page)
+    if best:
+        got = best[1]
+        r["proposal"] = True
+        r["right"] = right(got[0], g["value"])
+        r["scale_miss"] = not r["right"] and any(right(got[1] * s, g["value"]) for s in scales)
+        r["got"] = (got, best[2], best[3])
     return r
 
 
