@@ -299,6 +299,8 @@ def main():
             try:
                 r = evaluate(cur, g, spec["attributes"][g["attribute"]], spec, a.reader, usage)
             except Exception as e:
+                if type(e).__name__ == "ModelRefused":           # the API said no: stop and say why
+                    raise
                 conn.rollback(); cur.execute("set statement_timeout = '30s'")
                 s["database did not answer"] += 1; continue
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):

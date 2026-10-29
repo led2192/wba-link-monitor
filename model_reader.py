@@ -20,6 +20,10 @@ model_errors). No document text is printed.
 import json, os, re, time
 
 API = "https://api.anthropic.com/v1/messages"
+
+
+class ModelRefused(RuntimeError):
+    """The API refused the call for a reason a retry won't fix (key, credit, model name): stop the run."""
 DEFAULT_MODEL = "claude-haiku-5-5"
 PAGE_CHARS = 8000                       # per page; a long page is cut, tables sit near the top in practice
 MAX_TOKENS = 300
@@ -95,8 +99,8 @@ def call(messages, usage, sess=None, model=None):
             time.sleep(10 * (attempt + 1)); continue
         if r.status_code != 200:
             usage["model_errors"] += 1
-            if r.status_code in (400, 401, 403):       # a bad key or no credit: no point going on
-                raise RuntimeError(f"Messages API refused the call: HTTP {r.status_code} {r.text[:300]}")
+            if r.status_code in (400, 401, 403, 404):  # a bad key, no credit, a wrong model name: no point going on
+                raise ModelRefused(f"Messages API refused the call: HTTP {r.status_code} {r.text[:300]}")
             return ""
         j = r.json()
         usage["calls"] += 1

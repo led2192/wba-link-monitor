@@ -63,8 +63,9 @@ class ModelReader(unittest.TestCase):
         usage = X.collections.Counter()
         s = Sess((529, ""), (200, '{"page": "P2", "printed": "102,502", "scale": "millions"}'))
         self.assertTrue(M.read_with_model(G, REV, PAGES, usage, s))
-        with self.assertRaises(RuntimeError):
-            M.read_with_model(G, REV, PAGES, usage, Sess((401, "")))
+        for code in (400, 401, 404):
+            with self.assertRaises(M.ModelRefused):
+                M.read_with_model(G, REV, PAGES, usage, Sess((code, "")))
 
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)
