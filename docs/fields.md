@@ -294,6 +294,34 @@ One row per document that matches a search in mention_searches, written by the M
 | `counted_company` | formula | formula | The company id while this row still counts: not marked Not a mention and not stale. The search row counts the distinct values of this field. |
 | `found_on` | created time | formula | When this document first matched the search. |
 
+### attribute_values
+
+One row per company, benchmark attribute, year and method: a value proposed by a script for an analyst to accept or reject. Written by propose_values.py (wba-link-monitor); first source: revenue from SEC and ESEF XBRL filings. A row a person marked accepted or rejected is never touched again by a run.
+
+| Field | Kind | Who writes it | What it means |
+| --- | --- | --- | --- |
+| `value_id` | text | robot | Deterministic id: wba_id\|attribute\|year\|method. The key that lets a rerun update this row instead of adding another. Do not edit. |
+| `company` | link to rows | robot | The company (linked by record id, never by name). |
+| `wba_id` | text | robot |  |
+| `attribute` | text | robot | WBA metadata code, e.g. GMC_00048.1. |
+| `attribute_name` | text | robot | From attributes.json. |
+| `year` | number | robot | WBA reporting year (a fiscal year ending January to June counts as the previous year). |
+| `value` | number | robot | In full units (not thousands or millions). |
+| `unit` | text | robot | Currency code or tCO2e. |
+| `method` | pick one | robot | How the value was found: SEC XBRL, ESEF XBRL, rules reader, model reader. |
+| `status` | pick one | you | proposed (robot); accepted or rejected (you, never overwritten); superseded. |
+| `document` | link to rows | robot | The report the value was read from, when it is in the library. |
+| `library_id` | text | robot |  |
+| `page` | number | robot | Page of the document. |
+| `source_url` | link | robot | The filing or document. |
+| `evidence_link` | link | robot | Opens the evidence search page at this document. |
+| `detail` | long text | robot | For XBRL: concept, form, period end, filing date. For readers: the number as printed and the scale. |
+| `validated_value` | number | robot | The analysts' validated 2025-benchmark answer for this company, attribute and year, when there is one. |
+| `matches_validated` | pick one | robot | match (within 0.5 %, same unit), differs, or no validated answer. |
+| `reviewer_note` | long text | you | Why you accepted or rejected. Never overwritten. |
+| `first_proposed` | date and time | robot |  |
+| `last_run` | date and time | robot |  |
+
 ### base_health
 
 One row per night, written by base_health.py (wba-link-monitor) at the end of the nightly run. Read-only: how full the base is, what came in and went out, which jobs failed, and how complete the company universe is.
