@@ -53,6 +53,13 @@ class Propose(unittest.TestCase):
         self.assertEqual(P.sec_accession(cf, FACT), "0000123456-25-000010")
         self.assertEqual(P.sec_url("123456", "0000123456-25-000010"), "https://www.sec.gov/Archives/edgar/data/123456/000012345625000010/")
         self.assertIn("type=10-K", P.sec_url("123456", ""))
+        self.assertEqual(P.sec_url("4962", "0000004962-24-000013", "axp-20231231.htm"),
+                         "https://www.sec.gov/ix?doc=/Archives/edgar/data/4962/000000496224000013/axp-20231231.htm")
+
+    def test_how_to_find(self):
+        self.assertEqual(P.how_to_find(60515e6), "Search the report for 60,515 (in millions) or 60,515,000 (in thousands), in the income statement.")
+        self.assertIn("341 (in millions)", P.how_to_find(341e6))
+        self.assertIn("7.9 (in millions)", P.how_to_find(7.9e6))
 
 
 if __name__ == "__main__":

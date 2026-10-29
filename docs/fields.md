@@ -313,9 +313,9 @@ One row per company, benchmark attribute, year and method: a value proposed by a
 | `document` | link to rows | robot | The report the value was read from, when it is in the library. |
 | `library_id` | text | robot |  |
 | `page` | number | robot | Page of the document. |
-| `source_url` | link | robot | The filing or document. |
+| `source_url` | link | robot | Opens the report the value came from. SEC: the 10-K or 20-F itself in the SEC's viewer (figures are highlighted; use Ctrl+F with the number given in detail). ESEF: the annual report in the filings.xbrl.org viewer. Rows written before 29 Oct 2026 17:30 may still open the SEC filing folder; the next run replaces the link. |
 | `evidence_link` | link | robot | Opens the evidence search page at this document. |
-| `detail` | long text | robot | For XBRL: concept, form, period end, filing date. For readers: the number as printed and the scale. |
+| `detail` | long text | robot | How to check the value: the number to search for in the report (in millions and in thousands, as income statements print it), then the XBRL concept, form, period end and filing date. For readers: the number as printed and the scale. |
 | `validated_value` | number | robot | The analysts' validated 2025-benchmark answer for this company, attribute and year, when there is one. |
 | `matches_validated` | pick one | robot | match (within 0.5 %, same unit), differs, or no validated answer. |
 | `reviewer_note` | long text | you | Why you accepted or rejected. Never overwritten. |

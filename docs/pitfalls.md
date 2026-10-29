@@ -118,3 +118,6 @@ The first model-reader call sent `temperature: 0` (the usual way to ask for a re
 ## A bank's "revenue" is not its interest income
 The first full Propose values run (29 Oct 2026) took `ifrs-full:RevenueFromInterest` as revenue for European banks (one large Spanish bank: 61.7 billion EUR of interest income, against 35.5 billion EUR of gross income). WBA's validated bank answers are income net of interest expense ("gross income", "total operating income"; `us-gaap:RevenuesNetOfInterestExpense` for SEC filers), and every ESEF interest-income pick differed from them (5 of 5). Interest-income concepts are out of the revenue lists; a bank gets no ESEF revenue until its net-income concept is identified, usually a company extension rather than an IFRS concept.
 
+## A link that proves the value is not a link anyone can check it with
+The first `attribute_values` rows (29 Oct 2026) pointed SEC values at the filing's folder on sec.gov: correct, but a list of twenty files (exhibits, XBRL schemas, images) with no hint of which one to open or what to look for. The analyst asked to check them could not. A source link for review must open the readable report, and the row must say what to search for in it.
+
