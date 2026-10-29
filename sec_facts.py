@@ -74,8 +74,13 @@ def annual_facts(companyfacts):
 
 
 def choose(facts, year):
-    """The fact the rule picks for a WBA year: best-ranked concept, then the earliest filing."""
-    cand = [f for f in facts if f[2] == year]
+    """The fact the rule picks for a WBA year: in the company's main reporting currency (the one most of
+    its revenue facts use; some filings add a convenience translation), the best-ranked concept, then the
+    earliest filing."""
+    if not facts:
+        return None
+    main = collections.Counter(f[5] for f in facts).most_common(1)[0][0]
+    cand = [f for f in facts if f[2] == year and f[5] == main] or [f for f in facts if f[2] == year]
     return min(cand, key=lambda f: (f[0], f[7], -f[4])) if cand else None
 
 
