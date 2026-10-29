@@ -19,7 +19,7 @@ form, period end, filing date, a link to the filing) and, when the analysts vali
 attribute and year in the 2025 benchmark, that value and whether it matches (within 0.5 %, same unit).
 
 The company link is set by record id from companies.wba_id, never by name. Dry run by default: prints what
-it would write. Options: --years 2022,2023,2024, --limit N companies per method, --methods sec,esef,
+it would write. Options: --years (default 2018- : 2018 to last year; or 2024, or 2022,2023), --limit N companies per method, --methods sec,esef,
 --commit. Reads the gold bases with GOLD_TOKEN (read-only); writes attribute_values and the run's counters
 in Pipeline QA.
 """
@@ -34,6 +34,24 @@ REVENUE = "GMC_00048.1"
 PERSON_STATUSES = {"accepted", "rejected"}
 MAX_NEW = 20000                     # rows a run may add (the base holds at most 500,000; see base_health)
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+DEFAULT_YEARS = "2018-"              # 2018 to last year: the years WBA's benchmarks and trends look at
+
+
+def parse_years(spec, today=None):
+    """'2024' / '2022,2023' / '2018-2021' / '2018-' (to last year) -> sorted list of years."""
+    last = (today or datetime.now(timezone.utc)).year - 1
+    out = set()
+    for part in str(spec).replace(" ", "").split(","):
+        if not part:
+            continue
+        if "-" in part:
+            a, _, b = part.partition("-")
+            out.update(range(int(a), int(b or last) + 1))
+        else:
+            out.add(int(part))
+    return sorted(out)
 
 
 def value_id(wba, attr, year, method):
@@ -118,7 +136,7 @@ def write(H, base, creates, updates):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
-    ap.add_argument("--years", default="2022,2023,2024")
+    ap.add_argument("--years", default=DEFAULT_YEARS, help="e.g. 2024 or 2022,2023 or 2018- (2018 to last year)")
     ap.add_argument("--limit", type=int, default=0, help="companies per method (0 = all)")
     ap.add_argument("--methods", default="sec,esef")
     a = ap.parse_args()
@@ -127,7 +145,7 @@ def main():
     import requests
     from sec_facts import annual_facts as sec_annual, choose, companyfacts
     from esef_facts import ESEF_ISIN, annual_facts as esef_annual, filings
-    years = sorted(int(y) for y in a.years.split(","))
+    years = parse_years(a.years)
     methods = set(a.methods.split(","))
     base, H = os.environ["AIRTABLE_BASE"], {"Authorization": f"Bearer {os.environ['AIRTABLE_TOKEN']}"}
     run = qa.Run("propose_values.py")
