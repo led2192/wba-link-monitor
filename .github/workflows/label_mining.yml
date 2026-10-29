@@ -1,0 +1,58 @@
+name: Label mining
+
+# The words reports print next to an attribute's value, learned from the validated answers
+# (label_mining.py): for every validated 2025 answer of a number attribute, the pages of that year's
+# documents that print the value, and the phrases just before it, ranked against ordinary pages.
+# Suggestions for attributes.json; changes nothing. Read-only against the gold bases (GOLD_TOKEN) and the
+# evidence database. Manual; a pull request touching it runs 60 answers per attribute and posts the table.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "answers per attribute (0 = all validated answers with a value)"
+        default: "0"
+      attributes:
+        description: "GMC codes, comma-separated (blank = all in gold_attributes.json)"
+        default: ""
+  pull_request:
+    paths: [label_mining.py, gold_attributes.json, attributes.json, .github/workflows/label_mining.yml]
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 60"
+          else ARGS="--commit --limit ${{ inputs.limit }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"; fi
+          python label_mining.py $ARGS
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: label-mining
+          path: label_mining.md
+          if-no-files-found: ignore
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s label_mining.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file label_mining.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Label mining: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
