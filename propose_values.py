@@ -54,6 +54,14 @@ def parse_years(spec, today=None):
     return sorted(out)
 
 
+def how_to_find(v):
+    """What to search for in the report: the value as income statements print it, in millions and in
+    thousands ("Search the report for 60,515 (in millions) or 60,515,000 (in thousands)")."""
+    m, k = v / 1e6, v / 1e3
+    ms = f"{m:,.0f}" if abs(m - round(m)) < 0.05 or m >= 1000 else f"{m:,.1f}"
+    return f"Search the report for {ms} (in millions) or {k:,.0f} (in thousands), in the income statement."
+
+
 def value_id(wba, attr, year, method):
     return f"{wba}|{attr}|{year}|{method}"
 
@@ -68,7 +76,25 @@ def sec_accession(companyfacts, fact):
     return ""
 
 
-def sec_url(cik, accn):
+def sec_main_documents(cik, sess):
+    """{accession number: the filing's main document} from the SEC's submissions list, or {}."""
+    from regulator_filings import SEC_UA
+    try:
+        r = sess.get(f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json", headers=SEC_UA, timeout=60)
+    except Exception:
+        return {}
+    time.sleep(0.15)
+    if not r.ok:
+        return {}
+    rec = r.json().get("filings", {}).get("recent", {})
+    return {acc: doc for acc, doc in zip(rec.get("accessionNumber", []), rec.get("primaryDocument", [])) if doc}
+
+
+def sec_url(cik, accn, doc=""):
+    """The filing to read: its main document in the SEC's inline viewer (the report itself, figures
+    highlighted) when known, else the filing's folder, else the company's list of 10-K filings."""
+    if accn and doc:
+        return f"https://www.sec.gov/ix?doc=/Archives/edgar/data/{int(cik)}/{accn.replace('-', '')}/{doc}"
     if accn:
         return f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accn.replace('-', '')}/"
     return f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={int(cik):010d}&type=10-K"
@@ -82,7 +108,7 @@ def row(wba, attr, attr_name, year, fact, method, url, gold, company_rec, now):
     f = {"value_id": value_id(wba, attr, year, method), "wba_id": wba, "attribute": attr,
          "attribute_name": attr_name, "year": year, "value": fact[4], "unit": fact[5], "method": method,
          "source_url": url, "last_run": now,
-         "detail": f"{fact[1]}; {fact[6]}; period ending {fact[3]}; filed {fact[7] or 'unknown'}",
+         "detail": f"{how_to_find(fact[4])} Concept {fact[1]}; {fact[6]}; period ending {fact[3]}; filed {fact[7] or 'unknown'}.",
          "matches_validated": "no validated answer", "validated_value": None}
     if company_rec:
         f["company"] = [company_rec]
@@ -183,11 +209,13 @@ def main():
             time.sleep(0.15)                                    # the SEC asks for at most ten requests a second
             cf = companyfacts(cik, sess) or {}
             facts = sec_annual(cf)
+            docs = sec_main_documents(cik, sess) if facts else {}
             c["SEC companies"] += 1; c["SEC companies with revenue facts"] += bool(facts)
             for y in years:
                 f = choose(facts, y)
                 if f:
-                    proposals.append(row(wba, REVENUE, attr_name, y, f, "SEC XBRL", sec_url(cik, sec_accession(cf, f)), gold, rec.get(wba), now))
+                    accn = sec_accession(cf, f)
+                    proposals.append(row(wba, REVENUE, attr_name, y, f, "SEC XBRL", sec_url(cik, accn, docs.get(accn, "")), gold, rec.get(wba), now))
     if "esef" in methods:
         leis = [(r["fields"]["wba_id"], r["fields"]["lei"].strip()) for r in comps
                 if r["fields"].get("wba_id") and (r["fields"].get("lei") or "").strip()
@@ -195,14 +223,14 @@ def main():
         leis = leis[:a.limit] if a.limit else leis
         for wba, lei in leis:
             facts, src = [], {}
-            for pe, ju, added in filings(lei, sess, set(years)):
+            for pe, ju, added, viewer in filings(lei, sess, set(years)):
                 try:
                     r = sess.get(ju, timeout=120)
                     if r.ok:
                         fs = esef_annual(r.json(), added)
                         facts += fs
                         for f in fs:
-                            src.setdefault((f[3], f[7]), ju.rsplit("/", 1)[0] + "/")
+                            src.setdefault((f[3], f[7]), viewer or ju.rsplit("/", 1)[0] + "/")
                 except Exception:
                     pass
                 time.sleep(0.3)
