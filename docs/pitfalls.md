@@ -110,3 +110,6 @@ The search page listed documents from 2027 above everything else: 566 rows carri
 ## A broad except hides why an outside API said no
 The first model-reader check (29 Oct 2026) reported 134 failed calls and nothing else: the API's refusal was raised inside the per-answer loop, whose `except Exception` counts database timeouts, so every refusal became "database did not answer" and the reason never reached the log. A refusal a retry cannot fix (HTTP 400, 401, 403, 404: key, credit, model name) is now its own exception (`model_reader.ModelRefused`) that the loop re-raises, so the run stops and the report shows the API's message.
 
+## A word pattern of letters only loses the labels that are numbered
+Label mining first split words on letters only, so "Scope 1" and "Scope 2" both became "scope" and "tCO2e" became "tco". Labels that carry a number (scopes, categories) or a chemical formula need the digit kept: label_mining.py keeps a lone 1 to 3 and any word that mixes letters and digits, and still drops figures, years and percentages (29 Oct 2026).
+
