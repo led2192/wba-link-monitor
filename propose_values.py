@@ -92,10 +92,16 @@ def row(wba, attr, attr_name, year, fact, method, url, gold, company_rec, now):
     return f
 
 
-def plan(proposals, existing, now):
+def plan(proposals, existing, now, scope=None):
     """(creates, updates, kept): new rows get status proposed and first_proposed; existing rows the robot
-    owns are updated; rows a person decided are left alone."""
+    owns are updated; rows a person decided are left alone. scope(value_id) -> bool says which existing rows
+    this run covers (its methods and years): a covered row still "proposed" that the run no longer proposes
+    (a rule changed) becomes "superseded", never deleted."""
     creates, updates, kept = [], [], 0
+    seen = {f["value_id"] for f in proposals}
+    for vid, ex in existing.items():
+        if scope and scope(vid) and vid not in seen and ex["status"] == "proposed":
+            updates.append((ex["id"], {"status": "superseded", "last_run": now}))
     for f in proposals:
         ex = existing.get(f["value_id"])
         if not ex:
@@ -164,7 +170,7 @@ def main():
                     gold[(g["wba"], g["attribute"], g["year"])] = g
     comps = fetch(H, base, "companies", ["wba_id", "sec_cik", "lei", "isin"])
     rec = {r["fields"]["wba_id"]: r["id"] for r in comps if r["fields"].get("wba_id")}
-    existing = {r["fields"]["value_id"]: {"id": r["id"], "status": r["fields"].get("status", "")}
+    existing = {r["fields"]["value_id"]: {"id": r["id"], "status": (r["fields"].get("status") or "")}
                 for r in fetch(H, base, TABLE, ["value_id", "status"]) if r["fields"].get("value_id")}
     print(f">>> {len(rec):,} companies; {len(existing):,} rows already in {TABLE}; {len(gold):,} validated revenue answers; years {years}", flush=True)
 
@@ -209,8 +215,15 @@ def main():
     for p in proposals:
         c[f"{p['method']}: proposals"] += 1
         c[f"{p['method']}: {p['matches_validated']}"] += 1
-    creates, updates, kept = plan(proposals, existing, now)
+    names = {"sec": "SEC XBRL", "esef": "ESEF XBRL"}
+    run_methods = {names[m] for m in methods if m in names}
+    def scope(vid):
+        parts = vid.split("|")
+        return len(parts) == 4 and parts[1] == REVENUE and parts[3] in run_methods and int(parts[2]) in years and \
+            (not a.limit)                                  # a sample run never supersedes
+    creates, updates, kept = plan(proposals, existing, now, scope)
     c["new rows"], c["updated rows"], c["left alone (a person decided)"] = len(creates), len(updates), kept
+    c["superseded (no longer proposed)"] = sum(1 for _, f in updates if f.get("status") == "superseded")
     if len(creates) > MAX_NEW:
         raise SystemExit(f"{len(creates):,} new rows is more than MAX_NEW ({MAX_NEW:,}); check base_health first and raise it on purpose")
     if a.commit:

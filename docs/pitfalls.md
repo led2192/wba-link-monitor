@@ -115,4 +115,6 @@ Label mining first split words on letters only, so "Scope 1" and "Scope 2" both 
 
 ## Newer models refuse sampling settings
 The first model-reader call sent `temperature: 0` (the usual way to ask for a repeatable answer) and Haiku 5.5 answered HTTP 400 "`temperature` is deprecated for this model" (29 Oct 2026). model_reader.py sends no sampling settings; repeatability comes from the closed reply format and the check that the number is on the page.
+## A bank's "revenue" is not its interest income
+The first full Propose values run (29 Oct 2026) took `ifrs-full:RevenueFromInterest` as revenue for European banks (one large Spanish bank: 61.7 billion EUR of interest income, against 35.5 billion EUR of gross income). WBA's validated bank answers are income net of interest expense ("gross income", "total operating income"; `us-gaap:RevenuesNetOfInterestExpense` for SEC filers), and every ESEF interest-income pick differed from them (5 of 5). Interest-income concepts are out of the revenue lists; a bank gets no ESEF revenue until its net-income concept is identified, usually a company extension rather than an IFRS concept.
 

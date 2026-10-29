@@ -36,6 +36,11 @@ Sign-in emails: Supabase → Authentication → Emails → Magic Link template p
 - **How many companies mention X, with review:** a row in `mention_searches` ([../TEXT_SEARCH.md](../TEXT_SEARCH.md)); the answer and the hits appear overnight, or run Mention search by hand.
 - **Let someone outside WBA search:** Supabase → SQL Editor: `insert into search_access (email) values ('name@example.com');`
 
+## Attribute values
+- **Refresh revenue from filings:** Actions, Propose values, tick commit. Rows you accepted or rejected are never changed; rows the rule no longer proposes become superseded.
+- **Review:** in `attribute_values`, filter `matches_validated` = differs, open `source_url`, set `status` and a `reviewer_note`.
+- **Score a reader or a label change:** Actions, Generic reader (reader rules, or model: billed to the Anthropic credit, the report prints the cost). Details in [attributes.md](attributes.md).
+
 ## After a rule changes how documents are dated or typed
 Rows already decided are not re-decided by the nightly runs. Document years (rules) with `redo_future` re-decides only the rows dated after this year; Publication dates with `all` re-reads every key report; Document years (rules) without inputs re-dates the whole backlog. Dry run first (the summary lists the changes), then with `commit`.
 

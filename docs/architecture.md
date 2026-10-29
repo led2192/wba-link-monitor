@@ -6,7 +6,7 @@ The pipeline turns about 36,500 monitored company web pages into a library of ab
 
 | Store | What it holds | Written by |
 | --- | --- | --- |
-| Airtable base **Disclosure Library** (`appXS0v6SnWdzAsY3`) | `companies` (2,000), `monitored_links` (pages), `report_library` (documents), `webpage_library` (printed pages), `mention_searches` and `mention_hits`, `base_health` (one row per day) | the scripts, and the owner through the interfaces |
+| Airtable base **Disclosure Library** (`appXS0v6SnWdzAsY3`) | `companies` (2,000), `monitored_links` (pages), `report_library` (documents), `webpage_library` (printed pages), `mention_searches` and `mention_hits`, `base_health` (one row per day), `attribute_values` (proposed attribute values, from 29 Oct 2026) | the scripts, and the owner through the interfaces |
 | Airtable base **Pipeline QA** (`appJQ2mRtjHjzLq9E`) | `runs`, `failures`, `labels` (the golden set), `evals` | `qa.py` from the scripts, `qa_sync.py`, the daily and weekly Claude reviews, the owner |
 | Airtable bases **Source Library 2024 / 2025** | the analysts' curated sources, with their own type and year | analysts. The pipeline only reads them |
 | Text store (GitHub release assets of a private repository) | page-by-page full text of every readable disclosure, 2021 onwards (every type since 24 Oct 2026; about 4 GB compressed before the wider scope) | `build_fulltext.py` |
@@ -55,6 +55,7 @@ More pictures (the life of a document, the type and year ladders, completeness, 
 - **Analysts interface** (Disclosure Library, shared interface-only): analysts who use the reports see each company's documents and watched pages, add links and files through the same `add_link` and `add_file` boxes as My queue, and flag documents (`analyst_flag`, `analyst_flag_note`) or pages (`scan_concern`). Flags never change a row: the owner decides, and `qa_sync.py` records each flag in Pipeline QA.
 - **Scan now** (`scan_now.py`, every 30 minutes, watching for 5.5 hours): ticking `scan_now` on a page runs the whole chain for that page in about 10 to 15 minutes. It also runs `inbox.py`, which handles `add_link`, `add_file`, `approve_suggestions`, `delete_now` and new mention searches.
 - **Weekly:** regulator filings (SEC, ESEF annual reports for gaps, Monday 06:20), key figures (revenue, employees, Monday 09:20), page capture to PDF (Sunday 00:23).
+- **Attribute values** (manual): Propose values writes values from XBRL filings to `attribute_values`; SEC revenue, ESEF revenue, Generic reader, Value evaluation and Label mining score the routes against the validated answers and write only reports ([attributes.md](attributes.md)).
 - **Daily:** suggested pages for companies missing a hub (04:40), link and assign (07:03), base health (12:17).
 
 ## Claude tasks (scheduled outside GitHub)
