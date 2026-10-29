@@ -24,6 +24,11 @@ class Mining(unittest.TestCase):
         self.assertIn("taxonomy-aligned capex", ph)
         self.assertNotIn("capex eur", ph)                                           # ends on a stop word
 
+    def test_words_keep_scope_numbers_and_co2e(self):
+        self.assertEqual(L.words("Scope 1 (tCO2e) Scope 2 market-based 2024 1,234 15% 3.5"),
+                         ["scope", "1", "tco2e", "scope", "2", "market-based"])
+        self.assertIn("scope 2", L.phrases(L.words("Total Scope 2 emissions")))
+
     def test_mine_answer(self):
         pages = [("Annual Report", "Consolidated income statement (in USD million) 2024 2023 Revenues 102,502 106,848"),
                  ("Sustainability Report", "Nothing here 4,000")]

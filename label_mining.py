@@ -38,7 +38,9 @@ TOP = 25
 STOP = set("""a an and are as at be by for from has have in into is it its of on or our per than that the their
 this to was were which with we us total year years ended end fy note notes million millions thousand thousands
 billion bn mn m k eur usd gbp jpy inr cny chf sek nok dkk krw twd cad aud brl zar""".split())
-WORD = re.compile(r"[^\W\d_]{2,}(?:[-'][^\W\d_]+)*")
+# a word: letters, possibly with digits and hyphens ("co2e", "taxonomy-aligned", "tco2-eq"), or a lone 1 to 3
+# ("scope 1", "scope 2": dropping digits merged every scope into "scope", first run of 29 Oct 2026)
+WORD = re.compile(r"(?<![\w.,])[1-3](?![\w.,]|\s?%)|[^\W_]*[^\W\d_][^\W_]*(?:[-'][^\W_]+)*")
 NUM = re.compile(r"\d[\d,.'’    ]*")
 
 

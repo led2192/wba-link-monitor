@@ -106,3 +106,7 @@ The first search functions passed their checks on small phrases and failed on "s
 
 ## A document dated next year (26 Oct 2026)
 The search page listed documents from 2027 above everything else: 566 rows carried doc_year 2027, almost all from the file-name and cover rules, which accepted any year up to next year because Japanese and Indian companies label the quarter to June 2026 "FY27". The bare next year in a name is nearly always something else: a certificate "valid until 2027", notes with a "termination date of 18 October 2027", a "strategic plan for CY 2027". Rule now: next year counts only when written as a fiscal year (FY27, FY2027, 2026-27, 2026/2027, 2027年3月期). Rows already dated are never re-decided by the nightly run (it takes undated rows only), so a wrong batch needs the `redo_future` input of Document years (rules). Open question for the weekly review: a range in a name ("Annual Report 2024-25") is dated by its first year today; the Source Library labels will say which year analysts give such reports.
+
+## A word pattern of letters only loses the labels that are numbered
+Label mining first split words on letters only, so "Scope 1" and "Scope 2" both became "scope" and "tCO2e" became "tco". Labels that carry a number (scopes, categories) or a chemical formula need the digit kept: label_mining.py keeps a lone 1 to 3 and any word that mixes letters and digits, and still drops figures, years and percentages (29 Oct 2026).
+
