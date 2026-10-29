@@ -60,6 +60,22 @@ class Reader(unittest.TestCase):
         self.assertEqual(X.page_scale("Revenue 1,234", "currency", SPEC), 1)
 
 
+class Ranking(unittest.TestCase):
+    def test_a_table_page_with_the_year_beats_prose(self):
+        labels, ex = A["GMC_00001.1"]["labels"], A["GMC_00001.1"]["exclude"]
+        table = "GHG emissions (tCO2e) 2024 2023 Scope 1 24,442 25,100 Scope 2 53,335 61,020 Scope 3 1,204,000 1,250,000"
+        prose = "We report our scope 1 emissions every year and work to reduce scope 1 emissions across our sites."
+        t = X.page_score(0.3, X.propose(table, 2024, A["GMC_00001.1"], SPEC) and 6.0, table, 2024, labels, ex, 0.8)
+        p = X.page_score(0.5, None, prose, 2024, labels, ex, 0.8)
+        self.assertGreater(t, p)
+
+    def test_keep_pages_caps_one_document(self):
+        rows = [(10 - i, "big", i, "", None) for i in range(20)] + [(5.5, "small", 1, "", None)]
+        kept = X.keep_pages(rows, n=12, per_doc=10)
+        self.assertEqual(sum(1 for r in kept if r[1] == "big"), 10)
+        self.assertIn("small", [r[1] for r in kept])
+
+
 class PagesForModel(unittest.TestCase):
     def test_candidates_first_then_rank(self):
         scored = [(-99.0, None, "a", 1, ""), (0.5 - 0.05, ("c",), "a", 2, ""), (-99.1, None, "a", 3, ""),

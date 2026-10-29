@@ -34,8 +34,11 @@ import qa
 from value_eval import CURRENCY_SCALES, EMISSION_SCALES, found_on, printed_forms, tsquery_for
 
 SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attributes.json")
-MAX_DOCS, MAX_PAGES = 4, 25
-MODEL_PAGES = 6                     # pages given to the model reader: half by the rule candidates, half by rank
+MAX_DOCS, MAX_PAGES = 12, 25         # documents of the year searched; pages kept after ranking
+PER_DOC = 10                         # at most this many of the kept pages from one document
+POOL = 400                           # label-matching pages scored before ranking
+MODEL_PAGES = 8                      # pages given to the model reader: half by the rule candidates, half by rank
+BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
 # a printed number: Indian grouping, comma/dot/apostrophe groups, space groups (never followed by another
 # separator and three digits: "7 102,502" is a note 7 then 102,502), or plain digits; an optional decimal part
@@ -198,6 +201,34 @@ def label_query(labels):
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
 
+def page_score(text_rank, cand, body, year, labels, exclude, doc_weight):
+    """How likely a page holds the attribute's figure for the year, from five signals, each in 0 to 1:
+    the label match of the word index, the best rule candidate on the page, how much of a table it is
+    (numbers of four digits or more), whether it prints the year (or its fiscal label), how often the
+    labels occur, and the document's type and year. Documents first, then pages within them, lost pages
+    (29 Oct 2026: the number was in the year's documents for 60 to 80 % of answers, on the 25 kept pages
+    for 30 to 60 %), because a long annual report filled all 25 places with pages that merely name the
+    attribute."""
+    tab = min(len(BIGNUM.findall(body or "")), 30) / 30
+    y1 = str(year + 1)
+    has_year = 1.0 if (str(year) in (body or "") or f"FY{y1[2:]}" in (body or "") or f"FY{y1}" in (body or "")) else 0.0
+    hits = min(len(label_positions(body or "", labels, exclude)), 5) / 5
+    c = max(cand, 0) / 8 if cand is not None else 0.0
+    return 1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight
+
+
+def keep_pages(rows, n=MAX_PAGES, per_doc=PER_DOC):
+    """The n best-scored pages, at most per_doc from one document. rows: [(score, library_id, ...)]."""
+    out, per = [], collections.Counter()
+    for r in sorted(rows, key=lambda r: -r[0]):
+        if per[r[1]] >= per_doc:
+            continue
+        out.append(r); per[r[1]] += 1
+        if len(out) >= n:
+            break
+    return out
+
+
 def pages_for_model(scored, n):
     """Up to n of the ranked pages for the model: first the pages with the best rule candidates (half of n,
     those that have a candidate), then the best-ranked pages not yet taken. scored: [(score, candidate or
@@ -223,34 +254,38 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
     cur.execute("select library_id, coalesce(doc_type, ''), coalesce(year, 0) from public.documents "
                 "where wba_id = %s and year in (%s, %s)", (g["wba"], g["year"], g["year"] + 1))
     docs = sorted(cur.fetchall(), key=lambda d: (ranks.get(d[1], 99), d[2] != g["year"], d[0]))[:MAX_DOCS]
+    nt = max(len(ranks), 1)
+    weight = {d[0]: (1 - ranks[d[1]] / nt if d[1] in ranks else 0.0) * (1.0 if d[2] == g["year"] else 0.7) for d in docs}
     if not docs:
         return r
     r["docs"] = True
     ids = [d[0] for d in docs]
-    order = {lid: i for i, lid in enumerate(ids)}
     scales = EMISSION_SCALES if attr.get("unit_family") == "tco2e" else CURRENCY_SCALES
     forms = printed_forms(g["value"], scales)
     if forms:
         q = " | ".join(f"({tsquery_for(v, d)})" for v, _, d in forms)
         cur.execute("select body from public.pages where library_id = any(%s) and words @@ to_tsquery('simple', %s) limit 40", (ids, q))
         r["in_docs"] = any(found_on(b, v) for (b,) in cur.fetchall() for v, _, _ in forms)
-    cur.execute("select library_id, page, body, ts_rank(words, websearch_to_tsquery('simple', %s)) as rk from public.pages "
-                "where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s)",
-                (label_query(attr["labels"]), ids, label_query(attr["labels"])))
-    pages = sorted(cur.fetchall(), key=lambda p: (order[p[0]], -p[3]))[:MAX_PAGES]
-    r["in_pages"] = any(found_on(p[2], v) for p in pages for v, _, _ in forms)
-    # each page's best rule candidate, used by the rule reader and to pick the model's pages
-    scored = []
-    for i, (lid, page, body, _) in enumerate(pages):
+    cur.execute("select library_id, page, body, ts_rank_cd(words, websearch_to_tsquery('simple', %s), 32) as rk from public.pages "
+                "where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s) "
+                "order by rk desc limit %s",
+                (label_query(attr["labels"]), ids, label_query(attr["labels"]), POOL))
+    rows = []
+    for lid, page, body, rk in cur.fetchall():
         cs = candidates(body, g["year"], attr, spec)
         top = max(cs, key=lambda c: c[0]) if cs else None
-        scored.append(((top[0] if top else -99) - 0.05 * i, top, lid, page, body))
+        sc = page_score(rk, top[0] if top else None, body, g["year"], attr.get("labels", []), attr.get("exclude", []), weight.get(lid, 0))
+        rows.append((sc, lid, page, body, top))
+    pages = keep_pages(rows)
+    r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
+    # each kept page's best rule candidate, used by the rule reader and to pick the model's pages
+    scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
+    r["model_pages_have_number"] = any(found_on(b, v) for *_, b in pages_for_model(scored, MODEL_PAGES) for v, _, _ in forms)
     if reader == "model":
         from model_reader import read_with_model
         best_pages = pages_for_model(scored, MODEL_PAGES)
         note = {}
         got = read_with_model(g, attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
-        r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
         r["declined_why"] = note.get("why")
         if got:
             r["proposal"] = True
@@ -338,12 +373,12 @@ def main():
     md = [f"### The {title} against the validated answers" + ("" if a.commit else " (dry run, sample)"), "",
           f"{sum(s['answers'] for s in stats.values()):,} answers with a value" + (f" ({limit} per attribute)" if limit else "")
           + ("; stopped at the time budget" if cut else "") + ". Shares of those answers; the reader never sees the answer.", "",
-          "| Attribute | Answers | Document for the year | Number in those documents | Number on the ranked pages | Proposal | Right | Right among proposals | Right digits, wrong scale |",
-          "| --- | --: | --: | --: | --: | --: | --: | --: | --: |"]
+          "| Attribute | Answers | Document for the year | Number in those documents | Number on the ranked pages | Number on the model's pages | Proposal | Right | Right among proposals | Right digits, wrong scale |",
+          "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: |"]
     for c in codes:
         s = stats[c]; n = s["answers"] or 1
         pct = lambda k: f"{s[k] / n:.0%}"
-        md.append(f"| {c} {spec['attributes'][c]['name']} | {s['answers']:,} | {pct('docs')} | {pct('in_docs')} | {pct('in_pages')} | "
+        md.append(f"| {c} {spec['attributes'][c]['name']} | {s['answers']:,} | {pct('docs')} | {pct('in_docs')} | {pct('in_pages')} | {pct('model_pages')} | "
                   f"{pct('proposal')} | **{pct('right')}** | {s['right'] / (s['proposal'] or 1):.0%} | {pct('scale_miss')} |")
     md.append("")
     if a.reader == "model":
