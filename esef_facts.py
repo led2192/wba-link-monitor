@@ -26,8 +26,11 @@ import qa
 from sec_facts import REVENUE, choose, matches, score, wba_year
 
 ESEF = "https://filings.xbrl.org"
-ESEF_CONCEPTS = ["ifrs-full:Revenue", "ifrs-full:RevenueFromContractsWithCustomers", "ifrs-full:InsuranceRevenue",
-                 "ifrs-full:RevenueFromInterest", "ifrs-full:InterestRevenueCalculatedUsingEffectiveInterestMethod"]
+# Gross interest income is not a bank's revenue for WBA: the analysts take income net of interest expense
+# (what SEC filers tag RevenuesNetOfInterestExpense, "gross income" or "total operating income" in European
+# banks' reports). The interest concepts differed from every validated bank answer (5 of 5, 29 Oct 2026),
+# so a bank gets no ESEF revenue proposal until a concept for its net income is found.
+ESEF_CONCEPTS = ["ifrs-full:Revenue", "ifrs-full:RevenueFromContractsWithCustomers", "ifrs-full:InsuranceRevenue"]
 CORE_DIMS = {"concept", "entity", "period", "unit", "language"}
 # ISIN prefixes of the countries whose listed companies file in ESEF (the EU and the EEA) or in the UK's
 # equivalent format, which filings.xbrl.org also collects. A company with an LEI elsewhere (most of the
