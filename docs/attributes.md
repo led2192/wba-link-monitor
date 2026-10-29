@@ -31,6 +31,8 @@ The model's misses on the first sample: the neighbouring year's column (fiscal-y
 
 Second version (6 pages, 29 Oct 2026): revenue 30 %, Scope 1 28 %, Scope 2 location 18 %, market 25 %, capex 5 % (its ranked pages now hold the value for 20 % of answers, against 0 % before the mined labels); right for 71 to 88 % of its answers; $0.12 per 200 answers. The model now saw the number for 77 answers but declined many of them, so the third version loosens the prompt and records the reason for each decline.
 
+Third version (29 Oct 2026, replies no longer cut at 300 tokens): revenue 35 %, Scope 1 50 %, Scope 2 location 28 %, market 52 %, capex 12 %; the model now gives a figure for all but 2 of the 77 answers whose pages hold the number, so reading is no longer the limit. Retrieval is: the number is in the year's documents for 60 to 80 % of answers but on the model's pages for about 38 %. The fourth version ranks pages across all the year's documents by five signals and gives the model 8 pages.
+
 Reading the reader's table: "Number in those documents" is the ceiling (the value is printed somewhere in the year's documents: about 60 to 80 %), "Number on the ranked pages" is what the reader was given (32 to 60 %), and "Right" is what it got. The loss between the last two is reading; the loss between the first two is retrieval, which `label_mining.py` addresses.
 
 Banks: revenue for WBA is income net of interest expense (SEC `RevenuesNetOfInterestExpense`, "gross income" or "total operating income" in European reports), never gross interest income. Interest-income concepts were removed from the rules on 29 Oct 2026 (pitfalls.md).
