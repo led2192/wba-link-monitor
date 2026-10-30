@@ -59,7 +59,7 @@ Model reader rows (from 29 Oct 2026): method `model reader`, `document` linked, 
 | To | Do |
 | --- | --- |
 | Fill or refresh revenue from filings | Actions, Propose values, tick commit (years default to 2018 to last year) |
-| Values read from reports by the model | Actions, Propose values, methods `model`, model years (2024), companies or limit, cost limit; tick commit after a dry run |
+| Values read from reports by the model | Actions, Propose values, methods `model`, model years (2024, or 2024,2025), companies or limit, cost limit; tick commit after a dry run. One run reads about 1,000 answers (five hours at most; it stops reading at 300 minutes and writes) |
 | Score a route against the validated answers | Actions: SEC revenue, ESEF revenue, Generic reader (reader rules or model), Value evaluation |
 | Improve an attribute's labels | Actions, Label mining; copy the phrases worth having into `labels` in `attributes.json` (pull request), then run Generic reader again |
 | Change the methodology of an attribute | Edit its entry in `attributes.json` (pull request); the pull request's checks score it again |
