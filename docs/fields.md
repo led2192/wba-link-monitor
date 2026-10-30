@@ -318,6 +318,11 @@ One row per company, benchmark attribute, year and method: a value proposed by a
 | `detail` | long text | robot | How to check the value: the number to search for in the report (in millions and in thousands, as income statements print it), then the XBRL concept, form, period end and filing date. For readers: the number as printed and the scale. |
 | `validated_value` | number | robot | The analysts' validated 2025-benchmark answer for this company, attribute and year, when there is one. |
 | `matches_validated` | pick one | robot | match (within 0.5 %, same unit), differs, or no validated answer. |
+| `validated_source` | link | robot | Opens the document the analysts cited for validated_value (the gold base's Sources: Source Link). |
+| `validated_source_name` | text | robot | Source ID(s) of the cited document(s). |
+| `validated_page` | text | robot | The page the analysts wrote, as written (usually the printed page; the PDF page can differ by a few). |
+| `validated_quote` | long text | robot | The analysts' Evidence text, first 2,000 characters. |
+| `validated_record` | link | robot | The validated answer in the analysts' editor (Editor Interface Full URL), with screenshots and notes; needs access to that base. |
 | `reviewer_note` | long text | you | Why you accepted or rejected. Never overwritten. |
 | `corrected_value` | number | you | When both value and validated_value are wrong: the right figure, in full units (not thousands or millions), in the unit of the row. Leave blank otherwise. Never overwritten by a run. |
 | `reviewed_by` | last modified by | formula | Who last changed status or reviewer_note. |
