@@ -2,6 +2,12 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-10-30: Regulator filings are read as web pages, not printed to PDF
+The 655 SEC and ESEF filings in report_library had no text. Printing them to PDF (as capture_pages.py does for web pages) was rejected: a 10-K prints to roughly 5 to 15 MB, and a file we make ourselves can only reach Airtable through the direct upload, which takes 5 MB at most (files Airtable copies from a public address can be far bigger, which is why larger reports are attached). The filing's own HTML marks every printed page, so `web_filing.py` splits it there and the text store gets the same pages the SEC or ESEF viewer shows; the row keeps the official address and no file.
+
+### 2026-10-30: No learned vocabulary in retrieval (#145 closed)
+`vocabulary.json` (#142) added a second search with the 12 strongest learned terms per attribute, meant to reach pages that print the value with no label. Scored on the same 200 answers, the share with the number on the ranked pages barely moved (revenue 55 to 57 %, Scope 1 72 %, Scope 2 location 42 %, market 50 to 48 %, capex 25 %), and the scoring run took twice as long. Not merged; the missed capex pages need another approach (the EU Taxonomy tables split the figure over rows).
+
 ### 2026-10-30: Revenue from a filing is its largest revenue concept
 The revenue concepts were tried in a fixed order (`us-gaap:Revenues`, then contract revenue excluding and including assessed tax, net sales, revenue net of interest expense). In the first analyst review of `attribute_values`, 4 of the 5 SEC rows checked were rejected because the order picked a narrower line than WBA's revenue: net sales after excise taxes, contract revenue without other revenue, a card issuer's contract revenue instead of its revenue net of interest expense. The narrower concepts are always parts of the total, so `sec_facts.choose` now takes the largest the filing reports for the year (each concept as first filed; equal values keep the order). Applies to ESEF too, which uses the same choice. Rejected: reordering the list, because the right total sits in a different concept from one company to the next. Not solved by this: a total printed only in a company's own extension concept (gross sales before royalties, total revenue including other revenue in some IFRS reports, revenue including joint ventures).
 

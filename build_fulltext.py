@@ -75,7 +75,10 @@ F_TYPE_AI = "source_type_check"; F_TYPE_KW = "source_type"; F_YEAR = "year"; F_L
 F_PAGES = "page_count"; F_LABEL = "doc_label"; F_URL = "document_url"; F_FSTATUS = "file_status"
 SWEEP_FIELDS = [F_ID, F_WBA, F_NAME, F_FILE, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_LANG, F_PAGES, F_LABEL, F_URL, F_FSTATUS]
 # a row whose PDF is over Airtable's 5 MB upload limit has no attachment: read it from its address
-HAS_PDF = f"OR({{{F_FILE}}}, AND({{{F_FSTATUS}}}='too_big', {{{F_URL}}}!=''))"
+HAS_PDF = f"OR({{{F_FILE}}}, AND({{{F_FSTATUS}}}='too_big', {{{F_URL}}}!=''), " \
+          f"FIND('sec.gov/Archives/edgar/data/', {{{F_URL}}}), FIND('filings.xbrl.org/', {{{F_URL}}}))"
+# ... and a regulator filing (SEC 10-K / 20-F, ESEF report) is a web document with no attachment: its
+# HTML is read from document_url and split at its printed page breaks (web_filing.py, 30 Oct 2026)
 
 # Types read in full by default. Names match the source_type_check options verbatim.
 CORE_TYPES = [
@@ -153,7 +156,9 @@ def row_doc(rec):
     lid = (f.get(F_ID) or "").strip()
     att = pick_attachment(f.get(F_FILE))
     fs = f.get(F_FSTATUS); fs = fs.get("name") if isinstance(fs, dict) else fs
-    if not att and fs == "too_big" and f.get(F_URL):
+    from web_filing import is_filing_url
+    web = not att and is_filing_url(f.get(F_URL))
+    if not att and (fs == "too_big" or web) and f.get(F_URL):
         att = {}                                   # read from document_url (see HAS_PDF)
     elif not lid or not att:
         return None
@@ -163,7 +168,7 @@ def row_doc(rec):
     return {"id": lid, "rec": rec["id"], "wba": (f.get(F_WBA) or "").strip(), "co": f.get(F_NAME) or "",
             "type": eff_type(f), "year": y if y is not None else "", "lang": f.get(F_LANG) or "",
             "label": f.get(F_LABEL) or "", "url": f.get(F_URL) or "", "pages": int(f.get(F_PAGES) or 0),
-            "att": att.get("id") or "", "size": int(att.get("size") or 0)}
+            "att": att.get("id") or "", "size": int(att.get("size") or 0), "web": bool(web)}
 
 
 def refresh_rows(rec_ids):
@@ -326,6 +331,17 @@ def extract_one(task):
     try:
         if not task.get("url"):
             doc["status"] = "no_file"
+        elif task.get("web"):                         # a regulator filing: HTML, split at its page breaks
+            from web_filing import fetch_html, html_pages
+            kind, html = fetch_html(task["url"], int(task.get("max_mb") or MAX_MB) * 1024 * 1024)
+            if kind != "ok":
+                doc["status"] = kind
+            else:
+                pages = html_pages(html)[:MAX_PAGES]
+                doc["pages"] = len(pages)
+                doc["status"] = "ok" if sum(len(t) for _, t in pages) >= MIN_CHARS else "no_text"
+                if doc["status"] != "ok":
+                    pages = []
         else:
             kind, data = fetch_pdf(task["url"], int(task.get("max_mb") or MAX_MB) * 1024 * 1024)
             if kind != "ok":
@@ -485,7 +501,10 @@ def publish_plan(store, work, docs, queue, listing):
     tc.write_jsonl_gz(os.path.join(work, meta_name), ({k: d[k] for k in keep} for d in docs))
     store.upload(os.path.join(work, meta_name))
     with gzip.open(os.path.join(work, queue_name), "wt", encoding="utf-8") as f:
-        json.dump([{"id": d["id"], "rec": d["rec"], "att": d["att"], "pages": d["pages"]} for d in queue], f)
+        # url and web travel with the queue: a document with no attachment (a PDF over Airtable's upload
+        # limit, a regulator filing) is read from its address, which a shard cannot look up otherwise
+        json.dump([{"id": d["id"], "rec": d["rec"], "att": d["att"], "pages": d["pages"],
+                    "url": "" if d["att"] else d.get("url", ""), "web": bool(d.get("web"))} for d in queue], f)
     store.upload(os.path.join(work, queue_name))
     old_meta = sorted(n for n in listing if n.startswith("meta-") and n != meta_name)
     old_queue = sorted(n for n in listing if n.startswith("queue-") and n != queue_name)
@@ -519,7 +538,7 @@ def tasks_for(batch, max_mb):
         a = pick_attachment(cells.get(d["rec"]), d.get("att"))
         out.append({"id": d["id"], "rec": d["rec"], "att": (a or {}).get("id") or d.get("att") or "",
                     "url": (a or {}).get("url") or (d.get("url") if not d.get("att") else None),
-                    "timeout": doc_timeout(d.get("pages")), "max_mb": max_mb})
+                    "timeout": doc_timeout(d.get("pages")), "max_mb": max_mb, "web": bool(d.get("web") and not a)})
     return out
 
 
