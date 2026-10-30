@@ -1,0 +1,816 @@
+{
+ "learned": "2026-10-30",
+ "attributes": {
+  "GMC_00048.1": [
+   [
+    "revenues cost",
+    6.5
+   ],
+   [
+    "year attributable",
+    5.77
+   ],
+   [
+    "external customers",
+    5.64
+   ],
+   [
+    "interests earnings",
+    5.53
+   ],
+   [
+    "expenses cost",
+    5.45
+   ],
+   [
+    "by geographical",
+    5.45
+   ],
+   [
+    "revenues total",
+    5.4
+   ],
+   [
+    "expenses profit",
+    5.4
+   ],
+   [
+    "share diluted",
+    5.28
+   ],
+   [
+    "interests net",
+    5.24
+   ],
+   [
+    "revenue other",
+    5.09
+   ],
+   [
+    "expense profit",
+    5.09
+   ],
+   [
+    "revenue cost",
+    5.01
+   ],
+   [
+    "basic diluted",
+    4.99
+   ],
+   [
+    "development expenses",
+    4.98
+   ],
+   [
+    "revenue by",
+    4.96
+   ],
+   [
+    "financial summary",
+    4.89
+   ],
+   [
+    "revenue gross",
+    4.89
+   ],
+   [
+    "income finance",
+    4.86
+   ],
+   [
+    "revenue operating",
+    4.86
+   ],
+   [
+    "sales gross",
+    4.82
+   ],
+   [
+    "profit selling",
+    4.76
+   ],
+   [
+    "revenue revenue",
+    4.73
+   ],
+   [
+    "non-operating income",
+    4.68
+   ],
+   [
+    "intersegment",
+    4.61
+   ],
+   [
+    "share attributable",
+    4.61
+   ],
+   [
+    "expenses 3",
+    4.6
+   ],
+   [
+    "segment assets",
+    4.55
+   ],
+   [
+    "sales for",
+    4.5
+   ],
+   [
+    "total segment",
+    4.5
+   ],
+   [
+    "share basic",
+    4.48
+   ],
+   [
+    "financial income",
+    4.47
+   ],
+   [
+    "profit other",
+    4.47
+   ],
+   [
+    "other revenue",
+    4.44
+   ],
+   [
+    "income 1",
+    4.41
+   ],
+   [
+    "annual revenue",
+    4.39
+   ],
+   [
+    "except per",
+    4.39
+   ],
+   [
+    "eliminations",
+    4.39
+   ],
+   [
+    "tax net",
+    4.36
+   ],
+   [
+    "expenses operating",
+    4.34
+   ]
+  ],
+  "GMC_00001.1": [
+   [
+    "emissions location-based",
+    7.06
+   ],
+   [
+    "total ghg",
+    5.81
+   ],
+   [
+    "emissions gross",
+    5.57
+   ],
+   [
+    "emissions market-based",
+    5.55
+   ],
+   [
+    "the location-based",
+    5.4
+   ],
+   [
+    "from regulated",
+    5.36
+   ],
+   [
+    "emissions total",
+    5.32
+   ],
+   [
+    "location-based method",
+    5.31
+   ],
+   [
+    "market based",
+    5.23
+   ],
+   [
+    "location based",
+    5.2
+   ],
+   [
+    "2 indirect",
+    5.17
+   ],
+   [
+    "co2 equivalent",
+    5.09
+   ],
+   [
+    "ghg intensity",
+    4.98
+   ],
+   [
+    "biogenic emissions",
+    4.93
+   ],
+   [
+    "mt co2e",
+    4.85
+   ],
+   [
+    "the market-based",
+    4.8
+   ],
+   [
+    "tco2e total",
+    4.8
+   ],
+   [
+    "year scope",
+    4.61
+   ],
+   [
+    "tco2e scope",
+    4.6
+   ],
+   [
+    "location-based scope",
+    4.59
+   ],
+   [
+    "gross scope",
+    4.57
+   ],
+   [
+    "market-based scope",
+    4.5
+   ],
+   [
+    "tco",
+    4.35
+   ],
+   [
+    "direct emissions",
+    4.3
+   ],
+   [
+    "global scope",
+    4.3
+   ],
+   [
+    "1 scope",
+    4.25
+   ],
+   [
+    "co2e total",
+    4.23
+   ],
+   [
+    "emissions have",
+    4.23
+   ],
+   [
+    "2 scope",
+    4.19
+   ],
+   [
+    "downstream transportation",
+    4.14
+   ],
+   [
+    "direct ghg",
+    4.1
+   ],
+   [
+    "particulate matter",
+    4.1
+   ],
+   [
+    "gross global",
+    4.06
+   ],
+   [
+    "category use",
+    4.03
+   ],
+   [
+    "3 fuel",
+    4.01
+   ],
+   [
+    "1 ghg",
+    4.0
+   ],
+   [
+    "fuel-and energy-related",
+    3.97
+   ],
+   [
+    "2 location-based",
+    3.95
+   ],
+   [
+    "nf3",
+    3.94
+   ],
+   [
+    "tonnes co2e",
+    3.92
+   ]
+  ],
+  "GMC_00002.1": [
+   [
+    "from regulated",
+    6.9
+   ],
+   [
+    "trading schemes",
+    6.83
+   ],
+   [
+    "gross indirect",
+    6.58
+   ],
+   [
+    "co2e please",
+    6.5
+   ],
+   [
+    "location-based total",
+    5.86
+   ],
+   [
+    "gross scope",
+    5.79
+   ],
+   [
+    "emission trading",
+    5.74
+   ],
+   [
+    "gross market-based",
+    5.67
+   ],
+   [
+    "co2e gross",
+    5.6
+   ],
+   [
+    "regulated emission",
+    5.6
+   ],
+   [
+    "were your",
+    5.52
+   ],
+   [
+    "what were",
+    5.52
+   ],
+   [
+    "market-based total",
+    5.4
+   ],
+   [
+    "emissions gross",
+    5.37
+   ],
+   [
+    "emissions location",
+    5.35
+   ],
+   [
+    "emissions location-based",
+    5.24
+   ],
+   [
+    "emissions market-based",
+    5.24
+   ],
+   [
+    "gross location-based",
+    5.16
+   ],
+   [
+    "significant scope",
+    5.16
+   ],
+   [
+    "emissions total",
+    5.12
+   ],
+   [
+    "emissions1",
+    5.05
+   ],
+   [
+    "tco2eq",
+    5.05
+   ],
+   [
+    "tco2e total",
+    4.89
+   ],
+   [
+    "year gross",
+    4.86
+   ],
+   [
+    "co2e reporting",
+    4.84
+   ],
+   [
+    "commuting upstream",
+    4.8
+   ],
+   [
+    "and fugitive",
+    4.8
+   ],
+   [
+    "market-based scope",
+    4.64
+   ],
+   [
+    "direct ghg",
+    4.64
+   ],
+   [
+    "location-based scope",
+    4.61
+   ],
+   [
+    "retrospective",
+    4.6
+   ],
+   [
+    "distribution waste",
+    4.57
+   ],
+   [
+    "travel category",
+    4.55
+   ],
+   [
+    "s gross",
+    4.54
+   ],
+   [
+    "fugitive emissions",
+    4.47
+   ],
+   [
+    "emissions market",
+    4.46
+   ],
+   [
+    "category end-of-life",
+    4.46
+   ],
+   [
+    "the location-based",
+    4.4
+   ],
+   [
+    "accounting group",
+    4.39
+   ],
+   [
+    "consolidated accounting",
+    4.39
+   ]
+  ],
+  "GMC_00003.1": [
+   [
+    "trading schemes",
+    7.17
+   ],
+   [
+    "gross location-based",
+    7.08
+   ],
+   [
+    "gross market-based",
+    7.08
+   ],
+   [
+    "regulated emission",
+    7.0
+   ],
+   [
+    "gross indirect",
+    6.92
+   ],
+   [
+    "co2e gross",
+    6.8
+   ],
+   [
+    "location-based and",
+    6.58
+   ],
+   [
+    "market-based total",
+    6.54
+   ],
+   [
+    "schemes scope",
+    6.45
+   ],
+   [
+    "emissions location-based",
+    6.12
+   ],
+   [
+    "from regulated",
+    6.1
+   ],
+   [
+    "emission trading",
+    5.98
+   ],
+   [
+    "3 fuel-and",
+    5.7
+   ],
+   [
+    "products end-of-life",
+    5.7
+   ],
+   [
+    "s gross",
+    5.67
+   ],
+   [
+    "emissions market-based",
+    5.65
+   ],
+   [
+    "category end-of-life",
+    5.44
+   ],
+   [
+    "emissions total",
+    5.42
+   ],
+   [
+    "assets downstream",
+    5.39
+   ],
+   [
+    "commuting category",
+    5.39
+   ],
+   [
+    "market-based ghg",
+    5.39
+   ],
+   [
+    "were your",
+    5.39
+   ],
+   [
+    "what were",
+    5.39
+   ],
+   [
+    "location-based total",
+    5.28
+   ],
+   [
+    "market-based scope",
+    5.24
+   ],
+   [
+    "market based",
+    5.23
+   ],
+   [
+    "emissions gross",
+    5.11
+   ],
+   [
+    "the location-based",
+    5.08
+   ],
+   [
+    "location-based method",
+    5.08
+   ],
+   [
+    "2 market",
+    5.08
+   ],
+   [
+    "operations category",
+    4.93
+   ],
+   [
+    "the market-based",
+    4.88
+   ],
+   [
+    "gross scope",
+    4.88
+   ],
+   [
+    "market-based method",
+    4.88
+   ],
+   [
+    "location-based scope",
+    4.86
+   ],
+   [
+    "location based",
+    4.84
+   ],
+   [
+    "distribution waste",
+    4.78
+   ],
+   [
+    "travel employee",
+    4.78
+   ],
+   [
+    "significant scope",
+    4.75
+   ],
+   [
+    "accounting group",
+    4.71
+   ]
+  ],
+  "GMC_00064.1": [
+   [
+    "water circular",
+    6.59
+   ],
+   [
+    "capex year",
+    6.51
+   ],
+   [
+    "efficiency equipment",
+    6.46
+   ],
+   [
+    "transitional activities",
+    5.81
+   ],
+   [
+    "enabling activities",
+    5.78
+   ],
+   [
+    "el capex",
+    5.72
+   ],
+   [
+    "of transitional",
+    5.68
+   ],
+   [
+    "assessed activities",
+    5.61
+   ],
+   [
+    "activities proportion",
+    5.61
+   ],
+   [
+    "capex opex",
+    5.57
+   ],
+   [
+    "capex climate",
+    5.57
+   ],
+   [
+    "considered non-material",
+    5.54
+   ],
+   [
+    "a capex",
+    5.51
+   ],
+   [
+    "capex from",
+    5.5
+   ],
+   [
+    "with taxonomy-aligned",
+    5.37
+   ],
+   [
+    "activities capex",
+    5.36
+   ],
+   [
+    "capex of",
+    5.31
+   ],
+   [
+    "economy pollution",
+    5.2
+   ],
+   [
+    "services associated",
+    5.2
+   ],
+   [
+    "y t",
+    5.14
+   ],
+   [
+    "of enabling",
+    4.96
+   ],
+   [
+    "biodiversity climate",
+    4.9
+   ],
+   [
+    "of capex",
+    4.9
+   ],
+   [
+    "transport by",
+    4.85
+   ],
+   [
+    "installation maintenance",
+    4.8
+   ],
+   [
+    "aligned activities",
+    4.76
+   ],
+   [
+    "activities considered",
+    4.76
+   ],
+   [
+    "ce n",
+    4.76
+   ],
+   [
+    "adaptation water",
+    4.72
+   ],
+   [
+    "safeguards proportion",
+    4.69
+   ],
+   [
+    "transitional activity",
+    4.65
+   ],
+   [
+    "activities 1",
+    4.58
+   ],
+   [
+    "technologies ccm",
+    4.56
+   ],
+   [
+    "biodiversity minimum",
+    4.52
+   ],
+   [
+    "or eligible",
+    4.51
+   ],
+   [
+    "pollution biodiversity",
+    4.51
+   ],
+   [
+    "from products",
+    4.51
+   ],
+   [
+    "per objective",
+    4.47
+   ],
+   [
+    "category enabling",
+    4.46
+   ],
+   [
+    "pollution circular",
+    4.45
+   ]
+  ]
+ },
+ "_about": "Learned by vocab_mining.py from the validated answers (the Generic reader's first 40 per attribute held out); log-odds of a term on the page printing the value against other pages of the same reports. Regenerate with the Vocabulary mining workflow and replace this file."
+}

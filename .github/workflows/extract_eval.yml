@@ -23,7 +23,7 @@ on:
         description: "model for the model reader"
         default: "claude-haiku-5-5"
   pull_request:
-    paths: [extract_eval.py, model_reader.py, attributes.json, .github/workflows/extract_eval.yml]
+    paths: [extract_eval.py, model_reader.py, attributes.json, vocabulary.json, .github/workflows/extract_eval.yml]
 
 jobs:
   evaluate:

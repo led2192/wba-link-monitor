@@ -15,6 +15,7 @@ Retrieval and rules first, a model only for what they cannot read, and every rou
 | `value_eval.py` | The ceiling: is the validated number printed anywhere in the company's documents of that year, in any scale? |
 | `sec_facts.py`, `esef_facts.py` | Revenue from machine-readable filings (SEC companyfacts; European ESEF reports on filings.xbrl.org), scored |
 | `extract_eval.py` | The generic reader: the year's documents, the pages that name the attribute, then the value read by rules (`--reader rules`) or by a model (`--reader model`, `model_reader.py`), scored stage by stage |
+| `vocab_mining.py`, `vocabulary.json` | The words that set apart the page printing a value, learned from the validated answers; the reader's second search uses them to find pages with no label |
 | `label_mining.py` | Learns from the validated answers which words reports print next to a value; suggestions for `labels` in `attributes.json` |
 | `propose_values.py` | Writes values to the Disclosure Library table `attribute_values` for analysts to review. First source: SEC and ESEF revenue |
 
