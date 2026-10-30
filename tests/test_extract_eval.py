@@ -76,6 +76,15 @@ class Ranking(unittest.TestCase):
         self.assertIn("small", [r[1] for r in kept])
 
 
+class Hyphens(unittest.TestCase):
+    def test_labels_match_with_or_without_hyphen(self):
+        self.assertIn("location based", X.label_variants(["location-based"]))
+        self.assertIn("taxonomy-aligned", X.label_variants(["taxonomy aligned"]))
+        self.assertIn('"location based"', X.label_query(["location-based"]))
+        self.assertTrue(X.label_positions("Scope 2 location based emissions 12,345", ["location-based"], []))
+        self.assertTrue(X.label_positions("Scope 2 location-based 12,345", ["location based"], []))
+
+
 class RetrievalMiss(unittest.TestCase):
     def test_kinds(self):
         from value_eval import printed_forms, EMISSION_SCALES

@@ -139,7 +139,8 @@ def label_positions(text, labels, exclude):
     t = text.lower()
     out = []
     for lab in labels:
-        for m in re.finditer(r"(?<![a-z])" + re.escape(lab.lower()) + r"(?![a-z])", t):
+        pat = r"[-\s]+".join(re.escape(w) for w in re.split(r"[-\s]+", lab.lower()))
+        for m in re.finditer(r"(?<![a-z])" + pat + r"(?![a-z])", t):
             ctx = t[max(0, m.start() - 30):m.end() + 30]
             if any(x in ctx for x in exclude):
                 continue
@@ -195,8 +196,22 @@ def right(v, gold):
     return bool(v) and bool(gold) and abs(v - gold) / gold <= MATCH
 
 
+def label_variants(labels):
+    """The labels plus their spelling with spaces for hyphens and hyphens for spaces between two words
+    ("location-based" and "location based"): reports print both, and the word index treats them as
+    different words. On 29 Oct 2026, 10 of the 11 Scope 2 location-based answers whose page was missed
+    printed "location based" with a space."""
+    out = []
+    for l in labels:
+        for v in (l, l.replace("-", " "), re.sub(r"(?<=[a-z]) (?=based\b|aligned\b)", "-", l)):
+            if v not in out:
+                out.append(v)
+    return out
+
+
 def label_query(labels):
-    """websearch query: any of the labels, each as a phrase."""
+    """websearch query: any of the labels (and their hyphen variants), each as a phrase."""
+    labels = label_variants(labels)
     ascii_labels = [l for l in labels if re.fullmatch(r"[\w\s\-']+", l, flags=re.ASCII)]
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 

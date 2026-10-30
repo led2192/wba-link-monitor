@@ -123,3 +123,6 @@ The model reader allowed 300 output tokens. Replies averaged 236, and the model 
 ## A link that proves the value is not a link anyone can check it with
 The first `attribute_values` rows (29 Oct 2026) pointed SEC values at the filing's folder on sec.gov: correct, but a list of twenty files (exhibits, XBRL schemas, images) with no hint of which one to open or what to look for. The analyst asked to check them could not. A source link for review must open the readable report, and the row must say what to search for in it.
 
+## A hyphen is a different word to the word index
+"location-based" and "location based" are different words to Postgres full-text search, and reports print both. The reader's labels were written with hyphens, so the pages printing "Scope 2 location based" never matched (10 of 11 missed Scope 2 location-based pages, 29 Oct 2026). Labels are now searched in both spellings, and matched on the page with either a hyphen or a space between the words.
+
