@@ -42,6 +42,21 @@ class Rule(unittest.TestCase):
         self.assertEqual(S.choose(facts, 2024)[4], 102_502_000_000)                     # Revenues over contract revenue
         self.assertEqual(S.choose(facts, 2023)[4], 106_848_000_000)                     # as first filed, not restated
 
+    def test_the_top_line_over_narrower_concepts(self):
+        # cases an analyst rejected (30 Oct 2026): sales before excise taxes over net sales; a card issuer's
+        # revenue net of interest expense over its contract revenue
+        def facts(**concepts):
+            return S.annual_facts({"facts": {"us-gaap": {c: {"units": {"USD": [row("2024-05-01", "2025-04-30", v)]}}
+                                                        for c, v in concepts.items()}}})
+        self.assertEqual(S.choose(facts(RevenueFromContractWithCustomerExcludingAssessedTax=3_975e6,
+                                        RevenueFromContractWithCustomerIncludingAssessedTax=5_056e6), 2024)[4], 5_056e6)
+        self.assertEqual(S.choose(facts(RevenueFromContractWithCustomerExcludingAssessedTax=37_218e6,
+                                        RevenuesNetOfInterestExpense=67_364e6), 2024)[1], "us-gaap:RevenuesNetOfInterestExpense")
+        both = facts(Revenues=4_684e6, RevenueFromContractWithCustomerExcludingAssessedTax=4_653e6)
+        self.assertEqual(S.choose(both, 2024)[4], 4_684e6)
+        same = facts(Revenues=1e9, RevenueFromContractWithCustomerExcludingAssessedTax=1e9)
+        self.assertEqual(S.choose(same, 2024)[1], "us-gaap:Revenues")                  # a tie keeps the order
+
     def test_score(self):
         facts = S.annual_facts(FACTS)
         ok = S.score({"year": 2024, "value": 102_502_000_000.0, "unit": "USD"}, facts)
