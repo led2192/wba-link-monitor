@@ -13,7 +13,7 @@ the "retrieval and rules before any model" plan of 28 Oct 2026):
   year is chosen by rule:
     - annual: a 10-K, 20-F or 40-F (or their amendments), a period of 330 to 380 days;
     - the year by WBA's convention: a period ending January to June counts as the previous year;
-    - the concept by priority (REVENUE_CONCEPTS: total revenues before the narrower contract revenue);
+    - the largest of the revenue concepts reported for the year (REVENUE_CONCEPTS), each as first filed: the top line;
     - the earliest filing that reports the period (what the analyst read; later filings may restate it).
   A match is the same currency and a value within MATCH_TOLERANCE of the validated one. The table also
   says how often some other revenue concept would have matched, which is how the priority list is tuned.
@@ -30,8 +30,8 @@ import qa
 REVENUE = "GMC_00048.1"
 MATCH_TOLERANCE = 0.005                    # 0.5 %: analysts copy the printed figure; rounding stays inside
 ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A", "10-KT"}
-# total revenue first; the narrower contract-revenue concepts and the older sales concepts after; banks and
-# insurers report revenue in their own concepts, last
+# the concepts a revenue figure can be tagged with; choose() takes the largest the filing reports for the year
+# (the top line), the order only breaks ties
 REVENUE_CONCEPTS = [
     ("us-gaap", "Revenues"),
     ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"),
@@ -74,13 +74,22 @@ def annual_facts(companyfacts):
 
 def choose(facts, year):
     """The fact the rule picks for a WBA year: in the company's main reporting currency (the one most of
-    its revenue facts use; some filings add a convenience translation), the best-ranked concept, then the
-    earliest filing."""
+    its revenue facts use; some filings add a convenience translation), each concept as first filed, then
+    the largest of them: the top line. WBA takes total revenue, gross sales before excise taxes or royalties
+    deducted below them, income net of interest expense for a card issuer, and the narrower concepts
+    (revenue from contracts with customers, net sales) are always part of it. Ranking concepts instead
+    took contract revenue over the total for 4 of the first 5 SEC rows an analyst reviewed (30 Oct 2026).
+    Equal values keep the concept order."""
     if not facts:
         return None
     main = collections.Counter(f[5] for f in facts).most_common(1)[0][0]
     cand = [f for f in facts if f[2] == year and f[5] == main] or [f for f in facts if f[2] == year]
-    return min(cand, key=lambda f: (f[0], f[7], -f[4])) if cand else None
+    if not cand:
+        return None
+    first = {}
+    for f in sorted(cand, key=lambda f: (f[7], -f[4])):        # each concept as first filed, not restated
+        first.setdefault(f[1], f)
+    return max(first.values(), key=lambda f: (f[4], -f[0]))
 
 
 def matches(value, currency, fact, tol=MATCH_TOLERANCE):
