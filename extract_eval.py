@@ -281,17 +281,55 @@ def pages_for_model(scored, n):
 
 
 # ----------------------------------------------------------------------------------------------
+def year_documents(cur, wba, year, attr):
+    """([(library_id, doc_type, year)], {library_id: weight}): the company's documents of the year or the
+    next, preferred types first, at most MAX_DOCS; the weight favours the preferred types and the year itself."""
+    ranks = {t: i for i, t in enumerate(attr.get("doc_types", []))}
+    cur.execute("select library_id, coalesce(doc_type, ''), coalesce(year, 0) from public.documents "
+                "where wba_id = %s and year in (%s, %s)", (wba, year, year + 1))
+    docs = sorted(cur.fetchall(), key=lambda d: (ranks.get(d[1], 99), d[2] != year, d[0]))[:MAX_DOCS]
+    nt = max(len(ranks), 1)
+    weight = {d[0]: (1 - ranks[d[1]] / nt if d[1] in ranks else 0.0) * (1.0 if d[2] == year else 0.7) for d in docs}
+    return docs, weight
+
+
+def ranked_pages(cur, ids, weight, year, attr, spec):
+    """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents."""
+    cur.execute("select library_id, page, body, ts_rank_cd(words, websearch_to_tsquery('simple', %s), 32) as rk from public.pages "
+                "where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s) "
+                "order by rk desc limit %s",
+                (label_query(attr["labels"]), ids, label_query(attr["labels"]), POOL))
+    rows = []
+    for lid, page, body, rk in cur.fetchall():
+        cs = candidates(body, year, attr, spec)
+        top = max(cs, key=lambda c: c[0]) if cs else None
+        sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []), attr.get("exclude", []), weight.get(lid, 0))
+        rows.append((sc, lid, page, body, top))
+    return rows
+
+
+def read_value(cur, wba, year, attr, spec, usage):
+    """What the model reader proposes for a company, attribute and year, with no validated answer needed:
+    the same documents, ranking and pages as evaluate(). The model's checked reply (value, printed, scale,
+    library_id, page, unit) or None."""
+    from model_reader import read_with_model
+    docs, weight = year_documents(cur, wba, year, attr)
+    if not docs:
+        return None
+    pages = keep_pages(ranked_pages(cur, [d[0] for d in docs], weight, year, attr, spec))
+    scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
+    best = pages_for_model(scored, MODEL_PAGES)
+    if not best:
+        return None
+    return read_with_model({"wba": wba, "year": year}, attr, [(lid, page, body) for _, _, lid, page, body in best], usage)
+
+
 def evaluate(cur, g, attr, spec, reader="rules", usage=None):
     """Stage results for one answer. reader "rules": the best-scored labelled row on the ranked pages;
     "model": a language model reads MODEL_PAGES pages: the ones whose rule candidates scored best, then the
     best-ranked ones not yet taken (pages_for_model)."""
     r = {"docs": False, "in_docs": False, "in_pages": False, "proposal": False, "right": False, "scale_miss": False}
-    ranks = {t: i for i, t in enumerate(attr.get("doc_types", []))}
-    cur.execute("select library_id, coalesce(doc_type, ''), coalesce(year, 0) from public.documents "
-                "where wba_id = %s and year in (%s, %s)", (g["wba"], g["year"], g["year"] + 1))
-    docs = sorted(cur.fetchall(), key=lambda d: (ranks.get(d[1], 99), d[2] != g["year"], d[0]))[:MAX_DOCS]
-    nt = max(len(ranks), 1)
-    weight = {d[0]: (1 - ranks[d[1]] / nt if d[1] in ranks else 0.0) * (1.0 if d[2] == g["year"] else 0.7) for d in docs}
+    docs, weight = year_documents(cur, g["wba"], g["year"], attr)
     if not docs:
         return r
     r["docs"] = True
@@ -305,16 +343,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
         r["in_docs"] = bool(holding)
     else:
         holding = []
-    cur.execute("select library_id, page, body, ts_rank_cd(words, websearch_to_tsquery('simple', %s), 32) as rk from public.pages "
-                "where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s) "
-                "order by rk desc limit %s",
-                (label_query(attr["labels"]), ids, label_query(attr["labels"]), POOL))
-    rows = []
-    for lid, page, body, rk in cur.fetchall():
-        cs = candidates(body, g["year"], attr, spec)
-        top = max(cs, key=lambda c: c[0]) if cs else None
-        sc = page_score(rk, top[0] if top else None, body, g["year"], attr.get("labels", []), attr.get("exclude", []), weight.get(lid, 0))
-        rows.append((sc, lid, page, body, top))
+    rows = ranked_pages(cur, ids, weight, g["year"], attr, spec)
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
     if r["in_docs"] and not r["in_pages"]:
