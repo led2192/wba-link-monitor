@@ -146,15 +146,34 @@ def has_words(text, words):
 
 
 # ----------------------------------------------------------------------------------------------
-def gold_values(token, base, codes):
-    """Validated answers with a value: [{id, wba, attribute, year, value, unit}]. No quote needed."""
+def gold_values(token, base, codes, sources=False):
+    """Validated answers with a value: [{id, wba, attribute, year, value, unit}]. No quote needed.
+    sources=True adds where the analyst took it from: quote (the Evidence text), page (as written),
+    source_ids (Sources record ids), editor_url (the answer in the analysts' own editor)."""
     formula = "AND({Data Reviewed}, {Selected Value}!='', OR(" + ",".join(f"FIND('{c}', {{Metadata ID}})" for c in codes) + "))"
+    fields = ["Metadata ID", "Selected Value"] + (["Evidence", "Page Number", "Source Link", "Editor Interface Full URL"] if sources else [])
     out = []
-    for r in get_all(token, base, "Metadata", ["Metadata ID", "Selected Value"], formula):
-        wba, code, year = gold_id(r["fields"].get("Metadata ID"))
+    for r in get_all(token, base, "Metadata", fields, formula):
+        f = r["fields"]
+        wba, code, year = gold_id(f.get("Metadata ID"))
         if code in codes:
-            v, unit = parse_value(r["fields"].get("Selected Value"))
-            out.append({"id": r["fields"].get("Metadata ID"), "wba": wba, "attribute": code, "year": year, "value": v, "unit": unit})
+            v, unit = parse_value(f.get("Selected Value"))
+            g = {"id": f.get("Metadata ID"), "wba": wba, "attribute": code, "year": year, "value": v, "unit": unit}
+            if sources:
+                g.update(quote=(f.get("Evidence") or "").strip(), page=str(f.get("Page Number") or "").strip(),
+                         source_ids=f.get("Source Link") or [], editor_url=str(f.get("Editor Interface Full URL") or "").strip())
+            out.append(g)
+    return out
+
+
+def gold_sources(token, base):
+    """{Sources record id: {name, url, year}} of a gold base (read-only): the documents analysts cited.
+    Only fields every gold base has (Source Name is missing in some)."""
+    out = {}
+    for r in get_all(token, base, "Sources", ["Source ID", "Source Link", "Source Year"]):
+        f = r["fields"]
+        out[r["id"]] = {"name": (f.get("Source ID") or "").strip(),
+                        "url": (f.get("Source Link") or "").strip(), "year": f.get("Source Year") or ""}
     return out
 
 
