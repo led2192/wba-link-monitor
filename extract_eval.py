@@ -34,6 +34,42 @@ import qa
 from value_eval import CURRENCY_SCALES, EMISSION_SCALES, found_on, printed_forms, tsquery_for
 
 SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attributes.json")
+VOCAB = os.path.join(os.path.dirname(SPEC), "vocabulary.json")
+VOCAB_TERMS = 12                     # learned terms in the second search (the word index's OR query)
+VOCAB_POOL = 200                     # pages that second search may add
+
+
+def load_vocabulary():
+    """{attribute name: [(term, weight)]} from vocabulary.json (written from vocab_mining.py's output), or {}."""
+    try:
+        v = json.load(open(VOCAB, encoding="utf-8"))
+        names = {c: a["name"] for c, a in json.load(open(SPEC, encoding="utf-8"))["attributes"].items()}
+        return {names[c]: [tuple(x) for x in terms] for c, terms in v.get("attributes", {}).items() if c in names}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+VOCABULARY = load_vocabulary()
+
+
+def vocab_score(body, vocab):
+    """0 to 1: the share of the attribute's learned vocabulary weight present on the page."""
+    if not vocab:
+        return 0.0
+    from vocab_mining import terms
+    t = terms(body or "")
+    total = sum(w for _, w in vocab)
+    return sum(w for term, w in vocab if term in t) / total if total else 0.0
+
+
+def vocab_query(vocab, n=VOCAB_TERMS):
+    """to_tsquery text: any of the n strongest learned terms (a pair of words as a phrase)."""
+    parts = []
+    for term, _ in vocab[:n]:
+        ws = term.split()
+        if all(re.fullmatch(r"[a-z0-9]+", w) for w in ws):
+            parts.append(" <-> ".join(ws) if len(ws) > 1 else ws[0])
+    return " | ".join(f"({p})" for p in parts)
 MAX_DOCS, MAX_PAGES = 12, 25         # documents of the year searched; pages kept after ranking
 PER_DOC = 10                         # at most this many of the kept pages from one document
 POOL = 400                           # label-matching pages scored before ranking
@@ -216,7 +252,7 @@ def label_query(labels):
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
 
-def page_score(text_rank, cand, body, year, labels, exclude, doc_weight):
+def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, vocab=0.0):
     """How likely a page holds the attribute's figure for the year, from five signals, each in 0 to 1:
     the label match of the word index, the best rule candidate on the page, how much of a table it is
     (numbers of four digits or more), whether it prints the year (or its fiscal label), how often the
@@ -229,7 +265,7 @@ def page_score(text_rank, cand, body, year, labels, exclude, doc_weight):
     has_year = 1.0 if (str(year) in (body or "") or f"FY{y1[2:]}" in (body or "") or f"FY{y1}" in (body or "")) else 0.0
     hits = min(len(label_positions(body or "", labels, exclude)), 5) / 5
     c = max(cand, 0) / 8 if cand is not None else 0.0
-    return 1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight
+    return 1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight + 1.0 * vocab
 
 
 def retrieval_miss(holding, rows, forms):
@@ -294,16 +330,29 @@ def year_documents(cur, wba, year, attr):
 
 
 def ranked_pages(cur, ids, weight, year, attr, spec):
-    """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents."""
+    """[(score, library_id, page, body, best rule candidate)] for the documents' pages found two ways: the
+    label phrases of attributes.json, and the attribute's learned vocabulary (vocabulary.json), which finds
+    the right page when it carries no label (#139: 42 of 46 missed pages)."""
+    found = {}
     cur.execute("select library_id, page, body, ts_rank_cd(words, websearch_to_tsquery('simple', %s), 32) as rk from public.pages "
                 "where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s) "
                 "order by rk desc limit %s",
                 (label_query(attr["labels"]), ids, label_query(attr["labels"]), POOL))
-    rows = []
     for lid, page, body, rk in cur.fetchall():
+        found[(lid, page)] = (body, rk)
+    vocab = VOCABULARY.get(attr.get("name"), [])
+    vq = vocab_query(vocab)
+    if vq:
+        cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and words @@ to_tsquery('simple', %s) "
+                    "order by ts_rank_cd(words, to_tsquery('simple', %s), 32) desc limit %s", (ids, vq, vq, VOCAB_POOL))
+        for lid, page, body in cur.fetchall():
+            found.setdefault((lid, page), (body, 0.0))
+    rows = []
+    for (lid, page), (body, rk) in found.items():
         cs = candidates(body, year, attr, spec)
         top = max(cs, key=lambda c: c[0]) if cs else None
-        sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []), attr.get("exclude", []), weight.get(lid, 0))
+        sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []), attr.get("exclude", []),
+                        weight.get(lid, 0), vocab_score(body, vocab))
         rows.append((sc, lid, page, body, top))
     return rows
 

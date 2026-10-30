@@ -76,6 +76,23 @@ class Ranking(unittest.TestCase):
         self.assertIn("small", [r[1] for r in kept])
 
 
+class Vocabulary(unittest.TestCase):
+    def test_score_and_query(self):
+        vocab = [("location based", 2.0), ("scope 2", 1.0), ("tco2e", 1.0)]
+        self.assertAlmostEqual(X.vocab_score("Scope 2 location based 1,234 tCO2e", vocab), 1.0)
+        self.assertAlmostEqual(X.vocab_score("Scope 2 market based", vocab), 0.25)
+        self.assertEqual(X.vocab_score("anything", []), 0.0)
+        self.assertEqual(X.vocab_query(vocab), "(location <-> based) | (scope <-> 2) | (tco2e)")
+
+    def test_a_page_with_no_label_can_win_on_vocabulary(self):
+        labels, ex = ["scope 2 location-based"], []
+        page = "Indirect emissions, location based method, tCO2e 2024 2023 81,000 79,500"
+        self.assertFalse(X.label_positions(page, labels, ex))
+        with_v = X.page_score(0.0, None, page, 2024, labels, ex, 0.8, 0.9)
+        without = X.page_score(0.0, None, page, 2024, labels, ex, 0.8, 0.0)
+        self.assertGreater(with_v, without + 0.8)
+
+
 class Hyphens(unittest.TestCase):
     def test_labels_match_with_or_without_hyphen(self):
         self.assertIn("location based", X.label_variants(["location-based"]))
