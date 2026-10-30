@@ -16,8 +16,14 @@ For each company and fiscal year from FIRST_YEAR on, a filing is added to report
 the library holds no annual-family document (Annual Report, Integrated Report, 10K Form) for that
 year. So it fills gaps and never doubles a company's own annual report, which keeps the record
 count low. Each added row is a real document with its official address, labelled at once (type,
-year, auto_title) and marked file_status = not_pdf, because these filings are web documents
-(HTML / XHTML), not PDFs: open them with document_url.
+year, auto_title) and marked file_status = web_document, because these filings are web documents
+(HTML / XHTML), not PDFs: open them with document_url. build_fulltext.py reads their text from that
+address and splits it at the printed page breaks (web_filing.py). Rows added before 30 Oct 2026
+said not_pdf, which read as a failed download; --mark-web relabels them.
+
+SEC lookup covers every public company with an ISIN, not only US and Canadian ones: foreign
+companies listed in the US file a 10-K or 20-F too (NXP, Sony), and were never looked up before
+30 Oct 2026. A company that is not an SEC filer is stored as sec_cik = 'none' and not looked up again.
 
 Identifiers (lei, isin, hq_country, ownership) come from WBA's company master list. Private and
 government companies are skipped for the SEC. companies.filings_note says what was found.
@@ -159,6 +165,23 @@ def esef_filings(lei, sess):
 
 
 # --------------------------------------------------------------------------------------------- main
+def mark_web(commit):
+    """Filings added before 30 Oct 2026 carry file_status = not_pdf, which quality checks and views read
+    as a failed download. They are web documents: relabel them web_document."""
+    from web_filing import is_filing_url
+    rows = at_get("report_library", ["document_url", "file_status"],
+                  "AND({file_status}='not_pdf', OR(FIND('sec.gov/Archives/edgar/data/', {document_url}), "
+                  "FIND('filings.xbrl.org/', {document_url})))")
+    upd = [{"id": r["id"], "fields": {"file_status": "web_document"}} for r in rows
+           if is_filing_url(r["fields"].get("document_url"))]
+    print(f">>> {len(rows)} rows marked not_pdf at a filing address; {len(upd)} to relabel web_document"
+          + ("" if commit else " (dry run)"), flush=True)
+    if commit and upd:
+        at_write("report_library", "PATCH", upd)
+        print(f">>> relabelled {len(upd)} rows.", flush=True)
+    return 0
+
+
 def rows_for(company, filings, have_years, have_docs, source):
     from ids import doc_id
     f = company["fields"]; wba = f["wba_id"]; name = f.get("company_name", "")
@@ -177,7 +200,7 @@ def rows_for(company, filings, have_years, have_docs, source):
         rows.append({"library_id": f"{wba}-{hashlib.sha1(key.encode()).hexdigest()[:10]}", "wba_id": wba,
                      "company_name": name, "document_url": url, "doc_year": str(y),
                      "source_type": "Annual Report", "match_confidence": f"regulator filing ({source})",
-                     "auto_title": f"{label} for fiscal year {y}", "file_status": "not_pdf",
+                     "auto_title": f"{label} for fiscal year {y}", "file_status": "web_document",
                      "first_seen": date.today().isoformat(),
                      "Reviewer notes": f"Added from the {source} regulator database (filed {filed[:10]}). "
                                        "A web document, not a PDF: open document_url."})
@@ -191,9 +214,12 @@ def main():
     ap.add_argument("--wba", default="")
     ap.add_argument("--source", default="all", choices=["sec", "esef", "all"])
     ap.add_argument("--max", type=int, default=0)
+    ap.add_argument("--mark-web", action="store_true", help="relabel filings marked not_pdf as web_document, then stop")
     a = ap.parse_args()
     if not (TOKEN and BASE):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
+    if a.mark_web:
+        return mark_web(a.commit)
     wbas = [w.strip() for w in a.wba.split(",") if w.strip()]
     formula = ("OR(" + ",".join(f"{{wba_id}}='{w}'" for w in wbas) + ")") if wbas else None
     comps = [c for c in at_get("companies", ["wba_id", "company_name", "lei", "isin", "hq_country", "ownership",
@@ -207,8 +233,7 @@ def main():
 
     if a.source in ("sec", "all"):
         need = {c["fields"]["isin"] for c in comps if c["fields"].get("isin") and not c["fields"].get("sec_cik")
-                and c["fields"].get("ownership") == "Public"
-                and (c["fields"]["isin"].startswith("US") or c["fields"].get("hq_country") in ("USA", "CAN"))}
+                and c["fields"].get("ownership") == "Public"}                     # foreign filers too (30 Oct 2026)
         if need:
             print(f">>> SEC: looking up {len(need)} ISINs ...", flush=True)
             found = sec_ciks(need, sess)

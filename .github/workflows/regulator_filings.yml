@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "dry-run lists what would be added; commit adds it"
+        description: "dry-run lists what would be added; commit adds it; mark-web relabels old filing rows (not_pdf) as web_document"
         type: choice
         default: "dry-run"
-        options: [dry-run, commit]
+        options: [dry-run, commit, mark-web]
       source:
         description: "Which database"
         type: choice
@@ -40,6 +40,7 @@ jobs:
         run: |
           ARGS=(--source "${{ inputs.source || 'all' }}" --wba "${{ inputs.wba }}")
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then ARGS+=(--commit); fi
+          if [ "${{ inputs.mode }}" = "mark-web" ]; then ARGS=(--mark-web --commit); fi
           python regulator_filings.py "${ARGS[@]}"
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
