@@ -319,6 +319,9 @@ One row per company, benchmark attribute, year and method: a value proposed by a
 | `validated_value` | number | robot | The analysts' validated 2025-benchmark answer for this company, attribute and year, when there is one. |
 | `matches_validated` | pick one | robot | match (within 0.5 %, same unit), differs, or no validated answer. |
 | `reviewer_note` | long text | you | Why you accepted or rejected. Never overwritten. |
+| `corrected_value` | number | you | When both value and validated_value are wrong: the right figure, in full units (not thousands or millions), in the unit of the row. Leave blank otherwise. Never overwritten by a run. |
+| `reviewed_by` | last modified by | formula | Who last changed status or reviewer_note. |
+| `reviewed_on` | last modified time | formula | When status or reviewer_note was last changed. |
 | `first_proposed` | date and time | robot |  |
 | `last_run` | date and time | robot |  |
 

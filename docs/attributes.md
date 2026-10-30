@@ -45,6 +45,7 @@ One row per company, attribute, year and method (`value_id` = `PT_00001|GMC_0004
 - **matches_validated**: `match`, `differs` or `no validated answer`. The `differs` rows are the ones to look at first: either the validated answer has a slip (a currency label, a factor of 1,000) or the rule picked another line.
 - **source_url** opens the report itself (the SEC's viewer for a 10-K or 20-F, the filings.xbrl.org viewer for ESEF); **detail** starts with the number to search for in it (in millions and in thousands), then the concept, form, period end and filing date. To check a row: open the link, Ctrl+F that number, compare with the income statement.
 - Two methods that disagree on the same company and year are two rows, so the disagreement is visible.
+- A reviewer edits only `status`, `reviewer_note` and `corrected_value` (the right figure when both ours and the validated one are wrong). The value fields belong to the runs: a row still `proposed` is rewritten by the next run. `reviewed_by` and `reviewed_on` record who reviewed and when. A base that syncs this table for reviewers needs two-way sync on those three fields only.
 
 First full run (29 Oct 2026, 2022 to 2024): 1,324 revenue values; SEC 1,014 (288 match, 34 differ, 692 with no validated answer), ESEF 310 (72 match, 22 differ, 216 with no validated answer). Years now default to 2018 to last year.
 
