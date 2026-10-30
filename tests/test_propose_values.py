@@ -79,6 +79,33 @@ class Propose(unittest.TestCase):
         self.assertEqual(P.printed_text(2804.0), "2,804")
         self.assertEqual(P.printed_text(5206474.45), "5,206,474.45")
 
+    def test_the_model_reader_stops_at_the_time_budget(self):
+        # Propose values #43 (30 Oct 2026) read for two hours, hit the job limit and wrote nothing
+        import types, collections, psycopg, extract_eval
+        class Cur:
+            def execute(self, *a): pass
+        class Conn:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def cursor(self): return Cur()
+        reads = []
+        real = (psycopg.connect, extract_eval.read_value, P.T0)
+        psycopg.connect = lambda *a, **k: Conn()
+        extract_eval.read_value = lambda *a, **k: reads.append(a) or None
+        os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
+        a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024", companies="PT_1,PT_2", limit=0, max_usd=1.0, budget=1)
+        spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number"}}
+        try:
+            P.T0 = P.time.time() - 120                                              # two minutes in, budget one
+            c = collections.Counter()
+            self.assertEqual(P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c), [])
+            self.assertEqual((reads, c["model reader: stopped at the time budget"]), ([], 1))
+            P.T0 = P.time.time()
+            P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, collections.Counter())
+            self.assertEqual(len(reads), 2)
+        finally:
+            psycopg.connect, extract_eval.read_value, P.T0 = real
+
     def test_years(self):
         from datetime import datetime
         t = datetime(2026, 10, 29)

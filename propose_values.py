@@ -33,6 +33,8 @@ Revenue is left to the filing where a SEC or ESEF row exists. --companies and --
 import argparse, collections, json, os, sys, time, traceback
 from datetime import datetime, timezone
 
+T0 = time.time()
+
 import qa
 
 API = "https://api.airtable.com/v0"
@@ -260,6 +262,9 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                     if cost(usage) >= a.max_usd:
                         c["model reader: stopped at the cost limit"] = 1
                         break
+                    if time.time() - T0 > a.budget * 60:          # leave time to write what was read
+                        c["model reader: stopped at the time budget"] = 1
+                        break
                     if code == REVENUE and (wba, code, str(y)) in has_filing:
                         c["model reader: revenue left to the filing"] += 1; continue
                     c["model reader: asked"] += 1
@@ -293,6 +298,8 @@ def main():
     ap.add_argument("--attributes", default="", help="model reader: GMC codes (blank = every number attribute)")
     ap.add_argument("--companies", default="", help="model reader: wba ids, comma-separated (blank = every company)")
     ap.add_argument("--max-usd", type=float, default=1.0, help="model reader: stop when the estimated cost reaches this")
+    ap.add_argument("--budget", type=float, default=300, help="minutes: the model reader stops reading after this, "
+                    "so what it read is still written before the job's limit (one answer takes about 15 to 20 s)")
     a = ap.parse_args()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"

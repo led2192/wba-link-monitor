@@ -40,7 +40,7 @@ on:
 jobs:
   propose:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 345           # GitHub's limit is 360; the script stops reading at 300 (--budget) and writes
     permissions:
       contents: read
       pull-requests: write
