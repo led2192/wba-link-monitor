@@ -47,6 +47,7 @@ class ModelReader(unittest.TestCase):
         self.assertEqual((usage["calls"], usage["input_tokens"], usage["output_tokens"]), (1, 2000, 40))
         prompt = s.sent[0]["messages"][0]["content"]
         self.assertIn("Revenue", prompt); self.assertIn('<page id="P2">', prompt); self.assertIn("2024", prompt)
+        self.assertIn('"column"', prompt)
         self.assertNotIn("temperature", s.sent[0])                 # refused by Haiku 5.5 (HTTP 400, 29 Oct 2026)
 
     def test_a_number_not_on_the_named_page_is_dropped(self):
