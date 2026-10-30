@@ -54,6 +54,13 @@
         "million tonnes": 1000000.0,
         "million tons": 1000000.0
       }
+    },
+    "count": {
+      "scales": {
+        "thousand": 1000.0,
+        "thousands": 1000.0,
+        "'000": 1000.0
+      }
     }
   },
   "attributes": {
@@ -329,6 +336,65 @@
       ],
       "period": "fiscal_year",
       "scope": "group"
+    },
+    "GMC_02526.1": {
+      "name": "Total number of employees",
+      "definition": "Total number of employees of the company (headcount at the end of the reporting year, whole group).",
+      "type": "number",
+      "unit_family": "count",
+      "labels": [
+        "total number of employees",
+        "number of employees",
+        "total employees",
+        "employees at year end",
+        "headcount",
+        "total headcount",
+        "total workforce",
+        "workforce",
+        "full-time equivalent",
+        "full-time equivalents",
+        "FTE",
+        "staff",
+        "number of staff",
+        "Mitarbeiter",
+        "Mitarbeitende",
+        "collaborateurs",
+        "effectif",
+        "empleados",
+        "plantilla",
+        "funcionários",
+        "dipendenti",
+        "medewerkers",
+        "従業員数",
+        "员工总数",
+        "員工總數"
+      ],
+      "exclude": [
+        "per employee",
+        "turnover rate",
+        "training",
+        "new hires",
+        "new employees",
+        "contractors",
+        "average age",
+        "injur",
+        "fatalit"
+      ],
+      "doc_types": [
+        "Annual Report",
+        "10K Form",
+        "Integrated Report",
+        "Sustainability Report",
+        "ESG Report",
+        "Registration Document",
+        "Statutory Documents"
+      ],
+      "period": "year end",
+      "scope": "group",
+      "xbrl": [
+        "dei:EntityNumberOfEmployees",
+        "ifrs-full:NumberOfEmployees"
+      ]
     }
   }
 }

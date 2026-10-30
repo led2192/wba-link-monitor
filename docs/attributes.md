@@ -18,6 +18,8 @@ Retrieval and rules first, a model only for what they cannot read, and every rou
 | `label_mining.py` | Learns from the validated answers which words reports print next to a value; suggestions for `labels` in `attributes.json` |
 | `propose_values.py` | Writes values to the Disclosure Library table `attribute_values` for analysts to review. First source: SEC and ESEF revenue |
 
+Employees (from 30 Oct 2026): GMC_02526.1 Total number of employees, validated for the 2,000 companies in the base Metadata 2025 - 00 SDG2000, which `gold_attributes.json` now lists after the two ACT Core bases. An answer present in two bases counts once (the first base listed wins). Unit family `count`: printed as is or in thousands.
+
 ## Routes and how well they do (29 Oct 2026)
 
 | Route | Attributes | Scored on | Right |

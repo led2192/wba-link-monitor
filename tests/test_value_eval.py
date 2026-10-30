@@ -80,5 +80,23 @@ class AgainstPostgres(unittest.TestCase):
             c.execute("delete from public.pages where library_id like 'veval%'"); c.execute("delete from public.documents where library_id like 'veval%'")
 
 
+
+class GoldDuplicates(unittest.TestCase):
+    def test_an_answer_in_two_bases_counts_once(self):
+        import value_eval as VE
+        rows = {"a": [{"fields": {"Metadata ID": "PT_00001-GMC_00048.1-2024", "Selected Value": "100 USD"}}],
+                "b": [{"fields": {"Metadata ID": "PT_00001-GMC_00048.1-2024", "Selected Value": "100 USD"}},
+                      {"fields": {"Metadata ID": "PT_00001-GMC_02526.1-2024", "Selected Value": "16682 "}}]}
+        real = VE.get_all
+        VE.get_all = lambda token, base, table, fields, formula=None: rows[base]
+        VE._SEEN_IDS.clear()
+        try:
+            got = VE.gold_values("t", "a", ["GMC_00048.1", "GMC_02526.1"]) + VE.gold_values("t", "b", ["GMC_00048.1", "GMC_02526.1"])
+        finally:
+            VE.get_all = real; VE._SEEN_IDS.clear()
+        self.assertEqual([g["attribute"] for g in got], ["GMC_00048.1", "GMC_02526.1"])
+        self.assertEqual(got[1]["value"], 16682)
+
+
 if __name__ == "__main__":
     unittest.main()

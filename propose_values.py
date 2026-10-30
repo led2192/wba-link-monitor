@@ -132,7 +132,7 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
     """The Airtable fields of one model-reader proposal. got: model_reader's checked reply; doc: the
     report_library row of its document ({"id", "url", "label"}) or {}."""
     g = gold.get((wba, code, year))
-    unit = got.get("unit") or ("tCO2e" if attr.get("unit_family") == "tco2e" else "")
+    unit = got.get("unit") or {"tco2e": "tCO2e", "count": "employees"}.get(attr.get("unit_family"), "")
     scale = SCALE_WORDS.get(got["scale"], f"x{got['scale']:g}")
     f = {"value_id": value_id(wba, code, year, "model reader"), "wba_id": wba, "attribute": code,
          "attribute_name": attr["name"], "year": year, "value": got["value"], "unit": unit, "method": "model reader",
