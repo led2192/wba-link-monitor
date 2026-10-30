@@ -126,7 +126,7 @@ def row(wba, attr, attr_name, year, fact, method, url, gold, company_rec, now):
     return f
 
 
-SCALE_WORDS = {1: "units", 1e3: "thousands", 1e5: "lakhs", 1e6: "millions", 1e7: "crores", 1e8: "hundred millions", 1e9: "billions"}
+SCALE_WORDS = {1: "units", 1e3: "thousands", 1e4: "ten thousands", 1e5: "lakhs", 1e6: "millions", 1e7: "crores", 1e8: "hundred millions", 1e9: "billions"}
 
 
 def printed_text(x):
