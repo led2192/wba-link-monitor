@@ -1,9 +1,11 @@
 name: Propose values
 
 # Proposed attribute values in the Disclosure Library table attribute_values (propose_values.py): revenue
-# from SEC and ESEF XBRL filings for every company with the identifier, compared with the validated 2025
+# from SEC and ESEF XBRL filings for every company with the identifier, and (method model) every number
+# attribute read by the model reader from the company's reports, compared with the validated 2025
 # answers. Writes only with commit ticked; never touches a row a person accepted or rejected. A pull
-# request touching it runs a dry run on 30 companies per method and posts the counts.
+# request touching it runs a dry run: 30 companies per filing method, and the model reader on three
+# companies with no filing (at most 0.30 USD).
 on:
   workflow_dispatch:
     inputs:
@@ -15,13 +17,25 @@ on:
         description: "WBA years: 2018- (2018 to last year), 2024, or 2022,2023"
         default: "2018-"
       methods:
-        description: "sec, esef or both"
+        description: "sec, esef, model (the model reader, billed to the Anthropic credit), comma-separated"
         default: "sec,esef"
+      model_years:
+        description: "model reader: years to read"
+        default: "2024"
+      attributes:
+        description: "model reader: GMC codes (blank = every number attribute)"
+        default: ""
+      companies:
+        description: "model reader: wba ids, comma-separated (blank = every company, up to limit)"
+        default: ""
+      max_usd:
+        description: "model reader: stop at this estimated cost"
+        default: "1"
       limit:
         description: "companies per method (0 = all)"
         default: "0"
   pull_request:
-    paths: [propose_values.py, .github/workflows/propose_values.yml]
+    paths: [propose_values.py, extract_eval.py, model_reader.py, .github/workflows/propose_values.yml]
 
 jobs:
   propose:
@@ -43,10 +57,15 @@ jobs:
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 30"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ARGS="--limit 30 --methods sec,esef,model --companies PT_02083,PT_00646,PT_02801 --model-years 2024 --max-usd 0.3"
           else
-            ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }}"
+            ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }} --model-years ${{ inputs.model_years }} --max-usd ${{ inputs.max_usd }}"
+            [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
+            [ -n "${{ inputs.companies }}" ] && ARGS="$ARGS --companies ${{ inputs.companies }}"
             [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
           fi
           python propose_values.py $ARGS

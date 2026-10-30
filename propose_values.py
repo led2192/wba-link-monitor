@@ -22,6 +22,13 @@ The company link is set by record id from companies.wba_id, never by name. Dry r
 it would write. Options: --years (default 2018- : 2018 to last year; or 2024, or 2022,2023), --limit N companies per method, --methods sec,esef,
 --commit. Reads the gold bases with GOLD_TOKEN (read-only); writes attribute_values and the run's counters
 in Pipeline QA.
+
+Method "model" (--methods model): the model reader (model_reader.py) reads the company's reports for each
+number attribute in attributes.json and year in --model-years, with exactly the retrieval the Generic reader
+scores (extract_eval.read_value). One row per company, attribute, year with method "model reader", the
+document linked, the page, a link opening the PDF at that page, and what was printed and at which scale.
+Revenue is left to the filing where a SEC or ESEF row exists. --companies and --attributes narrow it;
+--max-usd stops it at an estimated cost. Needs ANTHROPIC_API_KEY and SUPABASE_DB_URL.
 """
 import argparse, collections, json, os, sys, time, traceback
 from datetime import datetime, timezone
@@ -118,6 +125,44 @@ def row(wba, attr, attr_name, year, fact, method, url, gold, company_rec, now):
     return f
 
 
+SCALE_WORDS = {1: "units", 1e3: "thousands", 1e5: "lakhs", 1e6: "millions", 1e7: "crores", 1e8: "hundred millions", 1e9: "billions"}
+
+
+def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
+    """The Airtable fields of one model-reader proposal. got: model_reader's checked reply; doc: the
+    report_library row of its document ({"id", "url", "label"}) or {}."""
+    g = gold.get((wba, code, year))
+    unit = got.get("unit") or ("tCO2e" if attr.get("unit_family") == "tco2e" else "")
+    scale = SCALE_WORDS.get(got["scale"], f"x{got['scale']:g}")
+    f = {"value_id": value_id(wba, code, year, "model reader"), "wba_id": wba, "attribute": code,
+         "attribute_name": attr["name"], "year": year, "value": got["value"], "unit": unit, "method": "model reader",
+         "library_id": got["library_id"], "page": int(got["page"]), "last_run": now,
+         "source_url": (doc.get("url") + f"#page={int(got['page'])}") if doc.get("url") else None,
+         "detail": f"Printed as {got['printed']:,g} ({scale}) on page {int(got['page'])}"
+                   + (f" of {doc['label']}" if doc.get("label") else "") + ". Read by a language model; the number was checked to be on that page.",
+         "matches_validated": "no validated answer", "validated_value": None}
+    if company_rec:
+        f["company"] = [company_rec]
+    if doc.get("id"):
+        f["document"] = [doc["id"]]
+    if g:
+        f["validated_value"] = g["value"]
+        f["matches_validated"] = "match" if g["value"] and abs(got["value"] - g["value"]) / g["value"] <= 0.005 else "differs"
+    return f
+
+
+def library_docs(H, base, ids):
+    """{library_id: {"id", "url", "label"}} for the report_library rows of these library ids."""
+    out, ids = {}, sorted(set(i for i in ids if i))
+    for i in range(0, len(ids), 40):
+        part = ids[i:i + 40]
+        formula = "OR(" + ",".join(f"{{library_id}}='{x}'" for x in part) + ")"
+        for r in fetch(H, base, "report_library", ["library_id", "document_url", "doc_label"], formula):
+            f = r["fields"]
+            out[f.get("library_id")] = {"id": r["id"], "url": f.get("document_url") or "", "label": f.get("doc_label") or ""}
+    return out
+
+
 def plan(proposals, existing, now, scope=None):
     """(creates, updates, kept): new rows get status proposed and first_proposed; existing rows the robot
     owns are updated; rows a person decided are left alone. scope(value_id) -> bool says which existing rows
@@ -165,12 +210,65 @@ def write(H, base, creates, updates):
         time.sleep(0.22)
 
 
+def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
+    """Model-reader proposals for the companies, attributes and years asked. Revenue is skipped for a
+    company and year that already has a SEC or ESEF row: the filing is the better source."""
+    import psycopg
+    from extract_eval import read_value
+    from model_reader import cost
+    if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        c["model reader: no ANTHROPIC_API_KEY"] += 1
+        return []
+    codes = [x for x in (a.attributes.split(",") if a.attributes else [k for k, v in spec.items() if v.get("type") == "number"]) if x in spec]
+    years = parse_years(a.model_years)
+    wanted = [x.strip() for x in a.companies.split(",") if x.strip()]
+    companies = wanted or [r["fields"]["wba_id"] for r in comps if r["fields"].get("wba_id")]
+    companies = companies[:a.limit] if a.limit else companies
+    has_filing = {tuple(v.split("|")[:3]) for v in existing if v.split("|")[-1] in ("SEC XBRL", "ESEF XBRL")}
+    full = json.load(open(os.path.join(HERE, "attributes.json"), encoding="utf-8"))
+    usage, got_rows = collections.Counter(), []
+    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+        cur = conn.cursor()
+        cur.execute("set statement_timeout = '90s'")
+        for wba in companies:
+            for y in years:
+                for code in codes:
+                    if cost(usage) >= a.max_usd:
+                        c["model reader: stopped at the cost limit"] = 1
+                        break
+                    if code == REVENUE and (wba, code, str(y)) in has_filing:
+                        c["model reader: revenue left to the filing"] += 1; continue
+                    c["model reader: asked"] += 1
+                    try:
+                        got = read_value(cur, wba, y, spec[code], full, usage)
+                    except Exception as e:
+                        if type(e).__name__ == "ModelRefused":
+                            raise
+                        if not c["model reader: errors"]:
+                            traceback.print_exc()
+                            c[f"model reader: first error {type(e).__name__}: {str(e)[:120]}"] = 1
+                        c["model reader: errors"] += 1
+                        conn.rollback(); cur.execute("set statement_timeout = '90s'")
+                        continue
+                    if got:
+                        got_rows.append((wba, code, y, got))
+    docs = library_docs(H, base, [g["library_id"] for *_, g in got_rows])
+    c["model reader: cost in USD (estimate)"] = round(cost(usage), 2)
+    c["model reader: calls"] = usage["calls"]
+    return [model_row(wba, code, spec[code], y, got, docs.get(got["library_id"], {}), gold, rec.get(wba), now)
+            for wba, code, y, got in got_rows]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--years", default=DEFAULT_YEARS, help="e.g. 2024 or 2022,2023 or 2018- (2018 to last year)")
     ap.add_argument("--limit", type=int, default=0, help="companies per method (0 = all)")
-    ap.add_argument("--methods", default="sec,esef")
+    ap.add_argument("--methods", default="sec,esef", help="sec, esef, model (the model reader on the company's reports)")
+    ap.add_argument("--model-years", default="2024", help="years the model reader reads (it costs per company and year)")
+    ap.add_argument("--attributes", default="", help="model reader: GMC codes (blank = every number attribute)")
+    ap.add_argument("--companies", default="", help="model reader: wba ids, comma-separated (blank = every company)")
+    ap.add_argument("--max-usd", type=float, default=1.0, help="model reader: stop when the estimated cost reaches this")
     a = ap.parse_args()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
@@ -191,7 +289,7 @@ def main():
         from value_eval import gold_values
         cfg = json.load(open(os.path.join(HERE, "gold_attributes.json"), encoding="utf-8"))
         for b in cfg["bases"].values():
-            for g in gold_values(token, b, [REVENUE]):
+            for g in gold_values(token, b, [c for c, v in spec.items() if v.get("type") == "number"]):
                 if g["value"]:
                     gold[(g["wba"], g["attribute"], g["year"])] = g
     comps = fetch(H, base, "companies", ["wba_id", "sec_cik", "lei", "isin"])
@@ -240,6 +338,9 @@ def main():
                 if f:
                     proposals.append(row(wba, REVENUE, attr_name, y, f, "ESEF XBRL", src.get((f[3], f[7]), ""), gold, rec.get(wba), now))
 
+    if "model" in methods:
+        proposals += model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c)
+
     for p in proposals:
         c[f"{p['method']}: proposals"] += 1
         c[f"{p['method']}: {p['matches_validated']}"] += 1
@@ -256,7 +357,7 @@ def main():
         raise SystemExit(f"{len(creates):,} new rows is more than MAX_NEW ({MAX_NEW:,}); check base_health first and raise it on purpose")
     if a.commit:
         write(H, base, creates, updates)
-    md = [f"### Proposed revenue values from XBRL filings" + ("" if a.commit else " (dry run: nothing written)"), "",
+    md = [f"### Proposed values ({', '.join(sorted(methods))})" + ("" if a.commit else " (dry run: nothing written)"), "",
           "| | Count |", "| --- | --: |"] + [f"| {k} | {v:,} |" for k, v in sorted(c.items())] + [""]
     open("propose_values.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
