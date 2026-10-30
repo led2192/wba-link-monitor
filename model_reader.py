@@ -27,7 +27,7 @@ class ModelRefused(RuntimeError):
 DEFAULT_MODEL = "claude-haiku-5-5"
 PAGE_CHARS = 8000                       # per page; a long page is cut, tables sit near the top in practice
 MAX_TOKENS = 1000                   # 300 cut replies off before their JSON (average reply 236 tokens, 29 Oct 2026)
-SCALES = {"units": 1, "thousands": 1e3, "lakhs": 1e5, "millions": 1e6, "crores": 1e7, "hundred millions": 1e8,
+SCALES = {"units": 1, "thousands": 1e3, "ten thousands": 1e4, "lakhs": 1e5, "millions": 1e6, "crores": 1e7, "hundred millions": 1e8,
           "billions": 1e9}
 
 SYSTEM = ("You read pages of company reports and find one reported figure. Answer with one JSON object and "
@@ -56,7 +56,7 @@ def prompt(g, attr, pages):
         lines += [f"<page id=\"P{i}\">", (body or "")[:PAGE_CHARS], "</page>"]
     lines += ["", "Reply with JSON: {\"page\": \"P1\", \"printed\": \"12,345.6\", \"scale\": one of "
               + ", ".join(f'"{s}"' for s in SCALES) + " (the unit the page states for that number, e.g. "
-              "\"in millions\", \"€m\", \"'000\", \"ktCO2e\"), \"unit\": \"EUR\" or \"tCO2e\" etc., "
+              "\"in millions\", \"€m\", \"'000\", \"ktCO2e\"; 万 is ten thousands, 億 or 亿 hundred millions), \"unit\": \"EUR\" or \"tCO2e\" etc., "
               "\"year\": 2024}. If none of the pages prints the figure for that year, reply {\"page\": null, \"why\": \"...\"} "
               "with the reason in ten words or fewer."]
     return "\n".join(l for l in lines if l is not None)
@@ -73,6 +73,30 @@ def parse_reply(text):
         return None
 
 
+def page_convention(body):
+    """"," when the page groups thousands with commas (1,701 / 293,316), "." when with points (1.701), else
+    None. Decides what a printed "14.408" means: 14.408 on a page of 1,701s, 14408 on a page of 1.701s."""
+    comma = len(re.findall(r"(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\d,])", body or ""))
+    point = len(re.findall(r"(?<![\d.,])\d{1,3}(?:\.\d{3})+(?:,\d+)?(?![\d.])", body or ""))
+    if comma > point:
+        return ","
+    if point > comma:
+        return "."
+    return None
+
+
+def printed_number(text, body, to_number):
+    """The printed number read with the page's own separators. "14.408" on a page that writes 1,701 is
+    14.408, not 14,408: to_number alone cannot tell, and read CNOOC's 14.408 million tonnes as 14,408
+    million (30 Oct 2026)."""
+    t = str(text).strip()
+    if re.fullmatch(r"\d{1,3}\.\d{3}", t) and page_convention(body) == ",":
+        return float(t)
+    if re.fullmatch(r"\d{1,3},\d{3}", t) and page_convention(body) == ".":
+        return float(t.replace(",", "."))
+    return to_number(t)
+
+
 def check(reply, pages, to_number, numbers_on):
     """{'value', 'printed', 'scale', 'library_id', 'page', 'unit'} when the reply names a page that prints the
     number, else None. to_number and numbers_on are the rule reader's own parsers."""
@@ -83,7 +107,7 @@ def check(reply, pages, to_number, numbers_on):
         return None
     lid, page, body = pages[int(m.group(1)) - 1]
     try:
-        printed = to_number(str(reply["printed"]).strip())
+        printed = printed_number(reply["printed"], body, to_number)
     except (TypeError, ValueError):
         return None
     if not any(abs(v - printed) < 1e-9 for v in numbers_on(body or "")):
