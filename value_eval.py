@@ -34,6 +34,12 @@ from import_source_library import get_all
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gold_attributes.json")
 CURRENCY_SCALES = (1, 1e3, 1e5, 1e6, 1e7, 1e8, 1e9)      # units, thousands, lakhs, millions, crores, 亿, billions
 EMISSION_SCALES = (1, 1e3, 1e6)
+COUNT_SCALES = (1, 1e3)                                     # people: as printed, or in thousands
+
+
+def scales_for(family):
+    """The scales a figure of this unit family may be printed in."""
+    return {"tco2e": EMISSION_SCALES, "count": COUNT_SCALES}.get(family, CURRENCY_SCALES)
 MAX_PAGES = 40                                            # candidate pages read per answer
 # a number with thousands groups separated by , . or ' (no spaces), one with groups separated by spaces
 # (French, South African and Swiss style), and a plain number; tables put numbers side by side with
@@ -146,8 +152,14 @@ def has_words(text, words):
 
 
 # ----------------------------------------------------------------------------------------------
+_SEEN_IDS = set()
+
+
 def gold_values(token, base, codes, sources=False):
     """Validated answers with a value: [{id, wba, attribute, year, value, unit}]. No quote needed.
+    An answer id already returned from another base in the same run is skipped: the SDG2000 base repeats
+    revenue and Scope answers of the ACT Core bases, and the bases are read in the order of
+    gold_attributes.json, so the first one listed wins (30 Oct 2026).
     sources=True adds where the analyst took it from: quote (the Evidence text), page (as written),
     source_ids (Sources record ids), editor_url (the answer in the analysts' own editor)."""
     formula = "AND({Data Reviewed}, {Selected Value}!='', OR(" + ",".join(f"FIND('{c}', {{Metadata ID}})" for c in codes) + "))"
@@ -157,6 +169,9 @@ def gold_values(token, base, codes, sources=False):
         f = r["fields"]
         wba, code, year = gold_id(f.get("Metadata ID"))
         if code in codes:
+            if f.get("Metadata ID") in _SEEN_IDS:
+                continue
+            _SEEN_IDS.add(f.get("Metadata ID"))
             v, unit = parse_value(f.get("Selected Value"))
             g = {"id": f.get("Metadata ID"), "wba": wba, "attribute": code, "year": year, "value": v, "unit": unit}
             if sources:
@@ -242,7 +257,7 @@ def main():
             if g["value"] is None:
                 s["no usable value"] += 1; continue
             s["with a value"] += 1
-            scales = EMISSION_SCALES if g["unit"].lower().startswith("tco2") else CURRENCY_SCALES
+            scales = EMISSION_SCALES if g["unit"].lower().startswith("tco2") else COUNT_SCALES if g["attribute"] == "GMC_02526.1" else CURRENCY_SCALES
             try:
                 r = evaluate(cur, g, attr_words(g["attribute"], cfg), scales)
             except Exception as e:
