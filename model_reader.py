@@ -57,7 +57,8 @@ def prompt(g, attr, pages):
     lines += ["", "Reply with JSON: {\"page\": \"P1\", \"printed\": \"12,345.6\", \"scale\": one of "
               + ", ".join(f'"{s}"' for s in SCALES) + " (the unit the page states for that number, e.g. "
               "\"in millions\", \"€m\", \"'000\", \"ktCO2e\"; 万 is ten thousands, 億 or 亿 hundred millions), \"unit\": \"EUR\" or \"tCO2e\" etc., "
-              "\"year\": 2024}. If none of the pages prints the figure for that year, reply {\"page\": null, \"why\": \"...\"} "
+              "\"year\": 2024, \"column\": the heading of the column or line the figure sits under, exactly as printed, "
+              "e.g. \"FY25\", \"2024\", \"2024/25\", \"Year ended 31 March 2025\"}. If none of the pages prints the figure for that year, reply {\"page\": null, \"why\": \"...\"} "
               "with the reason in ten words or fewer."]
     return "\n".join(l for l in lines if l is not None)
 
@@ -114,7 +115,7 @@ def check(reply, pages, to_number, numbers_on):
         return False                    # named a number the page does not print
     scale = SCALES.get(str(reply.get("scale") or "units").strip().lower(), 1)
     return {"value": printed * scale, "printed": printed, "scale": scale, "library_id": lid, "page": page,
-            "unit": reply.get("unit") or ""}
+            "unit": reply.get("unit") or "", "column": str(reply.get("column") or "").strip()[:60]}
 
 
 def call(messages, usage, sess=None, model=None):

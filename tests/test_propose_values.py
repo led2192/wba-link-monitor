@@ -50,6 +50,16 @@ class Propose(unittest.TestCase):
         _, updates, _ = P.plan(rows, existing, NOW, in_scope)
         self.assertEqual(updates, [("recB", {"status": "superseded", "last_run": NOW})])
 
+    def test_model_row_names_the_column(self):
+        # Eutelsat, 30 Oct 2026: the FY25 column (July 2024 to June 2025) is reporting year 2024, which a reviewer doubted
+        got = {"value": 630.52, "printed": 630.52, "scale": 1, "library_id": "PT_2-x", "page": 1, "unit": "tCO2e", "column": "FY25"}
+        d = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1"}, 2024, got, {}, {}, None, NOW)["detail"]
+        self.assertIn('in the column "FY25" on page 1', d); self.assertIn("so this is 2024", d)
+        got["column"] = "2024"
+        self.assertNotIn("fiscal year", P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1"}, 2024, got, {}, {}, None, NOW)["detail"])
+        del got["column"]
+        self.assertIn("(units) on page 1", P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1"}, 2024, got, {}, {}, None, NOW)["detail"])
+
     def test_model_row(self):
         got = {"value": 2804e6, "printed": 2804.0, "scale": 1e6, "library_id": "PT_1-abc", "page": 57, "unit": "EUR"}
         doc = {"id": "recDoc", "url": "https://example.com/ar.pdf", "label": "2024 | Testco | Annual Report"}

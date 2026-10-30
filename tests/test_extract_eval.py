@@ -76,6 +76,15 @@ class Ranking(unittest.TestCase):
         self.assertIn("small", [r[1] for r in kept])
 
 
+class Employees(unittest.TestCase):
+    def test_reads_headcount_rows(self):
+        a = A["GMC_02526.1"]
+        got = X.propose("Our people 2024 2023 Total number of employees 16,682 15,903 of which women 41% 40%", 2024, a, SPEC)
+        self.assertTrue(got and X.right(got[0], 16682), got)
+        got = X.propose("Employees (in thousands) 2024: Headcount 140.2", 2024, a, SPEC)
+        self.assertTrue(got and X.right(got[0], 140200), got)
+
+
 class Hyphens(unittest.TestCase):
     def test_labels_match_with_or_without_hyphen(self):
         self.assertIn("location based", X.label_variants(["location-based"]))

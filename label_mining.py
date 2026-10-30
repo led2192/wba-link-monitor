@@ -27,7 +27,7 @@ is printed. Options: --limit N answers per attribute (dry run default 60), --att
 import argparse, collections, json, math, os, re, sys, time, traceback
 
 import qa
-from value_eval import CURRENCY_SCALES, EMISSION_SCALES, printed_forms, tsquery_for
+from value_eval import CURRENCY_SCALES, EMISSION_SCALES, printed_forms, scales_for, tsquery_for
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WINDOW = 90                         # characters before the number where its label sits
@@ -175,7 +175,7 @@ def main():
                 print(f"  {i:,}/{len(todo):,} in {(time.time() - t0) / 60:.0f} min", flush=True)
             c = g["attribute"]; s = st[c]; s["answers"] += 1
             fam = (spec.get(c) or {}).get("unit_family")
-            scales = EMISSION_SCALES if fam == "tco2e" else CURRENCY_SCALES if fam == "currency" else tuple(sorted(set(CURRENCY_SCALES) | set(EMISSION_SCALES)))
+            scales = scales_for(fam) if fam else tuple(sorted(set(CURRENCY_SCALES) | set(EMISSION_SCALES)))
             forms = printed_forms(g["value"], scales)
             if not forms:
                 continue

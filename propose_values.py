@@ -153,14 +153,16 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
     """The Airtable fields of one model-reader proposal. got: model_reader's checked reply; doc: the
     report_library row of its document ({"id", "url", "label"}) or {}."""
     g = gold.get((wba, code, year))
-    unit = got.get("unit") or ("tCO2e" if attr.get("unit_family") == "tco2e" else "")
+    unit = got.get("unit") or {"tco2e": "tCO2e", "count": "employees"}.get(attr.get("unit_family"), "")
     scale = SCALE_WORDS.get(got["scale"], f"x{got['scale']:g}")
     f = {"value_id": value_id(wba, code, year, "model reader"), "wba_id": wba, "attribute": code,
          "attribute_name": attr["name"], "year": year, "value": got["value"], "unit": unit, "method": "model reader",
          "library_id": got["library_id"], "page": int(got["page"]), "last_run": now,
          "source_url": (doc.get("url") + f"#page={int(got['page'])}") if doc.get("url") else None,
-         "detail": f"Printed as {printed_text(got['printed'])} ({scale}) on page {int(got['page'])}"
-                   + (f" of {doc['label']}" if doc.get("label") else "") + ". Read by a language model; the number was checked to be on that page.",
+         "detail": f"Printed as {printed_text(got['printed'])} ({scale})"
+                   + (f" in the column \"{got['column']}\"" if got.get("column") else "") + f" on page {int(got['page'])}"
+                   + (f" of {doc['label']}" if doc.get("label") else "") + ". Read by a language model; the number was checked to be on that page."
+                   + (f" A fiscal year ending January to June counts as the previous reporting year, so this is {year}." if got.get("column") and str(year) not in got["column"] else ""),
          "matches_validated": "no validated answer", "validated_value": None}
     if company_rec:
         f["company"] = [company_rec]
