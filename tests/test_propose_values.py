@@ -21,6 +21,16 @@ class Propose(unittest.TestCase):
         f = P.row("PT_1", "GMC_00048.1", "Revenue", 2023, FACT, "SEC XBRL", "u", gold, None, NOW)
         self.assertEqual(f["matches_validated"], "no validated answer"); self.assertNotIn("company", f)
 
+    def test_where_the_analyst_took_the_value_from(self):
+        g = {"value": 10_886_000.0, "unit": "tCO2e", "quote": "Direct GHG emissions: 10.886 million tonnes", "page": "84",
+             "editor_url": "https://airtable.com/appX/pagY/recZ", "sources": [{"name": "PT_1-2024-ESG", "url": "https://x.com/esg2024.pdf", "year": "2024"}]}
+        f = P.row("PT_1", "GMC_00048.1", "Revenue", 2024, FACT, "SEC XBRL", "u", {("PT_1", "GMC_00048.1", 2024): g}, None, NOW)
+        self.assertEqual((f["validated_source"], f["validated_source_name"], f["validated_page"], f["validated_record"]),
+                         ("https://x.com/esg2024.pdf", "PT_1-2024-ESG", "84", "https://airtable.com/appX/pagY/recZ"))
+        self.assertIn("10.886", f["validated_quote"])
+        bare = P.validated_fields({"value": 1.0, "editor_url": "#RECORD_ID#"})                       # nothing cited
+        self.assertTrue(all(v is None for v in bare.values()))
+
     def test_plan_never_touches_a_decision(self):
         rows = [P.row(w, "GMC_00048.1", "Revenue", 2024, FACT, "SEC XBRL", "u", {}, None, NOW) for w in ("A", "B", "C")]
         existing = {"B|GMC_00048.1|2024|SEC XBRL": {"id": "recB", "status": "accepted"},
