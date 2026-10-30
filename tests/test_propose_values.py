@@ -54,6 +54,11 @@ class Propose(unittest.TestCase):
         self.assertEqual((f["unit"], f["source_url"], f["matches_validated"]), ("tCO2e", None, "no validated answer"))
         self.assertNotIn("document", f)
 
+    def test_printed_text_keeps_every_digit(self):
+        self.assertEqual(P.printed_text(41709.13), "41,709.13")
+        self.assertEqual(P.printed_text(2804.0), "2,804")
+        self.assertEqual(P.printed_text(5206474.45), "5,206,474.45")
+
     def test_years(self):
         from datetime import datetime
         t = datetime(2026, 10, 29)
