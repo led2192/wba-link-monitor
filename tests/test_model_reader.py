@@ -80,6 +80,25 @@ class ModelReader(unittest.TestCase):
         M.read_with_model(G, REV, PAGES, X.collections.Counter(), Sess((200, "Looking at page P2, the revenue line shows")), note=note)
         self.assertEqual(note["why"], "(no JSON in the reply)")
 
+    def test_a_point_on_a_page_of_comma_thousands_is_a_decimal_point(self):
+        # CNOOC, 30 Oct 2026: "14.408" million tonnes on a page that prints 1,701 and 293,316 was read as 14,408
+        page = [("lib2", 126, "Electricity Million KWh 1,701 2,280 2,646 Annual energy savings 293,316 276,800 "
+                              "Direct GHG emissions Million tonnes of CO2 equivalent 13.954 14.408 15.234")]
+        s = Sess((200, '{"page": "P1", "printed": "14.408", "scale": "millions", "unit": "tCO2e", "year": 2024}'))
+        got = M.read_with_model(G, REV, page, X.collections.Counter(), s)
+        self.assertAlmostEqual(got["value"], 14_408_000)
+        euro = [("lib3", 4, "Umsatz 1.701 2.280 293.316 Mio. EUR 14.408")]           # points group thousands
+        s = Sess((200, '{"page": "P1", "printed": "14.408", "scale": "millions"}'))
+        self.assertAlmostEqual(M.read_with_model(G, REV, euro, X.collections.Counter(), s)["value"], 14_408e6)
+        self.assertEqual(M.printed_number("102,502", "Revenues 102,502 106,848", X.to_number), 102502)
+
+    def test_ten_thousands(self):
+        # Master Kong, 30 Oct 2026: 16.05 万吨 is 160,500 tonnes; with no such scale it was written as 16.05
+        page = [("lib4", 100, "直接溫室氣體排放 萬噸 16.05 15.20")]
+        s = Sess((200, '{"page": "P1", "printed": "16.05", "scale": "ten thousands", "unit": "tCO2e"}'))
+        self.assertAlmostEqual(M.read_with_model(G, REV, page, X.collections.Counter(), s)["value"], 160_500)
+        self.assertIn("万 is ten thousands", M.prompt(G, REV, page))
+
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)
         self.assertAlmostEqual(M.cost(u), 0.10 + 0.05)

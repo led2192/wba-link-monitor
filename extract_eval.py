@@ -31,7 +31,7 @@ Read-only: the gold bases (GOLD_TOKEN), the evidence database (SUPABASE_DB_URL).
 import argparse, collections, json, os, re, sys, time, traceback
 
 import qa
-from value_eval import CURRENCY_SCALES, EMISSION_SCALES, found_on, printed_forms, tsquery_for
+from value_eval import CURRENCY_SCALES, EMISSION_SCALES, found_on, printed_forms, scales_for, tsquery_for
 
 SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attributes.json")
 MAX_DOCS, MAX_PAGES = 12, 25         # documents of the year searched; pages kept after ranking
@@ -113,6 +113,8 @@ def page_scale(text, family, spec):
             if re.search(pat, t):
                 return f
         return 1
+    if family == "count":
+        return 1e3 if re.search(r"\b(?:in thousands|thousands of (?:employees|people)|'000 (?:employees|people))\b", t) else 1
     scales = spec["unit_families"]["currency"]["scales"]
     pats = [
         r"(?:in|of|units?:?)\s+(?:[a-z]{3}\s+|[$€£¥₹]\s?)?(thousands?|millions?|billions?|lakhs?|crores?|mn|bn|mio|mrd)\b",
@@ -334,7 +336,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
         return r
     r["docs"] = True
     ids = [d[0] for d in docs]
-    scales = EMISSION_SCALES if attr.get("unit_family") == "tco2e" else CURRENCY_SCALES
+    scales = scales_for(attr.get("unit_family"))
     forms = printed_forms(g["value"], scales)
     if forms:
         q = " | ".join(f"({tsquery_for(v, d)})" for v, _, d in forms)
