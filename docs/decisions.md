@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-10-30: Revenue from a filing is its largest revenue concept
+The revenue concepts were tried in a fixed order (`us-gaap:Revenues`, then contract revenue excluding and including assessed tax, net sales, revenue net of interest expense). In the first analyst review of `attribute_values`, 4 of the 5 SEC rows checked were rejected because the order picked a narrower line than WBA's revenue: net sales after excise taxes, contract revenue without other revenue, a card issuer's contract revenue instead of its revenue net of interest expense. The narrower concepts are always parts of the total, so `sec_facts.choose` now takes the largest the filing reports for the year (each concept as first filed; equal values keep the order). Applies to ESEF too, which uses the same choice. Rejected: reordering the list, because the right total sits in a different concept from one company to the next. Not solved by this: a total printed only in a company's own extension concept (gross sales before royalties, total revenue including other revenue in some IFRS reports, revenue including joint ventures).
+
 ### 2026-10-23: A browser on the owner's computer for refused sites
 Plain requests from the owner's computer reached 11 of 30 refused recent reports; most of the rest check for a real browser. The owner decided to try a second pass in Microsoft Edge without a window (the base is a prototype and the reports are public). Safeguards: paths that robots.txt disallows are skipped; nothing clicks, types or solves, so captchas and logins stay refused; one page at a time with a pause; it runs only on the owner's computer. Rejected: solving captchas or using captcha services; paid proxies or rotating addresses.
 

@@ -37,7 +37,7 @@ Third version (29 Oct 2026, replies no longer cut at 300 tokens): revenue 35 %, 
 
 Reading the reader's table: "Number in those documents" is the ceiling (the value is printed somewhere in the year's documents: about 60 to 80 %), "Number on the ranked pages" is what the reader was given (32 to 60 %), and "Right" is what it got. The loss between the last two is reading; the loss between the first two is retrieval, which `label_mining.py` addresses.
 
-Banks: revenue for WBA is income net of interest expense (SEC `RevenuesNetOfInterestExpense`, "gross income" or "total operating income" in European reports), never gross interest income. Interest-income concepts were removed from the rules on 29 Oct 2026 (pitfalls.md).
+Which revenue: WBA takes the top line, before deductions printed under it (excise taxes, royalties) and including other revenue. A filing's revenue is therefore its largest revenue concept for the year (30 Oct 2026, after the first review). Banks: revenue for WBA is income net of interest expense (SEC `RevenuesNetOfInterestExpense`, "gross income" or "total operating income" in European reports), never gross interest income. Interest-income concepts were removed from the rules on 29 Oct 2026 (pitfalls.md).
 
 ## The table analysts review: `attribute_values`
 

@@ -128,6 +128,13 @@ def row(wba, attr, attr_name, year, fact, method, url, gold, company_rec, now):
 SCALE_WORDS = {1: "units", 1e3: "thousands", 1e5: "lakhs", 1e6: "millions", 1e7: "crores", 1e8: "hundred millions", 1e9: "billions"}
 
 
+def printed_text(x):
+    """A number as the report prints it, every digit kept: 41709.13 -> '41,709.13', 2804.0 -> '2,804'.
+    (The format g keeps six significant digits and showed 41,709.13 as 41,709.1, 30 Oct 2026.)"""
+    s = f"{x:,.6f}".rstrip("0").rstrip(".")
+    return s
+
+
 def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
     """The Airtable fields of one model-reader proposal. got: model_reader's checked reply; doc: the
     report_library row of its document ({"id", "url", "label"}) or {}."""
@@ -138,7 +145,7 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
          "attribute_name": attr["name"], "year": year, "value": got["value"], "unit": unit, "method": "model reader",
          "library_id": got["library_id"], "page": int(got["page"]), "last_run": now,
          "source_url": (doc.get("url") + f"#page={int(got['page'])}") if doc.get("url") else None,
-         "detail": f"Printed as {got['printed']:,g} ({scale}) on page {int(got['page'])}"
+         "detail": f"Printed as {printed_text(got['printed'])} ({scale}) on page {int(got['page'])}"
                    + (f" of {doc['label']}" if doc.get("label") else "") + ". Read by a language model; the number was checked to be on that page.",
          "matches_validated": "no validated answer", "validated_value": None}
     if company_rec:
