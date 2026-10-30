@@ -122,6 +122,7 @@ def row(wba, attr, attr_name, year, fact, method, url, gold, company_rec, now):
     if g:
         f["validated_value"] = g["value"]
         f["matches_validated"] = "match" if matches(g["value"], g["unit"], fact) else "differs"
+        f.update(validated_fields(g))
     return f
 
 
@@ -133,6 +134,19 @@ def printed_text(x):
     (The format g keeps six significant digits and showed 41,709.13 as 41,709.1, 30 Oct 2026.)"""
     s = f"{x:,.6f}".rstrip("0").rstrip(".")
     return s
+
+
+def validated_fields(g):
+    """Where the analyst took the validated value from, for a reviewer to check it too: the cited
+    document (name and link), the page as the analyst wrote it, the quoted evidence and a link to the
+    answer in the analysts' editor. Empty fields stay unset."""
+    src = (g.get("sources") or [{}])[0]
+    f = {"validated_source": src.get("url") or None,
+         "validated_source_name": "; ".join(s["name"] for s in g.get("sources") or [] if s.get("name"))[:250] or None,
+         "validated_page": g.get("page") or None,
+         "validated_quote": (g.get("quote") or "")[:2000] or None,
+         "validated_record": g.get("editor_url") if (g.get("editor_url") or "").startswith("http") else None}
+    return f
 
 
 def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
@@ -155,6 +169,7 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
     if g:
         f["validated_value"] = g["value"]
         f["matches_validated"] = "match" if g["value"] and abs(got["value"] - g["value"]) / g["value"] <= 0.005 else "differs"
+        f.update(validated_fields(g))
     return f
 
 
@@ -293,11 +308,16 @@ def main():
     gold = {}
     token = os.environ.get("GOLD_TOKEN", "").strip()
     if token:
-        from value_eval import gold_values
+        from value_eval import gold_sources, gold_values
         cfg = json.load(open(os.path.join(HERE, "gold_attributes.json"), encoding="utf-8"))
         for b in cfg["bases"].values():
-            for g in gold_values(token, b, [c for c, v in spec.items() if v.get("type") == "number"]):
+            try:
+                srcs = gold_sources(token, b)
+            except Exception as e:                  # a base without a readable Sources table: values still come
+                print(f"  sources of {b} not read: {str(e)[:120]}", flush=True); srcs = {}
+            for g in gold_values(token, b, [c for c, v in spec.items() if v.get("type") == "number"], sources=True):
                 if g["value"]:
+                    g["sources"] = [srcs[i] for i in g.get("source_ids", []) if i in srcs]
                     gold[(g["wba"], g["attribute"], g["year"])] = g
     comps = fetch(H, base, "companies", ["wba_id", "sec_cik", "lei", "isin"])
     rec = {r["fields"]["wba_id"]: r["id"] for r in comps if r["fields"].get("wba_id")}

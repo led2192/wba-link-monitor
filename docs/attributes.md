@@ -35,7 +35,7 @@ Third version (29 Oct 2026, replies no longer cut at 300 tokens): revenue 35 %, 
 
 Reading the reader's table: "Number in those documents" is the ceiling (the value is printed somewhere in the year's documents: about 60 to 80 %), "Number on the ranked pages" is what the reader was given (32 to 60 %), and "Right" is what it got. The loss between the last two is reading; the loss between the first two is retrieval, which `label_mining.py` addresses.
 
-Banks: revenue for WBA is income net of interest expense (SEC `RevenuesNetOfInterestExpense`, "gross income" or "total operating income" in European reports), never gross interest income. Interest-income concepts were removed from the rules on 29 Oct 2026 (pitfalls.md).
+Which revenue: WBA takes the top line, before deductions printed under it (excise taxes, royalties) and including other revenue. A filing's revenue is therefore its largest revenue concept for the year (30 Oct 2026, after the first review). Banks: revenue for WBA is income net of interest expense (SEC `RevenuesNetOfInterestExpense`, "gross income" or "total operating income" in European reports), never gross interest income. Interest-income concepts were removed from the rules on 29 Oct 2026 (pitfalls.md).
 
 ## The table analysts review: `attribute_values`
 
@@ -44,6 +44,7 @@ One row per company, attribute, year and method (`value_id` = `PT_00001|GMC_0004
 - **status**: `proposed` (written by the robot), `accepted` or `rejected` (set by a person and never touched again), `superseded` (the robot no longer proposes it, for instance after a rule changed; kept, never deleted).
 - **matches_validated**: `match`, `differs` or `no validated answer`. The `differs` rows are the ones to look at first: either the validated answer has a slip (a currency label, a factor of 1,000) or the rule picked another line.
 - **source_url** opens the report itself (the SEC's viewer for a 10-K or 20-F, the filings.xbrl.org viewer for ESEF); **detail** starts with the number to search for in it (in millions and in thousands), then the concept, form, period end and filing date. To check a row: open the link, Ctrl+F that number, compare with the income statement.
+- Where the validated value comes from: `validated_source`, `validated_page` and `validated_quote` (what the analysts cited), and `validated_record` (their answer in their own editor). When we differ, check both sides: in the first review of 10 revenue rows, one validated value was the wrong fiscal year.
 - Two methods that disagree on the same company and year are two rows, so the disagreement is visible.
 - A reviewer edits only `status`, `reviewer_note` and `corrected_value` (the right figure when both ours and the validated one are wrong). The value fields belong to the runs: a row still `proposed` is rewritten by the next run. `reviewed_by` and `reviewed_on` record who reviewed and when. A base that syncs this table for reviewers needs two-way sync on those three fields only.
 
