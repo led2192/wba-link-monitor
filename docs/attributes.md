@@ -52,14 +52,14 @@ One row per company, attribute, year and method (`value_id` = `PT_00001|GMC_0004
 
 First full run (29 Oct 2026, 2022 to 2024): 1,324 revenue values; SEC 1,014 (288 match, 34 differ, 692 with no validated answer), ESEF 310 (72 match, 22 differ, 216 with no validated answer). Years now default to 2018 to last year.
 
-Model reader rows (from 29 Oct 2026): method `model reader`, `document` linked, `page`, `source_url` opening the PDF at that page, and `detail` saying what was printed at which scale. To check one: open the link, find the number on that page.
+Model reader rows (from 29 Oct 2026): method `model reader`, `document` linked, `page`, `source_url` opening the PDF at that page, and `detail` saying what was printed, at which scale, in which column. To check one: open the link, find the number on that page. Since 31 Oct 2026 one call returns every year the pages print: a 2024 row may come from the 2025 report's comparison column, and `detail` then says so; a restated figure can differ from the one the 2024 report printed.
 
 ## Running it
 
 | To | Do |
 | --- | --- |
 | Fill or refresh revenue from filings | Actions, Propose values, tick commit (years default to 2018 to last year) |
-| Values read from reports by the model | Actions, Propose values, methods `model`, model years (2024, or 2024,2025), companies or limit, cost limit; tick commit after a dry run. One run reads about 1,000 answers (five hours at most; it stops reading at 300 minutes and writes) |
+| Values read from reports by the model | Actions, Propose values, methods `model`, model years (2024, or 2022-2025), companies or limit, cost limit per job, shards (1 to 8 parallel jobs); tick commit after a dry run. One call returns every year the pages print, so a four-year range costs about one call per company and attribute; one job reads for five hours at most, then writes |
 | Score a route against the validated answers | Actions: SEC revenue, ESEF revenue, Generic reader (reader rules or model), Value evaluation |
 | Improve an attribute's labels | Actions, Label mining; copy the phrases worth having into `labels` in `attributes.json` (pull request), then run Generic reader again |
 | Change the methodology of an attribute | Edit its entry in `attributes.json` (pull request); the pull request's checks score it again |
@@ -68,8 +68,10 @@ The model reader uses the repository secret `ANTHROPIC_API_KEY` (prepaid credit 
 
 ## What comes next
 
-1. Measure the model reader on the same 200 answers and compare with the rules reader.
-2. Score the mined labels (in `attributes.json` since 29 Oct 2026: the EU Taxonomy wording for capex, "gross" scope figures, operating and consolidated revenue) and the wider document types.
-3. Write the readers' values to `attribute_values` (methods "rules reader" and "model reader", with the page link).
-4. Current-year completeness: check that each company's latest reports are in, using the prior-year figures they repeat.
-5. The non-number attributes (board climate expertise, climate policies supported): options from the specification, same scoring.
+1. Run the model reader for all 2,000 companies, 2022 to 2025, in parallel jobs (Propose values, shards 8, model years 2022-2025): about $20 to $30 and an afternoon, now that one call returns every year a page prints (31 Oct 2026).
+2. The GRI and ESRS content index as a retrieval signal: it names the page where each disclosure sits (GRI 305-1 Scope 1 → p. 84), the strongest signal the ranking does not use yet; capex and Scope 2 are the attributes it should help most.
+3. Learn from the reviewers' decisions: a weekly score of each method and attribute on the rows accepted or rejected, and their notes as a list of patterns to fix.
+4. Low-carbon capex (58 % match, the right page found for 25 % of answers): a rule for the EU Taxonomy tables, where the figure is split over rows.
+5. The analysts' 2025 answers (their own file, 300+ companies) as validated answers, so the 2025 rows get compared too.
+6. Current-year completeness: check that each company's latest reports are in, using the prior-year figures they repeat.
+7. The non-number attributes (board climate expertise, climate policies supported): options from the specification, same scoring.

@@ -13,6 +13,12 @@ computed here (printed number × scale), never by the model, and the printed num
 named, or the proposal is dropped (counted as quote_not_on_page). A model that invents a number therefore
 cannot score.
 
+Every year in one call (31 Oct 2026): a report's table prints the figure for two to five years side by
+side, so the model is asked for the reporting year wanted AND every other reporting year the same figure is
+printed for. Each entry is checked on its own page; read_years returns them all, read_with_model the one for
+the year asked (with the others under "others"). One call therefore gives the history that separate calls
+per year used to cost, and the value a later report repeats for an earlier year checks the earlier read.
+
 Model: READER_MODEL (default claude-haiku-5-5), through the Messages API with ANTHROPIC_API_KEY. Token use
 is added to the `usage` counter the caller passes (calls, input_tokens, output_tokens, quote_not_on_page,
 model_errors). No document text is printed.
@@ -26,12 +32,15 @@ class ModelRefused(RuntimeError):
     """The API refused the call for a reason a retry won't fix (key, credit, model name): stop the run."""
 DEFAULT_MODEL = "claude-haiku-5-5"
 PAGE_CHARS = 8000                       # per page; a long page is cut, tables sit near the top in practice
-MAX_TOKENS = 1000                   # 300 cut replies off before their JSON (average reply 236 tokens, 29 Oct 2026)
+MAX_TOKENS = 1500                   # 300 cut replies off before their JSON (average reply 236 tokens, 29 Oct 2026); one
+                                    # entry per year since 31 Oct 2026, about 60 tokens each
 SCALES = {"units": 1, "thousands": 1e3, "ten thousands": 1e4, "lakhs": 1e5, "millions": 1e6, "crores": 1e7, "hundred millions": 1e8,
           "billions": 1e9}
 
-SYSTEM = ("You read pages of company reports and find one reported figure. Answer with one JSON object and "
-          "nothing else: no explanation before or after it. Copy the number exactly as printed on the page. Never compute, convert or round.")
+SYSTEM = ("You read pages of company reports and find one reported figure, for every year the pages print it. Answer "
+          "with one JSON object and nothing else: no explanation before or after it. Copy each number exactly as printed "
+          "on the page. Never compute, convert or round.")
+FIRST_YEAR, LAST_YEAR = 2010, time.gmtime().tm_year
 
 
 def prompt(g, attr, pages):
@@ -54,11 +63,17 @@ def prompt(g, attr, pages):
              "", "Pages:"]
     for i, (_, _, body) in enumerate(pages, 1):
         lines += [f"<page id=\"P{i}\">", (body or "")[:PAGE_CHARS], "</page>"]
-    lines += ["", "Reply with JSON: {\"page\": \"P1\", \"printed\": \"12,345.6\", \"scale\": one of "
+    y = g["year"]
+    lines += ["", "Reply with JSON: {\"values\": [{\"page\": \"P1\", \"printed\": \"12,345.6\", \"scale\": one of "
               + ", ".join(f'"{s}"' for s in SCALES) + " (the unit the page states for that number, e.g. "
               "\"in millions\", \"€m\", \"'000\", \"ktCO2e\"; 万 is ten thousands, 億 or 亿 hundred millions), \"unit\": \"EUR\" or \"tCO2e\" etc., "
-              "\"year\": 2024, \"column\": the heading of the column or line the figure sits under, exactly as printed, "
-              "e.g. \"FY25\", \"2024\", \"2024/25\", \"Year ended 31 March 2025\"}. If none of the pages prints the figure for that year, reply {\"page\": null, \"why\": \"...\"} "
+              f"\"year\": {y}, \"column\": the heading of the column or line the figure sits under, exactly as printed, "
+              "e.g. \"FY25\", \"2024\", \"2024/25\", \"Year ended 31 March 2025\"}, ...]}. "
+              f"The first entry is the figure for reporting year {y}. Then one entry for EVERY other reporting year the "
+              "same figure is printed for on these pages (the other year columns of the same row, or the same figure in "
+              "another table), newest first, each with its own page, printed number and column heading; \"year\" is the "
+              "reporting year of that column under the rule above, not the heading. Only years the pages print: never "
+              "estimate. If none of the pages prints the figure for any year, reply {\"values\": [], \"why\": \"...\"} "
               "with the reason in ten words or fewer."]
     return "\n".join(l for l in lines if l is not None)
 
@@ -98,9 +113,21 @@ def printed_number(text, body, to_number):
     return to_number(t)
 
 
+def column_year(column):
+    """The calendar year a column heading names, or None: "2024" -> 2024, "FY25" -> 2025, "2024/25" -> 2024,
+    "Year ended 31 March 2025" -> 2025 (the first four-digit year, else a two-digit FY)."""
+    m = re.search(r"(?<!\d)(20\d\d)(?!\d)", column or "")
+    if m:
+        return int(m.group(1))
+    m = re.search(r"FY\s?'?(\d{2})(?!\d)", column or "", flags=re.I)
+    return 2000 + int(m.group(1)) if m else None
+
+
 def check(reply, pages, to_number, numbers_on):
-    """{'value', 'printed', 'scale', 'library_id', 'page', 'unit'} when the reply names a page that prints the
-    number, else None. to_number and numbers_on are the rule reader's own parsers."""
+    """{'value', 'printed', 'scale', 'library_id', 'page', 'unit', 'year', 'column'} when the entry names a page
+    that prints the number, else None (nothing usable) or False (a number the page does not print).
+    to_number and numbers_on are the rule reader's own parsers. The year must be a reporting year the column
+    heading allows: the heading's year or the one before it (a fiscal year ending January to June)."""
     if not reply or not reply.get("page") or not reply.get("printed"):
         return None
     m = re.fullmatch(r"P(\d+)", str(reply["page"]).strip())
@@ -114,22 +141,52 @@ def check(reply, pages, to_number, numbers_on):
     if not any(abs(v - printed) < 1e-9 for v in numbers_on(body or "")):
         return False                    # named a number the page does not print
     scale = SCALES.get(str(reply.get("scale") or "units").strip().lower(), 1)
+    try:
+        year = int(reply.get("year")) if reply.get("year") not in (None, "") else None
+    except (TypeError, ValueError):
+        year = None
+    column = str(reply.get("column") or "").strip()[:60]
+    cy = column_year(column)
+    if year is not None and (not FIRST_YEAR <= year <= LAST_YEAR + 1 or (cy and year not in (cy, cy - 1))):
+        return None                     # a year the heading does not allow: the model mixed its columns
     return {"value": printed * scale, "printed": printed, "scale": scale, "library_id": lid, "page": page,
-            "unit": reply.get("unit") or "", "column": str(reply.get("column") or "").strip()[:60]}
+            "unit": reply.get("unit") or "", "column": column, "year": year}
+
+
+def check_all(reply, pages, to_number, numbers_on, usage):
+    """Every usable entry of a reply, one per year (the first wins), in the reply's order. Accepts the old
+    single-object shape too."""
+    entries = reply.get("values") if isinstance(reply, dict) and isinstance(reply.get("values"), list) else \
+        ([reply] if isinstance(reply, dict) and reply.get("page") else [])
+    out, seen = [], set()
+    for e in entries:
+        got = check(e if isinstance(e, dict) else None, pages, to_number, numbers_on)
+        if got is False:
+            usage["quote_not_on_page"] += 1
+            continue
+        if not got or got["year"] in seen:
+            continue
+        seen.add(got["year"]); out.append(got)
+    return out
 
 
 def call(messages, usage, sess=None, model=None):
-    """The model's text reply (Messages API), retrying twice on overload or rate limits."""
+    """The model's text reply (Messages API), retrying four times on overload or rate limits (parallel shards
+    share the account's limits, 31 Oct 2026)."""
     import requests
     sess = sess or requests
     body = {"model": model or os.environ.get("READER_MODEL", DEFAULT_MODEL), "max_tokens": MAX_TOKENS,
             "system": SYSTEM, "messages": messages}
     headers = {"x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(), "anthropic-version": "2023-06-01",
                "content-type": "application/json"}
-    for attempt in range(3):
+    for attempt in range(5):
         r = sess.post(API, headers=headers, json=body, timeout=120)
-        if r.status_code in (429, 500, 529) and attempt < 2:
-            time.sleep(10 * (attempt + 1)); continue
+        if r.status_code in (429, 500, 529) and attempt < 4:   # rate limit or overload: wait as told, else 10, 20, 40, 80 s
+            try:
+                wait = float((getattr(r, "headers", None) or {}).get("retry-after") or 0)
+            except (TypeError, ValueError):
+                wait = 0
+            time.sleep(min(max(wait, 10 * 2 ** attempt), 120)); continue
         if r.status_code != 200:
             usage["model_errors"] += 1
             if r.status_code in (400, 401, 403, 404):  # a bad key, no credit, a wrong model name: no point going on
@@ -145,27 +202,42 @@ def call(messages, usage, sess=None, model=None):
     return ""
 
 
-def read_with_model(g, attr, pages, usage, sess=None, note=None):
-    """The model's proposal for one answer, checked against the pages, or None. note (a dict), when given,
-    receives the model's reason when it gives no figure ("why")."""
+def read_years(g, attr, pages, usage, sess=None, note=None):
+    """One call: the model's checked figures for every reporting year the pages print, the year asked
+    (g["year"]) first when it is there. [] when none. note (a dict), when given, receives the model's reason
+    when it gives no figure ("why"). usage["years_returned"] counts the entries."""
     if not pages:
-        return None
+        return []
     from extract_eval import to_number
     from value_eval import numbers_on
     text = call([{"role": "user", "content": prompt(g, attr, pages)}], usage, sess)
     reply = parse_reply(text)
+    entries = reply.get("values") if isinstance(reply, dict) and isinstance(reply.get("values"), list) else None
     if note is not None:
         if reply is None:
             note["why"] = "(no JSON in the reply)" if text else "(empty reply)"
-        elif not reply.get("page"):
+        elif entries == [] or (entries is None and not reply.get("page")):
             note["why"] = str(reply.get("why") or "")[:120]
-        elif not reply.get("printed"):
-            note["why"] = "(named a page but no number)"
-    got = check(reply, pages, to_number, numbers_on)
-    if got is False:
-        usage["quote_not_on_page"] += 1
-        return None
+    got = check_all(reply, pages, to_number, numbers_on, usage)
+    for e in got:
+        if e["year"] is None:           # the old single-object shape, or a missing year: the year asked
+            e["year"] = g["year"]
+    got.sort(key=lambda e: e["year"] != g["year"])
+    usage["years_returned"] += len(got)
     return got
+
+
+def read_with_model(g, attr, pages, usage, sess=None, note=None):
+    """The model's proposal for the year asked, checked against the pages, or None; the figures for the other
+    years the pages print come with it under "others"."""
+    got = read_years(g, attr, pages, usage, sess, note)
+    mine = next((e for e in got if e["year"] == g["year"]), None)
+    if mine is None:
+        if got and note is not None and not note.get("why"):
+            note["why"] = "(only other years: " + ", ".join(str(e["year"]) for e in got) + ")"
+        return None
+    mine["others"] = [e for e in got if e is not mine]
+    return mine
 
 
 def cost(usage, model=None):

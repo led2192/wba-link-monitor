@@ -29,18 +29,35 @@ on:
         description: "model reader: wba ids, comma-separated (blank = every company, up to limit)"
         default: ""
       max_usd:
-        description: "model reader: stop at this estimated cost"
+        description: "model reader: stop at this estimated cost (per parallel job)"
         default: "1"
       limit:
         description: "companies per method (0 = all)"
         default: "0"
+      shards:
+        description: "parallel jobs, each taking a fixed slice of the companies (1 to 8). Each job reads for up to five hours and has its own cost limit."
+        default: "1"
   pull_request:
     paths: [propose_values.py, extract_eval.py, model_reader.py, .github/workflows/propose_values.yml]
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.list.outputs.shards }}
+    steps:
+      - id: list
+        run: |
+          N="${{ inputs.shards || '1' }}"; [ "$N" -ge 1 ] 2>/dev/null || N=1; [ "$N" -le 8 ] || N=8
+          echo "shards=$(python3 -c "import json;print(json.dumps([f'{i}/$N' for i in range(1, $N + 1)]))")" >> "$GITHUB_OUTPUT"
   propose:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 345           # GitHub's limit is 360; the script stops reading at 300 (--budget) and writes
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     permissions:
       contents: read
       pull-requests: write
@@ -67,13 +84,14 @@ jobs:
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
             [ -n "${{ inputs.companies }}" ] && ARGS="$ARGS --companies ${{ inputs.companies }}"
             [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+            [ "${{ matrix.shard }}" != "1/1" ] && ARGS="$ARGS --shard ${{ matrix.shard }}"
           fi
           python propose_values.py $ARGS
       - name: Keep the result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: propose-values
+          name: propose-values-${{ strategy.job-index }}
           path: propose_values.md
           if-no-files-found: ignore
       - name: Post the result on the pull request

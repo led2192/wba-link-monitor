@@ -89,9 +89,9 @@ class Propose(unittest.TestCase):
             def __exit__(self, *a): return False
             def cursor(self): return Cur()
         reads = []
-        real = (psycopg.connect, extract_eval.read_value, P.T0)
+        real = (psycopg.connect, extract_eval.read_values, P.T0)
         psycopg.connect = lambda *a, **k: Conn()
-        extract_eval.read_value = lambda *a, **k: reads.append(a) or None
+        extract_eval.read_values = lambda *a, **k: reads.append(a) or []
         os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
         a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024", companies="PT_1,PT_2", limit=0, max_usd=1.0, budget=1)
         spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number"}}
@@ -104,7 +104,38 @@ class Propose(unittest.TestCase):
             P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, collections.Counter())
             self.assertEqual(len(reads), 2)
         finally:
-            psycopg.connect, extract_eval.read_value, P.T0 = real
+            psycopg.connect, extract_eval.read_values, P.T0 = real
+
+    def test_one_call_covers_the_other_years(self):
+        # 31 Oct 2026: a 2025 read returns 2025, 2024 and 2023; 2024 is not read again, 2023 is written as history
+        import types, collections, psycopg, extract_eval
+        class Cur:
+            def execute(self, *a): pass
+        class Conn:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def cursor(self): return Cur()
+        asked = []
+        def fake(cur, wba, year, attr, spec, usage):
+            asked.append(year)
+            return [dict(value=v, printed=v, scale=1, library_id="L", page=1, unit="tCO2e", year=y, column=str(y), asked=year)
+                    for y, v in ((year, 100.0), (year - 1, 90.0), (year - 2, 80.0))]
+        real = (psycopg.connect, extract_eval.read_values, P.library_docs)
+        psycopg.connect = lambda *a, **k: Conn(); extract_eval.read_values = fake; P.library_docs = lambda *a: {}
+        os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
+        a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024,2025", companies="PT_1", limit=0, max_usd=1.0, budget=300)
+        spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number", "unit_family": "tco2e"}}
+        try:
+            c = collections.Counter()
+            rows = P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c)
+        finally:
+            psycopg.connect, extract_eval.read_values, P.library_docs = real
+        self.assertEqual(asked, [2025])                                             # newest first, 2024 never asked
+        self.assertEqual(sorted(r["year"] for r in rows), [2023, 2024, 2025])
+        self.assertEqual((c["model reader: year read in an earlier call"], c["model reader: values for other years"]), (1, 2))
+        d = next(r for r in rows if r["year"] == 2024)["detail"]
+        self.assertIn("pages of the 2025 report, where it is a comparison figure for 2024", d)
+        self.assertNotIn("comparison", next(r for r in rows if r["year"] == 2025)["detail"])
 
     def test_a_superseded_row_proposed_again_is_proposed(self):
         # 30 Oct 2026: filings.xbrl.org did not answer for 56 companies and their 270 ESEF rows were superseded
