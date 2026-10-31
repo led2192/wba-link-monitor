@@ -10,11 +10,11 @@ Retrieval and rules first, a model only for what they cannot read, and every rou
 
 | Piece | What it is |
 | --- | --- |
-| `attributes.json` | The specification: for each attribute its WBA definition, type, unit family and scales, labels (several languages), excluded neighbours, preferred document types, period, scope, XBRL concepts |
+| `attributes.json` | The specification: for each attribute its WBA definition, type, unit family and scales, labels (several languages), excluded neighbours, preferred document types, period, scope, XBRL concepts, and the GRI and ESRS codes and words of its content-index rows |
 | `gold_attributes.json` | Which attributes are scored and where the validated answers are (the 2024 and 2025 gold bases, read-only) |
 | `value_eval.py` | The ceiling: is the validated number printed anywhere in the company's documents of that year, in any scale? |
 | `sec_facts.py`, `esef_facts.py` | Revenue from machine-readable filings (SEC companyfacts; European ESEF reports on filings.xbrl.org), scored |
-| `extract_eval.py` | The generic reader: the year's documents, the pages that name the attribute, then the value read by rules (`--reader rules`) or by a model (`--reader model`, `model_reader.py`), scored stage by stage |
+| `extract_eval.py` | The generic reader: the year's documents, the pages that name the attribute (plus the pages the report's own index cites, `content_index.py`), then the value read by rules (`--reader rules`) or by a model (`--reader model`, `model_reader.py`), scored stage by stage |
 | `label_mining.py` | Learns from the validated answers which words reports print next to a value; suggestions for `labels` in `attributes.json` |
 | `propose_values.py` | Writes values to the Disclosure Library table `attribute_values` for analysts to review. First source: SEC and ESEF revenue |
 
@@ -69,7 +69,7 @@ The model reader uses the repository secret `ANTHROPIC_API_KEY` (prepaid credit 
 ## What comes next
 
 1. Run the model reader for all 2,000 companies, 2022 to 2025, in parallel jobs (Propose values, shards 8, model years 2022-2025): about $20 to $30 and an afternoon, now that one call returns every year a page prints (31 Oct 2026).
-2. The GRI and ESRS content index as a retrieval signal: it names the page where each disclosure sits (GRI 305-1 Scope 1 → p. 84), the strongest signal the ranking does not use yet; capex and Scope 2 are the attributes it should help most.
+2. Measure the GRI and ESRS content index as a retrieval signal (in since 31 Oct 2026, `content_index.py`): the share of answers whose number reaches the ranked pages, before and after, on the same 200 answers; then tune its weight and the index words per attribute.
 3. Learn from the reviewers' decisions: a weekly score of each method and attribute on the rows accepted or rejected, and their notes as a list of patterns to fix.
 4. Low-carbon capex (58 % match, the right page found for 25 % of answers): a rule for the EU Taxonomy tables, where the figure is split over rows.
 5. The analysts' 2025 answers (their own file, 300+ companies) as validated answers, so the 2025 rows get compared too.

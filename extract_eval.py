@@ -38,6 +38,7 @@ MAX_DOCS, MAX_PAGES = 12, 25         # documents of the year searched; pages kep
 PER_DOC = 10                         # at most this many of the kept pages from one document
 POOL = 400                           # label-matching pages scored before ranking
 MODEL_PAGES = 8                      # pages given to the model reader: half by the rule candidates, half by rank
+INDEX_WEIGHT = 1.5                   # page score added to a page the report's own content index cites (content_index.py)
 BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
 # a printed number: Indian grouping, comma/dot/apostrophe groups, space groups (never followed by another
@@ -218,7 +219,7 @@ def label_query(labels):
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
 
-def page_score(text_rank, cand, body, year, labels, exclude, doc_weight):
+def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0):
     """How likely a page holds the attribute's figure for the year, from five signals, each in 0 to 1:
     the label match of the word index, the best rule candidate on the page, how much of a table it is
     (numbers of four digits or more), whether it prints the year (or its fiscal label), how often the
@@ -231,7 +232,7 @@ def page_score(text_rank, cand, body, year, labels, exclude, doc_weight):
     has_year = 1.0 if (str(year) in (body or "") or f"FY{y1[2:]}" in (body or "") or f"FY{y1}" in (body or "")) else 0.0
     hits = min(len(label_positions(body or "", labels, exclude)), 5) / 5
     c = max(cand, 0) / 8 if cand is not None else 0.0
-    return 1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight
+    return 1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight + INDEX_WEIGHT * index_boost
 
 
 def retrieval_miss(holding, rows, forms):
@@ -295,17 +296,31 @@ def year_documents(cur, wba, year, attr):
     return docs, weight
 
 
-def ranked_pages(cur, ids, weight, year, attr, spec):
-    """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents."""
+def ranked_pages(cur, ids, weight, year, attr, spec, info=None):
+    """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents,
+    plus the pages the documents' own content index cites for the attribute (content_index.py, 31 Oct 2026),
+    which get INDEX_WEIGHT and join the pool even when no label is on them. info, a dict when given,
+    receives "cited": {(library_id, page): weight}."""
+    import content_index
+    cited = content_index.cited(cur, ids, attr)
+    if info is not None:
+        info["cited"] = dict(cited)
     cur.execute("select library_id, page, body, ts_rank_cd(words, websearch_to_tsquery('simple', %s), 32) as rk from public.pages "
                 "where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s) "
                 "order by rk desc limit %s",
                 (label_query(attr["labels"]), ids, label_query(attr["labels"]), POOL))
+    found = cur.fetchall()
+    missing = set(cited) - {(lid, page) for lid, page, _, _ in found}
+    if missing:
+        cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and page = any(%s)",
+                    (sorted({l for l, _ in missing}), sorted({p for _, p in missing})))
+        found += [(lid, page, body, 0.0) for lid, page, body in cur.fetchall() if (lid, page) in missing]
     rows = []
-    for lid, page, body, rk in cur.fetchall():
+    for lid, page, body, rk in found:
         cs = candidates(body, year, attr, spec)
         top = max(cs, key=lambda c: c[0]) if cs else None
-        sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []), attr.get("exclude", []), weight.get(lid, 0))
+        sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []), attr.get("exclude", []),
+                        weight.get(lid, 0), cited.get((lid, page), 0.0))
         rows.append((sc, lid, page, body, top))
     return rows
 
@@ -361,9 +376,12 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
         r["in_docs"] = bool(holding)
     else:
         holding = []
-    rows = ranked_pages(cur, ids, weight, g["year"], attr, spec)
+    info = {}
+    rows = ranked_pages(cur, ids, weight, g["year"], attr, spec, info)
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
+    r["index_cited"] = bool(info.get("cited"))                       # the report's own index named a page
+    r["index_hit"] = any((lid, page) in info.get("cited", {}) for lid, page, _ in holding)
     if r["in_docs"] and not r["in_pages"]:
         r["miss"] = retrieval_miss(holding, rows, forms)
     # each kept page's best rule candidate, used by the rule reader and to pick the model's pages
@@ -453,6 +471,7 @@ def main():
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
+            s["index cited"] += bool(r.get("index_cited")); s["index hit"] += bool(r.get("index_hit"))
             for e in r.get("others") or []:                   # the other years the same call read, scored where validated
                 s["other years"] += 1
                 gv = gold_index.get((g["wba"], g["attribute"], e["year"]))
@@ -516,6 +535,14 @@ def main():
         md.append(f"| {c} {spec['attributes'][c]['name']} | {n_miss:,} | {s['miss: no label on the page']:,} | "
                   f"{s['miss: label on the next or previous page']:,} | {s['miss: ranked too low']:,} | "
                   f"{rk[len(rk) // 2] if rk else ''} | {top} |")
+    md.append("")
+    md += ["The report's own content index (GRI, ESRS, table of contents) as a signal: answers where an index page named a page "
+           "for the attribute, and where a named page prints the validated number (the number must also be in the year's documents):", "",
+           "| Attribute | Index named a page | Named page prints the number | Of answers with the number in the documents |",
+           "| --- | --: | --: | --: |"]
+    for c in codes:
+        s = stats[c]
+        md.append(f"| {c} {spec['attributes'][c]['name']} | {s['index cited']:,} | {s['index hit']:,} | {s['index hit'] / (s['in_docs'] or 1):.0%} |")
     md.append("")
     for c in codes:
         if wrong[c]:

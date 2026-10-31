@@ -1,5 +1,5 @@
 {
-  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes).",
+  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes). The \"index\" of an attribute (GRI and ESRS disclosure codes, and the words its index rows use) lets the retrieval read the report's own content index for the page the figure is on (content_index.py, 31 Oct 2026).",
   "unit_families": {
     "currency": {
       "scales": {
@@ -107,6 +107,17 @@
         "deferred",
         "unearned"
       ],
+      "index": {
+        "codes": [
+          "201-1"
+        ],
+        "terms": [
+          "economic value generated",
+          "revenue",
+          "net sales",
+          "turnover"
+        ]
+      },
       "doc_types": [
         "Annual Report",
         "10K Form",
@@ -155,6 +166,18 @@
         "scope 1+2",
         "scopes 1 and 2"
       ],
+      "index": {
+        "codes": [
+          "305-1",
+          "E1-6"
+        ],
+        "terms": [
+          "direct (scope 1)",
+          "scope 1",
+          "direct ghg emissions",
+          "gross scopes 1, 2, 3"
+        ]
+      },
       "doc_types": [
         "Sustainability Report",
         "ESG Report",
@@ -190,6 +213,18 @@
         "market-based",
         "% "
       ],
+      "index": {
+        "codes": [
+          "305-2",
+          "E1-6"
+        ],
+        "terms": [
+          "indirect (scope 2)",
+          "scope 2",
+          "location-based",
+          "gross scopes 1, 2, 3"
+        ]
+      },
       "doc_types": [
         "Sustainability Report",
         "ESG Report",
@@ -228,6 +263,18 @@
         "location-based",
         "% "
       ],
+      "index": {
+        "codes": [
+          "305-2",
+          "E1-6"
+        ],
+        "terms": [
+          "indirect (scope 2)",
+          "scope 2",
+          "market-based",
+          "gross scopes 1, 2, 3"
+        ]
+      },
       "doc_types": [
         "Sustainability Report",
         "ESG Report",
@@ -269,6 +316,17 @@
         "ebitda",
         "total capex"
       ],
+      "index": {
+        "codes": [
+          "E1-5"
+        ],
+        "terms": [
+          "taxonomy",
+          "capex",
+          "capital expenditure",
+          "article 8"
+        ]
+      },
       "doc_types": [
         "Annual Report",
         "Sustainability Report",
@@ -380,6 +438,19 @@
         "injur",
         "fatalit"
       ],
+      "index": {
+        "codes": [
+          "2-7",
+          "405-1",
+          "S1-6"
+        ],
+        "terms": [
+          "employees",
+          "workforce",
+          "headcount",
+          "characteristics of the undertaking's employees"
+        ]
+      },
       "doc_types": [
         "Annual Report",
         "10K Form",
