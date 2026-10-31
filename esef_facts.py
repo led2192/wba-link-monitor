@@ -79,13 +79,18 @@ def filings(lei, sess, years):
     years. The viewer is the readable report, with the tagged figures highlighted."""
     flt = json.dumps([{"name": "entity.identifier", "op": "eq", "val": lei},
                       {"name": "period_end", "op": "ge", "val": f"{min(years)}-01-01"}])
-    try:
-        r = sess.get(f"{ESEF}/api/filings", params={"filter": flt, "page[size]": "50", "sort": "-period_end"},
-                     headers={"Accept": "application/vnd.api+json"}, timeout=60)
-    except Exception:
-        return []
+    r = None
+    for attempt in range(3):                      # the listing fails now and then too (31 Oct 2026)
+        try:
+            r = sess.get(f"{ESEF}/api/filings", params={"filter": flt, "page[size]": "50", "sort": "-period_end"},
+                         headers={"Accept": "application/vnd.api+json"}, timeout=60)
+            if r.ok:
+                break
+        except Exception:
+            r = None
+        time.sleep(5 * (attempt + 1))
     time.sleep(0.3)
-    if not r.ok:
+    if r is None or not r.ok:
         return []
     out = []
     for d in r.json().get("data", []):
