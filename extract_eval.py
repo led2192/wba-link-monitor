@@ -38,6 +38,8 @@ MAX_DOCS, MAX_PAGES = 12, 25         # documents of the year searched; pages kep
 PER_DOC = 10                         # at most this many of the kept pages from one document
 POOL = 400                           # label-matching pages scored before ranking
 MODEL_PAGES = 8                      # pages given to the model reader: half by the rule candidates, half by rank
+MORE_TERMS_TIMEOUT = "8s"            # the second query (an attribute's more_terms) may take this long, else it is skipped
+MORE_POOL = 120                      # pages it may add
 INDEX_WEIGHT = 1.5                   # page score added to a page the report's own content index cites (content_index.py)
 BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
@@ -212,7 +214,8 @@ def label_variants(labels):
     return out
 
 
-MAX_QUERY_LABELS = 30                # phrases in one word-index query; 46 took the capex search past 30 s, 27 is fine (31 Oct 2026)
+MAX_QUERY_LABELS = 30                # a guard on the phrases in one word-index query; what slowed the capex search (31 Oct 2026)
+                                     # was phrases of common words, which now go to a separate query (more_terms_pages)
 
 
 def label_query(labels):
@@ -315,6 +318,7 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None):
                 "order by rk desc limit %s",
                 (label_query(attr["labels"]), ids, label_query(attr["labels"]), POOL))
     found = cur.fetchall()
+    found += more_terms_pages(cur, ids, attr, {(lid, page) for lid, page, _, _ in found}, info)
     missing = set(cited) - {(lid, page) for lid, page, _, _ in found}
     if missing:
         cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and page = any(%s)",
@@ -324,10 +328,43 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None):
     for lid, page, body, rk in found:
         cs = candidates(body, year, attr, spec)
         top = max(cs, key=lambda c: c[0]) if cs else None
-        sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []), attr.get("exclude", []),
-                        weight.get(lid, 0), cited.get((lid, page), 0.0))
+        sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []) + attr.get("more_terms", []),
+                        attr.get("exclude", []), weight.get(lid, 0), cited.get((lid, page), 0.0))
         rows.append((sc, lid, page, body, top))
     return rows
+
+
+def more_terms_pages(cur, ids, attr, have, info=None):
+    """[(library_id, page, body, rank)] of the pages that print one of the attribute's more_terms and were not
+    found by the label query. A separate query with its own MORE_TERMS_TIMEOUT inside a savepoint: wording
+    with common words ("investments in energy efficiency") is slow to check in the word index, and adding it
+    to the label query timed out the whole search (31 Oct 2026); here a slow query only loses its own pages.
+    info["more_terms"] receives "ok", "timeout" or "none"."""
+    terms = attr.get("more_terms") or []
+    if not terms:
+        return []
+    q = label_query(terms)
+    cur.execute("show statement_timeout")
+    before = cur.fetchone()[0]
+    try:
+        with cur.connection.transaction():
+            cur.execute(f"set local statement_timeout = '{MORE_TERMS_TIMEOUT}'")
+            cur.execute("select library_id, page, body, ts_rank_cd(words, websearch_to_tsquery('simple', %s), 32) as rk "
+                        "from public.pages where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s) "
+                        "order by rk desc limit %s", (q, ids, q, MORE_POOL))
+            rows = [r for r in cur.fetchall() if (r[0], r[1]) not in have]
+        if info is not None:
+            info["more_terms"] = "ok"
+        return rows
+    except Exception:
+        if info is not None:
+            info["more_terms"] = "timeout"
+        return []
+    finally:
+        try:
+            cur.execute(f"set statement_timeout = '{before}'")
+        except Exception:
+            pass
 
 
 def read_values(cur, wba, year, attr, spec, usage):
@@ -385,6 +422,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
     rows = ranked_pages(cur, ids, weight, g["year"], attr, spec, info)
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
+    r["more_terms"] = info.get("more_terms")
     r["index_cited"] = bool(info.get("cited"))                       # the report's own index named a page
     r["index_hit"] = any((lid, page) in info.get("cited", {}) for lid, page, _ in holding)
     if r["in_docs"] and not r["in_pages"]:
@@ -477,6 +515,8 @@ def main():
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
             s["index cited"] += bool(r.get("index_cited")); s["index hit"] += bool(r.get("index_hit"))
+            if r.get("more_terms"):
+                s["more terms " + r["more_terms"]] += 1
             for e in r.get("others") or []:                   # the other years the same call read, scored where validated
                 s["other years"] += 1
                 gv = gold_index.get((g["wba"], g["attribute"], e["year"]))
@@ -541,6 +581,10 @@ def main():
                   f"{s['miss: label on the next or previous page']:,} | {s['miss: ranked too low']:,} | "
                   f"{rk[len(rk) // 2] if rk else ''} | {top} |")
     md.append("")
+    if any(stats[c]["more terms ok"] + stats[c]["more terms timeout"] for c in codes):
+        md += ["Second query with the attribute's more_terms (its own time limit, " + MORE_TERMS_TIMEOUT + "): " + "; ".join(
+            f"{c} {stats[c]['more terms ok']} answered, {stats[c]['more terms timeout']} timed out" for c in codes
+            if stats[c]["more terms ok"] + stats[c]["more terms timeout"]) + ".", ""]
     md += ["The report's own content index (GRI, ESRS, table of contents) as a signal: answers where an index page named a page "
            "for the attribute, and where a named page prints the validated number (the number must also be in the year's documents):", "",
            "| Attribute | Index named a page | Named page prints the number | Of answers with the number in the documents |",

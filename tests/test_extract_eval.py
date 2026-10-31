@@ -163,6 +163,35 @@ class AgainstPostgres(unittest.TestCase):
             self.assertTrue(r["in_pages"])                                        # no label on page 86: only the index brings it in
             c.execute("delete from public.pages where library_id like 'xidx%'"); c.execute("delete from public.documents where library_id like 'xidx%'")
 
+    def test_more_terms_bring_pages_and_a_slow_query_loses_only_its_own(self):
+        # 31 Oct 2026: narrative capex wording in the label query timed out the whole search; now it is a second query
+        import psycopg
+        with psycopg.connect(os.environ["PG_TEST_URL"]) as c:
+            if not c.execute("select to_regclass('public.pages')").fetchone()[0]:
+                self.skipTest("run tests/test_load_supabase.py first")
+            c.execute("delete from public.pages where library_id like 'xmore%'"); c.execute("delete from public.documents where library_id like 'xmore%'")
+            c.execute("insert into public.documents (library_id, wba_id, company, year, doc_type) values ('xmore1', 'PT_09995', 'Moreco', 2024, 'Sustainability Report')")
+            c.execute("insert into public.pages (library_id, page, body) values "
+                      "('xmore1', 4, 'In 2024 we made investments in energy efficiency of EUR 493.4 million across our plants.'), "
+                      "('xmore1', 9, 'Our taxonomy-aligned capex was 12.7 EUR m in 2024.')")
+            cur = c.cursor(); cur.execute("set statement_timeout = '30s'")
+            attr = dict(A["GMC_00064.1"])
+            info = {}
+            rows = X.ranked_pages(cur, ["xmore1"], {"xmore1": 1.0}, 2024, attr, SPEC, info)
+            self.assertEqual(sorted(p for _, _, p, _, _ in rows), [4, 9]); self.assertEqual(info["more_terms"], "ok")
+            real = X.MORE_TERMS_TIMEOUT
+            X.MORE_TERMS_TIMEOUT = "1ms"
+            try:
+                cur.execute("select pg_sleep(0)")                          # the connection still works after a timeout
+                info = {}
+                rows = X.ranked_pages(cur, ["xmore1"], {"xmore1": 1.0}, 2024, attr, SPEC, info)
+            finally:
+                X.MORE_TERMS_TIMEOUT = real
+            self.assertIn(9, [p for _, _, p, _, _ in rows])                # the label query's pages are kept
+            cur.execute("show statement_timeout"); self.assertEqual(cur.fetchone()[0], "30s")
+            cur.execute("select 1"); self.assertEqual(cur.fetchone()[0], 1)
+            c.execute("delete from public.pages where library_id like 'xmore%'"); c.execute("delete from public.documents where library_id like 'xmore%'")
+
 
 if __name__ == "__main__":
     unittest.main()
