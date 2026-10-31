@@ -129,6 +129,9 @@ regulator_filings.py added 655 SEC and ESEF filings to report_library from Octob
 ## A job that writes at the end loses everything at the job limit
 Propose values collects every proposal, then writes them all. Its first run with the model reader on two years (30 Oct 2026) was still reading when GitHub stopped it at its 120-minute limit, and nothing was written: two hours of reading and the model's cost for nothing. A reader answer takes 15 to 20 seconds (retrieval and the model call), so 1 USD of model calls is about five hours of work, not two. The reader now stops at a time budget below the job limit; a job that collects before writing needs a budget like that.
 
+## A source that times out looks like a source with nothing
+filings.xbrl.org serves some annual reports' JSON slowly (a large report takes minutes) and the read timed out at 120 s with no retry; the listing could fail the same way. A company then looked like one with no revenue facts: 146 companies had facts on the night of 30 Oct 2026 and 134 the next morning, and 125 rows of 26 companies stayed superseded. Every read of an external source gets retries and a counter for what could not be read, so "nothing there" and "could not read" never share a number.
+
 ## No answer from a source is not "no longer proposed"
 Propose values marks a filing row superseded when a run no longer proposes it, so that a changed rule leaves a trace. On 30 to 31 Oct 2026 filings.xbrl.org returned nothing for 56 companies, and their 270 ESEF revenue rows (28 matching the validated answer) were superseded as if the rule had dropped them. A row is now superseded only for a company whose source returned facts in the same run, and a superseded row proposed again goes back to proposed.
 

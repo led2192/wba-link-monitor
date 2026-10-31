@@ -1,0 +1,48 @@
+name: Review score
+
+# What the reviewers' decisions in attribute_values say about each method and attribute (review_score.py):
+# acceptance rates, the rows that disagree with the validated answer in either direction, the rejection
+# notes grouped into patterns, the corrected values and the weekly pace. Read-only on the Disclosure
+# Library; counters to Pipeline QA. Weekly, and on demand.
+on:
+  schedule:
+    - cron: "52 7 * * 1"          # Mondays 07:52 UTC
+  workflow_dispatch:
+  pull_request:
+    paths: [review_score.py, .github/workflows/review_score.yml]
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Score the reviews
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then python review_score.py; else python review_score.py --commit; fi
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-score
+          path: review_score.md
+          if-no-files-found: ignore
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s review_score.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file review_score.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Review score: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
