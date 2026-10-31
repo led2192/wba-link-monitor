@@ -112,7 +112,7 @@ class ModelReader(unittest.TestCase):
         self.assertEqual([(e["year"], e["value"], e["page"]) for e in got["others"]],
                          [(2023, 106848e6, 5), (2022, 98120e6, 9), (2021, 90003e6, 9), (2020, 85555e6, 9)])
         self.assertEqual((usage["calls"], usage["years_returned"]), (1, 5))
-        self.assertIn("EVERY other reporting year", M.prompt(G, REV, PAGES))
+        self.assertIn("each other reporting year the same row prints", M.prompt(G, REV, PAGES))
 
     def test_the_year_asked_comes_first_whatever_the_order(self):
         text = ('{"values": [{"page": "P2", "printed": "106,848", "scale": "millions", "year": 2023, "column": "2023"}, '
@@ -139,6 +139,14 @@ class ModelReader(unittest.TestCase):
         note = {}
         self.assertIsNone(M.read_with_model(G, REV, PAGES, X.collections.Counter(), Sess((200, '{"values": [], "why": "no revenue table"}')), note=note))
         self.assertEqual(note["why"], "no revenue table")
+
+    def test_a_reply_cut_at_the_limit_keeps_its_complete_entries(self):
+        # 31 Oct 2026: 1 in 10 replies hit the token limit and read as "no JSON", losing the year asked
+        cut = YEARS[:YEARS.index('{"page": "P3", "printed": "90,003"')] + '{"page": "P3", "printed": "90,0'
+        got = M.read_with_model(G, REV, PAGES, X.collections.Counter(), Sess((200, cut)))
+        self.assertEqual((got["value"], got["year"]), (102502e6, 2024))
+        self.assertEqual([e["year"] for e in got["others"]], [2023, 2022])
+        self.assertIsNone(M.parse_reply('{"values": [{"page": "P1", "printed": "1'))
 
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)
