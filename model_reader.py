@@ -32,8 +32,8 @@ class ModelRefused(RuntimeError):
     """The API refused the call for a reason a retry won't fix (key, credit, model name): stop the run."""
 DEFAULT_MODEL = "claude-haiku-5-5"
 PAGE_CHARS = 8000                       # per page; a long page is cut, tables sit near the top in practice
-MAX_TOKENS = 1500                   # 300 cut replies off before their JSON (average reply 236 tokens, 29 Oct 2026); one
-                                    # entry per year since 31 Oct 2026, about 60 tokens each
+MAX_TOKENS = 2500                   # 300 cut replies off before their JSON (average reply 236 tokens, 29 Oct 2026); with one
+                                    # entry per year the replies averaged 785 tokens and 1,500 cut 1 in 10 (31 Oct 2026)
 SCALES = {"units": 1, "thousands": 1e3, "ten thousands": 1e4, "lakhs": 1e5, "millions": 1e6, "crores": 1e7, "hundred millions": 1e8,
           "billions": 1e9}
 
@@ -69,24 +69,34 @@ def prompt(g, attr, pages):
               "\"in millions\", \"€m\", \"'000\", \"ktCO2e\"; 万 is ten thousands, 億 or 亿 hundred millions), \"unit\": \"EUR\" or \"tCO2e\" etc., "
               f"\"year\": {y}, \"column\": the heading of the column or line the figure sits under, exactly as printed, "
               "e.g. \"FY25\", \"2024\", \"2024/25\", \"Year ended 31 March 2025\"}, ...]}. "
-              f"The first entry is the figure for reporting year {y}. Then one entry for EVERY other reporting year the "
-              "same figure is printed for on these pages (the other year columns of the same row, or the same figure in "
-              "another table), newest first, each with its own page, printed number and column heading; \"year\" is the "
-              "reporting year of that column under the rule above, not the heading. Only years the pages print: never "
-              "estimate. If none of the pages prints the figure for any year, reply {\"values\": [], \"why\": \"...\"} "
+              f"The first entry is the figure for reporting year {y}. Then one entry for each other reporting year the "
+              "same row prints (its other year columns), newest first, at most six entries in all and one per year, each "
+              "with its page, printed number and column heading; \"year\" is the reporting year of that column under the "
+              "rule above, not the heading. Only years the pages print: never estimate. No text before or after the JSON. "
+              "If none of the pages prints the figure for any year, reply {\"values\": [], \"why\": \"...\"} "
               "with the reason in ten words or fewer."]
     return "\n".join(l for l in lines if l is not None)
 
 
 def parse_reply(text):
-    """The first JSON object in the model's text, or None."""
+    """The first JSON object in the model's text, or None. A reply cut before its closing brackets (the token
+    limit) still yields the complete entries of its "values" list, the year asked first among them."""
     m = re.search(r"\{.*\}", text or "", flags=re.S)
     if not m:
         return None
     try:
         return json.loads(m.group(0))
     except ValueError:
-        return None
+        pass
+    entries = []
+    for part in re.findall(r"\{[^{}]*\}", m.group(0)):
+        try:
+            e = json.loads(part)
+        except ValueError:
+            continue
+        if isinstance(e, dict) and e.get("page"):
+            entries.append(e)
+    return {"values": entries, "cut": True} if entries else None
 
 
 def page_convention(body):
