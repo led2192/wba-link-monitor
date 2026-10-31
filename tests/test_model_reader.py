@@ -148,6 +148,22 @@ class ModelReader(unittest.TestCase):
         self.assertEqual([e["year"] for e in got["others"]], [2023, 2022])
         self.assertIsNone(M.parse_reply('{"values": [{"page": "P1", "printed": "1'))
 
+    def test_one_scope_2_figure_goes_under_one_attribute(self):
+        # 30 Oct 2026: "Scope 2 GHG emissions: 646,000" with no basis was proposed as location- and market-based; the
+        # reviewer rejected the duplicate
+        loc, mkt = SPEC["attributes"]["GMC_00002.1"], SPEC["attributes"]["GMC_00003.1"]
+        page = [("lib5", 2, "Scope 1 GHG emissions 12,000 tCO2e. Scope 2 GHG emissions 646,000 tCO2e (2023: 650,000).")]
+        g = {"wba": "PT_1", "year": 2024, "value": 646000.0, "unit": "tCO2e"}
+        reply = '{"values": [{"page": "P1", "printed": "646,000", "scale": "units", "unit": "tCO2e", "year": 2024, "column": "2024", "basis": "not stated"}]}'
+        got = M.read_with_model(g, loc, page, X.collections.Counter(), Sess((200, reply)))
+        self.assertEqual(got["value"], 646000.0); self.assertIn("filed under location-based", got["basis_note"])
+        u = X.collections.Counter()
+        self.assertIsNone(M.read_with_model(g, mkt, page, u, Sess((200, reply)))); self.assertEqual(u["dropped_basis_not_stated"], 1)
+        reply = reply.replace("not stated", "market-based")
+        self.assertIsNone(M.read_with_model(g, loc, page, X.collections.Counter(), Sess((200, reply))))     # the other basis
+        self.assertEqual(M.read_with_model(g, mkt, page, X.collections.Counter(), Sess((200, reply)))["value"], 646000.0)
+        self.assertIn('"basis"', M.prompt(g, mkt, page)); self.assertNotIn('"basis"', M.prompt(G, REV, PAGES))
+
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)
         self.assertAlmostEqual(M.cost(u), 0.10 + 0.05)

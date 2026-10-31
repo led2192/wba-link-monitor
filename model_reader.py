@@ -57,6 +57,9 @@ def prompt(g, attr, pages):
              f"Period: {attr['period']}." if attr.get("period") else "",
              f"Scope: {attr['scope']}." if attr.get("scope") else "",
              "Take the figure for that year, for the whole company or group, not a segment, a region or a target.",
+             (f"The figure wanted is the {attr['variant']['wanted']} one. Say in \"basis\" what the page calls the figure: "
+              f"\"{attr['variant']['wanted']}\", \"{attr['variant']['other']}\", or \"not stated\" when the page gives one Scope 2 "
+              f"figure without saying which. Never give a figure the page calls {attr['variant']['other']}.") if attr.get("variant") else "",
              "The labels above are examples: if a page prints the figure under another name (\"Gross Scope 1\", "
              "\"Net sales\", \"Direct emissions\"), give it. A figure in a table whose year columns are headed further up "
              "the page counts. Reply with no figure only when none of the pages prints it.",
@@ -160,7 +163,8 @@ def check(reply, pages, to_number, numbers_on):
     if year is not None and (not FIRST_YEAR <= year <= LAST_YEAR + 1 or (cy and year not in (cy, cy - 1))):
         return None                     # a year the heading does not allow: the model mixed its columns
     return {"value": printed * scale, "printed": printed, "scale": scale, "library_id": lid, "page": page,
-            "unit": reply.get("unit") or "", "column": column, "year": year}
+            "unit": reply.get("unit") or "", "column": column, "year": year,
+            "basis": str(reply.get("basis") or "").strip().lower()[:20]}
 
 
 def check_all(reply, pages, to_number, numbers_on, usage):
@@ -212,6 +216,32 @@ def call(messages, usage, sess=None, model=None):
     return ""
 
 
+def variant_filter(attr, entries, usage=None):
+    """The entries an attribute with a "variant" (Scope 2 location- or market-based) may keep: the ones the
+    page calls by the wanted basis; the ones with no basis stated only when the variant is the default
+    (location-based), marked basis_note; never the other basis. A report that gives one Scope 2 figure
+    without naming a basis therefore yields one row, not two (a reviewer rejected the duplicate, 30 Oct 2026)."""
+    v = attr.get("variant")
+    if not v:
+        return entries
+    out = []
+    for e in entries:
+        b = e.get("basis") or ""
+        if v["other"] in b:
+            if usage is not None:
+                usage["dropped_other_basis"] += 1
+            continue
+        if v["wanted"] not in b:                          # not stated, or something else
+            if not v.get("default"):
+                if usage is not None:
+                    usage["dropped_basis_not_stated"] += 1
+                continue
+            e["basis_note"] = (f"The report gives one Scope 2 figure without saying location- or market-based; "
+                               f"it is filed under {v['wanted']}.")
+        out.append(e)
+    return out
+
+
 def read_years(g, attr, pages, usage, sess=None, note=None):
     """One call: the model's checked figures for every reporting year the pages print, the year asked
     (g["year"]) first when it is there. [] when none. note (a dict), when given, receives the model's reason
@@ -233,6 +263,7 @@ def read_years(g, attr, pages, usage, sess=None, note=None):
         if e["year"] is None:           # the old single-object shape, or a missing year: the year asked
             e["year"] = g["year"]
     got.sort(key=lambda e: e["year"] != g["year"])
+    got = variant_filter(attr, got, usage)
     usage["years_returned"] += len(got)
     return got
 
