@@ -17,10 +17,13 @@ on:
         description: "Which database"
         type: choice
         default: "all"
-        options: [all, sec, esef]
+        options: [all, sec, esef, hkex, cninfo]
       wba:
         description: "Only these companies (comma-separated wba_ids). Blank = all."
         default: ""
+
+  pull_request:
+    paths: [regulator_filings.py, web_filing.py, .github/workflows/regulator_filings.yml]
 
 concurrency:
   group: regulator-filings
@@ -30,6 +33,9 @@ jobs:
   filings:
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,6 +45,8 @@ jobs:
       - name: Look up and add annual filings
         run: |
           ARGS=(--source "${{ inputs.source || 'all' }}" --wba "${{ inputs.wba }}")
+          # a pull request: dry run on two companies listed in Hong Kong (Tencent) and Shanghai (Transsion)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=(--source all --wba PT_01760,PT_01818); fi
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then ARGS+=(--commit); fi
           if [ "${{ inputs.mode }}" = "mark-web" ]; then ARGS=(--mark-web --commit); fi
           python regulator_filings.py "${ARGS[@]}"
@@ -46,3 +54,10 @@ jobs:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           SEC_CONTACT: ${{ vars.SEC_CONTACT }}
+      - name: Comment on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s regulator_filings.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file regulator_filings.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Regulator filings: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}

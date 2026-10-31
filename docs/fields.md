@@ -220,6 +220,7 @@ How to use the fields day to day is in [guide.md](guide.md).
 | `hq_country` | text | robot | Headquarters country, ISO 3-letter code (from WBA's company master list). Decides which regulator database holds the annual report. |
 | `ownership` | text | robot | Public, Private, State-owned... (from WBA's company master list). Private companies file no annual report with a stock-market regulator. |
 | `sec_cik` | text | you | The company's number in the US SEC database (EDGAR), found from its ISIN. 'none' = not an SEC filer. Written by regulator_filings.py; correct it by hand if wrong. |
+| `exchange_codes` | text | robot | Hong Kong and mainland A-share stock codes, from the ISIN through OpenFIGI ("HK:00700; SH:600519"; "none" when the company has neither). Used by regulator_filings.py for HKEXnews and cninfo; looked up once. |
 | `filings_note` | long text | robot | What the weekly regulator-filings check found for this company (SEC, ESEF): which annual filings were added, or why none. Written by regulator_filings.py. |
 | `revenue` | text | robot | Latest annual revenue found by the robot, with currency and fiscal year. From the official filing data (SEC / ESEF XBRL) when available, otherwise a candidate read from the page of the latest annual (or sustainability) report: check it against revenue_source. |
 | `revenue_source` | link | robot | Where the revenue figure comes from: the filing, or the exact PDF page (opens on that page). |
