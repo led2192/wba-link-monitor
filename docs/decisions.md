@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-10-31: Stock exchanges as a gap filler, Hong Kong and mainland China first
+About 1 in 5 companies block automated access to their sites, many of them Chinese, and the analysts found reports (Transsion) only on an exchange. Listed companies must file their annual report with the exchange, whose databases are open: HKEXnews and cninfo (Shanghai and Shenzhen) first, because they cover the largest blocked group. Same rule as the SEC and ESEF: added only for a fiscal year with no annual report of the company's own in the library, so the record count stays low. Rejected for now: Japan (EDINET, an API key), Korea (DART, a key), India (BSE); next in line if these two work.
+
 ### 2026-10-30: Regulator filings are read as web pages, not printed to PDF
 The 655 SEC and ESEF filings in report_library had no text. Printing them to PDF (as capture_pages.py does for web pages) was rejected: a 10-K prints to roughly 5 to 15 MB, and a file we make ourselves can only reach Airtable through the direct upload, which takes 5 MB at most (files Airtable copies from a public address can be far bigger, which is why larger reports are attached). The filing's own HTML marks every printed page, so `web_filing.py` splits it there and the text store gets the same pages the SEC or ESEF viewer shows; the row keeps the official address and no file.
 
