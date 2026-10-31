@@ -1,5 +1,5 @@
 {
-  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes). The \"index\" of an attribute (GRI and ESRS disclosure codes, and the words its index rows use) lets the retrieval read the report's own content index for the page the figure is on (content_index.py, 31 Oct 2026). A \"variant\" (Scope 2) names the basis the attribute wants (location-based or market-based) and whether a figure the report gives without naming a basis is filed under it (default): one such figure goes under location-based only, never under both (31 Oct 2026).",
+  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes). The \"index\" of an attribute (GRI and ESRS disclosure codes, and the words its index rows use) lets the retrieval read the report's own content index for the page the figure is on (content_index.py, 31 Oct 2026). A \"variant\" (Scope 2) names the basis the attribute wants (location-based or market-based) and whether a figure the report gives without naming a basis is filed under it (default): one such figure goes under location-based only, never under both (31 Oct 2026). reading_notes: what the model reader is told about what counts and what to prefer, when the definition alone is not enough (31 Oct 2026).",
   "unit_families": {
     "currency": {
       "scales": {
@@ -302,6 +302,7 @@
     "GMC_00064.1": {
       "name": "Low-carbon capital expenditure",
       "definition": "What is the total CapEx or investments allocated to climate solutions/enabler activities? (a currency amount or a percentage of total CapEx)",
+      "reading_notes": "Reports rarely call this 'low-carbon capex'. It counts when the report attributes the capital expenditure or investment to climate solutions, renewable energy, energy efficiency, carbon reduction, decarbonisation, the energy transition, low-carbon products or environmental protection. Prefer, in this order: the EU Taxonomy-aligned CapEx amount (row A.1) when the report prints one; a total of such investments for the year; a single named project only when nothing wider is given. A multi-year budget or a target is not the year's figure.",
       "type": "number",
       "unit_family": "currency",
       "labels": [
@@ -319,7 +320,30 @@
         "green capex",
         "capex aligned",
         "climate capex",
-        "capital expenditure aligned"
+        "capital expenditure aligned",
+        "investment in renewable energy",
+        "renewable energy investment",
+        "investments in energy efficiency",
+        "energy efficiency investments",
+        "carbon-reduction projects",
+        "carbon reduction projects",
+        "low-carbon investments",
+        "lower emission investments",
+        "low carbon solutions",
+        "investment in climate solutions",
+        "climate-related projects",
+        "climate-related investments",
+        "decarbonisation investments",
+        "decarbonization investments",
+        "energy transition investments",
+        "green investment",
+        "green energy",
+        "environmental protection investment",
+        "environmental investment",
+        "investissements verts",
+        "inversiones sostenibles",
+        "capex of environmentally sustainable activities (taxonomy-aligned)",
+        "a.1"
       ],
       "exclude": [
         "opex",
