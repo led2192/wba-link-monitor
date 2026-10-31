@@ -106,6 +106,13 @@ class Propose(unittest.TestCase):
         finally:
             psycopg.connect, extract_eval.read_value, P.T0 = real
 
+    def test_a_superseded_row_proposed_again_is_proposed(self):
+        # 30 Oct 2026: filings.xbrl.org did not answer for 56 companies and their 270 ESEF rows were superseded
+        rows = [P.row("A", "GMC_00048.1", "Revenue", 2024, FACT, "ESEF XBRL", "u", {}, None, NOW)]
+        existing = {"A|GMC_00048.1|2024|ESEF XBRL": {"id": "recA", "status": "superseded"}}
+        _, updates, _ = P.plan(rows, existing, NOW)
+        self.assertEqual(updates[0][1]["status"], "proposed")
+
     def test_years(self):
         from datetime import datetime
         t = datetime(2026, 10, 29)
