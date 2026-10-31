@@ -118,6 +118,14 @@ class PagesForModel(unittest.TestCase):
         self.assertEqual(X.pages_for_model([], 6), [])
 
 
+class QueryCap(unittest.TestCase):
+    def test_a_long_label_list_is_capped(self):
+        # 31 Oct 2026: 46 phrases for capex timed out the word index on 31 of 40 answers
+        labels = [f"phrase number {i}" for i in range(60)]
+        self.assertEqual(X.label_query(labels).count(" or ") + 1, X.MAX_QUERY_LABELS)
+        self.assertIn('"phrase number 0"', X.label_query(labels))
+
+
 @unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres (after tests/test_load_supabase.py)")
 class AgainstPostgres(unittest.TestCase):
     def test_one_answer_end_to_end(self):

@@ -212,9 +212,14 @@ def label_variants(labels):
     return out
 
 
+MAX_QUERY_LABELS = 30                # phrases in one word-index query; 46 took the capex search past 30 s, 27 is fine (31 Oct 2026)
+
+
 def label_query(labels):
-    """websearch query: any of the labels (and their hyphen variants), each as a phrase."""
-    labels = label_variants(labels)
+    """websearch query: any of the labels (and their hyphen variants), each as a phrase; the first
+    MAX_QUERY_LABELS variants only (labels are listed most specific first), because every phrase makes the
+    index recheck its candidate pages and a long list times out."""
+    labels = label_variants(labels)[:MAX_QUERY_LABELS]
     ascii_labels = [l for l in labels if re.fullmatch(r"[\w\s\-']+", l, flags=re.ASCII)]
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
