@@ -135,6 +135,26 @@ class AgainstPostgres(unittest.TestCase):
             self.assertTrue(r["docs"] and r["in_docs"] and r["in_pages"] and r["proposal"] and r["right"])
             c.execute("delete from public.pages where library_id like 'xeval%'"); c.execute("delete from public.documents where library_id like 'xeval%'")
 
+    def test_the_content_index_brings_in_a_page_with_no_label(self):
+        # 31 Oct 2026: the figure sits in a table that names no attribute; the GRI index says "305-1 ... 84"; printed
+        # page 84 is pdf page 86 (the pages print their number two behind)
+        import psycopg
+        with psycopg.connect(os.environ["PG_TEST_URL"]) as c:
+            if not c.execute("select to_regclass('public.pages')").fetchone()[0]:
+                self.skipTest("run tests/test_load_supabase.py first")
+            c.execute("delete from public.pages where library_id like 'xidx%'"); c.execute("delete from public.documents where library_id like 'xidx%'")
+            c.execute("insert into public.documents (library_id, wba_id, company, year, doc_type) values ('xidx1', 'PT_09996', 'Idxco', 2024, 'Sustainability Report')")
+            rows = [(p, f"{p - 2} Idxco Sustainability Report 2024\nSome narrative about our strategy on page {p - 2}.") for p in range(3, 120) if p not in (86, 118)]
+            rows.append((86, "84 Idxco Sustainability Report 2024\nEnvironmental performance (tCO2e) 2024 2023\nTotal 4,074 4,500\nEnergy (MWh) 12,000 11,000"))
+            rows.append((118, "116 GRI content index\nGRI 2: General Disclosures 2021\n2-1 Organizational details 4\n2-7 Employees 45\n"
+                              "GRI 305: Emissions 2016\n305-1 Direct (Scope 1) GHG emissions 84\n305-2 Energy indirect (Scope 2) GHG emissions 84\n"
+                              "305-3 Other indirect (Scope 3) GHG emissions 87\n305-4 GHG emissions intensity 88\n405-1 Diversity 46"))
+            c.cursor().executemany("insert into public.pages (library_id, page, body) values ('xidx1', %s, %s)", rows)
+            r = X.evaluate(c.cursor(), {"wba": "PT_09996", "year": 2024, "value": 4074.0, "unit": "tCO2e"}, A["GMC_00001.1"], SPEC)
+            self.assertTrue(r["in_docs"]); self.assertTrue(r["index_cited"]); self.assertTrue(r["index_hit"])
+            self.assertTrue(r["in_pages"])                                        # no label on page 86: only the index brings it in
+            c.execute("delete from public.pages where library_id like 'xidx%'"); c.execute("delete from public.documents where library_id like 'xidx%'")
+
 
 if __name__ == "__main__":
     unittest.main()
