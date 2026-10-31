@@ -99,6 +99,23 @@ def sec_main_documents(cik, sess):
     return {acc: doc for acc, doc in zip(rec.get("accessionNumber", []), rec.get("primaryDocument", [])) if doc}
 
 
+def fetch_json(sess, url, tries=3, timeout=180):
+    """A filing's JSON, or None after `tries` attempts. filings.xbrl.org answers slowly for big reports and
+    now and then not at all; one failed read used to look like a company with no facts (31 Oct 2026: the
+    source "answered" for 146 companies one night and 134 the next morning, with no change on its side)."""
+    for attempt in range(tries):
+        try:
+            r = sess.get(url, timeout=timeout)
+            if r.ok:
+                return r.json()
+            if r.status_code == 404:
+                return None
+        except Exception:
+            pass
+        time.sleep(5 * (attempt + 1))
+    return None
+
+
 def sec_url(cik, accn, doc=""):
     """The filing to read: its main document in the SEC's inline viewer (the report itself, figures
     highlighted) when known, else the filing's folder, else the company's list of 10-K filings."""
@@ -362,16 +379,20 @@ def main():
         leis = leis[:a.limit] if a.limit else leis
         for wba, lei in leis:
             facts, src = [], {}
-            for pe, ju, added, viewer in filings(lei, sess, set(years)):
+            listed = filings(lei, sess, set(years))
+            c["ESEF filings listed"] += len(listed)
+            for pe, ju, added, viewer in listed:
+                j = fetch_json(sess, ju)                   # a big report's JSON times out now and then: three tries
+                if j is None:
+                    c["ESEF filings not read"] += 1; continue
+                c["ESEF filings read"] += 1
                 try:
-                    r = sess.get(ju, timeout=120)
-                    if r.ok:
-                        fs = esef_annual(r.json(), added)
-                        facts += fs
-                        for f in fs:
-                            src.setdefault((f[3], f[7]), viewer or ju.rsplit("/", 1)[0] + "/")
+                    fs = esef_annual(j, added)
                 except Exception:
-                    pass
+                    c["ESEF filings not read"] += 1; continue
+                facts += fs
+                for f in fs:
+                    src.setdefault((f[3], f[7]), viewer or ju.rsplit("/", 1)[0] + "/")
                 time.sleep(0.3)
             c["ESEF companies"] += 1; c["ESEF companies with revenue facts"] += bool(facts)
             if facts:

@@ -113,6 +113,25 @@ class Propose(unittest.TestCase):
         _, updates, _ = P.plan(rows, existing, NOW)
         self.assertEqual(updates[0][1]["status"], "proposed")
 
+    def test_a_filing_json_is_fetched_three_times(self):
+        class R:
+            def __init__(self, ok, code=500): self.ok, self.status_code = ok, code
+            def json(self): return {"facts": {}}
+        class Sess:
+            def __init__(self, answers): self.answers, self.n = list(answers), 0
+            def get(self, url, timeout=None):
+                self.n += 1
+                a = self.answers.pop(0)
+                if a == "boom":
+                    raise ConnectionError("x")
+                return a
+        P.time.sleep = lambda s: None
+        s = Sess(["boom", R(False), R(True)])
+        self.assertEqual(P.fetch_json(s, "u"), {"facts": {}}); self.assertEqual(s.n, 3)
+        self.assertIsNone(P.fetch_json(Sess([R(False), "boom", R(False)]), "u"))
+        s = Sess([R(False, 404)])
+        self.assertIsNone(P.fetch_json(s, "u")); self.assertEqual(s.n, 1)                 # gone: no retry
+
     def test_years(self):
         from datetime import datetime
         t = datetime(2026, 10, 29)
