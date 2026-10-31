@@ -334,6 +334,22 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None):
     return rows
 
 
+STOPWORDS = {"in", "of", "the", "and", "for", "to", "a", "an", "on"}
+
+
+def words_query(terms):
+    """to_tsquery text: any of the terms, each as its words with AND and no word order ("investments in energy
+    efficiency" -> investments & energy & efficiency). Word order is what makes a phrase slow to check in the
+    word index (32 of 38 capex answers timed out with phrases, 31 Oct 2026); the order is checked afterwards in
+    Python, on the pages found."""
+    parts = []
+    for t in terms:
+        ws = [w for w in re.findall(r"[a-z0-9]+", t.lower()) if w not in STOPWORDS]
+        if ws:
+            parts.append("(" + " & ".join(ws) + ")")
+    return " | ".join(parts) or "zzzz"
+
+
 def more_terms_pages(cur, ids, attr, have, info=None):
     """[(library_id, page, body, rank)] of the pages that print one of the attribute's more_terms and were not
     found by the label query. A separate query with its own MORE_TERMS_TIMEOUT inside a savepoint: wording
@@ -343,16 +359,16 @@ def more_terms_pages(cur, ids, attr, have, info=None):
     terms = attr.get("more_terms") or []
     if not terms:
         return []
-    q = label_query(terms)
+    q = words_query(terms)
     cur.execute("show statement_timeout")
     before = cur.fetchone()[0]
     try:
         with cur.connection.transaction():
             cur.execute(f"set local statement_timeout = '{MORE_TERMS_TIMEOUT}'")
-            cur.execute("select library_id, page, body, ts_rank_cd(words, websearch_to_tsquery('simple', %s), 32) as rk "
-                        "from public.pages where library_id = any(%s) and words @@ websearch_to_tsquery('simple', %s) "
+            cur.execute("select library_id, page, body, ts_rank_cd(words, to_tsquery('simple', %s), 32) as rk "
+                        "from public.pages where library_id = any(%s) and words @@ to_tsquery('simple', %s) "
                         "order by rk desc limit %s", (q, ids, q, MORE_POOL))
-            rows = [r for r in cur.fetchall() if (r[0], r[1]) not in have]
+            rows = [r for r in cur.fetchall() if (r[0], r[1]) not in have and label_positions(r[2] or "", terms, [])]
         if info is not None:
             info["more_terms"] = "ok"
         return rows
