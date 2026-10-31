@@ -186,7 +186,8 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
                    + (f" of {doc['label']}" if doc.get("label") else "") + ". Read by a language model; the number was checked to be on that page."
                    + (f" A fiscal year ending January to June counts as the previous reporting year, so this is {year}." if got.get("column") and str(year) not in got["column"] else "")
                    + (f" Read from the pages of the {got['asked']} report, where it is a comparison figure for {year}; a value the {year} report "
-                      f"itself prints may differ if restated." if got.get("asked") and got["asked"] != year else ""),
+                      f"itself prints may differ if restated." if got.get("asked") and got["asked"] != year else "")
+                   + (" " + got["basis_note"] if got.get("basis_note") else ""),
          "matches_validated": "no validated answer", "validated_value": None}
     if company_rec:
         f["company"] = [company_rec]

@@ -134,6 +134,8 @@ class Propose(unittest.TestCase):
         self.assertEqual(sorted(r["year"] for r in rows), [2023, 2024, 2025])
         self.assertEqual((c["model reader: year read in an earlier call"], c["model reader: values for other years"]), (1, 2))
         d = next(r for r in rows if r["year"] == 2024)["detail"]
+        got = dict(value=1.0, printed=1.0, scale=1, library_id="L", page=1, unit="tCO2e", basis_note="The report gives one Scope 2 figure without saying location- or market-based; it is filed under location-based.")
+        self.assertIn("filed under location-based", P.model_row("PT_2", "GMC_00002.1", {"name": "S2"}, 2024, got, {}, {}, None, NOW)["detail"])
         self.assertIn("pages of the 2025 report, where it is a comparison figure for 2024", d)
         self.assertNotIn("comparison", next(r for r in rows if r["year"] == 2025)["detail"])
 
