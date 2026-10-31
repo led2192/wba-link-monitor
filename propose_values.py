@@ -205,6 +205,8 @@ def plan(proposals, existing, now, scope=None):
             creates.append(dict(f, status="proposed", first_proposed=now))
         elif ex["status"] in PERSON_STATUSES:
             kept += 1
+        elif ex["status"] == "superseded":              # proposed again (a source answered again, a rule came back)
+            updates.append((ex["id"], dict(f, status="proposed")))
         else:
             updates.append((ex["id"], f))
     return creates, updates, kept
@@ -335,6 +337,7 @@ def main():
     print(f">>> {len(rec):,} companies; {len(existing):,} rows already in {TABLE}; {len(gold):,} validated revenue answers; years {years}", flush=True)
 
     sess, c, proposals = requests.Session(), collections.Counter(), []
+    answered = set()                                     # (wba_id, method) whose source returned revenue facts this run
     if "sec" in methods:
         ciks = [(r["fields"]["wba_id"], str(r["fields"]["sec_cik"])) for r in comps
                 if r["fields"].get("wba_id") and str(r["fields"].get("sec_cik") or "").strip() not in ("", "none")]
@@ -345,6 +348,8 @@ def main():
             facts = sec_annual(cf)
             docs = sec_main_documents(cik, sess) if facts else {}
             c["SEC companies"] += 1; c["SEC companies with revenue facts"] += bool(facts)
+            if facts:
+                answered.add((wba, "SEC XBRL"))
             for y in years:
                 f = choose(facts, y)
                 if f:
@@ -369,6 +374,8 @@ def main():
                     pass
                 time.sleep(0.3)
             c["ESEF companies"] += 1; c["ESEF companies with revenue facts"] += bool(facts)
+            if facts:
+                answered.add((wba, "ESEF XBRL"))
             for y in years:
                 f = choose(facts, y)
                 if f:
@@ -385,7 +392,8 @@ def main():
     def scope(vid):
         parts = vid.split("|")
         return len(parts) == 4 and parts[1] == REVENUE and parts[3] in run_methods and int(parts[2]) in years and \
-            (not a.limit)                                  # a sample run never supersedes
+            (not a.limit) and \
+            (parts[0], parts[3]) in answered               # a source that did not answer for the company supersedes nothing
     creates, updates, kept = plan(proposals, existing, now, scope)
     c["new rows"], c["updated rows"], c["left alone (a person decided)"] = len(creates), len(updates), kept
     c["superseded (no longer proposed)"] = sum(1 for _, f in updates if f.get("status") == "superseded")
