@@ -12,7 +12,13 @@ SPEC = json.load(open(X.SPEC, encoding="utf-8"))
 REV = SPEC["attributes"]["GMC_00048.1"]
 G = {"wba": "PT_09998", "year": 2024, "value": 102502e6, "unit": "USD"}
 PAGES = [("lib1", 3, "Our revenue grew strongly in 2024, to more than 100 billion."),
-         ("lib1", 5, "Consolidated income statement (in USD million) 2024 2023 Revenues 102,502 106,848")]
+         ("lib1", 5, "Consolidated income statement (in USD million) 2024 2023 Revenues 102,502 106,848"),
+         ("lib1", 9, "Five-year summary (USD million) 2024 2023 2022 2021 2020 Revenues 102,502 106,848 98,120 90,003 85,555")]
+YEARS = ('{"values": [{"page": "P2", "printed": "102,502", "scale": "millions", "unit": "USD", "year": 2024, "column": "2024"}, '
+         '{"page": "P2", "printed": "106,848", "scale": "millions", "unit": "USD", "year": 2023, "column": "2023"}, '
+         '{"page": "P3", "printed": "98,120", "scale": "millions", "unit": "USD", "year": 2022, "column": "2022"}, '
+         '{"page": "P3", "printed": "90,003", "scale": "millions", "unit": "USD", "year": 2021, "column": "2021"}, '
+         '{"page": "P3", "printed": "85,555", "scale": "millions", "unit": "USD", "year": 2020, "column": "2020"}]}')
 
 
 class Resp:
@@ -98,6 +104,49 @@ class ModelReader(unittest.TestCase):
         s = Sess((200, '{"page": "P1", "printed": "16.05", "scale": "ten thousands", "unit": "tCO2e"}'))
         self.assertAlmostEqual(M.read_with_model(G, REV, page, X.collections.Counter(), s)["value"], 160_500)
         self.assertIn("万 is ten thousands", M.prompt(G, REV, page))
+
+    def test_every_year_in_one_call(self):
+        usage = X.collections.Counter()
+        got = M.read_with_model(G, REV, PAGES, usage, Sess((200, YEARS)))
+        self.assertEqual((got["value"], got["year"], got["page"]), (102502e6, 2024, 5))
+        self.assertEqual([(e["year"], e["value"], e["page"]) for e in got["others"]],
+                         [(2023, 106848e6, 5), (2022, 98120e6, 9), (2021, 90003e6, 9), (2020, 85555e6, 9)])
+        self.assertEqual((usage["calls"], usage["years_returned"]), (1, 5))
+        self.assertIn("each other reporting year the same row prints", M.prompt(G, REV, PAGES))
+
+    def test_the_year_asked_comes_first_whatever_the_order(self):
+        text = ('{"values": [{"page": "P2", "printed": "106,848", "scale": "millions", "year": 2023, "column": "2023"}, '
+                '{"page": "P2", "printed": "102,502", "scale": "millions", "year": 2024, "column": "2024"}]}')
+        got = M.read_years(G, REV, PAGES, X.collections.Counter(), Sess((200, text)))
+        self.assertEqual([e["year"] for e in got], [2024, 2023])
+
+    def test_a_year_the_heading_does_not_allow_is_dropped(self):
+        # the model mixed its columns: "2023" headed, year 2024; FY25 may be 2025 or 2024, never 2023
+        text = ('{"values": [{"page": "P2", "printed": "106,848", "scale": "millions", "year": 2024, "column": "2023"}, '
+                '{"page": "P2", "printed": "102,502", "scale": "millions", "year": 2024, "column": "FY25"}, '
+                '{"page": "P2", "printed": "102,502", "scale": "millions", "year": 2024, "column": "2024"}, '
+                '{"page": "P2", "printed": "106,848", "scale": "millions", "year": 1999, "column": ""}]}')
+        got = M.read_years(G, REV, PAGES, X.collections.Counter(), Sess((200, text)))
+        self.assertEqual([(e["year"], e["value"]) for e in got], [(2024, 102502e6)])      # FY25 -> 2024 kept, once
+        self.assertEqual(M.column_year("Year ended 31 March 2025"), 2025)
+        self.assertEqual(M.column_year("FY'24"), 2024); self.assertIsNone(M.column_year("Group"))
+
+    def test_only_other_years_is_no_proposal_for_the_year_asked(self):
+        note = {}
+        text = '{"values": [{"page": "P2", "printed": "106,848", "scale": "millions", "year": 2023, "column": "2023"}]}'
+        self.assertIsNone(M.read_with_model(G, REV, PAGES, X.collections.Counter(), Sess((200, text)), note=note))
+        self.assertIn("only other years: 2023", note["why"])
+        note = {}
+        self.assertIsNone(M.read_with_model(G, REV, PAGES, X.collections.Counter(), Sess((200, '{"values": [], "why": "no revenue table"}')), note=note))
+        self.assertEqual(note["why"], "no revenue table")
+
+    def test_a_reply_cut_at_the_limit_keeps_its_complete_entries(self):
+        # 31 Oct 2026: 1 in 10 replies hit the token limit and read as "no JSON", losing the year asked
+        cut = YEARS[:YEARS.index('{"page": "P3", "printed": "90,003"')] + '{"page": "P3", "printed": "90,0'
+        got = M.read_with_model(G, REV, PAGES, X.collections.Counter(), Sess((200, cut)))
+        self.assertEqual((got["value"], got["year"]), (102502e6, 2024))
+        self.assertEqual([e["year"] for e in got["others"]], [2023, 2022])
+        self.assertIsNone(M.parse_reply('{"values": [{"page": "P1", "printed": "1'))
 
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)

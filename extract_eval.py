@@ -310,20 +310,36 @@ def ranked_pages(cur, ids, weight, year, attr, spec):
     return rows
 
 
-def read_value(cur, wba, year, attr, spec, usage):
-    """What the model reader proposes for a company, attribute and year, with no validated answer needed:
-    the same documents, ranking and pages as evaluate(). The model's checked reply (value, printed, scale,
-    library_id, page, unit) or None."""
-    from model_reader import read_with_model
+def read_values(cur, wba, year, attr, spec, usage):
+    """Every figure the model reads for a company and attribute from the documents of one year, with no
+    validated answer needed: the same documents, ranking and pages as evaluate(). The year asked comes first
+    when the pages print it; the other entries are the other years the same pages print (one call for all,
+    31 Oct 2026). Each entry: value, printed, scale, library_id, page, unit, year, column, and "asked" (the
+    year whose documents were read: when it differs from "year", the figure is a comparison column of a
+    later report). [] when nothing was read."""
+    from model_reader import read_years
     docs, weight = year_documents(cur, wba, year, attr)
     if not docs:
-        return None
+        return []
     pages = keep_pages(ranked_pages(cur, [d[0] for d in docs], weight, year, attr, spec))
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
     best = pages_for_model(scored, MODEL_PAGES)
     if not best:
-        return None
-    return read_with_model({"wba": wba, "year": year}, attr, [(lid, page, body) for _, _, lid, page, body in best], usage)
+        return []
+    got = read_years({"wba": wba, "year": year}, attr, [(lid, page, body) for _, _, lid, page, body in best], usage)
+    for e in got:
+        e["asked"] = year
+    return got
+
+
+def read_value(cur, wba, year, attr, spec, usage):
+    """What the model reader proposes for a company, attribute and year: the entry of read_values for that
+    year (the others under "others"), or None."""
+    got = read_values(cur, wba, year, attr, spec, usage)
+    mine = next((e for e in got if e["year"] == year), None)
+    if mine:
+        mine["others"] = [e for e in got if e is not mine]
+    return mine
 
 
 def evaluate(cur, g, attr, spec, reader="rules", usage=None):
@@ -354,11 +370,13 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
     r["model_pages_have_number"] = any(found_on(b, v) for *_, b in pages_for_model(scored, MODEL_PAGES) for v, _, _ in forms)
     if reader == "model":
-        from model_reader import read_with_model
+        from model_reader import read_years
         best_pages = pages_for_model(scored, MODEL_PAGES)
         note = {}
-        got = read_with_model(g, attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
-        r["declined_why"] = note.get("why")
+        all_got = read_years(g, attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
+        got = next((e for e in all_got if e["year"] == g["year"]), None)
+        r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
+        r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
         if got:
             r["proposal"] = True
             r["right"] = right(got["value"], g["value"])
@@ -402,6 +420,7 @@ def main():
     run = qa.Run("extract_eval.py")
     answers = [g for base in gold_cfg["bases"].values() for g in gold_values(token, base, codes)
                if g["value"] and not g["unit"].lower().startswith(("%", "percent"))]
+    gold_index = {(g["wba"], g["attribute"], g["year"]): g["value"] for g in answers}
     by = collections.defaultdict(list)
     for g in answers:
         by[g["attribute"]].append(g)
@@ -434,6 +453,12 @@ def main():
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
+            for e in r.get("others") or []:                   # the other years the same call read, scored where validated
+                s["other years"] += 1
+                gv = gold_index.get((g["wba"], g["attribute"], e["year"]))
+                if gv:
+                    s["other years validated"] += 1
+                    s["other years right"] += right(e["value"], gv)
             if r.get("miss"):
                 s["miss: " + r["miss"]["kind"]] += 1
                 if r["miss"]["rank"]:
@@ -470,6 +495,15 @@ def main():
                f"Replies cut at the token limit: {usage['cut_at_token_limit']:,}. "
                f"The model's pages hold the validated number for {sum(s['model_pages'] for s in stats.values()):,} answers; "
                f"it gave no figure for {sum(s['declined with the number on its pages'] for s in stats.values()):,} of them.", ""]
+        md += ["Other years read in the same call (the other year columns of the same figure; one call per answer since 31 Oct 2026). "
+               "\"Right\" compares them with the validated answer of the same company and attribute for that year, where there is one:", "",
+               "| Attribute | Calls with a figure | Other years returned | Per call | With a validated answer | Right |",
+               "| --- | --: | --: | --: | --: | --: |"]
+        for c in codes:
+            s = stats[c]
+            md.append(f"| {c} {spec['attributes'][c]['name']} | {s['proposal']:,} | {s['other years']:,} | {s['other years'] / (s['proposal'] or 1):.1f} | "
+                      f"{s['other years validated']:,} | {s['other years right']:,} ({s['other years right'] / (s['other years validated'] or 1):.0%}) |")
+        md.append("")
         if declined:
             md += ["No figure although its pages print the validated number (first 20, with the model's reason):", ""] + [f"- {d}" for d in declined] + [""]
     md += ["Pages that print the validated number but were not kept (answers where the number is in the documents and not on the 25 ranked pages):", "",

@@ -25,8 +25,11 @@ in Pipeline QA.
 
 Method "model" (--methods model): the model reader (model_reader.py) reads the company's reports for each
 number attribute in attributes.json and year in --model-years, with exactly the retrieval the Generic reader
-scores (extract_eval.read_value). One row per company, attribute, year with method "model reader", the
+scores (extract_eval.read_values). One row per company, attribute, year with method "model reader", the
 document linked, the page, a link opening the PDF at that page, and what was printed and at which scale.
+Years are read newest first and one call returns every year the pages print (31 Oct 2026): a year already
+read as a comparison column of a later report is not read again, and the years returned beyond the ones
+asked are written too (the history); `detail` says which report a comparison figure came from.
 Revenue is left to the filing where a SEC or ESEF row exists. --companies and --attributes narrow it;
 --max-usd stops it at an estimated cost. Needs ANTHROPIC_API_KEY and SUPABASE_DB_URL.
 """
@@ -181,7 +184,9 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
          "detail": f"Printed as {printed_text(got['printed'])} ({scale})"
                    + (f" in the column \"{got['column']}\"" if got.get("column") else "") + f" on page {int(got['page'])}"
                    + (f" of {doc['label']}" if doc.get("label") else "") + ". Read by a language model; the number was checked to be on that page."
-                   + (f" A fiscal year ending January to June counts as the previous reporting year, so this is {year}." if got.get("column") and str(year) not in got["column"] else ""),
+                   + (f" A fiscal year ending January to June counts as the previous reporting year, so this is {year}." if got.get("column") and str(year) not in got["column"] else "")
+                   + (f" Read from the pages of the {got['asked']} report, where it is a comparison figure for {year}; a value the {year} report "
+                      f"itself prints may differ if restated." if got.get("asked") and got["asked"] != year else ""),
          "matches_validated": "no validated answer", "validated_value": None}
     if company_rec:
         f["company"] = [company_rec]
@@ -243,23 +248,32 @@ def fetch(H, base, table, fields, formula=None):
         time.sleep(0.2)
 
 
+WRITE_PAUSE = 0.22                   # between write requests; longer when parallel shards share the base
+
+
+def shard_of(wba, n):
+    """Which of n slices a company falls in (0-based), fixed for a given id."""
+    import hashlib
+    return int(hashlib.sha1((wba or "").encode("utf-8")).hexdigest()[:8], 16) % n
+
+
 def write(H, base, creates, updates):
     from monitor_core import airtable_request
     clean = lambda f: {k: v for k, v in f.items() if v is not None}
     for i in range(0, len(creates), 10):
         airtable_request("POST", f"{API}/{base}/{TABLE}", H, {"records": [{"fields": clean(f)} for f in creates[i:i + 10]]})
-        time.sleep(0.22)
+        time.sleep(WRITE_PAUSE)
     for i in range(0, len(updates), 10):
         airtable_request("PATCH", f"{API}/{base}/{TABLE}", H,
                          {"records": [{"id": rid, "fields": f} for rid, f in updates[i:i + 10]]})
-        time.sleep(0.22)
+        time.sleep(WRITE_PAUSE)
 
 
 def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     """Model-reader proposals for the companies, attributes and years asked. Revenue is skipped for a
     company and year that already has a SEC or ESEF row: the filing is the better source."""
     import psycopg
-    from extract_eval import read_value
+    from extract_eval import read_values
     from model_reader import cost
     if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         c["model reader: no ANTHROPIC_API_KEY"] += 1
@@ -272,23 +286,27 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     has_filing = {tuple(v.split("|")[:3]) for v in existing if v.split("|")[-1] in ("SEC XBRL", "ESEF XBRL")}
     full = json.load(open(os.path.join(HERE, "attributes.json"), encoding="utf-8"))
     usage, got_rows = collections.Counter(), []
+    stop = False
     with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '90s'")
         for wba in companies:
-            for y in years:
-                for code in codes:
+            for code in codes:
+                covered = set()                      # years this company and attribute already have from an earlier call
+                for y in sorted(years, reverse=True):    # newest first: its report prints the earlier years as comparisons
                     if cost(usage) >= a.max_usd:
-                        c["model reader: stopped at the cost limit"] = 1
+                        c["model reader: stopped at the cost limit"] = 1; stop = True
                         break
                     if time.time() - T0 > a.budget * 60:          # leave time to write what was read
-                        c["model reader: stopped at the time budget"] = 1
+                        c["model reader: stopped at the time budget"] = 1; stop = True
                         break
+                    if y in covered:
+                        c["model reader: year read in an earlier call"] += 1; continue
                     if code == REVENUE and (wba, code, str(y)) in has_filing:
                         c["model reader: revenue left to the filing"] += 1; continue
                     c["model reader: asked"] += 1
                     try:
-                        got = read_value(cur, wba, y, spec[code], full, usage)
+                        got = read_values(cur, wba, y, spec[code], full, usage)
                     except Exception as e:
                         if type(e).__name__ == "ModelRefused":
                             raise
@@ -298,8 +316,18 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                         c["model reader: errors"] += 1
                         conn.rollback(); cur.execute("set statement_timeout = '90s'")
                         continue
-                    if got:
-                        got_rows.append((wba, code, y, got))
+                    for e in got:
+                        if code == REVENUE and (wba, code, str(e["year"])) in has_filing:
+                            c["model reader: revenue left to the filing"] += 1; continue
+                        if e["year"] in covered:
+                            continue
+                        covered.add(e["year"])
+                        c["model reader: values for the year asked" if e["year"] == y else "model reader: values for other years"] += 1
+                        got_rows.append((wba, code, e["year"], e))
+                if stop:
+                    break
+            if stop:
+                break
     docs = library_docs(H, base, [g["library_id"] for *_, g in got_rows])
     c["model reader: cost in USD (estimate)"] = round(cost(usage), 2)
     c["model reader: calls"] = usage["calls"]
@@ -319,7 +347,9 @@ def main():
     ap.add_argument("--max-usd", type=float, default=1.0, help="model reader: stop when the estimated cost reaches this")
     ap.add_argument("--budget", type=float, default=300, help="minutes: the model reader stops reading after this, "
                     "so what it read is still written before the job's limit (one answer takes about 15 to 20 s)")
+    ap.add_argument("--shard", default="", help="i/N: only the i-th of N slices of the companies (parallel jobs)")
     a = ap.parse_args()
+    shard_i, shard_n = (int(x) for x in a.shard.split("/")) if a.shard else (1, 1)
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
     import requests
@@ -348,6 +378,10 @@ def main():
                     g["sources"] = [srcs[i] for i in g.get("source_ids", []) if i in srcs]
                     gold[(g["wba"], g["attribute"], g["year"])] = g
     comps = fetch(H, base, "companies", ["wba_id", "sec_cik", "lei", "isin"])
+    if shard_n > 1:                                   # parallel jobs: each takes a fixed slice of the companies
+        comps = [r for r in comps if shard_of(r["fields"].get("wba_id", ""), shard_n) == shard_i - 1]
+        global WRITE_PAUSE
+        WRITE_PAUSE = 0.22 * shard_n                  # N jobs share the base's five requests a second
     rec = {r["fields"]["wba_id"]: r["id"] for r in comps if r["fields"].get("wba_id")}
     existing = {r["fields"]["value_id"]: {"id": r["id"], "status": (r["fields"].get("status") or "")}
                 for r in fetch(H, base, TABLE, ["value_id", "status"]) if r["fields"].get("value_id")}
