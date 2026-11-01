@@ -51,7 +51,7 @@ YEARS_BACK = 3                          # recent years: expected_year() and the 
 WRITE_PAUSE = 0.22
 
 # Hosts that serve many listed companies' documents from a domain that is not the company's own. A result
-# there is added only when its title or snippet carries the company's name (1 Nov 2026: an HKEXnews PDF is
+# there is added only when its title or address (not its snippet) carries the company's name (1 Nov 2026: an HKEXnews PDF is
 # named by a number, so without the name it can be any listed company's).
 DOC_HOSTS = {"q4cdn.com", "hkexnews.hk", "mziq.com", "sitecorecloud.io", "cision.com", "globenewswire.com",
              "amazonaws.com", "cloudfront.net", "azureedge.net", "sec.gov", "cninfo.com.cn", "sse.com.cn", "szse.cn",
