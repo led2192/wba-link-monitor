@@ -75,15 +75,16 @@ class Search(unittest.TestCase):
     def test_own_sites_first_then_by_name_only_when_needed(self):
         hit = [{"link": "https://www.acme.com/sr2025.pdf", "title": "Acme Sustainability Report 2025"}]
         api = Stub({"site:acme.com": hit})
-        res = W.search_company(self.F, [], YEARS, api, reg_domain)
+        res = W.search_company(self.F, [], YEARS, api, reg_domain, opener=None)
         self.assertEqual(res["found"], [("https://www.acme.com/sr2025.pdf", "sustainability 2025")])
         self.assertEqual(len(api.asked), 1)                                          # own site answered: no question by name
         api = Stub({'"Acme Group"': [{"link": "https://www.acme.com/esg-2025.pdf", "title": "ESG report 2025"},
                                       {"link": "https://news.example.org/acme-esg-2025.pdf", "title": "Acme ESG 2025"}]})
-        res = W.search_company(self.F, [], YEARS, api, reg_domain)
+        res = W.search_company(self.F, [], YEARS, api, reg_domain, opener=lambda u: ("News about Acme Group 2025", 2))
         self.assertEqual(len(api.asked), 2)
         self.assertEqual([u for u, _ in res["found"]], ["https://www.acme.com/esg-2025.pdf"])
-        self.assertEqual(res["not_added"], [("https://news.example.org/acme-esg-2025.pdf", "another site (example.org)")])
+        self.assertEqual(res["not_added"], [("https://news.example.org/acme-esg-2025.pdf",
+                                             "another site (example.org); opened: 2 pages, not a report")])
         self.assertIn("passed to research_link: https://www.acme.com/esg-2025.pdf", W.note("2026-11-01", res))
 
     def test_budget_cut_is_flagged(self):
@@ -157,6 +158,42 @@ class PublicationYear(unittest.TestCase):
                                        [2025, 2024, 2023]), {"sustainability": [], "annual": []})
         finally:
             W.expected_year = real
+
+
+class CoverCheck(unittest.TestCase):
+    """1 Nov 2026: a report on another server (CDN, group site, archive) is kept when its first pages show
+    the company, the report and a missing year."""
+    F = {"wba_id": "PT_1", "company_name": "Arcos Dorados Holdings Inc.", "website": "arcosdorados.com",
+         "sust_years": "2023; 2024", "coverage_breakdown": "Annual Report: 3 (latest 2025)"}
+
+    def test_cover_rules(self):
+        cover = "Arcos Dorados\nSocial Impact and Sustainability Report 2025\nRecipe for the Future"
+        self.assertEqual(W.cover_check(cover, 120, self.F, "sustainability", [2025]),
+                         (True, "sustainability 2025, checked on the file's first pages"))
+        self.assertEqual(W.cover_check("McDonald's Purpose & Impact Report 2025", 90, self.F, "sustainability", [2025])[1],
+                         "the company's name is not on the cover")
+        self.assertEqual(W.cover_check("Arcos Dorados press note sustainability 2025", 2, self.F, "sustainability", [2025])[1],
+                         "2 pages, not a report")
+        self.assertEqual(W.cover_check("Arcos Dorados Sustainability Report 2022", 80, self.F, "sustainability", [2025])[1],
+                         "no missing year on the cover")
+
+    def test_a_cdn_file_is_opened_and_kept(self):
+        hit = [{"link": "https://ddhnb9vx8lz57.cloudfront.net/wp-content/uploads/sites/3/2026/07/01100613/AD_2025_ENG.pdf",
+                "title": "AD_2025_ENG"}]
+        api = Stub({"site:arcosdorados.com": [], '"Arcos Dorados': hit})
+        opened = []
+        def opener(u):
+            opened.append(u); return ("ARCOS DORADOS Social Impact and Sustainability Report 2025", 150)
+        res = W.search_company(self.F, [], YEARS, api, reg_domain, opener=opener)
+        self.assertEqual(res["found"], [(hit[0]["link"], "sustainability 2025, checked on the file's first pages")])
+        self.assertEqual(len(opened), 1)
+
+    def test_at_most_four_files_opened_per_family(self):
+        hits = [{"link": f"https://other{i}.com/esg-{i}.pdf", "title": "ESG"} for i in range(8)]
+        api = Stub({"site:arcosdorados.com": [], '"Arcos Dorados': hits})
+        opened = []
+        W.search_company(self.F, [], YEARS, api, reg_domain, opener=lambda u: opened.append(u) or ("nothing", 1))
+        self.assertEqual(len(opened), W.CHECK_MAX)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,10 @@ A result is passed on only when all three hold:
 Passed documents go to companies.research_link, so the inbox (inbox.py, every 30 minutes) adds them
 with its duplicate and tombstone guards, attaches the file and has it typed and dated like any other
 document, marked as research. At most MAX_PER_FAMILY per family and company. Results on another site
-are never added: they are listed in web_search_note with the reason, for a person or a later rule.
+are not added on the quick test, but they are opened (up to 4 per family): when the first pages carry the
+company's name, the report and a missing year, and the file has at least 8 pages, the file is passed on as
+well (a company's report often sits on a CDN, a group site or an archive). The rest are listed in
+web_search_note with the reason.
 
 Modes (web_searched_on says when a company was last searched):
   --mode recovery   companies with a missing recent year that were never searched: the one-off sweep
@@ -249,11 +252,80 @@ class Serper:
         return []
 
 
-def search_company(f, page_urls, years, api, reg_domain):
-    """{"looked_for": [...], "found": [(url, why)], "not_added": [(url, why)], "queries": n}"""
+CHECK_MAX = 4                           # files opened per company and family to check the cover
+CHECK_MB = 60                           # larger files are not opened (the inbox still could, but we cannot check)
+MIN_PAGES = 8                           # a report has at least this many pages; a release or a memo has fewer
+CHECKABLE = ("another site", "shared host without", "not a PDF", "not one of the missing years", "does not name")
+
+
+def fold(t):
+    import unicodedata
+    t = unicodedata.normalize("NFKD", t or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+
+def cover_check(text, pages, f, fam, years):
+    """(True, why) when the first pages of a file show it is the company's report of a missing year: the
+    company's name (all its name words, or the whole name), the report family and a missing year on them,
+    and at least MIN_PAGES pages. The test for a file found on another site or with no year in its title."""
+    t = " " + fold(text) + " "
+    tokens = name_tokens(f.get("company_name"))
+    whole = fold(f.get("company_name"))
+    if not tokens or not (f" {whole} " in t or all(f" {tok} " in t for tok in tokens)):
+        return False, "the company's name is not on the cover"
+    if pages is not None and pages < MIN_PAGES:
+        return False, f"{pages} pages, not a report"
+    words = [fold(w) for w in FAMILIES[fam]["words"]]
+    if not any(w and w in t for w in words) and not any(w in (text or "").lower() for w in FAMILIES[fam]["words"]):
+        return False, "the cover does not name the report"
+    ys = years_in(text[:3000])
+    latest = max(years)
+    if latest == expected_year() and latest + 1 in ys:
+        ys = ys | {latest}
+    if not ys & set(years):
+        return False, "no missing year on the cover"
+    return True, f"{fam} {max(ys & set(years))}, checked on the file's first pages"
+
+
+def open_cover(link, sess=None):
+    """(text of the first 3 pages, page count) or (None, reason)."""
+    import io, requests
+    from pypdf import PdfReader
+    sess = sess or requests.Session()
+    try:
+        r = sess.get(link, timeout=60, stream=True, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"})
+        if r.status_code >= 400:
+            return None, f"HTTP {r.status_code}"
+        data = b""
+        for chunk in r.iter_content(1 << 16):
+            data += chunk
+            if len(data) > CHECK_MB << 20:
+                return None, f"over {CHECK_MB} MB"
+        if not data.startswith(b"%PDF"):
+            return None, "not a PDF"
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted:
+            try:
+                reader.decrypt("")
+            except Exception:
+                pass
+        text = "\n".join((p.extract_text() or "") for p in reader.pages[:3])
+        return text, len(reader.pages)
+    except Exception as e:
+        return None, f"could not be read ({type(e).__name__})"
+
+
+def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
+    """{"looked_for": [...], "found": [(url, why)], "not_added": [(url, why)], "queries": n, "opened": n}
+
+    A result that fails the quick test only because it sits on another site, has no year or report word in
+    its title, or is not a .pdf address is opened (up to CHECK_MAX per family) and kept when its first pages
+    show the company's name, the report and a missing year (1 Nov 2026: a company's report is often on a
+    CDN, a group site or an archive, and those must not be lost)."""
     name = f.get("company_name") or ""
     domains = company_domains(f, page_urls, reg_domain)
-    out = {"looked_for": [], "found": [], "not_added": [], "queries": 0}
+    out = {"looked_for": [], "found": [], "not_added": [], "queries": 0, "opened": 0}
     for fam, ys in missing(f, years).items():
         if not ys:
             continue
@@ -263,7 +335,7 @@ def search_company(f, page_urls, years, api, reg_domain):
             tried.append(query(fam, ys, domains=domains))
         if name:
             tried.append(query(fam, ys, name=name))
-        got = 0
+        got, opened = 0, 0
         for q in tried:
             results = api.search(q)
             if results is None:
@@ -271,11 +343,22 @@ def search_company(f, page_urls, years, api, reg_domain):
                 return out
             out["queries"] += 1
             for r in results:
-                ok, why = judge(r, fam, ys, domains, name, reg_domain)
                 link = r.get("link") or ""
-                if ok and got < MAX_PER_FAMILY and link not in {u for u, _ in out["found"]}:
+                if got >= MAX_PER_FAMILY or link in {u for u, _ in out["found"]}:
+                    continue
+                ok, why = judge(r, fam, ys, domains, name, reg_domain)
+                if not ok and why.startswith(CHECKABLE) and opened < CHECK_MAX and not NOT_A_REPORT.search(
+                        (r.get("title") or "") + " " + file_part(link)[0].replace("_", " ")):
+                    opened += 1; out["opened"] += 1
+                    text, pages = opener(link)
+                    if text is None:
+                        why = f"{why}; opened: {pages}"
+                    else:
+                        ok, why2 = cover_check(text, pages, f, fam, ys)
+                        why = why2 if ok else f"{why}; opened: {why2}"
+                if ok:
                     out["found"].append((link, why)); got += 1
-                elif not ok and len(out["not_added"]) < 8 and "does not name" not in why:
+                elif len(out["not_added"]) < 10 and not why.startswith("does not name"):
                     out["not_added"].append((link, why))
             if got:
                 break                     # the company's own sites answered: no question by name
@@ -297,6 +380,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="companies at most (0 = all due)")
     ap.add_argument("--max-queries", type=int, default=300, help="Serper credits this run may spend")
     ap.add_argument("--wba", default="", help="wba ids, comma-separated (ignores the waits)")
+    ap.add_argument("--minutes", type=float, default=150, help="stop searching after this (opening files takes time)")
     a = ap.parse_args()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
@@ -366,7 +450,11 @@ def main():
         pages[l["fields"].get("wba_id")].append(l["fields"].get("url") or "")
     api = Serper(key, a.max_queries)
     updates, examples = [], []
+    t0 = time.time()
     for i, r in enumerate(due, 1):
+        if time.time() - t0 > a.minutes * 60:
+            c["stopped at the time budget"] = 1
+            break
         f = r["fields"]
         res = search_company(f, pages.get(f["wba_id"], []), years, api, reg_domain)
         if res.get("cut"):
@@ -374,6 +462,8 @@ def main():
         c["companies searched"] += 1
         c["companies with a document found"] += bool(res["found"])
         c["documents passed on"] += len(res["found"])
+        c["files opened to check the cover"] += res.get("opened", 0)
+        c["passed after checking the cover"] += sum(1 for _, w in res["found"] if "checked on" in w)
         for _, why in res["found"]:
             c["found: " + why.split()[0]] += 1
         for _, why in res["not_added"]:
