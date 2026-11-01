@@ -76,7 +76,9 @@ NOT_COMPANY = {"squarespace.com", "wixstatic.com", "wix.com", "website-files.com
 NOT_A_REPORT = re.compile(r"press[ _-]?release|comunicado|communiqu|presentation|conference[ _-]?call|earnings|"
                           r"prospectus|glossary|questionnaire|consultation|memo\b|tender|factsheet|fact[ _-]sheet|"
                           r"basis[ _-]of[ _-]reporting|policy|\bq[1-4]\b|\b[1-4]q\d\d|interim|half[ _-]?year|"
-                          r"quarterly|webcast|invitation|agenda|minutes|newsletter|framework|grundsatzerkl", re.I)
+                          r"quarterly|webcast|invitation|agenda|minutes|newsletter|framework|grundsatzerkl|"
+                          r"semi[ _-]?annual|sample|plan[ _-]?document|summary[ _-]plan|\bfunds?[ _-](semi[ _-]?)?annual|"
+                          r"communication[ _-]file|downloadpubliccommunication", re.I)
 
 
 FAMILIES = {
@@ -142,14 +144,33 @@ def in_gap(f):
     return bool(gaps & {"Sustainability report (recent)", "Annual report (recent)", "Sustainability report", "Annual report"})
 
 
+GOVERNMENT = re.compile(r"\.(gov|gob|gouv|gc|go|nic|govt|org)\.[a-z]{2,3}$|\.gov$|\.(gov|gob|gouv|mil)\.|\.gc\.ca$")
+
+
+def on_sites(link, domains):
+    """True when the link's host is one of the company's sites (a registered domain, or a full host when the
+    site is a subdomain of a shared one) or below it."""
+    from urllib.parse import urlsplit
+    host = (urlsplit(link).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in domains)
+
+
 def company_domains(f, page_urls, reg_domain):
-    """The company's own registered domains: its website, then the domains of its monitored pages whose name
-    shares a word with the company's name or the website's (most pages first). Never a document host or a
-    NOT_COMPANY domain, never a government one. At most 4."""
+    """The company's own sites: its website, then the domains of its monitored pages whose name shares a word
+    with the company's name or the website's (most pages first). Never a document host or a NOT_COMPANY
+    domain, never a government one. At most 4. A website that is a subdomain of a government domain
+    (ptc.punjab.gov.pk, metro.cdmx.gob.mx) counts as that host, not the whole domain: the domain is shared by
+    every agency of that government (1 Nov 2026 wave: three other Punjab agencies' annual reports and a
+    civil-protection notice about a running race passed as the company's)."""
+    from urllib.parse import urlsplit
     out = []
     w = (f.get("website") or "").strip()
     if w:
-        d = reg_domain(w if "://" in w else "https://" + w)
+        u = w if "://" in w else "https://" + w
+        d = reg_domain(u)
+        host = (urlsplit(u).hostname or "").lower()
+        if d and GOVERNMENT.search(d) and host not in (d, "www." + d):
+            d = host[4:] if host.startswith("www.") else host
         if d and d not in DOC_HOSTS and d not in NOT_COMPANY:
             out.append(d)
     tokens = set(name_tokens(f.get("company_name"))) | ({out[0].split(".")[0]} if out else set())
@@ -203,7 +224,7 @@ def judge(r, fam, years, domains, name, reg_domain):
     last, folders = file_part(link)
     last, folders = last.lower(), folders.lower()
     d = reg_domain(link)
-    if d not in domains and d not in DOC_HOSTS:
+    if not on_sites(link, domains) and d not in DOC_HOSTS:
         return False, f"another site ({d})"
     if d in DOC_HOSTS and not any(t in (title + " " + link.lower()) for t in name_tokens(name)[:2]):
         return False, f"shared host without the company's name ({d})"
@@ -286,7 +307,10 @@ THIRD_PARTY = re.compile(r"target price|price target|equity research|research re
                          r"analyst certification|briefing note|working paper|white paper|policy brief|inspector general|"
                          r"fellowship|brochure|request for information|exclusion list|case study|disclosure guidance|"
                          r"guidance for listed|dissertation|thesis|journal of|proceedings|roadmap|insights report|"
-                         r"overview of|status of|in figures|outlook 20\d\d|fund annual report|etf|disclaimer: this report",
+                         r"overview of|status of|in figures|outlook 20\d\d|fund annual report|etf|disclaimer: this report|"
+                         r"special rapporteur|special procedures|mandates? of the|human rights council|allegation|"
+                         r"\bfederation\b|confederation|trade association|industry association|charitable|attorney general|"
+                         r"registry|semi-?annual report|plan document|sample report",
                          re.I)
 
 
@@ -436,7 +460,7 @@ def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
                     if text is None:
                         why = f"{why}; opened: {pages}"
                     else:
-                        ok, why2 = cover_check(text, pages, f, fam, ys, own_site=reg_domain(link) in domains)
+                        ok, why2 = cover_check(text, pages, f, fam, ys, own_site=on_sites(link, domains))
                         why = why2 if ok else f"{why}; opened: {why2}"
                 if ok:
                     out["found"].append((link, why)); got += 1
