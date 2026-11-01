@@ -41,6 +41,7 @@ MODEL_PAGES = 8                      # pages given to the model reader: half by 
 MORE_TERMS_TIMEOUT = "4s"            # the second query (an attribute's more_terms) may take this long, else it is skipped
 MORE_POOL = 30                       # pages it may add (bodies are read for these only)
 INDEX_WEIGHT = 1.5                   # page score added to a page the report's own content index cites (content_index.py)
+from company_memory import MEMORY_WEIGHT  # page score added to a page carrying the line the company used another year
 BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
 # a printed number: Indian grouping, comma/dot/apostrophe groups, space groups (never followed by another
@@ -227,7 +228,7 @@ def label_query(labels):
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
 
-def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0):
+def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0, memory_boost=0.0):
     """How likely a page holds the attribute's figure for the year, from five signals, each in 0 to 1:
     the label match of the word index, the best rule candidate on the page, how much of a table it is
     (numbers of four digits or more), whether it prints the year (or its fiscal label), how often the
@@ -240,7 +241,8 @@ def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_b
     has_year = 1.0 if (str(year) in (body or "") or f"FY{y1[2:]}" in (body or "") or f"FY{y1}" in (body or "")) else 0.0
     hits = min(len(label_positions(body or "", labels, exclude)), 5) / 5
     c = max(cand, 0) / 8 if cand is not None else 0.0
-    return 1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight + INDEX_WEIGHT * index_boost
+    return (1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight + INDEX_WEIGHT * index_boost
+            + MEMORY_WEIGHT * memory_boost)
 
 
 def retrieval_miss(holding, rows, forms):
@@ -304,12 +306,13 @@ def year_documents(cur, wba, year, attr):
     return docs, weight
 
 
-def ranked_pages(cur, ids, weight, year, attr, spec, info=None):
+def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None):
     """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents,
     plus the pages the documents' own content index cites for the attribute (content_index.py, 31 Oct 2026),
-    which get INDEX_WEIGHT and join the pool even when no label is on them. info, a dict when given,
-    receives "cited": {(library_id, page): weight}."""
-    import content_index
+    which get INDEX_WEIGHT and join the pool even when no label is on them, plus (memory, from
+    company_memory.memory_for, 1 Nov 2026) the pages carrying the line the company printed the figure on
+    another year, which get MEMORY_WEIGHT. info, a dict when given, receives "cited": {(library_id, page): weight}."""
+    import content_index, company_memory
     cited = content_index.cited(cur, ids, attr)
     if info is not None:
         info["cited"] = dict(cited)
@@ -324,12 +327,14 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None):
         cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and page = any(%s)",
                     (sorted({l for l, _ in missing}), sorted({p for _, p in missing})))
         found += [(lid, page, body, 0.0) for lid, page, body in cur.fetchall() if (lid, page) in missing]
+    if memory:
+        found += company_memory.memory_pages(cur, ids, memory, {(lid, page) for lid, page, _, _ in found})
     rows = []
     for lid, page, body, rk in found:
         cs = candidates(body, year, attr, spec)
         top = max(cs, key=lambda c: c[0]) if cs else None
         sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []) + attr.get("more_terms", []),
-                        attr.get("exclude", []), weight.get(lid, 0), cited.get((lid, page), 0.0))
+                        attr.get("exclude", []), weight.get(lid, 0), cited.get((lid, page), 0.0), company_memory.boost(body, memory))
         rows.append((sc, lid, page, body, top))
     return rows
 
@@ -389,39 +394,44 @@ def more_terms_pages(cur, ids, attr, have, info=None):
             pass
 
 
-def read_values(cur, wba, year, attr, spec, usage):
+def read_values(cur, wba, year, attr, spec, usage, known=None):
     """Every figure the model reads for a company and attribute from the documents of one year, with no
     validated answer needed: the same documents, ranking and pages as evaluate(). The year asked comes first
     when the pages print it; the other entries are the other years the same pages print (one call for all,
     31 Oct 2026). Each entry: value, printed, scale, library_id, page, unit, year, column, and "asked" (the
     year whose documents were read: when it differs from "year", the figure is a comparison column of a
-    later report). [] when nothing was read."""
+    later report). [] when nothing was read. known: {year: right value} for this company and attribute
+    (validated or accepted); the nearest other year's becomes the company's memory (company_memory.py)."""
     from model_reader import read_years
+    from company_memory import memory_for, hint
     docs, weight = year_documents(cur, wba, year, attr)
     if not docs:
         return []
-    pages = keep_pages(ranked_pages(cur, [d[0] for d in docs], weight, year, attr, spec))
+    memory = memory_for(cur, wba, attr, year, known, year_documents) if known else None
+    if memory:
+        usage["with a memory from another year"] += 1
+    pages = keep_pages(ranked_pages(cur, [d[0] for d in docs], weight, year, attr, spec, memory=memory))
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
     best = pages_for_model(scored, MODEL_PAGES)
     if not best:
         return []
-    got = read_years({"wba": wba, "year": year}, attr, [(lid, page, body) for _, _, lid, page, body in best], usage)
+    got = read_years({"wba": wba, "year": year, "hint": hint(memory)}, attr, [(lid, page, body) for _, _, lid, page, body in best], usage)
     for e in got:
         e["asked"] = year
     return got
 
 
-def read_value(cur, wba, year, attr, spec, usage):
+def read_value(cur, wba, year, attr, spec, usage, known=None):
     """What the model reader proposes for a company, attribute and year: the entry of read_values for that
     year (the others under "others"), or None."""
-    got = read_values(cur, wba, year, attr, spec, usage)
+    got = read_values(cur, wba, year, attr, spec, usage, known)
     mine = next((e for e in got if e["year"] == year), None)
     if mine:
         mine["others"] = [e for e in got if e is not mine]
     return mine
 
 
-def evaluate(cur, g, attr, spec, reader="rules", usage=None):
+def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     """Stage results for one answer. reader "rules": the best-scored labelled row on the ranked pages;
     "model": a language model reads MODEL_PAGES pages: the ones whose rule candidates scored best, then the
     best-ranked ones not yet taken (pages_for_model)."""
@@ -441,7 +451,10 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
     else:
         holding = []
     info = {}
-    rows = ranked_pages(cur, ids, weight, g["year"], attr, spec, info)
+    from company_memory import memory_for, hint
+    memory = memory_for(cur, g["wba"], attr, g["year"], known, year_documents) if known else None
+    r["memory"] = bool(memory)
+    rows = ranked_pages(cur, ids, weight, g["year"], attr, spec, info, memory)
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
     r["more_terms"] = info.get("more_terms")
@@ -456,7 +469,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None):
         from model_reader import read_years
         best_pages = pages_for_model(scored, MODEL_PAGES)
         note = {}
-        all_got = read_years(g, attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
+        all_got = read_years(dict(g, hint=hint(memory)), attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
         got = next((e for e in all_got if e["year"] == g["year"]), None)
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
         r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
@@ -483,7 +496,9 @@ def main():
     ap.add_argument("--attributes", default="")
     ap.add_argument("--budget", type=int, default=100)
     ap.add_argument("--reader", default="rules", choices=["rules", "model"])
+    ap.add_argument("--memory", default="on", choices=["on", "off"], help="use the company's right answer for another year (company_memory.py)")
     a = ap.parse_args()
+    a.memory = a.memory == "on"
     if a.reader == "model" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("extract_eval.md", "w").write("### Extraction: the model reader needs ANTHROPIC_API_KEY (a repository secret); nothing run.\n")
         return 0
@@ -527,7 +542,8 @@ def main():
                 print(f"  {i:,}/{len(todo):,} in {(time.time() - t0) / 60:.0f} min", flush=True)
             s = stats[g["attribute"]]; s["answers"] += 1
             try:
-                r = evaluate(cur, g, spec["attributes"][g["attribute"]], spec, a.reader, usage)
+                known = {y: v for (w, c, y), v in gold_index.items() if w == g["wba"] and c == g["attribute"] and y != g["year"]}
+                r = evaluate(cur, g, spec["attributes"][g["attribute"]], spec, a.reader, usage, known if a.memory else None)
             except Exception as e:
                 if type(e).__name__ == "ModelRefused":           # the API said no: stop and say why
                     raise
@@ -537,6 +553,10 @@ def main():
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
             s["index cited"] += bool(r.get("index_cited")); s["index hit"] += bool(r.get("index_hit"))
+            if r.get("memory"):
+                s["memory"] += 1; s["memory in_pages"] += bool(r["in_pages"]); s["memory right"] += bool(r["right"])
+            else:
+                s["no memory"] += 1; s["no memory in_pages"] += bool(r["in_pages"]); s["no memory right"] += bool(r["right"])
             if r.get("more_terms"):
                 s["more terms " + r["more_terms"]] += 1
             for e in r.get("others") or []:                   # the other years the same call read, scored where validated
@@ -614,6 +634,17 @@ def main():
     for c in codes:
         s = stats[c]
         md.append(f"| {c} {spec['attributes'][c]['name']} | {s['index cited']:,} | {s['index hit']:,} | {s['index hit'] / (s['in_docs'] or 1):.0%} |")
+    md.append("")
+    md += ["The company's memory (company_memory.py): answers where the validated value for another year was found in that "
+           "year's documents, so the line the company printed it on was searched for and boosted this year"
+           + ("" if a.memory else " (switched off in this run)") + ". Number on the ranked pages and right, with and without a memory:", "",
+           "| Attribute | With a memory | On the ranked pages | Right | Without | On the ranked pages | Right |",
+           "| --- | --: | --: | --: | --: | --: | --: |"]
+    for c in codes:
+        s = stats[c]
+        md.append(f"| {c} {spec['attributes'][c]['name']} | {s['memory']:,} | {s['memory in_pages'] / (s['memory'] or 1):.0%} | "
+                  f"{s['memory right'] / (s['memory'] or 1):.0%} | {s['no memory']:,} | {s['no memory in_pages'] / (s['no memory'] or 1):.0%} | "
+                  f"{s['no memory right'] / (s['no memory'] or 1):.0%} |")
     md.append("")
     for c in codes:
         if wrong[c]:

@@ -117,7 +117,7 @@ class Propose(unittest.TestCase):
             def __exit__(self, *a): return False
             def cursor(self): return Cur()
         asked = []
-        def fake(cur, wba, year, attr, spec, usage):
+        def fake(cur, wba, year, attr, spec, usage, known=None):
             asked.append(year)
             return [dict(value=v, printed=v, scale=1, library_id="L", page=1, unit="tCO2e", year=y, column=str(y), asked=year)
                     for y, v in ((year, 100.0 + year), (year - 1, 90.0), (year - 2, 80.0))]
@@ -189,6 +189,31 @@ class Propose(unittest.TestCase):
         self.assertIn("341 (in millions)", P.how_to_find(341e6))
         self.assertIn("7.9 (in millions)", P.how_to_find(7.9e6))
 
+
+    def test_the_memory_gets_the_other_years_answers_only(self):
+        # 1 Nov 2026: the validated answer of another year is the company's memory; the year read never is
+        import types, collections, psycopg, extract_eval
+        class Cur:
+            def execute(self, *a): pass
+        class Conn:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def cursor(self): return Cur()
+        seen = []
+        def fake(cur, wba, year, attr, spec, usage, known=None):
+            seen.append((year, dict(known or {}))); return []
+        real = (psycopg.connect, extract_eval.read_values, P.library_docs)
+        psycopg.connect = lambda *a, **k: Conn(); extract_eval.read_values = fake; P.library_docs = lambda *a: {}
+        os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
+        a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024,2025", companies="PT_1", limit=0, max_usd=1.0, budget=300)
+        spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number", "unit_family": "tco2e"}}
+        gold = {("PT_1", "GMC_00001.1", 2024): {"value": 14408.0}, ("PT_1", "GMC_00001.1", 2025): {"value": 13950.0},
+                ("PT_2", "GMC_00001.1", 2023): {"value": 1.0}}
+        try:
+            P.model_proposals(a, spec, [], {}, {}, gold, {}, "b", NOW, collections.Counter())
+        finally:
+            psycopg.connect, extract_eval.read_values, P.library_docs = real
+        self.assertEqual(seen, [(2025, {2024: 14408.0}), (2024, {2025: 13950.0})])
 
     def test_every_version_is_kept_and_the_others_are_summarised(self):
         # 1 Nov 2026: a 2023 figure printed in three reports is three versions; the row shown names the other two
