@@ -152,3 +152,8 @@ The first `attribute_values` rows (29 Oct 2026) pointed SEC values at the filing
 ## Parallel jobs of one run share a run key
 
 The four shards of Propose values on 31 Oct 2026 ran under one GitHub run id, so each shard's `qa.Run.finish()` updated the same Pipeline QA row and only the last shard's counters were kept (1,116 proposals of about four times that). A workflow that runs a script in a matrix must set `QA_RUN_PART` per job; the Propose values workflow sets it to `shard1-4`, `shard2-4` and so on.
+
+## A web search result is not the company's just because it is on a site we watch
+
+The first dry run of `web_search.py` (1 Nov 2026, 30 companies) passed on 70 documents, and many were not the company's: a monitored SBTi page made sciencebasedtargets.org count as the company's site, so SBTi's glossary went through as an annual report; squarespace, lobbymap and a state government's domain did the same; a 2019 report passed as 2025 because the snippet named 2025; a file in `/uploads/2025/07/` passed as 2025 although its name said 2020; HKEXnews PDFs, named by a number, passed for a company whose name was nowhere in the result. Now: the company's sites are its website and only those monitored-page domains that carry its name (never site builders, report archives, initiatives or governments); the report and the year are read from the title and the file name, never the snippet or an upload-date folder; a document host needs the company's name in the result; press releases, presentations, policies and quarterly material are not reports. Each case is a regression test in `tests/test_web_search.py`.
+
