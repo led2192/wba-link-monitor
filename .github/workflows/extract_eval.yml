@@ -25,10 +25,14 @@ on:
   pull_request:
     paths: [extract_eval.py, model_reader.py, attributes.json, .github/workflows/extract_eval.yml]
 
+concurrency:                      # a newer commit of the same pull request replaces the older run (1 Nov 2026: two pushes
+  group: extract-eval-${{ github.ref }}   # 4 s apart ran two 2-hour scorings that slowed each other past the limit)
+  cancel-in-progress: true
+
 jobs:
   evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
       pull-requests: write

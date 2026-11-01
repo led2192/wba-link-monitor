@@ -8,7 +8,7 @@ Design document (21 Oct 2026, inventory of all 34 scripts at the time, the reaso
 
 | Table | One row per | Written by |
 | --- | --- | --- |
-| `runs` | script execution (`run_key` = workflow + GitHub run id) | `qa.Run.finish()` |
+| `runs` | script execution (`run_key` = workflow + GitHub run id, plus `.` and `QA_RUN_PART` when one run has several parts, such as the shards of Propose values) | `qa.Run.finish()` |
 | `failures` | distinct failure (`failure_key` = sha1 of code + key); `occurrences`, `last_seen`, `last_commit` move on each recurrence | `qa.Run.failure()`, `qa_sync.py` |
 | `labels` | one judged fact about one document, page or company (the golden set) | the daily sampler and review, corrections, Source Library, audits; the owner's answers on the cards |
 | `evals` | one scoring of one rule or prompt against the labels | `sl_labels.py` (baseline scores); pull request measurements are posted as PR comments by `year_eval.py` and the coverage comparison |

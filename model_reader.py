@@ -48,6 +48,7 @@ def prompt(g, attr, pages):
     labels = ", ".join(attr.get("labels", [])[:12])
     lines = [f"Find: {attr['name']}.",
              f"Definition: {attr.get('definition', '').strip()}" if attr.get("definition") else "",
+             f"Notes: {attr['reading_notes'].strip()}" if attr.get("reading_notes") else "",
              f"Labels it may appear under: {labels}." if labels else "",
              f"Reporting year: {g['year']}. A fiscal year ending between January and June of {g['year'] + 1} is also "
              f"reporting year {g['year']}: a column headed FY{g['year'] + 1}, FY{str(g['year'] + 1)[2:]} or {g['year']}/{str(g['year'] + 1)[2:]} "

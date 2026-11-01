@@ -323,6 +323,8 @@ One row per company, benchmark attribute, year and method: a value proposed by a
 | `validated_source_name` | text | robot | Source ID(s) of the cited document(s). |
 | `validated_page` | text | robot | The page the analysts wrote, as written (usually the printed page; the PDF page can differ by a few). |
 | `validated_quote` | long text | robot | The analysts' Evidence text, first 2,000 characters. |
+| `other_reports` | long text | robot | Model reader rows, since 1 Nov 2026: the same company, attribute and year as printed in other documents, one line each (document, page, value, difference from the value shown). Every version is in the evidence database table `value_versions`. Not written on rows a person decided. |
+| `restated` | checkbox | robot | Ticked when one of `other_reports` differs from the value shown by more than 0.5%. |
 | `validated_record` | link | robot | The validated answer in the analysts' editor (Editor Interface Full URL), with screenshots and notes; needs access to that base. |
 | `reviewer_note` | long text | you | Why you accepted or rejected. Never overwritten. |
 | `corrected_value` | number | you | When both value and validated_value are wrong: the right figure, in full units (not thousands or millions), in the unit of the row. Leave blank otherwise. Never overwritten by a run. |

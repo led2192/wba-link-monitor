@@ -106,8 +106,9 @@ class Propose(unittest.TestCase):
         finally:
             psycopg.connect, extract_eval.read_values, P.T0 = real
 
-    def test_one_call_covers_the_other_years(self):
-        # 31 Oct 2026: a 2025 read returns 2025, 2024 and 2023; 2024 is not read again, 2023 is written as history
+    def test_a_year_asked_is_read_and_its_own_figure_wins(self):
+        # 31 Oct 2026: a 2025 read returns 2025, 2024 and 2023. 1 Nov 2026: comparison figures matched the validated
+        # answer less often (66% against 76%), so 2024 is still read and its own figure replaces the comparison one
         import types, collections, psycopg, extract_eval
         class Cur:
             def execute(self, *a): pass
@@ -119,7 +120,7 @@ class Propose(unittest.TestCase):
         def fake(cur, wba, year, attr, spec, usage, known=None):
             asked.append(year)
             return [dict(value=v, printed=v, scale=1, library_id="L", page=1, unit="tCO2e", year=y, column=str(y), asked=year)
-                    for y, v in ((year, 100.0), (year - 1, 90.0), (year - 2, 80.0))]
+                    for y, v in ((year, 100.0 + year), (year - 1, 90.0), (year - 2, 80.0))]
         real = (psycopg.connect, extract_eval.read_values, P.library_docs)
         psycopg.connect = lambda *a, **k: Conn(); extract_eval.read_values = fake; P.library_docs = lambda *a: {}
         os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
@@ -130,13 +131,15 @@ class Propose(unittest.TestCase):
             rows = P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c)
         finally:
             psycopg.connect, extract_eval.read_values, P.library_docs = real
-        self.assertEqual(asked, [2025])                                             # newest first, 2024 never asked
-        self.assertEqual(sorted(r["year"] for r in rows), [2023, 2024, 2025])
-        self.assertEqual((c["model reader: year read in an earlier call"], c["model reader: values for other years"]), (1, 2))
-        d = next(r for r in rows if r["year"] == 2024)["detail"]
+        self.assertEqual(asked, [2025, 2024])                                       # newest first, 2024 still asked
+        self.assertEqual(sorted(r["year"] for r in rows), [2022, 2023, 2024, 2025])
+        self.assertEqual(next(r for r in rows if r["year"] == 2024)["value"], 2124.0)   # its own read, not the comparison 90
+        self.assertEqual(c["model reader: comparison figure replaced by the year's own read"], 1)
+        self.assertEqual((c["model reader: values for the year asked"], c["model reader: values for other years"]), (2, 2))
+        d = next(r for r in rows if r["year"] == 2023)["detail"]
         got = dict(value=1.0, printed=1.0, scale=1, library_id="L", page=1, unit="tCO2e", basis_note="The report gives one Scope 2 figure without saying location- or market-based; it is filed under location-based.")
         self.assertIn("filed under location-based", P.model_row("PT_2", "GMC_00002.1", {"name": "S2"}, 2024, got, {}, {}, None, NOW)["detail"])
-        self.assertIn("pages of the 2025 report, where it is a comparison figure for 2024", d)
+        self.assertIn("pages of the 2025 report, where it is a comparison figure for 2023", d)
         self.assertNotIn("comparison", next(r for r in rows if r["year"] == 2025)["detail"])
 
     def test_a_superseded_row_proposed_again_is_proposed(self):
@@ -211,6 +214,31 @@ class Propose(unittest.TestCase):
         finally:
             psycopg.connect, extract_eval.read_values, P.library_docs = real
         self.assertEqual(seen, [(2025, {2024: 14408.0}), (2024, {2025: 13950.0})])
+
+    def test_every_version_is_kept_and_the_others_are_summarised(self):
+        # 1 Nov 2026: a 2023 figure printed in three reports is three versions; the row shown names the other two
+        chosen = dict(value=100.0, library_id="L23", page=40, year=2023, asked=2023)
+        versions = [chosen, dict(value=100.2, library_id="L24", page=50, year=2023, asked=2024),
+                    dict(value=96.0, library_id="L25", page=60, year=2023, asked=2025)]
+        docs = {"L24": {"label": "2024 | Co | Sustainability Report 2024"}, "L25": {"label": "2025 | Co | Annual Report 2025"}}
+        o = P.other_reports(chosen, versions, docs)
+        self.assertTrue(o["restated"])
+        self.assertEqual(o["other_reports"].split("\n"), ["2025 | Co | Annual Report 2025, page 60: 96 (-4.0%)",
+                                                         "2024 | Co | Sustainability Report 2024, page 50: 100.2 (same)"])
+        self.assertEqual(P.other_reports(chosen, [chosen], docs), {"other_reports": None, "restated": False})
+        url = os.environ.get("PG_TEST_URL")
+        if not url:
+            self.skipTest("PG_TEST_URL not set")
+        import psycopg
+        with psycopg.connect(url) as c:
+            c.execute("drop table if exists public.value_versions"); c.commit()
+            vs = [("PT_1", "GMC_00001.1", dict(v, unit="tCO2e", printed=str(v["value"]), scale=1, column="2023")) for v in versions]
+            self.assertEqual(P.write_versions(c, vs, "model reader", NOW), 3)
+            vs[2][2]["value"] = 97.0
+            self.assertEqual(P.write_versions(c, vs, "model reader", NOW), 3)             # read again: updated, not duplicated
+            rows = c.execute("select library_id, value from public.value_versions order by library_id").fetchall()
+            self.assertEqual(rows, [("L23", 100.0), ("L24", 100.2), ("L25", 97.0)])
+            c.execute("drop table public.value_versions"); c.commit()
 
 if __name__ == "__main__":
     unittest.main()
