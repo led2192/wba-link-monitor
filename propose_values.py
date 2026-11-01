@@ -286,22 +286,27 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     companies = companies[:a.limit] if a.limit else companies
     has_filing = {tuple(v.split("|")[:3]) for v in existing if v.split("|")[-1] in ("SEC XBRL", "ESEF XBRL")}
     full = json.load(open(os.path.join(HERE, "attributes.json"), encoding="utf-8"))
-    usage, got_rows = collections.Counter(), []
+    usage, got_rows, versions = collections.Counter(), [], []
     stop = False
     with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '90s'")
         for wba in companies:
             for code in codes:
-                covered = set()                      # years this company and attribute already have from an earlier call
-                for y in sorted(years, reverse=True):    # newest first: its report prints the earlier years as comparisons
+                # Newest first: its report prints the earlier years as comparisons. A comparison figure no longer
+                # stops the year from being read: on the 31 Oct 2026 run it matched the validated answer 66% of the
+                # time against 76% for a figure from the year's own read (restatements; the analysts take the
+                # figure as first reported). A year asked is read; its own figure replaces the comparison one,
+                # which stays only when the year's read finds nothing.
+                own, picked = set(), {}                  # years with a figure from their own read; year -> entry
+                for y in sorted(years, reverse=True):
                     if cost(usage) >= a.max_usd:
                         c["model reader: stopped at the cost limit"] = 1; stop = True
                         break
                     if time.time() - T0 > a.budget * 60:          # leave time to write what was read
                         c["model reader: stopped at the time budget"] = 1; stop = True
                         break
-                    if y in covered:
+                    if y in own:
                         c["model reader: year read in an earlier call"] += 1; continue
                     if code == REVENUE and (wba, code, str(y)) in has_filing:
                         c["model reader: revenue left to the filing"] += 1; continue
@@ -318,22 +323,91 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                         conn.rollback(); cur.execute("set statement_timeout = '90s'")
                         continue
                     for e in got:
+                        versions.append((wba, code, e))                      # every figure found, kept in value_versions
                         if code == REVENUE and (wba, code, str(e["year"])) in has_filing:
                             c["model reader: revenue left to the filing"] += 1; continue
-                        if e["year"] in covered:
+                        if e["year"] in own or (e["year"] != y and e["year"] in picked):
                             continue
-                        covered.add(e["year"])
-                        c["model reader: values for the year asked" if e["year"] == y else "model reader: values for other years"] += 1
-                        got_rows.append((wba, code, e["year"], e))
+                        if e["year"] == y:
+                            if y in picked:
+                                c["model reader: comparison figure replaced by the year's own read"] += 1
+                            own.add(y)
+                        picked[e["year"]] = e
+                for yy, e in sorted(picked.items(), reverse=True):
+                    c["model reader: values for the year asked" if yy in own else "model reader: values for other years"] += 1
+                    got_rows.append((wba, code, yy, e))
                 if stop:
                     break
             if stop:
                 break
-    docs = library_docs(H, base, [g["library_id"] for *_, g in got_rows])
+        c["model reader: figures found (all versions)"] = len(versions)
+        if getattr(a, "commit", False) and versions:
+            try:
+                c["model reader: versions written"] = write_versions(conn, versions, "model reader", now)
+            except Exception as e:
+                conn.rollback()
+                c[f"model reader: versions not written ({type(e).__name__}: {str(e)[:100]})"] = 1
+    docs = library_docs(H, base, [g["library_id"] for *_, g in got_rows] + [e["library_id"] for *_, e in versions])
     c["model reader: cost in USD (estimate)"] = round(cost(usage), 2)
     c["model reader: calls"] = usage["calls"]
-    return [model_row(wba, code, spec[code], y, got, docs.get(got["library_id"], {}), gold, rec.get(wba), now)
-            for wba, code, y, got in got_rows]
+    others = collections.defaultdict(list)
+    for wba, code, e in versions:
+        others[(wba, code, e["year"])].append(e)
+    rows = []
+    for wba, code, y, got in got_rows:
+        f = model_row(wba, code, spec[code], y, got, docs.get(got["library_id"], {}), gold, rec.get(wba), now)
+        f.update(other_reports(got, others[(wba, code, y)], docs))
+        c["model reader: restated in another report"] += 1 if f["restated"] else 0
+        rows.append(f)
+    return rows
+
+
+def version_id(wba, code, year, library_id, method):
+    import hashlib
+    return hashlib.sha1(f"{wba}|{code}|{year}|{library_id}|{method}".encode("utf-8")).hexdigest()
+
+
+VERSIONS_SQL = """create table if not exists public.value_versions (
+  version_id text primary key, wba_id text not null, attribute text not null, year int not null,
+  value double precision not null, unit text, printed text, scale double precision, column_label text, basis text,
+  library_id text not null, page int, read_for int, method text not null,
+  first_seen timestamptz not null default now(), last_seen timestamptz not null default now())"""
+
+
+def write_versions(conn, versions, method, now):
+    """Upsert every figure found into value_versions (schema.sql); one row per company, attribute, year,
+    document and method, so a figure read again updates its row. Returns the rows written."""
+    rows = {}
+    for wba, code, e in versions:
+        k = version_id(wba, code, e["year"], e["library_id"], method)
+        rows[k] = (k, wba, code, int(e["year"]), float(e["value"]), e.get("unit"), str(e.get("printed", "")), e.get("scale"),
+                   e.get("column"), e.get("basis"), e["library_id"], int(e["page"]) if e.get("page") is not None else None,
+                   e.get("asked"), method, now, now)
+    cur = conn.cursor()
+    cur.execute(VERSIONS_SQL)
+    cur.executemany(
+        "insert into public.value_versions (version_id, wba_id, attribute, year, value, unit, printed, scale, column_label, basis, "
+        "library_id, page, read_for, method, first_seen, last_seen) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "on conflict (version_id) do update set value = excluded.value, unit = excluded.unit, printed = excluded.printed, "
+        "scale = excluded.scale, column_label = excluded.column_label, basis = excluded.basis, page = excluded.page, "
+        "read_for = excluded.read_for, last_seen = excluded.last_seen", list(rows.values()))
+    conn.commit()
+    return len(rows)
+
+
+def other_reports(chosen, versions, docs):
+    """{"other_reports": text, "restated": bool}: the same company, attribute and year as printed in other
+    documents, one line each with the difference from the value shown. Restated = one differs by more than 0.5%."""
+    lines, restated, seen = [], False, {chosen["library_id"]}
+    for e in sorted(versions, key=lambda e: -(e.get("asked") or 0)):
+        if e["library_id"] in seen:
+            continue
+        seen.add(e["library_id"])
+        diff = (e["value"] - chosen["value"]) / chosen["value"] if chosen["value"] else 0.0
+        restated = restated or abs(diff) > 0.005
+        label = docs.get(e["library_id"], {}).get("label") or e["library_id"]
+        lines.append(f"{label}, page {e.get('page')}: {e['value']:,.6g}" + (" (same)" if abs(diff) <= 0.005 else f" ({diff:+.1%})"))
+    return {"other_reports": "\n".join(lines) or None, "restated": restated}
 
 
 def main():
