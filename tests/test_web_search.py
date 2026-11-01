@@ -241,7 +241,9 @@ class FirstWaveCases(unittest.TestCase):
     def test_a_short_name_needs_its_website_in_the_file(self):
         f = {"company_name": "ADIA", "website": "adia.ae"}
         doc = {"front": "ADIA Annual Report 2025\nAustralian Dental Industry Association", "more": "www.adia.com.au", "meta": "", "file": "2025-ADIA-Annual-Report.pdf"}
-        self.assertIn("not in the file", self.check(f, doc)[1])
+        self.assertIn("industry association", self.check(f, doc)[1])          # another organisation, by its own words
+        doc = {"front": "ADIA Annual Report 2025\nDental supplies, Australia", "more": "www.adia.com.au", "meta": "", "file": "2025-ADIA-Annual-Report.pdf"}
+        self.assertIn("not in the file", self.check(f, doc)[1])               # and by the website missing
         doc = {"front": "ADIA Annual Review 2025 Annual Report", "more": "Abu Dhabi Investment Authority www.adia.ae", "meta": "", "file": "ar.pdf"}
         self.assertTrue(self.check(f, doc)[0])
 
@@ -255,6 +257,39 @@ class FirstWaveCases(unittest.TestCase):
         doc = {"front": "Social Impact and Sustainability Report 2025", "more": "Arcos Dorados", "meta": "", "file": "sr.pdf"}
         self.assertFalse(self.check(f, doc, fam="sustainability")[0])
         self.assertTrue(self.check(f, doc, fam="sustainability", own=True)[0])     # on its own site it is
+
+
+class SecondWaveCases(unittest.TestCase):
+    """1 Nov 2026, the second committed wave (100 companies, 33 documents, about 12 wrong)."""
+    def test_a_government_subdomain_is_the_site_not_the_whole_domain(self):
+        f = {"company_name": "Punjab Transport Company", "website": "https://ptc.punjab.gov.pk/node/472"}
+        self.assertEqual(W.company_domains(f, [], reg_domain), ["ptc.punjab.gov.pk"])
+        f = {"company_name": "Sistema de Transporte Colectivo", "website": "https://www.metro.cdmx.gob.mx"}
+        self.assertEqual(W.company_domains(f, [], reg_domain), ["metro.cdmx.gob.mx"])
+        f = {"company_name": "Transmilenio", "website": "https://www.transmilenio.gov.co"}
+        self.assertEqual(W.company_domains(f, [], reg_domain), ["transmilenio.gov.co"])   # its own domain
+        self.assertTrue(W.on_sites("https://www.transmilenio.gov.co/files/informe-2025.pdf", ["transmilenio.gov.co"]))
+        self.assertTrue(W.on_sites("https://ptc.punjab.gov.pk/files/ar.pdf", ["ptc.punjab.gov.pk"]))
+        self.assertFalse(W.on_sites("https://ppdb.punjab.gov.pk/system/files/PPDB_AnualReport_2025.pdf", ["ptc.punjab.gov.pk"]))
+        self.assertIn("site:ptc.punjab.gov.pk", W.query("annual", [2025], domains=["ptc.punjab.gov.pk"]))
+        r = {"link": "https://ppdb.punjab.gov.pk/system/files/Annex-C_PPDB_AnualReport_2025.pdf", "title": "Annual Report 2025"}
+        self.assertEqual(W.judge(r, "annual", [2025], ["ptc.punjab.gov.pk"], "Punjab Transport Company", reg_domain)[1],
+                         "another site (punjab.gov.pk)")
+
+    def test_more_things_that_are_not_a_report(self):
+        for title in ("Dodge & Cox Worldwide Funds Semi-Annual Report", "Worldwide Funds Annual Report", "JSS Analytics Sample Report",
+                      "apd_sriinternational plan document", "DownLoadPublicCommunicationFile"):
+            r = {"link": "https://www.dodgeandcox.com/x/" + title.replace(" ", "_") + ".pdf", "title": title}
+            self.assertFalse(W.judge(r, "annual", [2025, 2024], ["dodgeandcox.com"], "Dodge & Cox", reg_domain)[0], title)
+
+    def test_written_by_an_organisation_about_the_company(self):
+        f = {"company_name": "Tsingshan Holding", "website": "tsingshan.com"}
+        doc = {"front": "Mandates of the Special Rapporteur on the human rights to safe drinking water...\nTsingshan Holding Group sustainability 2025 report",
+               "more": "Tsingshan Holding", "meta": "", "file": "x.pdf"}
+        self.assertIn("written by someone else", W.cover_check(doc, 20, f, "sustainability", [2025], own_site=False)[1])
+        f = {"company_name": "Deichmann SE", "website": "deichmann.com"}
+        doc = {"front": "World Federation of Advertisers\nAnnual Report 2024\nMembers: ... Deichmann SE ... Deichmann SE", "more": "", "meta": "", "file": "wfa_annual_report_2024.pdf"}
+        self.assertIn("written by someone else", W.cover_check(doc, 60, f, "annual", [2024], own_site=False)[1])
 
 
 class Writes(unittest.TestCase):
