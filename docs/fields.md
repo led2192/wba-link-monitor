@@ -219,6 +219,9 @@ How to use the fields day to day is in [guide.md](guide.md).
 | `isin` | text | robot | ISIN of the company's main listed share (from WBA's company master list). Used to find the company in stock-exchange and regulator databases. |
 | `hq_country` | text | robot | Headquarters country, ISO 3-letter code (from WBA's company master list). Decides which regulator database holds the annual report. |
 | `ownership` | text | robot | Public, Private, State-owned... (from WBA's company master list). Private companies file no annual report with a stock-market regulator. |
+| `wba_industry` | text | robot | WBA industry, one of 36 (Banks, Food Production, Utilities...), from the SDG2000 list loaded by `load_company_master.py`. Used to learn how companies of one industry print their figures. |
+| `isic_code` | text | robot | ISIC Rev. 4 class code (6419 commercial banks, 3510 electric power...), from the SDG2000 list. |
+| `hq_region` | text | robot | World Bank region of the headquarters (East Asia & Pacific, Europe & Central Asia, North America...), from the SDG2000 list. |
 | `sec_cik` | text | you | The company's number in the US SEC database (EDGAR), found from its ISIN. 'none' = not an SEC filer. Written by regulator_filings.py; correct it by hand if wrong. |
 | `exchange_codes` | text | robot | Hong Kong and mainland A-share stock codes, from the ISIN through OpenFIGI ("HK:00700; SH:600519"; "none" when the company has neither). Used by regulator_filings.py for HKEXnews and cninfo; looked up once. |
 | `filings_note` | long text | robot | What the weekly regulator-filings check found for this company (SEC, ESEF): which annual filings were added, or why none. Written by regulator_filings.py. |
