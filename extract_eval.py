@@ -38,8 +38,8 @@ MAX_DOCS, MAX_PAGES = 12, 25         # documents of the year searched; pages kep
 PER_DOC = 10                         # at most this many of the kept pages from one document
 POOL = 400                           # label-matching pages scored before ranking
 MODEL_PAGES = 8                      # pages given to the model reader: half by the rule candidates, half by rank
-MORE_TERMS_TIMEOUT = "8s"            # the second query (an attribute's more_terms) may take this long, else it is skipped
-MORE_POOL = 120                      # pages it may add
+MORE_TERMS_TIMEOUT = "4s"            # the second query (an attribute's more_terms) may take this long, else it is skipped
+MORE_POOL = 30                       # pages it may add (bodies are read for these only)
 INDEX_WEIGHT = 1.5                   # page score added to a page the report's own content index cites (content_index.py)
 BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
@@ -365,9 +365,15 @@ def more_terms_pages(cur, ids, attr, have, info=None):
     try:
         with cur.connection.transaction():
             cur.execute(f"set local statement_timeout = '{MORE_TERMS_TIMEOUT}'")
-            cur.execute("select library_id, page, body, ts_rank_cd(words, to_tsquery('simple', %s), 32) as rk "
-                        "from public.pages where library_id = any(%s) and words @@ to_tsquery('simple', %s) "
-                        "order by rk desc limit %s", (q, ids, q, MORE_POOL))
+            # The company's pages first (the primary key starts with library_id), then the words: left to itself
+            # the planner took the word index, whose OR of common words ("capital", "energy") matches millions of
+            # pages before the library_id filter, and the scoring passed its two-hour limit (31 Oct 2026). Bodies
+            # are read only for the MORE_POOL best pages.
+            cur.execute("with p as materialized (select library_id, page, words from public.pages where library_id = any(%s)), "
+                        "m as (select library_id, page, ts_rank_cd(words, to_tsquery('simple', %s), 32) as rk from p "
+                        "      where words @@ to_tsquery('simple', %s) order by rk desc limit %s) "
+                        "select m.library_id, m.page, b.body, m.rk from m join public.pages b using (library_id, page) "
+                        "order by m.rk desc", (ids, q, q, MORE_POOL))
             rows = [r for r in cur.fetchall() if (r[0], r[1]) not in have and label_positions(r[2] or "", terms, [])]
         if info is not None:
             info["more_terms"] = "ok"
