@@ -212,5 +212,32 @@ class CoverCheck(unittest.TestCase):
         self.assertEqual(len(opened), W.CHECK_MAX)
 
 
+class Writes(unittest.TestCase):
+    """1 Nov 2026: the first committed wave spent 384 credits, then the single write at the end called
+    airtable_request with json= (it takes payload=) and nothing was written."""
+    def test_patch_uses_payload_in_tens(self):
+        import inspect
+        from monitor_core import airtable_request
+        self.assertIn("payload", inspect.signature(airtable_request).parameters)
+        calls = []
+        W.WRITE_PAUSE, pause = 0, W.WRITE_PAUSE
+        try:
+            n = W.write_companies("appX", {"Authorization": "Bearer t"},
+                                  [{"id": f"rec{i}", "fields": {"web_searched_on": "2026-11-01"}} for i in range(23)],
+                                  request=lambda *a, **k: calls.append((a, k)))
+        finally:
+            W.WRITE_PAUSE = pause
+        self.assertEqual(n, 23)
+        self.assertEqual([len(k["payload"]["records"]) for _, k in calls], [10, 10, 3])
+        self.assertTrue(all(a[0] == "PATCH" and a[1].endswith("/appX/companies") and k["payload"]["typecast"] is False
+                            for a, k in calls))
+        self.assertEqual(calls[0][0][2]["Content-Type"], "application/json")
+
+    def test_main_writes_as_it_goes(self):
+        src = open(W.__file__, encoding="utf-8").read()
+        self.assertIn("if a.commit and len(updates) >= 10:", src)          # not only once at the end
+        self.assertNotIn("json={", src)
+
+
 if __name__ == "__main__":
     unittest.main()

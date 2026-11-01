@@ -400,6 +400,20 @@ def note(today, res):
     return "\n".join(lines)
 
 
+def write_companies(base, H, updates, request=None):
+    """PATCH companies rows, 10 per call. request: monitor_core.airtable_request (stubbed in tests).
+    Called every 10 companies during the run, so a crash later never loses searches already paid for
+    (1 Nov 2026: the first wave spent 384 credits and wrote nothing when the single write at the end failed)."""
+    if request is None:
+        from monitor_core import airtable_request as request
+    hdr = {**H, "Content-Type": "application/json"}
+    for i in range(0, len(updates), 10):
+        request("PATCH", f"https://api.airtable.com/v0/{base}/companies", hdr,
+                payload={"records": updates[i:i + 10], "typecast": False})
+        time.sleep(WRITE_PAUSE)
+    return len(updates)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -476,7 +490,7 @@ def main():
     for l in links:
         pages[l["fields"].get("wba_id")].append(l["fields"].get("url") or "")
     api = Serper(key, a.max_queries)
-    updates, examples = [], []
+    updates, examples, written = [], [], 0
     t0 = time.time()
     for i, r in enumerate(due, 1):
         if time.time() - t0 > a.minutes * 60:
@@ -502,18 +516,15 @@ def main():
         if res["found"]:
             upd["research_link"] = "\n".join([x for x in [(f.get("research_link") or "").strip()] if x] + [u for u, _ in res["found"]])
         updates.append({"id": r["id"], "fields": upd})
+        if a.commit and len(updates) >= 10:
+            written += write_companies(base, H, updates); updates = []
         if i % 50 == 0:
             print(f"  {i}/{len(due)}: {api.used} searches, {c['documents passed on']} documents", flush=True)
     c["searches (credits)"] = api.used
     if api.stopped:
         c["stopped: " + api.stopped] = 1
-    written = 0
-    if a.commit:
-        from monitor_core import airtable_request
-        for i in range(0, len(updates), 10):
-            airtable_request("PATCH", f"https://api.airtable.com/v0/{base}/companies", H,
-                             json={"records": updates[i:i + 10], "typecast": False})
-            written += len(updates[i:i + 10]); time.sleep(WRITE_PAUSE)
+    if a.commit and updates:
+        written += write_companies(base, H, updates); updates = []
     c["companies written"] = written
     md = [f"### Web search for missing reports ({mode})" + ("" if a.commit else " (dry run: nothing written)"), "",
           f"Recent years: {', '.join(str(y) for y in years)}. Serper searches used: {api.used} (one credit each)."
