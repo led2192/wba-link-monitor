@@ -132,6 +132,31 @@ create table if not exists public.datapoints (
 );
 create index if not exists datapoints_company_attribute on public.datapoints (wba_id, attribute);
 
+-- Every figure a reader found, one row per company x attribute x year x document x method (propose_values.py,
+-- since 1 Nov 2026). A 2023 figure printed in the 2023, 2024 and 2025 reports is three rows: attribute_values
+-- shows one of them (the year's own read first) and says in other_reports how the others differ, so the
+-- analysts see one value and the restatements stay here. version_id is deterministic, so a re-run updates.
+create table if not exists public.value_versions (
+  version_id   text primary key,           -- sha1 of wba_id|attribute|year|library_id|method
+  wba_id       text not null,
+  attribute    text not null,              -- GMC code
+  year         int  not null,              -- reporting year of the figure
+  value        double precision not null,  -- printed number x scale
+  unit         text,
+  printed      text,                       -- as printed
+  scale        double precision,
+  column_label text,                       -- the column heading it was read under
+  basis        text,                       -- Scope 2: location-based, market-based, not stated
+  library_id   text not null,
+  page         int,
+  read_for     int,                        -- the year asked when it was read (its documents are that year's or the next)
+  method       text not null,              -- model reader
+  first_seen   timestamptz not null default now(),
+  last_seen    timestamptz not null default now()
+);
+create index if not exists value_versions_company on public.value_versions (wba_id, attribute, year);
+alter table public.value_versions enable row level security;
+
 -- Which store files are already in the database, so a run only loads what is new.
 create table if not exists public.load_log (
   name       text primary key,

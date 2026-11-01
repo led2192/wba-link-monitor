@@ -190,5 +190,30 @@ class Propose(unittest.TestCase):
         self.assertIn("7.9 (in millions)", P.how_to_find(7.9e6))
 
 
+    def test_every_version_is_kept_and_the_others_are_summarised(self):
+        # 1 Nov 2026: a 2023 figure printed in three reports is three versions; the row shown names the other two
+        chosen = dict(value=100.0, library_id="L23", page=40, year=2023, asked=2023)
+        versions = [chosen, dict(value=100.2, library_id="L24", page=50, year=2023, asked=2024),
+                    dict(value=96.0, library_id="L25", page=60, year=2023, asked=2025)]
+        docs = {"L24": {"label": "2024 | Co | Sustainability Report 2024"}, "L25": {"label": "2025 | Co | Annual Report 2025"}}
+        o = P.other_reports(chosen, versions, docs)
+        self.assertTrue(o["restated"])
+        self.assertEqual(o["other_reports"].split("\n"), ["2025 | Co | Annual Report 2025, page 60: 96 (-4.0%)",
+                                                         "2024 | Co | Sustainability Report 2024, page 50: 100.2 (same)"])
+        self.assertEqual(P.other_reports(chosen, [chosen], docs), {"other_reports": None, "restated": False})
+        url = os.environ.get("PG_TEST_URL")
+        if not url:
+            self.skipTest("PG_TEST_URL not set")
+        import psycopg
+        with psycopg.connect(url) as c:
+            c.execute("drop table if exists public.value_versions"); c.commit()
+            vs = [("PT_1", "GMC_00001.1", dict(v, unit="tCO2e", printed=str(v["value"]), scale=1, column="2023")) for v in versions]
+            self.assertEqual(P.write_versions(c, vs, "model reader", NOW), 3)
+            vs[2][2]["value"] = 97.0
+            self.assertEqual(P.write_versions(c, vs, "model reader", NOW), 3)             # read again: updated, not duplicated
+            rows = c.execute("select library_id, value from public.value_versions order by library_id").fetchall()
+            self.assertEqual(rows, [("L23", 100.0), ("L24", 100.2), ("L25", 97.0)])
+            c.execute("drop table public.value_versions"); c.commit()
+
 if __name__ == "__main__":
     unittest.main()
