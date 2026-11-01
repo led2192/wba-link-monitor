@@ -62,6 +62,7 @@ Model reader rows (from 29 Oct 2026): method `model reader`, `document` linked, 
 | Values read from reports by the model | Actions, Propose values, methods `model`, model years (2024, or 2022-2025), companies or limit, cost limit per job, shards (1 to 8 parallel jobs); tick commit after a dry run. One call returns every year the pages print, so a four-year range costs about one call per company and attribute; one job reads for five hours at most, then writes |
 | Score a route against the validated answers | Actions: SEC revenue, ESEF revenue, Generic reader (reader rules or model), Value evaluation |
 | Improve an attribute's labels | Actions, Label mining; copy the phrases worth having into `labels` in `attributes.json` (pull request), then run Generic reader again |
+| Switch the company's memory off for an attribute | Add `"memory": false` to its entry in `attributes.json` (capex has it since 1 Nov 2026: the line of another year's figure misled the reader); the Generic reader's report compares answers with and without a memory |
 | Change the methodology of an attribute | Edit its entry in `attributes.json` (pull request); the pull request's checks score it again |
 
 The model reader uses the repository secret `ANTHROPIC_API_KEY` (prepaid credit in the Anthropic console; the balance is the spending limit). Each run's report prints calls, tokens and cost.

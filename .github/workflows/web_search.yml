@@ -1,0 +1,82 @@
+name: Web search for missing reports
+
+# web_search.py: a company's missing annual and sustainability reports looked for with Serper (Google
+# results), on its own sites first. Documents found go to companies.research_link, which the inbox adds
+# with its duplicate guards. Every two hours a wave of at most 100 companies: first the one-off sweep of
+# every company never searched, then (once that is done) the companies whose coverage flags a missing or
+# overdue report, again after 30 days. A wave waits while the inbox has not caught up with the last one.
+# A pull request runs a dry run on 30 companies (about 60 searches).
+on:
+  schedule:
+    - cron: "23 */2 * * *"         # every two hours at :23
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "auto (sweep, then gaps), recovery (never searched), gaps (flagged missing or overdue)"
+        default: auto
+      limit:
+        description: "Companies at most in this run (0 = all due)"
+        default: "100"
+      max_queries:
+        description: "Serper searches (credits) this run may spend"
+        default: "400"
+      wba:
+        description: "Only these wba ids, comma-separated (optional)"
+        default: ""
+      commit:
+        description: "Write research_link and the notes (false = dry run)"
+        type: boolean
+        default: false
+  pull_request:
+    paths: [web_search.py, .github/workflows/web_search.yml]
+
+concurrency:
+  group: web-search-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Search
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            ARGS="--mode recovery --limit 30 --max-queries 80"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            ARGS="--mode auto --limit 100 --max-queries 400 --commit"
+          else
+            ARGS="--mode ${{ inputs.mode }} --limit ${{ inputs.limit }} --max-queries ${{ inputs.max_queries }}"
+            [ -n "${{ inputs.wba }}" ] && ARGS="$ARGS --wba ${{ inputs.wba }}"
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          fi
+          echo ">>> python web_search.py $ARGS"
+          python web_search.py $ARGS
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-search
+          path: web_search.md
+          if-no-files-found: ignore
+      - name: Post the result on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s web_search.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file web_search.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Web search: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}

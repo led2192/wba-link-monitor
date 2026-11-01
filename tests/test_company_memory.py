@@ -53,6 +53,8 @@ class AgainstPostgres(unittest.TestCase):
             self.assertEqual((mem["year"], mem["library_id"], mem["page"], mem["scale"]), (2024, "xmem24", 31, 1))
             self.assertEqual(mem["label"], "operational carbon footprint own plants tco2e")
             self.assertIsNone(M.memory_for(cur, "PT_09994", attr, 2025, {2025: 13950.0}, X.year_documents))   # never the year read
+            self.assertIsNone(M.memory_for(cur, "PT_09994", dict(attr, memory=False), 2025, {2024: 14408.0}, X.year_documents))
+            self.assertIs(A["GMC_00064.1"].get("memory"), False)                 # capex: 0 of 10 right with a memory (1 Nov 2026)
             docs, weight = X.year_documents(cur, "PT_09994", 2025, attr)
             ids = [d[0] for d in docs]
             plain = X.ranked_pages(cur, ids, weight, 2025, attr, SPEC)

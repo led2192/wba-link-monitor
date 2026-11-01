@@ -302,6 +302,7 @@
     "GMC_00064.1": {
       "name": "Low-carbon capital expenditure",
       "definition": "What is the total CapEx or investments allocated to climate solutions/enabler activities? (a currency amount or a percentage of total CapEx)",
+      "memory": false,
       "reading_notes": "Reports rarely call this 'low-carbon capex'. It counts when the report attributes the capital expenditure or investment to climate solutions, renewable energy, energy efficiency, carbon reduction, decarbonisation, the energy transition, low-carbon products or environmental protection. Prefer, in this order: the EU Taxonomy-aligned CapEx amount (row A.1) when the report prints one; a total of such investments for the year; a single named project only when nothing wider is given. A multi-year budget or a target is not the year's figure.",
       "type": "number",
       "unit_family": "currency",

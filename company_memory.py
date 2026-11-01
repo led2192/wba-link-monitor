@@ -48,6 +48,8 @@ def label_of(body, printed):
 def memory_for(cur, wba, attr, year, known, year_documents):
     """{"year", "library_id", "page", "doc_type", "label", "scale"} from the known right value nearest to
     `year` (never `year` itself), or None. known: {year: value}. year_documents: extract_eval's function."""
+    if attr.get("memory") is False:          # switched off for the attribute in attributes.json
+        return None
     ranks = {t: i for i, t in enumerate(attr.get("doc_types", []))}
     for y in sorted((y for y in known if y != year and known[y]), key=lambda y: (abs(y - year), -y)):
         value = known[y]

@@ -343,10 +343,12 @@ def run_links():
                               + (f.get("add_result") or ""))[:90000]}
         if f.get("approve_suggestions"):
             upd["suggested_links"] = ""
-        results.append({"id": rec["id"], "fields": upd})
+        # written at once, company by company (1 Nov 2026): the web search hands over up to 100 companies at
+        # a time, and a run cut by the job's time limit used to lose every result and redo them all
+        write(COMP, "PATCH", [{"id": rec["id"], "fields": upd}])
+        results.append(rec["id"])
         if f.get("wba_id"):
             touched.append(f["wba_id"])
-    write(COMP, "PATCH", results)
     if created_all:
         import scan_now
         scan_now.finish_docs(created_all)
