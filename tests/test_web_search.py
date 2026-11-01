@@ -45,9 +45,9 @@ class Questions(unittest.TestCase):
         f = {"website": "www.acme.com", "company_name": 'Acme "Group" plc'}
         doms = W.company_domains(f, ["https://ir.acme-investors.com/x", "https://www.acme.com/y", "https://s2.q4cdn.com/z"], reg_domain)
         self.assertEqual(doms, ["acme.com", "acme-investors.com"])               # document hosts are not the company's sites
-        q = W.query("sustainability", [2025, 2024], domains=doms)
+        q = W.query("sustainability", [2021, 2020], domains=doms)               # not the latest year: no publication year added
         self.assertTrue(q.startswith("(site:acme.com OR site:acme-investors.com) (sustainability OR ESG"))
-        self.assertTrue(q.endswith("(2025 OR 2024) filetype:pdf"))
+        self.assertTrue(q.endswith("(2021 OR 2020) filetype:pdf"))
         self.assertTrue(W.query("annual", [2025], name=f["company_name"]).startswith('"Acme Group plc" ("annual report"'))
 
 
@@ -138,6 +138,25 @@ class DryRunCases(unittest.TestCase):
         self.assertTrue(self.j("https://www.acme.com/q/Conference_Call_1Q26_fv.pdf", "Conference call ESG 2025")[1].startswith("not a report"))
         self.assertTrue(self.j("https://www.acme.com/bonds/2023/Sustainability-Linked-Finance-Framework.pdf",
                                "Sustainability-Linked Finance Framework 2023")[1].startswith("not a report"))
+
+
+class PublicationYear(unittest.TestCase):
+    """1 Nov 2026: reporting year 2025 is published in 2026, often titled 2026 or FY2026."""
+    def test_2026_is_searched_and_counts_as_2025(self):
+        real = W.expected_year
+        W.expected_year = lambda today=None: 2025
+        try:
+            self.assertTrue(W.query("sustainability", [2025, 2024], domains=["acme.com"]).endswith("(2026 OR 2025 OR 2024) filetype:pdf"))
+            self.assertEqual(W.judge({"link": "https://www.acme.com/r/acme-sustainability-report-2026.pdf",
+                                      "title": "Acme Sustainability Report 2026"}, "sustainability", [2025, 2024],
+                                     ["acme.com"], "Acme", reg_domain), (True, "sustainability 2025"))
+            self.assertTrue(W.judge({"link": "https://www.acme.com/ir/integrated-report-fy2026.pdf", "title": "Integrated Report FY2026"},
+                                    "annual", [2025], ["acme.com"], "Acme", reg_domain)[0])
+            # a March year end: the report for FY ending March 2026 is held as 2026, which is reporting year 2025
+            self.assertEqual(W.missing({"sust_years": "2023; 2024; 2026", "coverage_breakdown": "Annual Report: 3 (latest 2026)"},
+                                       [2025, 2024, 2023]), {"sustainability": [], "annual": []})
+        finally:
+            W.expected_year = real
 
 
 if __name__ == "__main__":

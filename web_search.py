@@ -7,8 +7,12 @@ them in.
 For each company it works out which recent years it lacks for each family:
   sustainability   Sustainability, ESG, CSR, Integrated or Impact Report; years held from `sust_years`
   annual           Annual Report, Integrated Report, 10-K; latest held from `coverage_breakdown`
-Recent years are the three up to the latest year that should be out by now (company_coverage's
-expected_year: in November 2026 that is 2023 to 2025).
+Years are reporting years, as everywhere in the pipeline: the year the period ends, a fiscal year ending
+January to June counting as the year before. Recent years are the three up to the latest that should be out
+by now (company_coverage's expected_year: in November 2026, 2023 to 2025). A report for 2025 is published
+in 2026, so 2026 is searched and accepted too, as 2025: reports are often titled by their publication year
+("Sustainability Report 2026") or by a fiscal year ending in 2026; and a document we hold dated 2026 counts
+as 2025.
 
 For each family with missing years it asks one question first on the company's own sites:
     site:acme.com OR site:acme-ir.com (sustainability OR ESG OR ...) (2025 OR 2024) filetype:pdf
@@ -121,6 +125,11 @@ def held_years(f):
 
 def missing(f, years):
     held = held_years(f)
+    # A document dated after the latest expected year is a fiscal year that ended in January to June of the
+    # current year (a 2026 report of a March year end): by the reporting-year rule it is that latest year.
+    for fam in held:
+        if any(y > max(years) for y in held[fam]):
+            held[fam].add(max(years))
     return {fam: [y for y in years if y not in held[fam]] for fam in FAMILIES}
 
 
@@ -158,8 +167,11 @@ def name_tokens(name):
 
 
 def query(fam, years, domains=None, name=None):
-    ys = " OR ".join(str(y) for y in sorted(years, reverse=True))
-    ys = f"({ys})" if len(years) > 1 else ys
+    """The search. Years are reporting years; a report for the latest one is published in the following
+    year and is often titled by it ("Sustainability Report 2026", "FY2026"), so that year is asked too."""
+    asked = sorted(set(years) | ({max(years) + 1} if max(years) == expected_year() else set()), reverse=True)
+    ys = " OR ".join(str(y) for y in asked)
+    ys = f"({ys})" if len(asked) > 1 else ys
     if domains:
         where = " OR ".join(f"site:{d}" for d in domains)
         where = f"({where})" if len(domains) > 1 else where
@@ -200,6 +212,11 @@ def judge(r, fam, years, domains, name, reg_domain):
     if not any(w in named for w in FAMILIES[fam]["words"]):
         return False, "does not name the report"
     ys = years_in(title) | years_in(last) or years_in(folders)
+    # titled by the publication year: a 2026 report of the latest expected reporting year (published in 2026,
+    # or a fiscal year ending January to June 2026); the inbox's typing then dates it from the cover
+    latest = max(years)
+    if latest == expected_year() and latest + 1 in ys and latest not in ys:
+        ys = ys | {latest}
     if not ys & set(years):
         return False, "not one of the missing years" + (f" ({', '.join(str(y) for y in sorted(ys)[-3:])})" if ys else "")
     return True, f"{fam} {max(ys & set(years))}"
