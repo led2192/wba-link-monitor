@@ -126,7 +126,6 @@ class QueryCap(unittest.TestCase):
         self.assertIn('"phrase number 0"', X.label_query(labels))
 
 
-@unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres (after tests/test_load_supabase.py)")
 class Neighbours(unittest.TestCase):
     """1 Nov 2026: a page next to a well-scored page scores higher, less so two pages away."""
     def test_scores_spread_to_the_next_pages_only(self):
@@ -147,6 +146,7 @@ class Neighbours(unittest.TestCase):
         self.assertEqual(M.adjacent_notes([("L", 1, "x")]), [])
 
 
+@unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres (after tests/test_load_supabase.py)")
 class AgainstPostgres(unittest.TestCase):
     def test_a_table_that_runs_on_to_the_next_page_is_found(self):
         # 1 Nov 2026: the label and the year columns are on page 50, the Scope 1 row on page 51, which carries
