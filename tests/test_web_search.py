@@ -124,11 +124,20 @@ class DryRunCases(unittest.TestCase):
         self.assertTrue(self.j("https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0325/2025032501525.pdf",
                                "ACME GROUP - ESG Report 2024")[0])
 
+    def test_name_in_a_snippet_is_not_enough(self):
+        # a NIQ annual report on q4cdn passed for SHEIN: the snippet named SHEIN, the title and address did not
+        self.assertFalse(self.j("https://s206.q4cdn.com/369/files/doc_financials/2025/ar/NIQ-2025-Annual-Report.pdf",
+                                "NIQ 2025 Annual Report", snippet="clients such as Acme Group", fam="annual")[0])
+        self.assertTrue(self.j("https://acme-prod-asset.s3.us-east-2.amazonaws.com/uploads/2024-03/Acme_Sustainability_Report_2024.pdf",
+                               "Sustainability Report 2024")[0])                     # the name in the address
+
     def test_not_a_report_or_not_a_pdf(self):
         self.assertEqual(self.j("https://www.acme.com/2023-ifpr-disclosures/", "2023 IFPR disclosures")[1], "not a PDF")
         self.assertTrue(self.j("https://www.acme.com/files/Comunicado-de-Prensa-COP30-2025.pdf",
                                "Comunicado de Prensa sustainability 2025")[1].startswith("not a report"))
         self.assertTrue(self.j("https://www.acme.com/q/Conference_Call_1Q26_fv.pdf", "Conference call ESG 2025")[1].startswith("not a report"))
+        self.assertTrue(self.j("https://www.acme.com/bonds/2023/Sustainability-Linked-Finance-Framework.pdf",
+                               "Sustainability-Linked Finance Framework 2023")[1].startswith("not a report"))
 
 
 if __name__ == "__main__":

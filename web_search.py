@@ -69,7 +69,7 @@ NOT_COMPANY = {"squarespace.com", "wixstatic.com", "wix.com", "website-files.com
 NOT_A_REPORT = re.compile(r"press[ _-]?release|comunicado|communiqu|presentation|conference[ _-]?call|earnings|"
                           r"prospectus|glossary|questionnaire|consultation|memo\b|tender|factsheet|fact[ _-]sheet|"
                           r"basis[ _-]of[ _-]reporting|policy|\bq[1-4]\b|\b[1-4]q\d\d|interim|half[ _-]?year|"
-                          r"quarterly|webcast|invitation|agenda|minutes|newsletter", re.I)
+                          r"quarterly|webcast|invitation|agenda|minutes|newsletter|framework|grundsatzerkl", re.I)
 
 
 FAMILIES = {
@@ -190,8 +190,7 @@ def judge(r, fam, years, domains, name, reg_domain):
     d = reg_domain(link)
     if d not in domains and d not in DOC_HOSTS:
         return False, f"another site ({d})"
-    if d in DOC_HOSTS and not any(t in (title + " " + (r.get("snippet") or "").lower() + " " + last)
-                                  for t in name_tokens(name)[:2]):
+    if d in DOC_HOSTS and not any(t in (title + " " + link.lower()) for t in name_tokens(name)[:2]):
         return False, f"shared host without the company's name ({d})"
     if ".pdf" not in link.lower() and d not in DOC_HOSTS:
         return False, "not a PDF"
