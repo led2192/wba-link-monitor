@@ -58,7 +58,7 @@ class Judge(unittest.TestCase):
     def test_rules(self):
         self.assertEqual(self.j("https://www.acme.com/docs/acme-sustainability-report-2025.pdf", "Sustainability Report 2025"),
                          (True, "sustainability 2025"))
-        self.assertTrue(self.j("https://s2.q4cdn.com/123/files/doc_downloads/2025/ESG.pdf", "ESG Report")[0])   # IR host
+        self.assertTrue(self.j("https://s2.q4cdn.com/123/files/doc_downloads/2025/ESG.pdf", "Acme ESG Report")[0])   # IR host, named
         self.assertEqual(self.j("https://www.other.com/acme-sr-2025.pdf", "Acme Sustainability Report 2025")[1], "another site (other.com)")
         self.assertEqual(self.j("https://www.acme.com/r/2023.pdf", "Sustainability Report 2023")[1], "not one of the missing years (2023)")
         self.assertEqual(self.j("https://www.acme.com/r/menu-2025.pdf", "Canteen menu 2025")[1], "does not name the report")
@@ -95,6 +95,40 @@ class Search(unittest.TestCase):
         api = Stub({})
         res = W.search_company(dict(self.F, sust_years="2023; 2024; 2025"), [], YEARS, api, reg_domain)
         self.assertEqual((api.asked, res["looked_for"]), ([], []))
+
+
+class DryRunCases(unittest.TestCase):
+    """Regression cases from the first dry run on 30 companies (1 Nov 2026)."""
+    def j(self, link, title, snippet="", fam="sustainability", years=(2025, 2024, 2023), domains=("acme.com",), name="Acme Group"):
+        return W.judge({"link": link, "title": title, "snippet": snippet}, fam, list(years), list(domains), name, reg_domain)
+
+    def test_not_the_companys_site(self):
+        # a monitored SBTi page made sciencebasedtargets.org look like the company's site
+        doms = W.company_domains({"company_name": "DMK", "website": "dmk.de"},
+                                 ["https://files.sciencebasedtargets.org/x", "https://dmk.de/a", "https://lobbymap.org/b",
+                                  "https://static1.squarespace.com/c", "https://psc.wb.gov.in/d", "https://www.dmk-group.com/e"], reg_domain)
+        self.assertEqual(doms, ["dmk.de", "dmk-group.com"])
+
+    def test_year_from_title_and_file_not_snippet_or_upload_folder(self):
+        self.assertEqual(self.j("https://www.acme.com/media/x/acme-global-sustainability-report-2019.pdf",
+                                "Acme global sustainability report 2019", snippet="... in 2025 we ...")[1],
+                         "not one of the missing years (2019)")
+        self.assertEqual(self.j("https://www.acme.com/wp-content/uploads/2025/07/Acme-Relatorio-Sustentavel-2020.pdf",
+                                "Relatório de Desenvolvimento Sustentável 2020")[1], "not one of the missing years (2020)")
+        self.assertTrue(self.j("https://www.acme.com/wp-content/uploads/2025/07/Acme-sustainability-report.pdf",
+                               "Acme Sustainability Report 2024")[0])
+
+    def test_shared_hosts_need_the_name(self):
+        self.assertFalse(self.j("https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0325/2025032501525.pdf",
+                                "ESG Report 2024")[0])
+        self.assertTrue(self.j("https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0325/2025032501525.pdf",
+                               "ACME GROUP - ESG Report 2024")[0])
+
+    def test_not_a_report_or_not_a_pdf(self):
+        self.assertEqual(self.j("https://www.acme.com/2023-ifpr-disclosures/", "2023 IFPR disclosures")[1], "not a PDF")
+        self.assertTrue(self.j("https://www.acme.com/files/Comunicado-de-Prensa-COP30-2025.pdf",
+                               "Comunicado de Prensa sustainability 2025")[1].startswith("not a report"))
+        self.assertTrue(self.j("https://www.acme.com/q/Conference_Call_1Q26_fv.pdf", "Conference call ESG 2025")[1].startswith("not a report"))
 
 
 if __name__ == "__main__":

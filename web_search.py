@@ -50,20 +50,33 @@ MAX_PER_FAMILY = 3                      # documents passed on per company and fa
 YEARS_BACK = 3                          # recent years: expected_year() and the two before it
 WRITE_PAUSE = 0.22
 
-# Hosts that serve many listed companies' documents from a domain that is not the company's own.
+# Hosts that serve many listed companies' documents from a domain that is not the company's own. A result
+# there is added only when its title or snippet carries the company's name (1 Nov 2026: an HKEXnews PDF is
+# named by a number, so without the name it can be any listed company's).
 DOC_HOSTS = {"q4cdn.com", "hkexnews.hk", "mziq.com", "sitecorecloud.io", "cision.com", "globenewswire.com",
-             "annualreports.com", "amazonaws.com", "cloudfront.net", "azureedge.net", "sec.gov",
-             "cninfo.com.cn", "sse.com.cn", "szse.cn", "tdnet.info", "jpx.co.jp", "edinet-fsa.go.jp", "dart.fss.or.kr",
-             "bseindia.com", "nseindia.com", "londonstockexchange.com", "euronext.com", "asx.com.au"}
-# Shared hosts where a file may belong to any company: added only when the company's name is in it.
-NAME_CHECK_HOSTS = {"annualreports.com", "amazonaws.com", "cloudfront.net", "azureedge.net", "cision.com",
-                    "globenewswire.com"}
+             "amazonaws.com", "cloudfront.net", "azureedge.net", "sec.gov", "cninfo.com.cn", "sse.com.cn", "szse.cn",
+             "tdnet.info", "jpx.co.jp", "edinet-fsa.go.jp", "dart.fss.or.kr", "bseindia.com", "nseindia.com",
+             "londonstockexchange.com", "euronext.com", "asx.com.au"}
+# Domains that are never a company's own site, even when one of its monitored pages sits there (1 Nov 2026
+# dry run: a monitored SBTi page made sciencebasedtargets.org "the company's site", and its glossary was
+# passed on as an annual report): site builders, report archives of many companies, initiatives, governments.
+NOT_COMPANY = {"squarespace.com", "wixstatic.com", "wix.com", "website-files.com", "hubspotusercontent-na1.net",
+               "hubspotusercontent-eu1.net", "hubspot.com", "wordpress.com", "sciencebasedtargets.org", "lobbymap.org",
+               "responsibilityreports.com", "annualreports.com", "weps.org", "unglobalcompact.org", "cdp.net",
+               "globalreporting.org", "linkedin.com", "issuu.com", "yumpu.com", "scribd.com", "publicnow.com",
+               "marketscreener.com", "google.com", "youtube.com", "facebook.com", "x.com", "twitter.com"}
+# Words in a title or file name that mark a document that is not a report.
+NOT_A_REPORT = re.compile(r"press[ _-]?release|comunicado|communiqu|presentation|conference[ _-]?call|earnings|"
+                          r"prospectus|glossary|questionnaire|consultation|memo\b|tender|factsheet|fact[ _-]sheet|"
+                          r"basis[ _-]of[ _-]reporting|policy|\bq[1-4]\b|\b[1-4]q\d\d|interim|half[ _-]?year|"
+                          r"quarterly|webcast|invitation|agenda|minutes|newsletter", re.I)
+
 
 FAMILIES = {
     "sustainability": {
         "query": '(sustainability OR ESG OR CSR OR "non-financial" OR "impact report" OR responsibility)',
         "words": ["sustainab", "esg", "csr", "non-financial", "nonfinancial", "impact report", "responsib",
-                  "nachhaltig", "durabilit", "développement durable", "sostenib", "sustentab", "duurzaam",
+                  "nachhaltig", "durabilit", "développement durable", "sostenib", "sustent", "duurzaam",
                   "hållbar", "bærekraft", "bæredygtig", "vastuullisuus", "zrównoważon", "sürdürülebilir",
                   "integrated report", "可持续", "社会责任", "永續", "サステナビリティ", "統合報告", "지속가능"]},
     "annual": {
@@ -118,16 +131,22 @@ def in_gap(f):
 
 
 def company_domains(f, page_urls, reg_domain):
-    """The company's own registered domains: its website first, then those of its monitored pages
-    (most pages first), document hosts excluded. At most 4."""
+    """The company's own registered domains: its website, then the domains of its monitored pages whose name
+    shares a word with the company's name or the website's (most pages first). Never a document host or a
+    NOT_COMPANY domain, never a government one. At most 4."""
     out = []
     w = (f.get("website") or "").strip()
     if w:
         d = reg_domain(w if "://" in w else "https://" + w)
-        if d and d not in DOC_HOSTS:
+        if d and d not in DOC_HOSTS and d not in NOT_COMPANY:
             out.append(d)
+    tokens = set(name_tokens(f.get("company_name"))) | ({out[0].split(".")[0]} if out else set())
     for d, _ in collections.Counter(reg_domain(u) for u in page_urls if u).most_common():
-        if d and d not in out and d not in DOC_HOSTS and len(out) < 4:
+        if not d or d in out or d in DOC_HOSTS or d in NOT_COMPANY or re.search(r"\.gov(\.|$)|\.gob\.|\.gouv\.", d) or len(out) >= 4:
+            continue
+        label = d.split(".")[0]
+        parts = re.split(r"[-_]", label)
+        if any(label.startswith(t) or t in parts or (len(t) >= 5 and t in label) for t in tokens if len(t) >= 3):
             out.append(d)
     return out
 
@@ -149,19 +168,41 @@ def query(fam, years, domains=None, name=None):
     return f"{where} {FAMILIES[fam]['query']} {ys} filetype:pdf"
 
 
+def file_part(link):
+    """The address's last segment, decoded, and the address without folders named by an upload date
+    (/uploads/2025/07/, /files/2025-08/): those say when the file was put online, not the report's year."""
+    from urllib.parse import unquote, urlsplit
+    path = unquote(urlsplit(link).path)
+    last = path.rstrip("/").rsplit("/", 1)[-1]
+    folders = re.sub(r"/(?:20\d\d)[/-](?:0?[1-9]|1[0-2])(?=[/-])", "/", path.rsplit("/", 1)[0])
+    folders = re.sub(r"/20\d\d-\d\d-\d\d[-\d]*", "/", folders)
+    return last, folders
+
+
 def judge(r, fam, years, domains, name, reg_domain):
-    """(True, reason) when a search result is passed on, else (False, reason)."""
-    link, text = r.get("link") or "", " ".join([r.get("title") or "", r.get("snippet") or "", r.get("link") or ""]).lower()
+    """(True, reason) when a search result is passed on, else (False, reason). The report and its year are
+    read from the title and the file name, never from the snippet (1 Nov 2026 dry run: a 2019 report was
+    passed on as 2025 because the snippet named 2025)."""
+    link = r.get("link") or ""
+    title = (r.get("title") or "").lower()
+    last, folders = file_part(link)
+    last, folders = last.lower(), folders.lower()
     d = reg_domain(link)
     if d not in domains and d not in DOC_HOSTS:
         return False, f"another site ({d})"
-    if d in NAME_CHECK_HOSTS and not any(t in text for t in name_tokens(name)[:2]):
+    if d in DOC_HOSTS and not any(t in (title + " " + (r.get("snippet") or "").lower() + " " + last)
+                                  for t in name_tokens(name)[:2]):
         return False, f"shared host without the company's name ({d})"
-    if not any(w in text for w in FAMILIES[fam]["words"]):
+    if ".pdf" not in link.lower() and d not in DOC_HOSTS:
+        return False, "not a PDF"
+    if NOT_A_REPORT.search(title) or NOT_A_REPORT.search(last.replace("_", " ")):
+        return False, "not a report (" + NOT_A_REPORT.search(title + " " + last.replace("_", " ")).group(0) + ")"
+    named = title + " " + last + " " + folders
+    if not any(w in named for w in FAMILIES[fam]["words"]):
         return False, "does not name the report"
-    ys = years_in(text)
+    ys = years_in(title) | years_in(last) or years_in(folders)
     if not ys & set(years):
-        return False, "not one of the missing years" + (f" ({', '.join(str(y) for y in sorted(years_in(text))[-3:])})" if years_in(text) else "")
+        return False, "not one of the missing years" + (f" ({', '.join(str(y) for y in sorted(ys)[-3:])})" if ys else "")
     return True, f"{fam} {max(ys & set(years))}"
 
 
