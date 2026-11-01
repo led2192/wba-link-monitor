@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-01: Industry and region as fields on companies, loaded from the SDG2000 list
+The reader's accuracy differs by country (India 41%, Japan 64%, China 88%) and industry (chemicals 47%, utilities 88%), and the next steps (scale rules by country, a memory shared by companies of one industry) need those facts on every company. Chosen: three text fields on `companies` (wba_industry, isic_code, hq_region) loaded by a re-runnable script from the list committed in `data/`. Rejected: a lookup to a new companies-master table (one more table to keep in step, for three values that change once a year); reading the CSV at run time in each script (the fields are then invisible in Airtable views and filters). The script never overwrites hq_country, ownership or isin: those may carry hand corrections.
+
 ### 2026-11-01: A record of what the model reader read, so a stopped run is carried on
 The 1 Nov run (2022 to 2025, 8 shards) stopped at the 5-hour limit in every shard, and the reader always starts from the first company of its slice, so a second run would read the same companies again. Chosen: a `model_reads` table (company, attribute, year, when, found) and a skip of what was read in the last 30 days. Rejected: skipping years that already have a model reader row in attribute_values (a read that found nothing leaves no row, so those would be read again every run, and they are the costly ones); starting each run at a random company (no guarantee of covering the whole list). 30 days lets a run carry on for a month; `--fresh-days 0` reads everything again after a change to the reader.
 

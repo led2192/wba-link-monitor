@@ -1,0 +1,35 @@
+name: Load company master list
+
+# load_company_master.py: industry, ISIC class, region, country and ownership from WBA's SDG2000 list
+# (data/sdg2000_2025.csv) into the companies table. Re-runnable: run it again with a new file.
+on:
+  workflow_dispatch:
+    inputs:
+      csv:
+        description: "Path of the list in the repository"
+        default: "data/sdg2000_2025.csv"
+      commit:
+        description: "Write to companies (unticked = dry run)"
+        type: boolean
+        default: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Load
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          ARGS="--csv ${{ inputs.csv }}"
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          python load_company_master.py $ARGS
