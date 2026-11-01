@@ -34,6 +34,9 @@ on:
       limit:
         description: "companies per method (0 = all)"
         default: "0"
+      fresh_days:
+        description: "model reader: skip what was read in the last N days, so a run goes on where the last stopped (0 = read again)"
+        default: "30"
       shards:
         description: "parallel jobs, each taking a fixed slice of the companies (1 to 8). Each job reads for up to five hours and has its own cost limit."
         default: "1"
@@ -80,7 +83,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             ARGS="--limit 30 --methods sec,esef,model --companies PT_02083,PT_00646,PT_02801 --model-years 2024 --max-usd 0.3"
           else
-            ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }} --model-years ${{ inputs.model_years }} --max-usd ${{ inputs.max_usd }}"
+            ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }} --model-years ${{ inputs.model_years }} --max-usd ${{ inputs.max_usd }} --fresh-days ${{ inputs.fresh_days || '30' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
             [ -n "${{ inputs.companies }}" ] && ARGS="$ARGS --companies ${{ inputs.companies }}"
             [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"

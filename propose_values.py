@@ -286,11 +286,13 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     companies = companies[:a.limit] if a.limit else companies
     has_filing = {tuple(v.split("|")[:3]) for v in existing if v.split("|")[-1] in ("SEC XBRL", "ESEF XBRL")}
     full = json.load(open(os.path.join(HERE, "attributes.json"), encoding="utf-8"))
-    usage, got_rows, versions = collections.Counter(), [], []
+    usage, got_rows, versions, reads = collections.Counter(), [], [], []
     stop = False
     with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '90s'")
+        fresh = recent_reads(cur, companies, codes, getattr(a, "fresh_days", 0))
+        c["model reader: read in the last days, skipped"] = 0
         for wba in companies:
             for code in codes:
                 # Newest first: its report prints the earlier years as comparisons. A comparison figure no longer
@@ -308,6 +310,8 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                         break
                     if y in own:
                         c["model reader: year read in an earlier call"] += 1; continue
+                    if (wba, code, y) in fresh:            # a run that stopped at its time limit goes on from here
+                        c["model reader: read in the last days, skipped"] += 1; continue
                     if code == REVENUE and (wba, code, str(y)) in has_filing:
                         c["model reader: revenue left to the filing"] += 1; continue
                     c["model reader: asked"] += 1
@@ -324,6 +328,7 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                         c["model reader: errors"] += 1
                         conn.rollback(); cur.execute("set statement_timeout = '90s'")
                         continue
+                    reads.append((wba, code, y, any(e["year"] == y for e in got)))
                     for e in got:
                         versions.append((wba, code, e))                      # every figure found, kept in value_versions
                         if code == REVENUE and (wba, code, str(e["year"])) in has_filing:
@@ -349,6 +354,12 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
             except Exception as e:
                 conn.rollback()
                 c[f"model reader: versions not written ({type(e).__name__}: {str(e)[:100]})"] = 1
+        if getattr(a, "commit", False) and reads:
+            try:
+                c["model reader: reads recorded"] = write_reads(conn, reads, now)
+            except Exception as e:
+                conn.rollback()
+                c[f"model reader: reads not recorded ({type(e).__name__}: {str(e)[:100]})"] = 1
     docs = library_docs(H, base, [g["library_id"] for *_, g in got_rows] + [e["library_id"] for *_, e in versions])
     c["model reader: cost in USD (estimate)"] = round(cost(usage), 2)
     c["model reader: calls"] = usage["calls"]
@@ -363,6 +374,37 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
         c["model reader: restated in another report"] += 1 if f["restated"] else 0
         rows.append(f)
     return rows
+
+
+READS_SQL = """create table if not exists public.model_reads (
+  wba_id text not null, attribute text not null, year int not null, read_on timestamptz not null,
+  found boolean not null, primary key (wba_id, attribute, year))"""
+
+
+def recent_reads(cur, companies, codes, days):
+    """{(wba, code, year)} the model reader read in the last `days` days (model_reads), so a run that stopped
+    at its time limit is carried on by the next one instead of reading the same companies again (1 Nov 2026:
+    all 8 shards stopped at 5 hours and a second run would have started over). 0 days = read everything."""
+    if not days:
+        return set()
+    cur.execute("select to_regclass('public.model_reads')")
+    if not cur.fetchone()[0]:
+        return set()
+    cur.execute("select wba_id, attribute, year from public.model_reads where read_on > now() - make_interval(days => %s) "
+                "and wba_id = any(%s) and attribute = any(%s)", (int(days), list(companies), list(codes)))
+    return {(w, a, int(y)) for w, a, y in cur.fetchall()}
+
+
+def write_reads(conn, reads, now):
+    """Upsert one row per company, attribute and year read (found: the year's own figure was found)."""
+    rows = {(w, a, int(y)): (w, a, int(y), now, bool(f)) for w, a, y, f in reads}
+    cur = conn.cursor()
+    cur.execute(READS_SQL)
+    cur.executemany("insert into public.model_reads (wba_id, attribute, year, read_on, found) values (%s,%s,%s,%s,%s) "
+                    "on conflict (wba_id, attribute, year) do update set read_on = excluded.read_on, found = excluded.found",
+                    list(rows.values()))
+    conn.commit()
+    return len(rows)
 
 
 def version_id(wba, code, year, library_id, method):
@@ -425,6 +467,8 @@ def main():
     ap.add_argument("--max-usd", type=float, default=1.0, help="model reader: stop when the estimated cost reaches this")
     ap.add_argument("--budget", type=float, default=300, help="minutes: the model reader stops reading after this, "
                     "so what it read is still written before the job's limit (one answer takes about 15 to 20 s)")
+    ap.add_argument("--fresh-days", type=int, default=30, help="model reader: skip a company, attribute and year read "
+                    "in the last N days (0 = read again), so a run carries on where the last one stopped")
     ap.add_argument("--shard", default="", help="i/N: only the i-th of N slices of the companies (parallel jobs)")
     a = ap.parse_args()
     shard_i, shard_n = (int(x) for x in a.shard.split("/")) if a.shard else (1, 1)

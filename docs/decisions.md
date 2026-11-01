@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-01: A record of what the model reader read, so a stopped run is carried on
+The 1 Nov run (2022 to 2025, 8 shards) stopped at the 5-hour limit in every shard, and the reader always starts from the first company of its slice, so a second run would read the same companies again. Chosen: a `model_reads` table (company, attribute, year, when, found) and a skip of what was read in the last 30 days. Rejected: skipping years that already have a model reader row in attribute_values (a read that found nothing leaves no row, so those would be read again every run, and they are the costly ones); starting each run at a random company (no guarantee of covering the whole list). 30 days lets a run carry on for a month; `--fresh-days 0` reads everything again after a change to the reader.
+
 ### 2026-10-31: A Scope 2 figure with no basis goes under location-based, once
 Many reports print one Scope 2 figure without saying location- or market-based. The reader proposed it under both attributes, and the reviewer rejected the market-based copy: we cannot know which it is. Chosen: file it under location-based only (the GHG Protocol's default method, and what a company reports when it buys no contractual instruments), say so in `detail`, and leave market-based empty. Rejected: under both (a duplicate a reviewer has to reject every time); under neither (loses a figure that is usually the location-based one). The reader report measures the cost on the market-based answers; if the validated answers file such figures under market-based too, the rule moves there.
 

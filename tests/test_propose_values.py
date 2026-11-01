@@ -142,6 +142,41 @@ class Propose(unittest.TestCase):
         self.assertIn("pages of the 2025 report, where it is a comparison figure for 2023", d)
         self.assertNotIn("comparison", next(r for r in rows if r["year"] == 2025)["detail"])
 
+    def test_a_run_goes_on_where_the_last_one_stopped(self):
+        # 1 Nov 2026: all 8 shards stopped at their 5-hour limit; a second run must not read the same companies again
+        import types, collections, psycopg, extract_eval
+        sql = []
+        class Cur:
+            def execute(self, q, p=None): sql.append(q)
+            def fetchone(self): return ("public.model_reads",)
+            def fetchall(self): return [("PT_1", "GMC_00001.1", 2025)]
+        class Conn:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def cursor(self): return Cur()
+        asked = []
+        def fake(cur, wba, year, attr, spec, usage, known=None):
+            asked.append((wba, year)); return []
+        real = (psycopg.connect, extract_eval.read_values, P.library_docs)
+        psycopg.connect = lambda *a, **k: Conn(); extract_eval.read_values = fake; P.library_docs = lambda *a: {}
+        os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
+        spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number", "unit_family": "tco2e"}}
+        try:
+            a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024,2025", companies="PT_1,PT_2", limit=0,
+                                      max_usd=1.0, budget=300, fresh_days=30)
+            c = collections.Counter()
+            P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c)
+            self.assertEqual(asked, [("PT_1", 2024), ("PT_2", 2025), ("PT_2", 2024)])
+            self.assertEqual(c["model reader: read in the last days, skipped"], 1)
+            asked.clear()
+            a.fresh_days = 0                                   # 0: read everything again, the table is not asked
+            n = len(sql)
+            P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, collections.Counter())
+            self.assertEqual(len(asked), 4)
+            self.assertFalse(any("model_reads" in q for q in sql[n:]))
+        finally:
+            psycopg.connect, extract_eval.read_values, P.library_docs = real
+
     def test_a_superseded_row_proposed_again_is_proposed(self):
         # 30 Oct 2026: filings.xbrl.org did not answer for 56 companies and their 270 ESEF rows were superseded
         rows = [P.row("A", "GMC_00048.1", "Revenue", 2024, FACT, "ESEF XBRL", "u", {}, None, NOW)]
