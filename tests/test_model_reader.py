@@ -164,6 +164,11 @@ class ModelReader(unittest.TestCase):
         self.assertEqual(M.read_with_model(g, mkt, page, X.collections.Counter(), Sess((200, reply)))["value"], 646000.0)
         self.assertIn('"basis"', M.prompt(g, mkt, page)); self.assertNotIn('"basis"', M.prompt(G, REV, PAGES))
 
+    def test_reading_notes_reach_the_prompt(self):
+        capex = SPEC["attributes"]["GMC_00064.1"]
+        self.assertIn("Notes: Reports rarely call this", M.prompt(G, capex, PAGES))
+        self.assertNotIn("Notes:", M.prompt(G, REV, PAGES))
+
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)
         self.assertAlmostEqual(M.cost(u), 0.10 + 0.05)
