@@ -157,6 +157,18 @@ create table if not exists public.value_versions (
 create index if not exists value_versions_company on public.value_versions (wba_id, attribute, year);
 alter table public.value_versions enable row level security;
 
+-- What the model reader has read, one row per company x attribute x year (propose_values.py, since 1 Nov 2026),
+-- so a run that stopped at its time limit is carried on by the next one (--fresh-days, 30 by default).
+create table if not exists public.model_reads (
+  wba_id    text not null,
+  attribute text not null,
+  year      int  not null,
+  read_on   timestamptz not null,
+  found     boolean not null,            -- the year's own figure was found
+  primary key (wba_id, attribute, year)
+);
+alter table public.model_reads enable row level security;
+
 -- Which store files are already in the database, so a run only loads what is new.
 create table if not exists public.load_log (
   name       text primary key,
