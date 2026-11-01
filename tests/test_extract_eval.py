@@ -127,7 +127,46 @@ class QueryCap(unittest.TestCase):
 
 
 @unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres (after tests/test_load_supabase.py)")
+class Neighbours(unittest.TestCase):
+    """1 Nov 2026: a page next to a well-scored page scores higher, less so two pages away."""
+    def test_scores_spread_to_the_next_pages_only(self):
+        rows = [(4.0, "L", 10, "a", None), (0.5, "L", 11, "b", None), (0.5, "L", 12, "c", None), (0.5, "L", 15, "d", None),
+                (0.5, "M", 11, "e", None)]
+        out = {(lid, p): sc for sc, lid, p, *_ in X.with_neighbours(rows)}
+        self.assertAlmostEqual(out[("L", 11)], 0.5 + X.NEIGHBOUR_WEIGHT * 1.0)            # next page: the whole share
+        self.assertAlmostEqual(out[("L", 12)], 0.5 + X.NEIGHBOUR_WEIGHT * 0.4)            # two pages away: less
+        self.assertAlmostEqual(out[("L", 15)], 0.5 + X.NEIGHBOUR_WEIGHT * 0.0)            # five pages away: nothing
+        self.assertAlmostEqual(out[("M", 11)], 0.5)                                      # another document: nothing
+        self.assertAlmostEqual(out[("L", 10)], 4.0 + X.NEIGHBOUR_WEIGHT * 0.125)          # its own neighbour's share, from the scores before
+        self.assertEqual(X.with_neighbours([]), [])
+
+    def test_the_model_is_told_which_pages_follow_each_other(self):
+        import model_reader as M
+        notes = M.adjacent_notes([("L", 40, "x"), ("M", 3, "y"), ("L", 41, "z"), ("L", 43, "w")])
+        self.assertEqual(notes, ["P3 is the page right after P1 in the same document: a table may run from one to the other."])
+        self.assertEqual(M.adjacent_notes([("L", 1, "x")]), [])
+
+
 class AgainstPostgres(unittest.TestCase):
+    def test_a_table_that_runs_on_to_the_next_page_is_found(self):
+        # 1 Nov 2026: the label and the year columns are on page 50, the Scope 1 row on page 51, which carries
+        # no label: only its neighbour brings it in
+        import psycopg
+        with psycopg.connect(os.environ["PG_TEST_URL"]) as c:
+            if not c.execute("select to_regclass('public.pages')").fetchone()[0]:
+                self.skipTest("run tests/test_load_supabase.py first")
+            c.execute("delete from public.pages where library_id like 'xnb%'"); c.execute("delete from public.documents where library_id like 'xnb%'")
+            c.execute("insert into public.documents (library_id, wba_id, company, year, doc_type) values ('xnb1', 'PT_09995', 'Nbco', 2024, 'Sustainability Report')")
+            rows = [(p, f"Nbco Sustainability Report 2024\nNarrative on page {p}.") for p in range(1, 80) if p not in (50, 51)]
+            rows.append((50, "Environmental performance\nScope 1 emissions by source (tCO2e) 2024 2023\nEnergy consumption (MWh) 12,000 11,000"))
+            rows.append((51, "Total 4,074 4,500\nStationary combustion 3,000 3,300\nMobile combustion 1,074 1,200\nWater (m3) 1,200 1,100"))
+            c.cursor().executemany("insert into public.pages (library_id, page, body) values ('xnb1', %s, %s)", rows)
+            r = X.evaluate(c.cursor(), {"wba": "PT_09995", "year": 2024, "value": 4074.0, "unit": "tCO2e"}, A["GMC_00001.1"], SPEC)
+            self.assertTrue(r["in_docs"])
+            self.assertTrue(r["neighbour_hit"], "page 51 came in as the neighbour of page 50")
+            self.assertTrue(r["in_pages"] and r["neighbour_kept"])
+            c.execute("delete from public.pages where library_id like 'xnb%'"); c.execute("delete from public.documents where library_id like 'xnb%'")
+
     def test_one_answer_end_to_end(self):
         import psycopg
         with psycopg.connect(os.environ["PG_TEST_URL"]) as c:

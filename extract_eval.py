@@ -41,6 +41,9 @@ MODEL_PAGES = 8                      # pages given to the model reader: half by 
 MORE_TERMS_TIMEOUT = "4s"            # the second query (an attribute's more_terms) may take this long, else it is skipped
 MORE_POOL = 30                       # pages it may add (bodies are read for these only)
 INDEX_WEIGHT = 1.5                   # page score added to a page the report's own content index cites (content_index.py)
+NEIGHBOUR_WEIGHT = 0.5               # page score added for a well-scored page next to this one (neighbours, 1 Nov 2026)
+NEIGHBOUR_DECAY = {1: 1.0, 2: 0.4}   # share of the neighbour's score that reaches this page, by distance in pages
+NEIGHBOUR_TOP = 10                   # the best pages whose missing next and previous pages are fetched and scored
 from company_memory import MEMORY_WEIGHT  # page score added to a page carrying the line the company used another year
 BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
@@ -306,6 +309,48 @@ def year_documents(cur, wba, year, attr):
     return docs, weight
 
 
+def neighbour_pages(cur, rows, have, n=NEIGHBOUR_TOP):
+    """[(library_id, page, body, 0.0)]: the page before and after each of the n best-scored rows that is not
+    in the pool yet. A table often runs on to the next page, and the report's index names the page a
+    section starts on while the figure sits on the one after; neither page carries the label, so the word
+    index never returns it (1 Nov 2026). rows: [(score, library_id, page, ...)]."""
+    want = set()
+    for _, lid, page, *_ in sorted(rows, key=lambda r: -r[0])[:n]:
+        for q in (page - 1, page + 1):
+            if q >= 1 and (lid, q) not in have:
+                want.add((lid, q))
+    if not want:
+        return []
+    cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and page = any(%s)",
+                (sorted({l for l, _ in want}), sorted({p for _, p in want})))
+    return [(lid, page, body, 0.0) for lid, page, body in cur.fetchall() if (lid, page) in want]
+
+
+def with_neighbours(rows, weight=None, decay=None):
+    """The rows with NEIGHBOUR_WEIGHT x the best neighbour's share added: a page next to a well-scored page
+    of the same document scores higher, less so two pages away (what lies at page x is more like what lies
+    at x+1 than at x+30). Shares are of the best score in the pool, from the scores before this step, so
+    nothing travels further than two pages. rows: [(score, library_id, page, body, top)]."""
+    weight = NEIGHBOUR_WEIGHT if weight is None else weight
+    decay = decay or NEIGHBOUR_DECAY
+    if not rows or not weight:
+        return rows
+    top = max(r[0] for r in rows)
+    if top <= 0:
+        return rows
+    base = {(r[1], r[2]): r[0] for r in rows}
+    out = []
+    for r in rows:
+        best = 0.0
+        for d, share in decay.items():
+            for q in (r[2] - d, r[2] + d):
+                sc = base.get((r[1], q))
+                if sc:
+                    best = max(best, sc / top * share)
+        out.append((r[0] + weight * best,) + tuple(r[1:]))
+    return out
+
+
 def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None):
     """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents,
     plus the pages the documents' own content index cites for the attribute (content_index.py, 31 Oct 2026),
@@ -329,14 +374,19 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None):
         found += [(lid, page, body, 0.0) for lid, page, body in cur.fetchall() if (lid, page) in missing]
     if memory:
         found += company_memory.memory_pages(cur, ids, memory, {(lid, page) for lid, page, _, _ in found})
-    rows = []
-    for lid, page, body, rk in found:
+    def score(lid, page, body, rk):
         cs = candidates(body, year, attr, spec)
         top = max(cs, key=lambda c: c[0]) if cs else None
         sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []) + attr.get("more_terms", []),
                         attr.get("exclude", []), weight.get(lid, 0), cited.get((lid, page), 0.0), company_memory.boost(body, memory))
-        rows.append((sc, lid, page, body, top))
-    return rows
+        return (sc, lid, page, body, top)
+    rows = [score(lid, page, body, rk) for lid, page, body, rk in found]
+    # the pages next to the best ones join the pool (a table running on, the page after an index entry)
+    rows += [score(lid, page, body, rk) for lid, page, body, rk in
+             neighbour_pages(cur, rows, {(lid, page) for lid, page, _, _ in found})]
+    if info is not None:
+        info["neighbours"] = {(lid, page) for _, lid, page, _, _ in rows[len(found):]}
+    return with_neighbours(rows)
 
 
 STOPWORDS = {"in", "of", "the", "and", "for", "to", "a", "an", "on"}
@@ -460,6 +510,9 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     r["more_terms"] = info.get("more_terms")
     r["index_cited"] = bool(info.get("cited"))                       # the report's own index named a page
     r["index_hit"] = any((lid, page) in info.get("cited", {}) for lid, page, _ in holding)
+    r["neighbour_pages"] = len(info.get("neighbours", ()))
+    r["neighbour_hit"] = any((lid, page) in info.get("neighbours", ()) for lid, page, _ in holding)   # the number sits on a page brought in as a neighbour
+    r["neighbour_kept"] = any((lid, page) in info.get("neighbours", ()) and any(found_on(body, v) for v, _, _ in forms) for _, lid, page, body, _ in pages)
     if r["in_docs"] and not r["in_pages"]:
         r["miss"] = retrieval_miss(holding, rows, forms)
     # each kept page's best rule candidate, used by the rule reader and to pick the model's pages
@@ -553,6 +606,7 @@ def main():
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
             s["index cited"] += bool(r.get("index_cited")); s["index hit"] += bool(r.get("index_hit"))
+            s["neighbour pages"] += r.get("neighbour_pages", 0); s["neighbour hit"] += bool(r.get("neighbour_hit")); s["neighbour kept"] += bool(r.get("neighbour_kept"))
             if r.get("memory"):
                 s["memory"] += 1; s["memory in_pages"] += bool(r["in_pages"]); s["memory right"] += bool(r["right"])
             else:
@@ -634,6 +688,15 @@ def main():
     for c in codes:
         s = stats[c]
         md.append(f"| {c} {spec['attributes'][c]['name']} | {s['index cited']:,} | {s['index hit']:,} | {s['index hit'] / (s['in_docs'] or 1):.0%} |")
+    md.append("")
+    md += ["Neighbours (1 Nov 2026): the page before and after each of the 10 best-scored pages joins the pool, and a page next to a "
+           "well-scored page scores higher. Answers where the validated number sits on a page that came in only as a neighbour, "
+           "and where that page was kept among the 25:", "",
+           "| Attribute | Neighbour pages added per answer | Number on a neighbour page | Kept among the ranked pages |",
+           "| --- | --: | --: | --: |"]
+    for c in codes:
+        s = stats[c]
+        md.append(f"| {c} {spec['attributes'][c]['name']} | {s['neighbour pages'] / (s['answers'] or 1):.1f} | {s['neighbour hit']:,} | {s['neighbour kept']:,} |")
     md.append("")
     md += ["The company's memory (company_memory.py): answers where the validated value for another year was found in that "
            "year's documents, so the line the company printed it on was searched for and boosted this year"
