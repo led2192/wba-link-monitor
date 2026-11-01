@@ -293,15 +293,20 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
         cur.execute("set statement_timeout = '90s'")
         for wba in companies:
             for code in codes:
-                covered = set()                      # years this company and attribute already have from an earlier call
-                for y in sorted(years, reverse=True):    # newest first: its report prints the earlier years as comparisons
+                # Newest first: its report prints the earlier years as comparisons. A comparison figure no longer
+                # stops the year from being read: on the 31 Oct 2026 run it matched the validated answer 66% of the
+                # time against 76% for a figure from the year's own read (restatements; the analysts take the
+                # figure as first reported). A year asked is read; its own figure replaces the comparison one,
+                # which stays only when the year's read finds nothing.
+                own, picked = set(), {}                  # years with a figure from their own read; year -> entry
+                for y in sorted(years, reverse=True):
                     if cost(usage) >= a.max_usd:
                         c["model reader: stopped at the cost limit"] = 1; stop = True
                         break
                     if time.time() - T0 > a.budget * 60:          # leave time to write what was read
                         c["model reader: stopped at the time budget"] = 1; stop = True
                         break
-                    if y in covered:
+                    if y in own:
                         c["model reader: year read in an earlier call"] += 1; continue
                     if code == REVENUE and (wba, code, str(y)) in has_filing:
                         c["model reader: revenue left to the filing"] += 1; continue
@@ -320,11 +325,16 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                     for e in got:
                         if code == REVENUE and (wba, code, str(e["year"])) in has_filing:
                             c["model reader: revenue left to the filing"] += 1; continue
-                        if e["year"] in covered:
+                        if e["year"] in own or (e["year"] != y and e["year"] in picked):
                             continue
-                        covered.add(e["year"])
-                        c["model reader: values for the year asked" if e["year"] == y else "model reader: values for other years"] += 1
-                        got_rows.append((wba, code, e["year"], e))
+                        if e["year"] == y:
+                            if y in picked:
+                                c["model reader: comparison figure replaced by the year's own read"] += 1
+                            own.add(y)
+                        picked[e["year"]] = e
+                for yy, e in sorted(picked.items(), reverse=True):
+                    c["model reader: values for the year asked" if yy in own else "model reader: values for other years"] += 1
+                    got_rows.append((wba, code, yy, e))
                 if stop:
                     break
             if stop:

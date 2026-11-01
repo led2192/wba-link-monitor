@@ -106,8 +106,9 @@ class Propose(unittest.TestCase):
         finally:
             psycopg.connect, extract_eval.read_values, P.T0 = real
 
-    def test_one_call_covers_the_other_years(self):
-        # 31 Oct 2026: a 2025 read returns 2025, 2024 and 2023; 2024 is not read again, 2023 is written as history
+    def test_a_year_asked_is_read_and_its_own_figure_wins(self):
+        # 31 Oct 2026: a 2025 read returns 2025, 2024 and 2023. 1 Nov 2026: comparison figures matched the validated
+        # answer less often (66% against 76%), so 2024 is still read and its own figure replaces the comparison one
         import types, collections, psycopg, extract_eval
         class Cur:
             def execute(self, *a): pass
@@ -119,7 +120,7 @@ class Propose(unittest.TestCase):
         def fake(cur, wba, year, attr, spec, usage):
             asked.append(year)
             return [dict(value=v, printed=v, scale=1, library_id="L", page=1, unit="tCO2e", year=y, column=str(y), asked=year)
-                    for y, v in ((year, 100.0), (year - 1, 90.0), (year - 2, 80.0))]
+                    for y, v in ((year, 100.0 + year), (year - 1, 90.0), (year - 2, 80.0))]
         real = (psycopg.connect, extract_eval.read_values, P.library_docs)
         psycopg.connect = lambda *a, **k: Conn(); extract_eval.read_values = fake; P.library_docs = lambda *a: {}
         os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
@@ -130,13 +131,15 @@ class Propose(unittest.TestCase):
             rows = P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c)
         finally:
             psycopg.connect, extract_eval.read_values, P.library_docs = real
-        self.assertEqual(asked, [2025])                                             # newest first, 2024 never asked
-        self.assertEqual(sorted(r["year"] for r in rows), [2023, 2024, 2025])
-        self.assertEqual((c["model reader: year read in an earlier call"], c["model reader: values for other years"]), (1, 2))
-        d = next(r for r in rows if r["year"] == 2024)["detail"]
+        self.assertEqual(asked, [2025, 2024])                                       # newest first, 2024 still asked
+        self.assertEqual(sorted(r["year"] for r in rows), [2022, 2023, 2024, 2025])
+        self.assertEqual(next(r for r in rows if r["year"] == 2024)["value"], 2124.0)   # its own read, not the comparison 90
+        self.assertEqual(c["model reader: comparison figure replaced by the year's own read"], 1)
+        self.assertEqual((c["model reader: values for the year asked"], c["model reader: values for other years"]), (2, 2))
+        d = next(r for r in rows if r["year"] == 2023)["detail"]
         got = dict(value=1.0, printed=1.0, scale=1, library_id="L", page=1, unit="tCO2e", basis_note="The report gives one Scope 2 figure without saying location- or market-based; it is filed under location-based.")
         self.assertIn("filed under location-based", P.model_row("PT_2", "GMC_00002.1", {"name": "S2"}, 2024, got, {}, {}, None, NOW)["detail"])
-        self.assertIn("pages of the 2025 report, where it is a comparison figure for 2024", d)
+        self.assertIn("pages of the 2025 report, where it is a comparison figure for 2023", d)
         self.assertNotIn("comparison", next(r for r in rows if r["year"] == 2025)["detail"])
 
     def test_a_superseded_row_proposed_again_is_proposed(self):

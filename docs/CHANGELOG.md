@@ -2,6 +2,9 @@
 
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
+## November 2026
+- 2026-11-01 Model reader, the year's own figure first: a year asked is read even when a newer report already gave it as a comparison column, and its own figure replaces the comparison one (on the 31 Oct run comparison figures matched the validated answer 66% of the time against 76% for the year's own read). Comparison figures stay for years not asked and where the year's read finds nothing; new counter "comparison figure replaced by the year's own read" (#PR)
+
 ## October 2026
 - 2026-10-31 Scope 2, one figure under one attribute: the model says what the page calls the figure (location-based, market-based, not stated); a figure the report gives without naming a basis is filed under location-based only, with a note in `detail`, and never under market-based; a figure the page calls the other basis is never taken. The reviewer rejected a duplicate on 30 Oct. The variant lives in `attributes.json` (#158)
 - 2026-10-31 Reader retrieval, the report's own index: `content_index.py` finds the GRI or ESRS content index and table of contents among the year's documents, reads the printed pages their rows cite for the attribute (codes and words in `attributes.json`, e.g. 305-1 and "direct (scope 1)"), turns them into PDF pages with the document's own offset (the mode of pdf page minus the page number printed at the top or bottom; the usual offsets at half weight when unknown) and brings them into the ranking with a boost of 1.5, also when the page carries no label (42 of the 46 pages missed on 29 Oct had none). The reader report says for how many answers the index named a page and how often that page printed the number (#155)
