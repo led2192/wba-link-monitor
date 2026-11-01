@@ -84,7 +84,10 @@ jobs:
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
             [ -n "${{ inputs.companies }}" ] && ARGS="$ARGS --companies ${{ inputs.companies }}"
             [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
-            [ "${{ matrix.shard }}" != "1/1" ] && ARGS="$ARGS --shard ${{ matrix.shard }}"
+            if [ "${{ matrix.shard }}" != "1/1" ]; then
+              ARGS="$ARGS --shard ${{ matrix.shard }}"
+              export QA_RUN_PART="shard$(echo '${{ matrix.shard }}' | tr / -)"   # one Pipeline QA row per shard, not one overwritten by each
+            fi
           fi
           python propose_values.py $ARGS
       - name: Keep the result

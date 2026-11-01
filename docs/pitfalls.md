@@ -143,3 +143,6 @@ The first `attribute_values` rows (29 Oct 2026) pointed SEC values at the filing
 ## A hyphen is a different word to the word index
 "location-based" and "location based" are different words to Postgres full-text search, and reports print both. The reader's labels were written with hyphens, so the pages printing "Scope 2 location based" never matched (10 of 11 missed Scope 2 location-based pages, 29 Oct 2026). Labels are now searched in both spellings, and matched on the page with either a hyphen or a space between the words.
 
+## Parallel jobs of one run share a run key
+
+The four shards of Propose values on 31 Oct 2026 ran under one GitHub run id, so each shard's `qa.Run.finish()` updated the same Pipeline QA row and only the last shard's counters were kept (1,116 proposals of about four times that). A workflow that runs a script in a matrix must set `QA_RUN_PART` per job; the Propose values workflow sets it to `shard1-4`, `shard2-4` and so on.
