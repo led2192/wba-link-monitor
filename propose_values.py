@@ -387,12 +387,18 @@ def recent_reads(cur, companies, codes, days):
     all 8 shards stopped at 5 hours and a second run would have started over). 0 days = read everything."""
     if not days:
         return set()
-    cur.execute("select to_regclass('public.model_reads')")
-    if not cur.fetchone()[0]:
-        return set()
-    cur.execute("select wba_id, attribute, year from public.model_reads where read_on > now() - make_interval(days => %s) "
-                "and wba_id = any(%s) and attribute = any(%s)", (int(days), list(companies), list(codes)))
-    return {(w, a, int(y)) for w, a, y in cur.fetchall()}
+    out = set()
+    # value_versions.read_for is the year asked: reads that found a figure before model_reads existed (the 1 Nov run)
+    for table, sql in (("model_reads", "select wba_id, attribute, year from public.model_reads where read_on > now() - "
+                        "make_interval(days => %s) and wba_id = any(%s) and attribute = any(%s)"),
+                       ("value_versions", "select distinct wba_id, attribute, read_for from public.value_versions where "
+                        "method = 'model reader' and read_for is not null and last_seen > now() - make_interval(days => %s) "
+                        "and wba_id = any(%s) and attribute = any(%s)")):
+        cur.execute("select to_regclass(%s)", (f"public.{table}",))
+        if cur.fetchone()[0]:
+            cur.execute(sql, (int(days), list(companies), list(codes)))
+            out |= {(w, a, int(y)) for w, a, y in cur.fetchall()}
+    return out
 
 
 def write_reads(conn, reads, now):
