@@ -307,7 +307,9 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                         c["model reader: revenue left to the filing"] += 1; continue
                     c["model reader: asked"] += 1
                     try:
-                        got = read_values(cur, wba, y, spec[code], full, usage)
+                        # the validated answers of the company's other years: the company's memory (company_memory.py)
+                        known = {yy: g["value"] for (w, cc, yy), g in gold.items() if w == wba and cc == code and yy != y and g.get("value")}
+                        got = read_values(cur, wba, y, spec[code], full, usage, known)
                     except Exception as e:
                         if type(e).__name__ == "ModelRefused":
                             raise
@@ -332,6 +334,7 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     docs = library_docs(H, base, [g["library_id"] for *_, g in got_rows])
     c["model reader: cost in USD (estimate)"] = round(cost(usage), 2)
     c["model reader: calls"] = usage["calls"]
+    c["model reader: reads with a memory from another year"] = usage["with a memory from another year"]
     return [model_row(wba, code, spec[code], y, got, docs.get(got["library_id"], {}), gold, rec.get(wba), now)
             for wba, code, y, got in got_rows]
 

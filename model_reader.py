@@ -57,6 +57,7 @@ def prompt(g, attr, pages):
              f"Period: {attr['period']}." if attr.get("period") else "",
              f"Scope: {attr['scope']}." if attr.get("scope") else "",
              "Take the figure for that year, for the whole company or group, not a segment, a region or a target.",
+             g.get("hint") or "",
              (f"The figure wanted is the {attr['variant']['wanted']} one. Say in \"basis\" what the page calls the figure: "
               f"\"{attr['variant']['wanted']}\", \"{attr['variant']['other']}\", or \"not stated\" when the page gives one Scope 2 "
               f"figure without saying which. Never give a figure the page calls {attr['variant']['other']}.") if attr.get("variant") else "",

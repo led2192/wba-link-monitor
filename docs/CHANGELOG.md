@@ -2,6 +2,9 @@
 
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
+## November 2026
+- 2026-11-01 The company's memory: `company_memory.py` takes the validated answer of the company's nearest other year, finds the page of that year's documents that prints it, and keeps the line it sits on (its words, numbers removed), the document type and the scale. This year's pages that carry the line join the reader's pool with a page-score boost of 1.0, and the model reader is told how the company printed the figure that year (never the value). The year being read is never used. Used by Propose values and by the Generic reader, whose report compares answers with and without a memory (`--memory off` switches it off) (#PR)
+
 ## October 2026
 - 2026-10-31 Scope 2, one figure under one attribute: the model says what the page calls the figure (location-based, market-based, not stated); a figure the report gives without naming a basis is filed under location-based only, with a note in `detail`, and never under market-based; a figure the page calls the other basis is never taken. The reviewer rejected a duplicate on 30 Oct. The variant lives in `attributes.json` (#158)
 - 2026-10-31 Reader retrieval, the report's own index: `content_index.py` finds the GRI or ESRS content index and table of contents among the year's documents, reads the printed pages their rows cite for the attribute (codes and words in `attributes.json`, e.g. 305-1 and "direct (scope 1)"), turns them into PDF pages with the document's own offset (the mode of pdf page minus the page number printed at the top or bottom; the usual offsets at half weight when unknown) and brings them into the ranking with a boost of 1.5, also when the page carries no label (42 of the 46 pages missed on 29 Oct had none). The reader report says for how many answers the index named a page and how often that page printed the number (#155)
