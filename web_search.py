@@ -27,9 +27,9 @@ A result is passed on only when all three hold:
 Passed documents go to companies.research_link, so the inbox (inbox.py, every 30 minutes) adds them
 with its duplicate and tombstone guards, attaches the file and has it typed and dated like any other
 document, marked as research. At most MAX_PER_FAMILY per family and company. Results on another site
-are not added on the quick test, but they are opened (up to 4 per family): when the first pages carry the
-company's name, the report and a missing year, and the file has at least 8 pages, the file is passed on as
-well (a company's report often sits on a CDN, a group site or an archive). The rest are listed in
+are not added on the quick test, but they are opened (up to 4 per family): when the company's name is on
+the first 15 pages or in the file's properties, the report and a missing year on the first pages, and the
+file has at least 8 pages, it is passed on as well (a company's report often sits on a CDN, a group site or an archive). The rest are listed in
 web_search_note with the reason.
 
 Modes (web_searched_on says when a company was last searched):
@@ -265,30 +265,36 @@ def fold(t):
 
 
 def cover_check(text, pages, f, fam, years):
-    """(True, why) when the first pages of a file show it is the company's report of a missing year: the
-    company's name (all its name words, or the whole name), the report family and a missing year on them,
-    and at least MIN_PAGES pages. The test for a file found on another site or with no year in its title."""
-    t = " " + fold(text) + " "
+    """(True, why) when a file's first pages show it is the company's report of a missing year: the company's
+    name (all its name words, or the whole name), the report family and a missing year, and at least MIN_PAGES
+    pages. Not the cover alone (the owner's warning, 1 Nov 2026: a cover may carry only a logo): `text` is
+    {"front": pages 1-3, "more": pages 4-15, "meta": the PDF's title, author and subject, "file": its name},
+    or a plain string for pages 1-3. The name may be anywhere in those; the report and the year in the first
+    five pages or the metadata (deeper pages print every comparison year, so they would prove nothing)."""
+    if isinstance(text, str):
+        text = {"front": text}
+    front, more, meta, fname = (text.get(k) or "" for k in ("front", "more", "meta", "file"))
     tokens = name_tokens(f.get("company_name"))
     whole = fold(f.get("company_name"))
-    if not tokens or not (f" {whole} " in t or all(f" {tok} " in t for tok in tokens)):
-        return False, "the company's name is not on the cover"
+    anywhere = " " + fold(" ".join([front, more, meta, fname])) + " "
+    if not tokens or not (f" {whole} " in anywhere or all(f" {tok} " in anywhere for tok in tokens)):
+        return False, "the company's name is not on its first 15 pages or in its properties"
     if pages is not None and pages < MIN_PAGES:
         return False, f"{pages} pages, not a report"
-    words = [fold(w) for w in FAMILIES[fam]["words"]]
-    if not any(w and w in t for w in words) and not any(w in (text or "").lower() for w in FAMILIES[fam]["words"]):
-        return False, "the cover does not name the report"
-    ys = years_in(text[:3000])
+    head = " ".join([front, more[:6000], meta, fname])
+    if not any(w in head.lower() or (fold(w) and fold(w) in " " + fold(head) + " ") for w in FAMILIES[fam]["words"]):
+        return False, "its first pages do not name the report"
+    ys = years_in(" ".join([front[:3000], meta, fname])) or years_in(more[:6000])
     latest = max(years)
     if latest == expected_year() and latest + 1 in ys:
         ys = ys | {latest}
     if not ys & set(years):
-        return False, "no missing year on the cover"
+        return False, "no missing year on its first pages"
     return True, f"{fam} {max(ys & set(years))}, checked on the file's first pages"
 
 
 def open_cover(link, sess=None):
-    """(text of the first 3 pages, page count) or (None, reason)."""
+    """({"front", "more", "meta", "file"}, page count) or (None, reason)."""
     import io, requests
     from pypdf import PdfReader
     sess = sess or requests.Session()
@@ -310,8 +316,21 @@ def open_cover(link, sess=None):
                 reader.decrypt("")
             except Exception:
                 pass
-        text = "\n".join((p.extract_text() or "") for p in reader.pages[:3])
-        return text, len(reader.pages)
+
+        def pages_text(a, b):
+            out = []
+            for p in reader.pages[a:b]:
+                try:
+                    out.append(p.extract_text() or "")
+                except Exception:
+                    out.append("")
+            return "\n".join(out)
+        try:
+            m = reader.metadata or {}
+            meta = " ".join(str(m.get(k) or "") for k in ("/Title", "/Author", "/Subject"))
+        except Exception:
+            meta = ""
+        return {"front": pages_text(0, 3), "more": pages_text(3, 15), "meta": meta, "file": file_part(link)[0]}, len(reader.pages)
     except Exception as e:
         return None, f"could not be read ({type(e).__name__})"
 

@@ -171,11 +171,22 @@ class CoverCheck(unittest.TestCase):
         self.assertEqual(W.cover_check(cover, 120, self.F, "sustainability", [2025]),
                          (True, "sustainability 2025, checked on the file's first pages"))
         self.assertEqual(W.cover_check("McDonald's Purpose & Impact Report 2025", 90, self.F, "sustainability", [2025])[1],
-                         "the company's name is not on the cover")
+                         "the company's name is not on its first 15 pages or in its properties")
         self.assertEqual(W.cover_check("Arcos Dorados press note sustainability 2025", 2, self.F, "sustainability", [2025])[1],
                          "2 pages, not a report")
         self.assertEqual(W.cover_check("Arcos Dorados Sustainability Report 2022", 80, self.F, "sustainability", [2025])[1],
-                         "no missing year on the cover")
+                         "no missing year on its first pages")
+
+    def test_not_only_the_cover(self):
+        # a cover with only a logo: the name is further in, or in the file's properties
+        doc = {"front": "Sustainability Report 2025\nBuilding a better future", "more": "Message from the CEO of Arcos Dorados ...",
+               "meta": "", "file": "SR2025.pdf"}
+        self.assertTrue(W.cover_check(doc, 120, self.F, "sustainability", [2025])[0])
+        doc = {"front": "Sustainability Report 2025", "more": "", "meta": "Arcos Dorados Holdings Inc.", "file": "x.pdf"}
+        self.assertTrue(W.cover_check(doc, 120, self.F, "sustainability", [2025])[0])
+        # a year only deep inside does not count (every report prints its comparison years)
+        doc = {"front": "Arcos Dorados Sustainability Report", "more": "x" * 7000 + " 2025 ", "meta": "", "file": "sr.pdf"}
+        self.assertEqual(W.cover_check(doc, 120, self.F, "sustainability", [2025])[1], "no missing year on its first pages")
 
     def test_a_cdn_file_is_opened_and_kept(self):
         hit = [{"link": "https://ddhnb9vx8lz57.cloudfront.net/wp-content/uploads/sites/3/2026/07/01100613/AD_2025_ENG.pdf",
