@@ -175,7 +175,12 @@ class CoverCheck(unittest.TestCase):
         self.assertEqual(W.cover_check("Arcos Dorados press note sustainability 2025", 2, self.F, "sustainability", [2025])[1],
                          "2 pages, not a report")
         self.assertEqual(W.cover_check("Arcos Dorados Sustainability Report 2022", 80, self.F, "sustainability", [2025])[1],
-                         "no missing year on its first pages")
+                         "no missing year on its first pages (2022)")
+        # dry run 1 Nov 2026: a 2022 report whose cover names its 2025 targets is a 2022 report
+        self.assertEqual(W.cover_check("Arcos Dorados\nSustainability Report 2022\nOur 2025 goals", 80, self.F, "sustainability", [2025])[1],
+                         "no missing year on its first pages (2022)")
+        self.assertEqual(W.cover_check({"front": "Arcos Dorados Sustainability Report", "file": "AD_2022_ENG.pdf"}, 80,
+                                       self.F, "sustainability", [2025])[1], "no missing year on its first pages (2022)")
 
     def test_not_only_the_cover(self):
         # a cover with only a logo: the name is further in, or in the file's properties

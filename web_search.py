@@ -255,7 +255,7 @@ class Serper:
 CHECK_MAX = 4                           # files opened per company and family to check the cover
 CHECK_MB = 60                           # larger files are not opened (the inbox still could, but we cannot check)
 MIN_PAGES = 8                           # a report has at least this many pages; a release or a memo has fewer
-CHECKABLE = ("another site", "shared host without", "not a PDF", "not one of the missing years", "does not name")
+CHECKABLE = ("another site", "shared host without", "not a PDF", "does not name")   # and a title with no year at all
 
 
 def fold(t):
@@ -284,13 +284,16 @@ def cover_check(text, pages, f, fam, years):
     head = " ".join([front, more[:6000], meta, fname])
     if not any(w in head.lower() or (fold(w) and fold(w) in " " + fold(head) + " ") for w in FAMILIES[fam]["words"]):
         return False, "its first pages do not name the report"
-    ys = years_in(" ".join([front[:3000], meta, fname])) or years_in(more[:6000])
+    # The report's own year: the one its properties or file name give, else the FIRST year printed on its first
+    # page (1 Nov 2026 dry run: a 2022 report passed as 2025 because its cover named its 2025 targets).
+    first = [int(y) for y in re.findall(r"(?<!\d)(20\d\d)(?!\d)", front[:1500])]
+    own = years_in(meta + " " + fname) or ({first[0]} if first else set()) or years_in(more[:6000])
     latest = max(years)
-    if latest == expected_year() and latest + 1 in ys:
-        ys = ys | {latest}
-    if not ys & set(years):
-        return False, "no missing year on its first pages"
-    return True, f"{fam} {max(ys & set(years))}, checked on the file's first pages"
+    if latest == expected_year() and latest + 1 in own:
+        own = own | {latest}
+    if not own & set(years):
+        return False, "no missing year on its first pages" + (f" ({', '.join(str(y) for y in sorted(own))})" if own else "")
+    return True, f"{fam} {max(own & set(years))}, checked on the file's first pages"
 
 
 def open_cover(link, sess=None):
@@ -366,7 +369,12 @@ def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
                 if got >= MAX_PER_FAMILY or link in {u for u, _ in out["found"]}:
                     continue
                 ok, why = judge(r, fam, ys, domains, name, reg_domain)
-                if not ok and why.startswith(CHECKABLE) and opened < CHECK_MAX and not NOT_A_REPORT.search(
+                # a title or file name that names only other years is not opened: it says which year the file is
+                tf = years_in((r.get("title") or "") + " " + file_part(link)[0])
+                allowed = set(ys) | ({max(ys) + 1} if max(ys) == expected_year() else set())
+                titled_other = bool(tf) and not tf & allowed
+                if not ok and (why.startswith(CHECKABLE) or why == "not one of the missing years") and not titled_other \
+                        and opened < CHECK_MAX and not NOT_A_REPORT.search(
                         (r.get("title") or "") + " " + file_part(link)[0].replace("_", " ")):
                     opened += 1; out["opened"] += 1
                     text, pages = opener(link)
