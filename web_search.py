@@ -258,13 +258,53 @@ MIN_PAGES = 8                           # a report has at least this many pages;
 CHECKABLE = ("another site", "shared host without", "not a PDF", "does not name")   # and a title with no year at all
 
 
+def reg_domain_of(website):
+    """The registered domain of a companies.website value, or ""."""
+    if not website:
+        return ""
+    from monitor_core import reg_domain
+    w = website.strip()
+    return reg_domain(w if "://" in w else "https://" + w) or ""
+
+
 def fold(t):
     import unicodedata
     t = unicodedata.normalize("NFKD", t or "").encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9]+", " ", t).strip()
 
 
-def cover_check(text, pages, f, fam, years):
+# A report's own title: a family word with a report word next to it ("Sustainability Report", "ESG-Bericht",
+# "Informe de Sostenibilidad", "可持续发展报告"), not a family word alone (1 Nov 2026 wave: research notes on a
+# company's own site passed as sustainability reports because they spoke of the "green transition").
+REPORT_WORD = re.compile(r"report|bericht|rapport|informe|relat[oó]rio|relazione|verslag|redovisning|raport|kertomus|"
+                         r"raporu|registration document|document d.enregistrement|10-k|报告|報告|报|보고서|レポート", re.I)
+# Signs, on a file's first page or in its properties, that someone else wrote it: brokers, consultants,
+# researchers, regulators, investors (1 Nov 2026 wave: an EY overview, a broker note, a university fellowship
+# brochure, a government white paper and an exchange's guidance all passed for the company they mentioned).
+THIRD_PARTY = re.compile(r"target price|price target|equity research|research report|initiat\w* coverage|"
+                         r"\b(maintain|reiterate|upgrade|downgrade)\w*\s+(to\s+)?(buy|hold|sell|outperform|neutral)|"
+                         r"analyst certification|briefing note|working paper|white paper|policy brief|inspector general|"
+                         r"fellowship|brochure|request for information|exclusion list|case study|disclosure guidance|"
+                         r"guidance for listed|dissertation|thesis|journal of|proceedings|roadmap|insights report|"
+                         r"overview of|status of|in figures|outlook 20\d\d|fund annual report|etf|disclaimer: this report",
+                         re.I)
+
+
+def report_titled(text, fam):
+    """True when a family word stands next to a report word (within 40 characters) in `text`."""
+    low = (text or "").lower()
+    for w in FAMILIES[fam]["words"]:
+        if REPORT_WORD.fullmatch(w) or REPORT_WORD.search(w):
+            if w in low:
+                return True
+            continue
+        for m in re.finditer(re.escape(w), low):
+            if REPORT_WORD.search(low[max(0, m.start() - 40):m.end() + 40]):
+                return True
+    return False
+
+
+def cover_check(text, pages, f, fam, years, own_site=True):
     """(True, why) when a file's first pages show it is the company's report of a missing year: the company's
     name (all its name words, or the whole name), the report family and a missing year, and at least MIN_PAGES
     pages. Not the cover alone (the owner's warning, 1 Nov 2026: a cover may carry only a logo): `text` is
@@ -281,9 +321,24 @@ def cover_check(text, pages, f, fam, years):
         return False, "the company's name is not on its first 15 pages or in its properties"
     if pages is not None and pages < MIN_PAGES:
         return False, f"{pages} pages, not a report"
-    head = " ".join([front, more[:6000], meta, fname])
-    if not any(w in head.lower() or (fold(w) and fold(w) in " " + fold(head) + " ") for w in FAMILIES[fam]["words"]):
-        return False, "its first pages do not name the report"
+    if not own_site:
+        # Not on the company's own site: it must be the company's report, not a document about it (1 Nov 2026
+        # wave: parent's and subsidiary's reports, broker notes and studies that mention the company passed).
+        # The whole name on the title page (the first 1,500 characters) or in the file's properties or name,
+        # else at least twice on pages 1 to 3 (a cover may carry only a logo); never only on deeper pages.
+        core = " ".join(tokens)                      # the name without its legal words ("Holdings Inc.")
+        cover = " " + fold(front[:1500] + " " + meta + " " + fname) + " "
+        if not any(f" {n} " in cover or (" " + fold(front) + " ").count(f" {n} ") >= 2 for n in {whole, core}):
+            return False, "on another site and its title page does not carry the company's whole name"
+        hit = THIRD_PARTY.search(front[:3000] + " " + meta)
+        if hit:
+            return False, f"on another site and written by someone else ({hit.group(0).strip().lower()})"
+        site = reg_domain_of(f.get("website"))
+        if len(tokens) == 1 and len(tokens[0]) <= 5 and site and f" {fold(site)} " not in " " + fold(front + " " + more + " " + meta) + " ":
+            # a short name or acronym (ADIA) is shared by other organisations: its website must be in the file
+            return False, f"on another site, a short name, and {site} is not in the file"
+    if not report_titled(" ".join([front[:3000], meta, fname.replace("-", " ").replace("_", " ")]), fam):
+        return False, "its title page does not name the report"
     # The report's own year: the one its properties or file name give, else the FIRST year printed on its first
     # page (1 Nov 2026 dry run: a 2022 report passed as 2025 because its cover named its 2025 targets).
     first = [int(y) for y in re.findall(r"(?<!\d)(20\d\d)(?!\d)", front[:1500])]
@@ -381,7 +436,7 @@ def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
                     if text is None:
                         why = f"{why}; opened: {pages}"
                     else:
-                        ok, why2 = cover_check(text, pages, f, fam, ys)
+                        ok, why2 = cover_check(text, pages, f, fam, ys, own_site=reg_domain(link) in domains)
                         why = why2 if ok else f"{why}; opened: {why2}"
                 if ok:
                     out["found"].append((link, why)); got += 1

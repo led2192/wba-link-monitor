@@ -212,6 +212,51 @@ class CoverCheck(unittest.TestCase):
         self.assertEqual(len(opened), W.CHECK_MAX)
 
 
+class FirstWaveCases(unittest.TestCase):
+    """1 Nov 2026, the first committed wave: files on other sites passed because they mentioned the company
+    somewhere and spoke of reports. Each kind is a case here."""
+    def check(self, f, doc, fam="annual", own=False, pages=120, years=(2025, 2024, 2023)):
+        return W.cover_check(doc, pages, f, fam, list(years), own_site=own)
+
+    def test_a_relatives_report_is_not_the_companys(self):
+        f = {"company_name": "China Post Group", "website": "chinapost.com.cn"}
+        doc = {"front": "Postal Savings Bank of China Co., Ltd.\nAnnual Report 2025", "more": "controlling shareholder China Post Group ...",
+               "meta": "", "file": "P020260415322721338496.pdf"}
+        self.assertFalse(self.check(f, doc)[0])
+        self.assertIn("whole name", self.check(f, doc)[1])
+
+    def test_written_by_someone_else(self):
+        f = {"company_name": "BetAgro", "website": "betagro.com"}
+        doc = {"front": "BetAgro (BTG TB) M&A is coming; Maintain HOLD TP THB23.00\nAnnual results 2024 equity research", "more": "", "meta": "", "file": "x.pdf"}
+        self.assertIn("written by someone else", self.check(f, doc)[1])
+        f = {"company_name": "Boehringer Ingelheim", "website": "boehringer-ingelheim.com"}
+        doc = {"front": "Boehringer Ingelheim\nPostdoctoral Fellowship Brochure 2022-2024\nresponsibility report", "more": "", "meta": "", "file": "BIFellowshipBrochure-2022-2024.pdf"}
+        self.assertFalse(self.check(f, doc, fam="sustainability")[0])
+
+    def test_a_report_word_must_stand_next_to_the_family(self):
+        f = {"company_name": "Bridgewater Associates", "website": "bridgewater.com"}
+        doc = {"front": "Bridgewater Associates\nIs the Green Energy Transition Dead? 2025\nsustainable investing research", "more": "", "meta": "", "file": "x"}
+        self.assertEqual(self.check(f, doc, fam="sustainability", own=True)[1], "its title page does not name the report")
+
+    def test_a_short_name_needs_its_website_in_the_file(self):
+        f = {"company_name": "ADIA", "website": "adia.ae"}
+        doc = {"front": "ADIA Annual Report 2025\nAustralian Dental Industry Association", "more": "www.adia.com.au", "meta": "", "file": "2025-ADIA-Annual-Report.pdf"}
+        self.assertIn("not in the file", self.check(f, doc)[1])
+        doc = {"front": "ADIA Annual Review 2025 Annual Report", "more": "Abu Dhabi Investment Authority www.adia.ae", "meta": "", "file": "ar.pdf"}
+        self.assertTrue(self.check(f, doc)[0])
+
+    def test_the_companys_report_elsewhere_still_passes(self):
+        f = {"company_name": "Arcos Dorados Holdings Inc.", "website": "arcosdorados.com"}
+        # a logo-only cover: the name twice on pages 1 to 3
+        doc = {"front": "Social Impact and Sustainability Report 2025\nAbout Arcos Dorados ... Arcos Dorados is the largest ...",
+               "more": "", "meta": "", "file": "AD_2025_ENG.pdf"}
+        self.assertTrue(self.check(f, doc, fam="sustainability")[0])
+        # the name only on deeper pages is not enough off the company's site
+        doc = {"front": "Social Impact and Sustainability Report 2025", "more": "Arcos Dorados", "meta": "", "file": "sr.pdf"}
+        self.assertFalse(self.check(f, doc, fam="sustainability")[0])
+        self.assertTrue(self.check(f, doc, fam="sustainability", own=True)[0])     # on its own site it is
+
+
 class Writes(unittest.TestCase):
     """1 Nov 2026: the first committed wave spent 384 credits, then the single write at the end called
     airtable_request with json= (it takes payload=) and nothing was written."""
@@ -234,7 +279,8 @@ class Writes(unittest.TestCase):
         self.assertEqual(calls[0][0][2]["Content-Type"], "application/json")
 
     def test_main_writes_as_it_goes(self):
-        src = open(W.__file__, encoding="utf-8").read()
+        with open(W.__file__, encoding="utf-8") as fh:
+            src = fh.read()
         self.assertIn("if a.commit and len(updates) >= 10:", src)          # not only once at the end
         self.assertNotIn("json={", src)
 
