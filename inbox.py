@@ -252,6 +252,9 @@ def handle_company(rec, sess, tombs):
             row = lib_row(wba, name, info or url)
             if how == "research":
                 row["Reviewer notes"] = f"Found by research ({stamp()[:10]})"
+                row["origin"] = "web search or research"
+            else:
+                row["origin"] = "added by hand"
             if doc_id(wba, row["document_url"]) in known:
                 lines.append(f"Already in the library: {short}"); continue
             created, _, blocked, _ = HR.upsert([row], {}, BASE, TOKEN, LIB,

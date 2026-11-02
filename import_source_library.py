@@ -7,17 +7,23 @@ The Source Library bases (2024, 2025, ...) are human-curated: an analyst found e
 the PDF, and set its type and year. Their "Source Link" is usually the page the report was found on,
 not the PDF, so the file to bring over is the attachment (Source File), not the link.
 
-What is imported (planned per Source Library record):
+What is imported (planned per Source Library record; webpages never, the library holds files):
   reports   Sustainability / ESG / CSR / Impact / Integrated / Annual / 10-K of year >= --min-year
-  policies  Code of Conduct and Human Rights Policy: the newest one per company, ONLY when the
-            Disclosure Library holds no document of that type for the company at all
+  others    (--types all, the default since 2 Nov 2026) every other document an analyst saved: policies,
+            codes, human rights policies, registration documents, climate, environmental and social
+            reports, CDP answers, statutory documents, presentations... Periodic ones from --min-year on;
+            standing ones (codes, policies, statutory documents, certifications) whatever their year.
+            Until 2 Nov 2026 only reports came in, plus a code or human rights policy when the library held
+            none of that type: the analysts' 2025 citations are 30% policies and codes, and those were missing.
+  --types reports keeps the old scope.
 
 Never imported (the duplicate guards, all checked against the live Disclosure Library):
   1. same company + same file size in bytes (the same file; discarded rows count as held)
   2. same company + same file name
   3. reports: we already hold a document of the same family for that company in that year or
      the year before/after (it may be the same report with a different file, or a year that is
-     off by one; those are listed in the plan as "review", never added)
+     off by one; those are listed in the plan as "review", never added); other documents are
+     told apart by their file only (a company has many policies)
   4. files Edi deleted by hand (state/deleted_by_hand.jsonl.gz: same company + size or name)
   5. inside the import itself: one document per company + type + year, preferring the newest
      Source Library base, then the largest file
@@ -51,7 +57,14 @@ SOURCE_LIBRARIES = {
     "2024": {"base": "appsrc5xpZH12ezzP", "sources": "Sources", "companies": "Companies", "co_id": "wba-id",
              "link": "Source Link", "type": "Source Type", "year": "Source Year", "file": "Source File",
              "name": "Source Name", "wba": "WBA ID"},
+    # the current research cycle, filled by the analysts as they go (2 Nov 2026: 7,488 sources)
+    "2026": {"base": "appLkf0N4Tc26ojYD", "sources": "Sources", "companies": "Companies", "co_id": "WBA ID",
+             "link": "Source Link", "type": "Source Type", "year": "Source Year", "file": "Source File",
+             "name": "Source Name", "wba": "WBA ID", "kind": "Document Type"},
 }
+# Standing documents: no reporting period, imported whatever their year.
+STANDING = {"Code of Conduct", "Human Rights Policy", "Policy Documents", "Statutory Documents", "Certifications", "Other"}
+MAX_REPORT_ROWS = 420_000           # report_library rows after an import at most (the base holds 500,000 in all)
 FAMILY = {"Sustainability Report": "SUST", "ESG Report": "SUST", "CSR Report": "SUST", "Impact Report": "SUST",
           "Integrated Report": "INT", "Annual Report": "ANN", "10K Form": "ANN",
           "Code of Conduct": "COC", "Human Rights Policy": "HRP"}
@@ -88,14 +101,21 @@ def fname_of(u):
     return unquote(urlsplit((u or "").split("?")[0]).path.rstrip("/").rsplit("/", 1)[-1]).lower()
 
 
-def read_sources(token, tag, min_year):
+def family(t):
+    """The import family of a Source Library type: SUST, INT, ANN, COC, HRP, or "DOC:<type>" for the rest."""
+    return FAMILY.get(t) or ("DOC:" + t if t else "")
+
+
+def read_sources(token, tag, min_year, types="all"):
     """Reads one Source Library base (GET requests only, with the read-only token)."""
     c = SOURCE_LIBRARIES[tag]
     cos = get_all(token, c["base"], c["companies"], [c["co_id"]])
     wba_of = {r["id"]: (r["fields"].get(c["co_id"]) or "").strip() for r in cos}
-    types = ",".join(f"{{{c['type']}}}='{t}'" for t in FAMILY)
-    recs = get_all(token, c["base"], c["sources"], [c[k] for k in ("link", "type", "year", "file", "name", "wba")],
-                   f"OR({types})")
+    if types == "reports":
+        formula = "OR(" + ",".join(f"{{{c['type']}}}='{t}'" for t in FAMILY) + ")"
+    else:
+        formula = f"AND({{{c['file']}}}!='', {{{c['type']}}}!='Webpage')"
+    recs = get_all(token, c["base"], c["sources"], [c[k] for k in ("link", "type", "year", "file", "name", "wba")], formula)
     out = []
     for r in recs:
         f = r["fields"]
@@ -106,10 +126,10 @@ def read_sources(token, tag, min_year):
             y = 0
         links = f.get(c["wba"]) or []
         wba = wba_of.get(links[0], "") if links else ""
-        if not (t in FAMILY and att and att.get("size") and wba):
+        fam = family(t)
+        if not (fam and att and att.get("size") and wba) or (types == "reports" and t not in FAMILY):
             continue
-        fam = FAMILY[t]
-        if fam in REPORTS and y < min_year:
+        if t not in STANDING and y < min_year:
             continue
         out.append({"src": tag, "rec": r["id"], "wba": wba, "type": t, "fam": fam, "year": y,
                     "link": (f.get(c["link"]) or "").strip(), "name": f.get(c["name"]) or "",
@@ -168,12 +188,6 @@ def plan(sources, held, deleted, order):
     rank = {tag: i for i, tag in enumerate(order)}           # earlier in --bases = preferred
     sources = sorted(sources, key=lambda s: (rank[s["src"]], -s["size"]))
     seen_size, seen_slot, out = set(), set(), []
-    newest_policy = {}
-    for s in sources:
-        if s["fam"] not in REPORTS:
-            k = (s["wba"], s["type"])
-            if k not in newest_policy or s["year"] > newest_policy[k]["year"]:
-                newest_policy[k] = s
     for s in sources:
         w, fam, y = s["wba"], s["fam"], s["year"]
         if (w, s["size"]) in held["size"] or (w, s["filename"].lower()) in held["name"]:
@@ -190,11 +204,9 @@ def plan(sources, held, deleted, order):
                 out.append((s, "review:we hold this report type for the year before or after")); continue
             slot = (w, s["type"], y)
         else:
-            if s["type"] in held["types"].get(w, set()):
-                out.append((s, "skip:we hold this policy type")); continue
-            if newest_policy.get((w, s["type"])) is not s:
-                out.append((s, "skip:a newer version of this policy is imported")); continue
-            slot = (w, s["type"])
+            # a company has many policies and codes: told apart by the file, not the type (2 Nov 2026; until then
+            # only the newest code or human rights policy came in, and only when the library held none)
+            slot = (w, s["type"], y, s["filename"].lower())
         if slot in seen_slot:
             out.append((s, "skip:one per company, type and year")); continue
         seen_slot.add(slot); seen_size.add((w, s["size"]))
@@ -209,9 +221,43 @@ def row_for(s, names):
             "file": [{"url": s["file_url"], "filename": s["filename"]}],
             **({"found_on": s["link"]} if s["link"] else {}),
             "doc_year": str(s["year"]), "doc_year_from": "source library",
-            "source_type": s["type"], "first_seen": date.today().isoformat(),
+            "source_type": s["type"], "first_seen": date.today().isoformat(), "origin": f"Source Library {s['src']}",
             "Reviewer notes": (f"From Source Library {s['src']} (record {s['rec']}): {s['type']} {s['year']}"
                                f" — \"{s['name']}\". Type and year set by an analyst.")}
+
+
+def origin_from_notes(notes):
+    """The origin of a row added before the origin field existed, from its Reviewer notes, or None."""
+    n = (notes or "").strip()
+    for tag in SOURCE_LIBRARIES:
+        if n.startswith(f"From Source Library {tag}"):
+            return f"Source Library {tag}"
+    if n.startswith("Found by research"):
+        return "web search or research"
+    return None
+
+
+def tag_existing(token, base, commit):
+    """Sets origin on the rows whose Reviewer notes say where they came from and whose origin is blank
+    (2 Nov 2026: the owner's rule that analyst-imported documents stay identified, because they show the
+    library's completeness, not what the pipeline's discovery found). Dry run unless commit."""
+    from monitor_core import airtable_request
+    rows = get_all(token, base, "report_library", ["Reviewer notes", "origin"],
+                   "AND({origin}='', OR(LEFT({Reviewer notes}, 19)='From Source Library', LEFT({Reviewer notes}, 17)='Found by research'))")
+    ups = [{"id": r["id"], "fields": {"origin": o}} for r in rows
+           for o in [origin_from_notes(r["fields"].get("Reviewer notes"))] if o]
+    c = collections.Counter(u["fields"]["origin"] for u in ups)
+    print(f">>> origin to set on {len(ups):,} rows: " + "; ".join(f"{k} {v:,}" for k, v in c.most_common())
+          + ("" if commit else " (dry run: nothing written)"), flush=True)
+    if not commit:
+        return
+    url = f"{API}/{base}/report_library"
+    assert base not in SL_BASES
+    H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    for i in range(0, len(ups), 10):
+        airtable_request("PATCH", url, H, {"records": ups[i:i + 10], "typecast": False})
+        time.sleep(0.22)
+    print(f">>> origin set on {len(ups):,} rows.", flush=True)
 
 
 def main():
@@ -221,6 +267,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--plan-out", default="source_library_plan.csv")
+    ap.add_argument("--types", default="all", choices=["all", "reports"], help="all documents (default) or reports only")
+    ap.add_argument("--tag-existing", action="store_true", help="only set origin on rows imported before the field existed "
+                    "(Reviewer notes starting 'From Source Library <base>' or 'Found by research'), then stop")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
     sl_token = os.environ.get("SOURCE_LIBRARY_TOKEN")
@@ -228,11 +277,13 @@ def main():
         sys.exit("Set AIRTABLE_TOKEN, AIRTABLE_BASE and SOURCE_LIBRARY_TOKEN (read-only).")
     if base in SL_BASES:
         sys.exit("AIRTABLE_BASE is a Source Library base: refusing to run (this script never writes there).")
+    if a.tag_existing:
+        return tag_existing(token, base, a.commit)
     order = [b.strip() for b in a.bases.split(",") if b.strip()]
     sources = []
     for tag in order:
         try:
-            got = read_sources(sl_token, tag, a.min_year)
+            got = read_sources(sl_token, tag, a.min_year, a.types)
         except Exception as e:
             sys.exit(f"Cannot read Source Library {tag} ({e}). The token needs read access to that base.")
         print(f">>> Source Library {tag}: {len(got)} documents in scope.", flush=True)
@@ -264,6 +315,9 @@ def main():
     if not a.commit:
         print("DRY RUN. Re-run with --commit to create the rows.")
         return
+    if n + len(adds) > MAX_REPORT_ROWS:
+        sys.exit(f"Refusing: report_library would hold {n + len(adds):,} rows, over {MAX_REPORT_ROWS:,} (the base holds "
+                 "500,000 in all). Use --limit, or free room first (purge_discarded.py).")
     from monitor_core import airtable_request
     names = {r["fields"].get("wba_id"): r["fields"].get("company_name", "")
              for r in get_all(token, base, "companies", ["wba_id", "company_name"])}
