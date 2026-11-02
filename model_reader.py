@@ -223,6 +223,9 @@ def check(reply, pages, to_number, numbers_on, fy_month=None):
         year = py                       # the period end says which reporting year the column is
     if year is not None and (not FIRST_YEAR <= year <= LAST_YEAR + 1 or (cy and year not in (cy, cy - 1))):
         return None                     # a year the heading does not allow: the model mixed its columns
+    if year is not None and cy and fy_month and int(fy_month) > 6 and year != cy:
+        return None                     # a July-to-December year end: a column of 2025 is 2025, never 2024 (2 Nov 2026:
+                                        # CVS Health's 2025 verification opinion, "January 1 to December 31, 2025", read as 2024)
     return {"value": printed * scale, "printed": printed, "scale": scale, "library_id": lid, "page": page,
             "unit": reply.get("unit") or "", "column": column, "year": year,
             "basis": str(reply.get("basis") or "").strip().lower()[:20]}

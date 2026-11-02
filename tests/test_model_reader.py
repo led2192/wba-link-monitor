@@ -144,6 +144,10 @@ class ModelReader(unittest.TestCase):
         self.assertEqual(M.read_years(dict(G, fy_month=3), REV, PAGES, X.collections.Counter(), Sess((200, text))), [])
         # the same reply for a calendar-year company keeps its year
         self.assertEqual([e["year"] for e in M.read_years(dict(G, fy_month=12), REV, PAGES, X.collections.Counter(), Sess((200, text)))], [2024])
+        # a December year end: a column of 2025 is never reporting year 2024 (CVS Health, 2 Nov 2026)
+        text = ('{"values": [{"page": "P2", "printed": "106,848", "scale": "millions", "year": 2024, "column": "January 1, 2025 to December 31, 2025"}]}')
+        self.assertEqual(M.read_years(dict(G, fy_month=12), REV, PAGES, X.collections.Counter(), Sess((200, text))), [])
+        self.assertEqual(len(M.read_years(G, REV, PAGES, X.collections.Counter(), Sess((200, text)))), 1)   # unknown year end: the old rule
         self.assertEqual(M.period_year("2025-03"), (2024, 3)); self.assertEqual(M.period_year("2024-12"), (2024, 12))
         self.assertEqual(M.period_year("2024"), (None, None)); self.assertEqual(M.period_year(None), (None, None))
 
