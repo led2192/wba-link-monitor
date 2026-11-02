@@ -28,7 +28,7 @@ Read-only: the gold bases (GOLD_TOKEN), the evidence database (SUPABASE_DB_URL).
 (also a run artifact) and the run's counters in Pipeline QA. Options: --limit N answers per attribute
 (dry run default 40), --attributes codes, --budget minutes (100), --reader rules|model, --commit.
 """
-import argparse, collections, json, os, re, sys, time, traceback
+import argparse, collections, json, statistics, os, re, sys, time, traceback
 
 import qa
 from value_eval import CURRENCY_SCALES, EMISSION_SCALES, found_on, printed_forms, scales_for, tsquery_for
@@ -542,6 +542,91 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     return r
 
 
+def holding_pages(cur, g, attr, ids):
+    """{(library_id, page)} where the documents print the validated value g["value"] (any of its printed
+    forms at the attribute's scales)."""
+    forms = printed_forms(g["value"], scales_for(attr.get("unit_family")))
+    if not forms or not ids:
+        return set()
+    q = " | ".join(f"({tsquery_for(v, d)})" for v, _, d in forms)
+    cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and words @@ to_tsquery('simple', %s) limit 40", (ids, q))
+    return {(lid, page) for lid, page, body in cur.fetchall() if any(found_on(body, v) for v, _, _ in forms)}
+
+
+def sibling_distances(found):
+    """found: {attribute: {(library_id, page)}} for one company and year. For each pair of attributes whose
+    numbers are both printed in one document, the smallest page distance between them in that document;
+    None when they are printed only in different documents. {(a, b): distance or None}."""
+    out = {}
+    codes = sorted(c for c in found if found[c])
+    for i, a in enumerate(codes):
+        for b in codes[i + 1:]:
+            best = None
+            for la, pa in found[a]:
+                for lb, pb in found[b]:
+                    if la == lb and (best is None or abs(pa - pb) < best):
+                        best = abs(pa - pb)
+            out[(a, b)] = best
+    return out
+
+
+def siblings(cur, answers, codes, spec, n, budget_s):
+    """Edi's idea (2 Nov 2026): when one attribute's figure is on page 28, a related attribute's figure is
+    likely on page 28 or near it. Measured on company-years with validated answers for two or more of the
+    attributes: where each validated number is printed, and how far apart in the same document."""
+    by_cy = collections.defaultdict(dict)
+    for g in answers:
+        if g["attribute"] in codes:
+            by_cy[(g["wba"], g["year"])][g["attribute"]] = g
+    cys = sorted((k for k, v in by_cy.items() if len(v) >= 2), key=lambda k: (-len(by_cy[k]), k))[:n]
+    pairs = collections.defaultdict(list)
+    sizes = []
+    t0 = time.time()
+    done = 0
+    for wba, year in cys:
+        if time.time() - t0 > budget_s:
+            break
+        found = {}
+        for c, g in by_cy[(wba, year)].items():
+            attr = spec["attributes"][c]
+            docs, _ = year_documents(cur, wba, year, attr)
+            try:
+                found[c] = holding_pages(cur, g, attr, [d[0] for d in docs])
+            except Exception:
+                cur.connection.rollback(); cur.execute("set statement_timeout = '30s'")
+                found[c] = set()
+        for k, dist in sibling_distances(found).items():
+            pairs[k].append(dist)
+        lids = {lid for v in found.values() for lid, _ in v}
+        if lids:
+            cur.execute("select library_id, max(page) from public.pages where library_id = any(%s) group by library_id", (sorted(lids),))
+            sizes += [m for _, m in cur.fetchall() if m]
+        done += 1
+    return pairs, sizes, done, len(cys)
+
+
+def siblings_md(pairs, sizes, done, total, spec):
+    md = ["### Sibling attributes: how far apart their figures are printed (dry run)", "",
+          f"{done:,} company-years with validated answers for two or more attributes (of {total:,} chosen). For each pair, "
+          "company-years where both validated numbers are printed in the year's documents; of those, printed in the same document, "
+          "and the smallest page distance there. The validated page of the first attribute stands in for a page the reader "
+          "found, so this is the best the idea can do. A number printed on several pages counts its nearest one. "
+          f"Documents involved: median {statistics.median(sizes) if sizes else 0:.0f} pages.", "",
+          "| Pair | Both printed | Same document | Same page | Within 1 page | Within 2 | Within 5 | Further |",
+          "| --- | --: | --: | --: | --: | --: | --: | --: |"]
+    name = lambda c: spec["attributes"][c]["name"]
+    for (a, b), ds in sorted(pairs.items(), key=lambda x: -len(x[1])):
+        same = [d for d in ds if d is not None]
+        n = len(ds)
+        if not n:
+            continue
+        pc = lambda k: f"{k / (len(same) or 1):.0%}"
+        md.append(f"| {name(a)} / {name(b)} | {n:,} | {len(same) / n:.0%} | {pc(sum(d == 0 for d in same))} | {pc(sum(d <= 1 for d in same))} | "
+                  f"{pc(sum(d <= 2 for d in same))} | {pc(sum(d <= 5 for d in same))} | {pc(sum(d > 5 for d in same))} |")
+    md += ["", "Shares after \"Same document\" are of the pairs printed in the same document.", ""]
+    return md
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -550,6 +635,7 @@ def main():
     ap.add_argument("--budget", type=int, default=100)
     ap.add_argument("--reader", default="rules", choices=["rules", "model"])
     ap.add_argument("--memory", default="on", choices=["on", "off"], help="use the company's right answer for another year (company_memory.py)")
+    ap.add_argument("--siblings", type=int, default=0, help="only measure how far apart sibling attributes' figures are printed, on up to N company-years")
     a = ap.parse_args()
     a.memory = a.memory == "on"
     if a.reader == "model" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
@@ -572,6 +658,17 @@ def main():
     answers = [g for base in gold_cfg["bases"].values() for g in gold_values(token, base, codes)
                if g["value"] and not g["unit"].lower().startswith(("%", "percent"))]
     gold_index = {(g["wba"], g["attribute"], g["year"]): g["value"] for g in answers}
+    if a.siblings:
+        import psycopg
+        with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+            cur = conn.cursor()
+            cur.execute("set statement_timeout = '30s'")
+            pairs, sizes, done, total = siblings(cur, answers, codes, spec, a.siblings, a.budget * 60)
+        md = siblings_md(pairs, sizes, done, total, spec)
+        open("extract_eval.md", "w").write("\n".join(md) + "\n")
+        print("\n".join(md), flush=True)
+        run.finish("ok", rows_in=done, rows_out=sum(len(v) for v in pairs.values()), counters={"company-years": done})
+        return 0
     by = collections.defaultdict(list)
     for g in answers:
         by[g["attribute"]].append(g)

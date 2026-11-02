@@ -234,3 +234,12 @@ class AgainstPostgres(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Siblings(unittest.TestCase):
+    def test_nearest_page_in_the_same_document(self):
+        found = {"A": {("d1", 28), ("d1", 90)}, "B": {("d1", 30)}, "C": {("d2", 5)}, "D": set()}
+        out = X.sibling_distances(found)
+        self.assertEqual(out[("A", "B")], 2)            # nearest occurrence counts
+        self.assertIsNone(out[("A", "C")])              # only in different documents
+        self.assertNotIn(("A", "D"), out)               # a number never printed makes no pair

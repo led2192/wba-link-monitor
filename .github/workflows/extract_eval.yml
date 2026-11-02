@@ -22,6 +22,9 @@ on:
       model:
         description: "model for the model reader"
         default: "claude-haiku-5-5"
+      siblings:
+        description: "only measure how far apart sibling attributes' figures are printed, on up to N company-years (0 = off)"
+        default: "0"
   pull_request:
     paths: [extract_eval.py, model_reader.py, attributes.json, .github/workflows/extract_eval.yml]
 
@@ -57,6 +60,8 @@ jobs:
             python extract_eval.py --limit 40 --reader rules; mv extract_eval.md rules.md
             python extract_eval.py --limit 40 --reader model || true
             cat rules.md extract_eval.md > both.md && mv both.md extract_eval.md
+          elif [ "${{ inputs.siblings }}" != "0" ] && [ -n "${{ inputs.siblings }}" ]; then
+            python extract_eval.py --siblings ${{ inputs.siblings }}
           else
             ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
