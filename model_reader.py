@@ -55,6 +55,31 @@ def adjacent_notes(pages):
     return out
 
 
+MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+
+def fiscal_note(g):
+    """The sentence that says when this company's fiscal year ends and which period is the reporting year
+    asked, when the year end is known (g["fy_month"], from the company's documents). For a year ending
+    January to June the reporting year is the period ending in the following calendar year (2 Nov 2026: ORIX,
+    year end March, had the column "2024", the year ended March 31, 2024, read as reporting year 2024)."""
+    m = g.get("fy_month")
+    y = g["year"]
+    if not m or not 1 <= int(m) <= 12:
+        return ""
+    m = int(m)
+    end_year = y + 1 if m <= 6 else y
+    if m == 12:
+        return (f"This company's fiscal year is the calendar year: reporting year {y} is the year ended December 31, {y}. "
+                f"A column headed {y} is that year.")
+    start = f"{MONTHS[m % 12]} {end_year - 1}"
+    return (f"This company's fiscal year ends in {MONTHS[m - 1]}: reporting year {y} is the year from {start} to "
+            f"{MONTHS[m - 1]} {end_year}, printed as \"year ended {MONTHS[m - 1]} {end_year}\", FY{end_year}, "
+            f"FY{str(end_year - 1)[2:]}/{str(end_year)[2:]}" + (f" or (in Japan) FY{end_year - 1}" if m <= 6 else "")
+            + f". Take that column" + (f", not the one for the year ended {MONTHS[m - 1]} {end_year - 1}" if m <= 6 else "")
+            + ". For every figure give \"period_end\": the month the column's period ends, as YYYY-MM.")
+
+
 def prompt(g, attr, pages):
     """The user message: what to find, then the pages, each tagged P1, P2, ..."""
     labels = ", ".join(attr.get("labels", [])[:12])
@@ -67,6 +92,7 @@ def prompt(g, attr, pages):
              f"for such a year is the one to take, not the column headed {g['year'] - 1} or FY{g['year']} of a company "
              f"whose year ends in March. When several year columns are printed, take the one for this reporting year, "
              f"even if a later year is also printed.",
+             fiscal_note(g),
              f"Period: {attr['period']}." if attr.get("period") else "",
              f"Scope: {attr['scope']}." if attr.get("scope") else "",
              "Take the figure for that year, for the whole company or group, not a segment, a region or a target.",
@@ -86,7 +112,9 @@ def prompt(g, attr, pages):
               + ", ".join(f'"{s}"' for s in SCALES) + " (the unit the page states for that number, e.g. "
               "\"in millions\", \"€m\", \"'000\", \"ktCO2e\"; 万 is ten thousands, 億 or 亿 hundred millions), \"unit\": \"EUR\" or \"tCO2e\" etc., "
               f"\"year\": {y}, \"column\": the heading of the column or line the figure sits under, exactly as printed, "
-              "e.g. \"FY25\", \"2024\", \"2024/25\", \"Year ended 31 March 2025\"}, ...]}. "
+              "e.g. \"FY25\", \"2024\", \"2024/25\", \"Year ended 31 March 2025\", \"period_end\": the month the column's "
+              "period ends, as YYYY-MM, when the page says it (\"for the years ended March 31, 2024\" above a column headed 2024 "
+              "is 2024-03)}, ...]}. "
               f"The first entry is the figure for reporting year {y}. Then one entry for each other reporting year the "
               "same row prints (its other year columns), newest first, at most six entries in all and one per year, each "
               "with its page, printed number and column heading; \"year\" is the reporting year of that column under the "
@@ -151,11 +179,24 @@ def column_year(column):
     return 2000 + int(m.group(1)) if m else None
 
 
-def check(reply, pages, to_number, numbers_on):
+def period_year(period_end):
+    """(reporting year, month) from a period end "YYYY-MM": the year the period ends, or the year before when
+    it ends January to June; (None, None) when there is no month."""
+    m = re.fullmatch(r"\s*((?:19|20)\d\d)-(\d\d?)\s*", str(period_end or ""))
+    if not m or not 1 <= int(m.group(2)) <= 12:
+        return None, None
+    y, mo = int(m.group(1)), int(m.group(2))
+    return (y - 1 if mo <= 6 else y), mo
+
+
+def check(reply, pages, to_number, numbers_on, fy_month=None):
     """{'value', 'printed', 'scale', 'library_id', 'page', 'unit', 'year', 'column'} when the entry names a page
     that prints the number, else None (nothing usable) or False (a number the page does not print).
     to_number and numbers_on are the rule reader's own parsers. The year must be a reporting year the column
-    heading allows: the heading's year or the one before it (a fiscal year ending January to June)."""
+    heading allows: the heading's year or the one before it (a fiscal year ending January to June). When the
+    entry gives the period's end month, the reporting year is taken from it (2 Nov 2026: the model called the
+    year ended March 31, 2024 reporting year 2024; it is 2023), and when the company's year end is known
+    (fy_month) a period ending in another month is a misread column and the entry is dropped."""
     if not reply or not reply.get("page") or not reply.get("printed"):
         return None
     m = re.fullmatch(r"P(\d+)", str(reply["page"]).strip())
@@ -175,21 +216,29 @@ def check(reply, pages, to_number, numbers_on):
         year = None
     column = str(reply.get("column") or "").strip()[:60]
     cy = column_year(column)
+    py, pm = period_year(reply.get("period_end"))
+    if pm and fy_month and abs(pm - int(fy_month)) > 1 and abs(pm - int(fy_month)) < 11:
+        return None                     # a period ending in another month than the company's year end: a misread column
+    if py is not None and (not cy or py in (cy, cy - 1)):
+        year = py                       # the period end says which reporting year the column is
     if year is not None and (not FIRST_YEAR <= year <= LAST_YEAR + 1 or (cy and year not in (cy, cy - 1))):
         return None                     # a year the heading does not allow: the model mixed its columns
+    if year is not None and cy and fy_month and int(fy_month) > 6 and year != cy:
+        return None                     # a July-to-December year end: a column of 2025 is 2025, never 2024 (2 Nov 2026:
+                                        # CVS Health's 2025 verification opinion, "January 1 to December 31, 2025", read as 2024)
     return {"value": printed * scale, "printed": printed, "scale": scale, "library_id": lid, "page": page,
             "unit": reply.get("unit") or "", "column": column, "year": year,
             "basis": str(reply.get("basis") or "").strip().lower()[:20]}
 
 
-def check_all(reply, pages, to_number, numbers_on, usage):
+def check_all(reply, pages, to_number, numbers_on, usage, fy_month=None):
     """Every usable entry of a reply, one per year (the first wins), in the reply's order. Accepts the old
     single-object shape too."""
     entries = reply.get("values") if isinstance(reply, dict) and isinstance(reply.get("values"), list) else \
         ([reply] if isinstance(reply, dict) and reply.get("page") else [])
     out, seen = [], set()
     for e in entries:
-        got = check(e if isinstance(e, dict) else None, pages, to_number, numbers_on)
+        got = check(e if isinstance(e, dict) else None, pages, to_number, numbers_on, fy_month)
         if got is False:
             usage["quote_not_on_page"] += 1
             continue
@@ -273,7 +322,7 @@ def read_years(g, attr, pages, usage, sess=None, note=None):
             note["why"] = "(no JSON in the reply)" if text else "(empty reply)"
         elif entries == [] or (entries is None and not reply.get("page")):
             note["why"] = str(reply.get("why") or "")[:120]
-    got = check_all(reply, pages, to_number, numbers_on, usage)
+    got = check_all(reply, pages, to_number, numbers_on, usage, g.get("fy_month"))
     for e in got:
         if e["year"] is None:           # the old single-object shape, or a missing year: the year asked
             e["year"] = g["year"]

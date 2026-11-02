@@ -70,6 +70,11 @@ class Planning(unittest.TestCase):
         self.assertEqual(row[:6], ("a", "recA", "WBA1", "Acme", "Annual Report", 2025))
         self.assertEqual(row[11:13], ("ok", P2))
         self.assertIsNone(L.document_row({"id": "c", "status": "no_text"}, {})[2])
+        # period_end (2 Nov 2026): "2025-03" or "2025" from the metadata snapshot, nothing else
+        self.assertIsNone(row[14])
+        self.assertEqual(L.document_row({"id": "a", "status": "ok"}, {"end": "2025-03"})[14], "2025-03")
+        self.assertEqual(L.document_row({"id": "a", "status": "ok"}, {"end": "2025"})[14], "2025")
+        self.assertIsNone(L.document_row({"id": "a", "status": "ok"}, {"end": "March 2025"})[14])
 
 
 @unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres to run")

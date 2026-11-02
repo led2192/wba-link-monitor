@@ -40,6 +40,9 @@ on:
       shards:
         description: "parallel jobs, each taking a fixed slice of the companies (1 to 8). Each job reads for up to five hours and has its own cost limit."
         default: "1"
+      fy_months:
+        description: "model reader: only companies whose fiscal year ends in these months, e.g. 1-6 (blank = all); with fresh_days 0 for the re-read after the fiscal-year fix"
+        default: ""
   pull_request:
     paths: [propose_values.py, extract_eval.py, model_reader.py, .github/workflows/propose_values.yml]
 
@@ -86,6 +89,7 @@ jobs:
             ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }} --model-years ${{ inputs.model_years }} --max-usd ${{ inputs.max_usd }} --fresh-days ${{ inputs.fresh_days || '30' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
             [ -n "${{ inputs.companies }}" ] && ARGS="$ARGS --companies ${{ inputs.companies }}"
+            [ -n "${{ inputs.fy_months }}" ] && ARGS="$ARGS --fy-months ${{ inputs.fy_months }}"
             [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
             if [ "${{ matrix.shard }}" != "1/1" ]; then
               ARGS="$ARGS --shard ${{ matrix.shard }}"

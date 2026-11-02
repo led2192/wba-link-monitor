@@ -26,6 +26,11 @@ create table if not exists public.documents (
   extracted_at  text,
   loaded_at     timestamptz not null default now()
 );
+-- period_end: "2025-03" (or "2025"), the end of the period the document covers, from report_library.period_end
+-- (fiscal_years.py). The month says when the company's fiscal year ends: a year ending January to June is the
+-- reporting year before (2 Nov 2026: ORIX's integrated report dated 2024 covers April 2023 to March 2024, which
+-- is reporting year 2023, and was read as 2024's).
+alter table public.documents add column if not exists period_end text;
 create index if not exists documents_wba_id on public.documents (wba_id);
 create index if not exists documents_year on public.documents (year);
 create index if not exists documents_doc_type on public.documents (doc_type);

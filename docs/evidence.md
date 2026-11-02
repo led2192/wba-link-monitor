@@ -19,7 +19,7 @@ Supabase project `wba-evidence` (managed Postgres, region Frankfurt, Pro plan, S
 
 | Table | Rows (26 Oct 2026) | What |
 | --- | --- | --- |
-| `documents` | 186,902 | One per document the text store has tried: company, type, year, language, title, address, pages, characters, `text_status` (ok, no_text, not_pdf, no_file ...). Documents with no company are out of the library's scope now (discarded since their text was read) and are left out of searches. |
+| `documents` | 186,902 | One per document the text store has tried: company, type, year, language, title, address, pages, characters, `text_status` (ok, no_text, not_pdf, no_file ...), `period_end` (since 2 Nov 2026: "2025-03", the end of the period covered, from `report_library.period_end`; its month says when the company's fiscal year ends, and a year ending January to June is the reporting year before). Documents with no company are out of the library's scope now (discarded since their text was read) and are left out of searches. |
 | `pages` | 6,640,513 | The text of each page (`body`), its words with positions (`words`), and copies of the document's `year`, `doc_type` and `wba_id` for the index. |
 | `passages` | 190,987 | The evidence passages with their tags (`dims`, `area`, `topics`, `terms`), and an empty `embedding` column for search by meaning later. |
 | `model_reads` | grows with each committed Propose values run (one row per company, attribute and year) | What the model reader has read and when, since 1 Nov 2026: wba_id, attribute, year, read_on, found (the year's own figure was found). A run skips what was read in the last `--fresh-days` days (30), so a run that stopped at its time limit is carried on by the next one. |

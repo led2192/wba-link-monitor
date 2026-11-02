@@ -270,6 +270,21 @@ def write(H, base, creates, updates):
         time.sleep(WRITE_PAUSE)
 
 
+def parse_months(text):
+    """{1, 2, ..., 6} from "1-6", {3, 6} from "3,6"; an empty set from blank."""
+    out = set()
+    for part in (text or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            a, b = part.split("-", 1)
+            out |= set(range(int(a), int(b) + 1))
+        else:
+            out.add(int(part))
+    return {m for m in out if 1 <= m <= 12}
+
+
 def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     """Model-reader proposals for the companies, attributes and years asked. Revenue is skipped for a
     company and year that already has a SEC or ESEF row: the filing is the better source."""
@@ -291,6 +306,11 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '90s'")
+        months = parse_months(getattr(a, "fy_months", ""))
+        if months:
+            from extract_eval import fy_end_month
+            companies = [w for w in companies if fy_end_month(cur, w) in months]
+            c["model reader: companies with a fiscal year ending in the months asked"] = len(companies)
         fresh = recent_reads(cur, companies, codes, getattr(a, "fresh_days", 0))
         c["model reader: read in the last days, skipped"] = 0
         for wba in companies:
@@ -475,6 +495,8 @@ def main():
                     "so what it read is still written before the job's limit (one answer takes about 15 to 20 s)")
     ap.add_argument("--fresh-days", type=int, default=30, help="model reader: skip a company, attribute and year read "
                     "in the last N days (0 = read again), so a run carries on where the last one stopped")
+    ap.add_argument("--fy-months", default="", help="model reader: only companies whose fiscal year ends in these months, "
+                    "e.g. 1-6 or 3,6 (blank = every company); for the re-read after the fiscal-year fix of 2 Nov 2026")
     ap.add_argument("--shard", default="", help="i/N: only the i-th of N slices of the companies (parallel jobs)")
     a = ap.parse_args()
     shard_i, shard_n = (int(x) for x in a.shard.split("/")) if a.shard else (1, 1)
