@@ -199,13 +199,13 @@ def check_all(reply, pages, to_number, numbers_on, usage):
     return out
 
 
-def call(messages, usage, sess=None, model=None):
+def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
     """The model's text reply (Messages API), retrying four times on overload or rate limits (parallel shards
-    share the account's limits, 31 Oct 2026)."""
+    share the account's limits, 31 Oct 2026). system and max_tokens default to the reader's."""
     import requests
     sess = sess or requests
-    body = {"model": model or os.environ.get("READER_MODEL", DEFAULT_MODEL), "max_tokens": MAX_TOKENS,
-            "system": SYSTEM, "messages": messages}
+    body = {"model": model or os.environ.get("READER_MODEL", DEFAULT_MODEL), "max_tokens": max_tokens or MAX_TOKENS,
+            "system": system or SYSTEM, "messages": messages}
     headers = {"x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(), "anthropic-version": "2023-06-01",
                "content-type": "application/json"}
     for attempt in range(5):
