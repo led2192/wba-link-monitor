@@ -43,6 +43,18 @@ SYSTEM = ("You read pages of company reports and find one reported figure, for e
 FIRST_YEAR, LAST_YEAR = 2010, time.gmtime().tm_year
 
 
+def adjacent_notes(pages):
+    """Lines telling the model which pages follow each other in the same document, so a table that runs
+    from one page to the next is read as one (1 Nov 2026). pages: [(library_id, page, body)]."""
+    where = {(lid, page): i for i, (lid, page, _) in enumerate(pages, 1)}
+    out = []
+    for (lid, page), i in sorted(where.items(), key=lambda x: x[1]):
+        j = where.get((lid, page + 1))
+        if j:
+            out.append(f"P{j} is the page right after P{i} in the same document: a table may run from one to the other.")
+    return out
+
+
 def prompt(g, attr, pages):
     """The user message: what to find, then the pages, each tagged P1, P2, ..."""
     labels = ", ".join(attr.get("labels", [])[:12])
@@ -68,6 +80,7 @@ def prompt(g, attr, pages):
              "", "Pages:"]
     for i, (_, _, body) in enumerate(pages, 1):
         lines += [f"<page id=\"P{i}\">", (body or "")[:PAGE_CHARS], "</page>"]
+    lines += adjacent_notes(pages)
     y = g["year"]
     lines += ["", "Reply with JSON: {\"values\": [{\"page\": \"P1\", \"printed\": \"12,345.6\", \"scale\": one of "
               + ", ".join(f'"{s}"' for s in SCALES) + " (the unit the page states for that number, e.g. "
