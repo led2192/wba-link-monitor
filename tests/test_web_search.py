@@ -81,12 +81,16 @@ class Search(unittest.TestCase):
         self.assertEqual(res["found"], [("https://www.acme.com/sr2025.pdf", "sustainability 2025")])
         self.assertEqual(len(api.asked), 1)                                          # own site answered: no question by name
         api = Stub({'"Acme Group"': [{"link": "https://www.acme.com/esg-2025.pdf", "title": "ESG report 2025"},
-                                      {"link": "https://news.example.org/acme-esg-2025.pdf", "title": "Acme ESG 2025"}]})
-        res = W.search_company(self.F, [], YEARS, api, reg_domain, opener=lambda u: ("News about Acme Group 2025", 2))
+                                      {"link": "https://news.example.com/acme-esg-2025.pdf", "title": "Acme ESG 2025"}]})
+        # every file is opened (2 Nov 2026), the company's own too: the own-site report passes on its cover, the
+        # two-page news item elsewhere does not
+        covers = {"https://www.acme.com/esg-2025.pdf": ("Acme Group\nESG Report 2025", 80),
+                  "https://news.example.com/acme-esg-2025.pdf": ("News about Acme Group 2025", 2)}
+        res = W.search_company(self.F, [], YEARS, api, reg_domain, opener=lambda u: covers[u])
         self.assertEqual(len(api.asked), 2)
-        self.assertEqual([u for u, _ in res["found"]], ["https://www.acme.com/esg-2025.pdf"])
-        self.assertEqual(res["not_added"], [("https://news.example.org/acme-esg-2025.pdf",
-                                             "another site (example.org); opened: 2 pages, not a report")])
+        self.assertEqual(res["found"], [("https://www.acme.com/esg-2025.pdf", "sustainability 2025, checked on the file's first pages")])
+        self.assertEqual(res["not_added"], [("https://news.example.com/acme-esg-2025.pdf",
+                                             "another site (example.com); opened: 2 pages, not a report")])
         self.assertIn("passed to research_link: https://www.acme.com/esg-2025.pdf", W.note("2026-11-01", res))
 
     def test_budget_cut_is_flagged(self):
@@ -276,7 +280,7 @@ class SecondWaveCases(unittest.TestCase):
         self.assertIn("site:ptc.punjab.gov.pk", W.query("annual", [2025], domains=["ptc.punjab.gov.pk"]))
         r = {"link": "https://ppdb.punjab.gov.pk/system/files/Annex-C_PPDB_AnualReport_2025.pdf", "title": "Annual Report 2025"}
         self.assertEqual(W.judge(r, "annual", [2025], ["ptc.punjab.gov.pk"], "Punjab Transport Company", reg_domain)[1],
-                         "another site (punjab.gov.pk)")
+                         "not the company's: a government site (punjab.gov.pk)")        # and never opened (2 Nov 2026)
 
     def test_more_things_that_are_not_a_report(self):
         for title in ("Dodge & Cox Worldwide Funds Semi-Annual Report", "Worldwide Funds Annual Report", "JSS Analytics Sample Report",
@@ -362,3 +366,178 @@ class SharedHostCases(unittest.TestCase):
         f = {"company_name": "Mesirow Financial", "website": "https://www.mesirow.com"}
         doc = {"front": "2025 Annual Report\nMorningstar, Inc.\nLetter to Shareholders", "more": "", "meta": "", "file": "2025AnnualReport.pdf"}
         self.assertFalse(W.cover_check(doc, 120, f, "annual", [2025], own_site=False)[0])
+
+
+class ThirdWaveCases(unittest.TestCase):
+    """2 Nov 2026: 37 of the 167 documents the waves of 1 and 2 Nov brought in were other organisations' files
+    or not reports. Every kind is a case here. Own-site files were never opened; now every file is."""
+    def j(self, link, title, name, domains, fam="annual", years=(2025, 2024, 2023)):
+        return W.judge({"link": link, "title": title}, fam, list(years), list(domains), name, reg_domain)
+
+    def test_own_site_files_that_are_not_reports_by_their_title(self):
+        cases = [("https://www.invesco.com/content/dam/invesco/apac/en/pdf/insights/2025/january/invesco-sustainable-investing-outlook-for-jan25.pdf",
+                  "Invesco sustainable investing outlook for jan25", "Invesco", ["invesco.com"], "sustainability", "outlook for"),
+                 ("https://www.teliacompany.com/assets/x/The_Enablement_Effect_Telia_Trend_Report_Sustainability_2026.pdf",
+                  "The Enablement Effect Telia Trend Report Sustainability 2026", "Telia", ["teliacompany.com"], "sustainability", "trend report"),
+                 ("https://media.amtrak.com/wp-content/uploads/2023/06/FY22-Sustainability-Report-News-Release-1.pdf",
+                  "FY22 Sustainability Report News Release", "Amtrak", ["amtrak.com"], "sustainability", "news release"),
+                 ("https://media.amtrak.com/wp-content/uploads/2024/06/FY23-Sustainability-Report-cover.pdf",
+                  "FY23 Sustainability Report cover", "Amtrak", ["amtrak.com"], "sustainability", "cover"),
+                 ("https://packagingcoatings.akzonobel.com/x/akzonobel-packaging-coatings-sustainability-whitepaper-2025.pdf",
+                  "AkzoNobel sustainability whitepaper 2025", "AkzoNobel", ["akzonobel.com"], "sustainability", "whitepaper"),
+                 ("http://www.posco-inc.com/poscoinc/servlet/FileDown?file=x.pdf&filename=POSCO_Holdings_consolidated_FY22_4Q_E.pdf",
+                  "POSCO Holdings consolidated FY22 4Q E annual report 2023", "POSCO Holdings", ["posco-inc.com"], "annual", "4q"),
+                 ("https://www.spic.in/wp-content/uploads/2024/08/Intimation_on_BRSR.pdf", "Intimation on BRSR sustainability report 2024",
+                  "SPIC", ["spic.in"], "sustainability", "intimation"),
+                 ("https://www.sama.gov.sa/en-US/Documents/Financial_Sector_Development_Program_Annual_Report-2024-EN.pdf",
+                  "Financial Sector Development Program Annual Report 2024", "SAMA", ["sama.gov.sa"], "annual", "program annual report"),
+                 ("https://www.cofcointernational.com/media/rupkzhxi/soft-commodities-forum-scf24_annualreport-2024-en-1.pdf",
+                  "Soft Commodities Forum SCF24 annual report 2024", "COFCO", ["cofco.com", "cofcointernational.com"], "annual", "forum"),
+                 ("https://www.hanafn.com:8002/download/10072085/crossDownload.do", "2026 Allocation & Impact Report (English)",
+                  "Hana Financial Group", ["hanafn.com"], "sustainability", "allocation & impact"),
+                 ("https://www.storaenso.com/x/green-and-sustainability-linked-financing-report-2025.pdf",
+                  "Green and Sustainability-Linked Financing Report 2025", "Stora Enso", ["storaenso.com"], "sustainability", "financing report")]
+        for link, title, name, doms, fam, word in cases:
+            ok, why = self.j(link, title, name, doms, fam)
+            self.assertFalse(ok, link)
+            self.assertIn(word, why, link)
+        # on another site such a title is never opened either (a rating agency's rationale for Bank of India)
+        self.assertEqual(W.not_a_report("BoI ESG Rating Rationale", "Bank of India"), "rating rationale")
+        # a word of the company's own name does not make its report "not a report"
+        self.assertTrue(self.j("https://www.futurefund.gov.au/x/future-fund-annual-report-2025.pdf", "Future Fund Annual Report 2025",
+                               "Future Fund", ["futurefund.gov.au"])[0])
+        self.assertTrue(self.j("https://www.postholdings.com/x/post-holdings-annual-report-2025.pdf", "Post Holdings Annual Report 2025",
+                               "Post Holdings", ["postholdings.com"])[0])
+
+    def test_sites_that_never_hold_the_companys_report_are_not_opened(self):
+        cases = [("https://www.jica.go.jp/english/x/Result_of_Monitoring_2025.pdf", "Klabin", ["klabin.com.br"], "government"),
+                 ("http://www.sasac.gov.cn/n4470048/x/33812651.pdf", "China Railway Construction", ["crcc.cn"], "government"),
+                 ("https://academica-e.unavarra.es/bitstreams/cfcacad0/download", "Mercadona", ["mercadona.es"], "academic"),
+                 ("https://www.digicelfoundation.org/api/assets/x/2022-2023-annual-report.pdf", "Digicel", ["digicelgroup.com"], "foundation"),
+                 ("https://www.theclimategroup.org/hubfs/Under2/Future%20Fund%202025.pdf", "Future Fund", ["futurefund.gov.au"], ".org"),
+                 ("https://regnskaber.cvrapi.dk/xhtml/28960101/abc.pdf", "Lactalis", ["lactalis.fr"], "registry"),
+                 ("https://www.wwf.de/fileadmin/x/EDEKA-WWF-Progress-Report-2023-2024.pdf", "Edeka Zentrale", ["verbund.edeka"], "not a company")]
+        for link, name, doms, kind in cases:
+            ok, why = self.j(link, "Annual Report 2025", name, doms)
+            self.assertFalse(ok, link)
+            self.assertTrue(why.startswith("not the company's"), why)
+            self.assertIn(kind, why, link)
+            self.assertFalse(why.startswith(W.CHECKABLE), why)                   # never opened
+        self.assertEqual(W.site_class("https://www.jica.go.jp/x.pdf", ["klabin.com.br"], reg_domain), "never")
+        self.assertEqual(W.site_class("https://www.virginaustralia.com/x.pdf", ["qatarairways.com"], reg_domain), "third")
+        self.assertEqual(W.site_class("https://s3.amazonaws.com/x.pdf", ["qatarairways.com"], reg_domain), "doc_host")
+        self.assertEqual(W.site_class("https://www.qatarairways.com/x.pdf", ["qatarairways.com"], reg_domain), "own")
+
+    def test_a_shared_domain_and_a_government_folder_are_not_the_companys_site(self):
+        # bank.in is every Indian bank's: the company's site under it is its host
+        f = {"company_name": "Bank of India", "website": "https://www.bankofindia.co.in", "hq_country": "IND"}
+        self.assertEqual(W.company_domains(f, ["https://bankofindia.bank.in/investor-relations"], reg_domain),
+                         ["bankofindia.co.in", "bankofindia.bank.in"])
+        self.assertEqual(self.j("https://www.axis.bank.in/docs/brsr-2024-25.pdf", "Business Responsibility Sustainability Report 2024-25",
+                                "Bank of India", ["bankofindia.co.in", "bankofindia.bank.in"], "sustainability")[1], "another site (bank.in)")
+        # a folder of a bare government domain is the site, not the whole domain
+        f = {"company_name": "Michigan Retirement Systems", "website": "https://www.michigan.gov/ors/", "hq_country": "USA"}
+        self.assertEqual(W.company_domains(f, [], reg_domain), ["michigan.gov/ors"])
+        self.assertTrue(W.on_sites("https://www.michigan.gov/ors/-/media/x/SERS-Summary-Annual-Report-2025.pdf", ["michigan.gov/ors"]))
+        self.assertFalse(W.on_sites("https://www.michigan.gov/ok2say/-/media/x/2025-OK2SAY-Annual-Report.pdf", ["michigan.gov/ors"]))
+        self.assertIn("site:michigan.gov/ors", W.query("annual", [2025], domains=["michigan.gov/ors"]))
+        self.assertTrue(self.j("https://www.michigan.gov/ok2say/-/media/x/2025-OK2SAY-Annual-Report.pdf", "2025 OK2SAY Annual Report",
+                               "Michigan Retirement Systems", ["michigan.gov/ors"])[1].startswith("not the company's: a government site"))
+
+    def test_a_local_affiliates_domain_is_not_the_groups(self):
+        f = {"company_name": "McCain Foods", "website": "https://www.mccain.com", "hq_country": "CAN"}
+        self.assertEqual(W.company_domains(f, ["https://www.mccainindia.com/x", "https://www.mccain.com/y"], reg_domain), ["mccain.com"])
+        f = {"company_name": "Novo Nordisk", "website": "https://www.novonordisk.com", "hq_country": "DNK"}
+        self.assertEqual(W.company_domains(f, ["https://www.novonordisk-us.com/x"], reg_domain), ["novonordisk.com"])
+        f = {"company_name": "AS Watson", "website": "https://www.aswatson.com/", "hq_country": "HKG"}
+        self.assertEqual(W.company_domains(f, ["https://bulten.watsons.com.tr/x", "https://www.aswatson.com/y"], reg_domain), ["aswatson.com"])
+        f = {"company_name": "Digicel", "website": "https://www.digicelgroup.com", "hq_country": "JAM"}
+        self.assertEqual(W.company_domains(f, ["https://www.digicelfoundation.org/x"], reg_domain), ["digicelgroup.com"])
+        # the group's own second domain in its own country still counts
+        f = {"company_name": "Telenor", "website": "https://www.telenor.com", "hq_country": "NOR"}
+        self.assertEqual(W.company_domains(f, ["https://www.telenor.no/x"], reg_domain), ["telenor.com", "telenor.no"])
+
+    def check(self, f, front, more="", meta="", fname="x.pdf", fam="annual", site="third", years=(2025, 2024, 2023), pages=120):
+        return W.cover_check({"front": front, "more": more, "meta": meta, "file": fname}, pages, f, fam, list(years), site=site)
+
+    def test_another_companys_report_that_names_the_company_further_down(self):
+        f = {"company_name": "Qatar Airways Group", "website": "https://www.qatarairways.com", "hq_country": "QAT"}
+        front = "Virgin Australia\nSustainability Report 2025\n" + "x " * 200 + "Our shareholders Bain Capital and Qatar Airways Group ... Qatar Airways Group"
+        self.assertIn("does not head the file", self.check(f, front, fam="sustainability")[1])
+        f = {"company_name": "New Balance", "website": "https://www.newbalance.com", "hq_country": "USA"}
+        front = "JD Sports Fashion plc\nAnnual Report and Accounts 2026\n" + "x " * 200 + "brands such as Nike, adidas and New Balance ... New Balance"
+        self.assertIn("does not head the file", self.check(f, front)[1])
+        f = {"company_name": "SC Johnson", "website": "https://www.scjohnson.com", "hq_country": "USA"}
+        front = "Johnson Outdoors Inc.\n2025 Annual Report\nJohnson Outdoors ... Johnson Outdoors"
+        self.assertIn("whole name", self.check(f, front)[1])                     # "johnson" alone is not the name
+        f = {"company_name": "Apax Partners", "website": "https://www.apax.com", "hq_country": "GBR"}
+        front = "EARPS Midco 1 Limited\nAnnual Report 2025\n" + "x " * 200 + "funds advised by Apax Partners ... Apax Partners LLP"
+        self.assertIn("does not head the file", self.check(f, front)[1])
+
+    def test_a_subsidiarys_or_affiliates_document(self):
+        f = {"company_name": "Lactalis", "website": "https://www.lactalis.fr", "hq_country": "FRA", "corporate_name": "Groupe Lactalis"}
+        front = "Lactalis Danmark A/S\nIndustrivej 14C, DK-3320 Skaevinge\nAnnual report 2025\nLactalis Danmark A/S"
+        self.assertIn("subsidiary's or affiliate's document (lactalis danmark", self.check(f, front)[1])
+        f = {"company_name": "REMONDIS", "website": "https://www.remondis.com", "hq_country": "DEU", "corporate_name": "REMONDIS SE & Co. KG"}
+        front = "Remondis A/S\nAnnual report 2025\nIndustrikrogen 18, 2635 Ishoj\nRemondis A/S CVR No. 19012345"
+        self.assertIn("subsidiary's or affiliate's document (remondis a s", self.check(f, front)[1])
+        f = {"company_name": "SC Johnson", "website": "https://www.scjohnson.com", "hq_country": "USA", "corporate_name": "S.C. Johnson & Son, Inc."}
+        front = "SC Johnson Professional A/S\nSverigesgade 26, 5000 Odense C\nAnnual report 2023\nSC Johnson Professional A/S"
+        self.assertIn("subsidiary's or affiliate's document", self.check(f, front)[1])
+        f = {"company_name": "McCain Foods", "website": "https://www.mccain.com", "hq_country": "CAN", "corporate_name": "McCain Foods Limited"}
+        front = "Project Shakti\nAnnual Report FY26\nMcCain Foods (India) Private Limited\nMcCain Foods India"
+        self.assertIn("subsidiary's or affiliate's document (mccain foods india", self.check(f, front, fname="project-shakti-f26-annual-report.pdf")[1])
+        f = {"company_name": "Novo Nordisk", "website": "https://www.novonordisk.com", "hq_country": "DNK", "corporate_name": "Novo Nordisk A/S"}
+        front = "Novo Nordisk Inc.\nSocial Impact Report 2023\nNovo Nordisk Inc., Plainsboro, New Jersey"
+        self.assertIn("subsidiary's or affiliate's document (novo nordisk inc", self.check(f, front, fam="sustainability")[1])
+        # a relative that names its parent on the cover
+        f = {"company_name": "China Datang", "website": "http://en.china-cdt.com", "hq_country": "CHN", "corporate_name": "China Datang Corporation Ltd."}
+        front = "Datang International Power Generation Co., Ltd.\nEnvironmental, Social and Governance Report 2023\nA subsidiary of China Datang Corporation"
+        self.assertIn("about a relative of the company (a subsidiary of", self.check(f, front, fam="sustainability", site="doc_host")[1])
+
+    def test_the_groups_own_report_still_passes(self):
+        f = {"company_name": "Novo Nordisk", "website": "https://www.novonordisk.com", "hq_country": "DNK", "corporate_name": "Novo Nordisk A/S"}
+        self.assertTrue(self.check(f, "Novo Nordisk\nAnnual Report 2025\nNovo Nordisk A/S", site="doc_host")[0])
+        f = {"company_name": "Telenor", "website": "https://www.telenor.com", "hq_country": "NOR", "corporate_name": "Telenor ASA"}
+        self.assertTrue(self.check(f, "Telenor Group\nAnnual Report 2025\nTelenor ASA ... Telenor Norge AS is our Norwegian business")[0])
+        f = {"company_name": "Koc Holding", "website": "https://www.koc.com.tr", "hq_country": "TUR", "corporate_name": "Koç Holding A.Ş."}
+        self.assertTrue(self.check(f, "Koç Holding A.Ş.\nAnnual Report 2025\nKoç Holding A.Ş.", site="own")[0])
+        f = {"company_name": "Nomura Holdings", "website": "https://www.nomura.com", "hq_country": "JPN", "corporate_name": "Nomura Holdings, Inc."}
+        self.assertTrue(self.check(f, "Nomura Holdings, Inc.\nIntegrated Report 2025\nNomura Holdings, Inc.", site="own")[0])
+        f = {"company_name": "FAW", "website": "http://www.faw.com", "hq_country": "CHN", "corporate_name": "CHINA FAW GROUP CO., LTD."}
+        self.assertTrue(self.check(f, "China FAW Group Co., Ltd.\nAnnual Report 2025", more="www.faw.com", site="doc_host")[0])
+        f = {"company_name": "Dole", "website": "https://www.doleplc.com", "hq_country": "IRL", "corporate_name": "Dole plc"}
+        self.assertTrue(self.check(f, "UNITED STATES SECURITIES AND EXCHANGE COMMISSION\n" + "x " * 150 + "FORM 10-K\nANNUAL REPORT\nDole plc",
+                                   fname="Dole-plc-Form-10-K-Annual-Report-2025.pdf", site="doc_host")[0])
+
+    def test_a_files_first_lines_say_it_is_something_else(self):
+        f = {"company_name": "Hana Financial Group", "website": "https://www.hanafn.com", "hq_country": "KOR"}
+        front = "DNV\nSecond Party Opinion\nHana Financial Group 2026 Allocation & Impact Report\nsustainability report"
+        self.assertIn("something else (second party opinion)", self.check(f, front, fam="sustainability", site="own")[1])
+        f = {"company_name": "Fidelity Investments", "website": "https://www.fidelity.com", "hq_country": "USA"}
+        front = "Fidelity Enhanced Emerging Markets ETF\nAnnual Report\nFebruary 28, 2025\nFidelity Investments"
+        self.assertIn("something else (etf annual report)", self.check(f, front, site="own")[1])
+        f = {"company_name": "Nordzucker", "website": "https://www.nordzucker.com", "hq_country": "DEU"}
+        front = "Nordzucker Post\nDas Magazin\nsustainability report 2023 ... Nordzucker"
+        self.assertIn("something else (magazin)", self.check(f, front, fam="sustainability", site="own")[1])
+
+    def test_a_name_of_common_words_needs_the_website_off_the_companys_site(self):
+        f = {"company_name": "Future Fund", "website": "https://www.futurefund.gov.au", "hq_country": "AUS"}
+        front = "Future Fund 2025\nUnder2 Coalition\nannual report of the Under2 Future Fund ... Future Fund"
+        self.assertIn("a shared name, and futurefund.gov.au is not in the file", self.check(f, front)[1])
+        self.assertTrue(self.check(f, "Future Fund\nAnnual Report 2025", more="www.futurefund.gov.au")[0])
+
+    def test_own_site_files_are_opened_and_a_refused_one_is_passed_from_its_title(self):
+        F = {"wba_id": "PT_1", "company_name": "Acme Group", "website": "acme.com", "sust_years": "", "coverage_breakdown": "", "hq_country": "USA"}
+        hits = [{"link": "https://www.acme.com/ir/acme-annual-report-2025.pdf", "title": "Acme Annual Report 2025"},
+                {"link": "https://www.acme.com/ir/acme-annual-report-2024.pdf", "title": "Acme Annual Report 2024"},
+                {"link": "https://www.acme.com/ir/acme-integrated-report-2023.pdf", "title": "Acme Integrated Report 2023"}]
+        covers = {hits[0]["link"]: ({"front": "Acme Group\nAnnual Report 2025", "more": "", "meta": "", "file": "acme-annual-report-2025.pdf"}, 150),
+                  hits[1]["link"]: (None, "HTTP 403"),
+                  hits[2]["link"]: ({"front": "Acme Group\nIntegrated Report", "more": "", "meta": "", "file": "r.pdf"}, 90)}
+        api = Stub({'site:acme.com ("annual report"': hits})
+        res = W.search_company(F, [], YEARS, api, reg_domain, opener=lambda u: covers[u])
+        self.assertEqual(res["opened"], 3)
+        self.assertEqual(res["found"], [(hits[0]["link"], "annual 2025, checked on the file's first pages"),
+                                        (hits[1]["link"], "annual 2024; could not be opened (HTTP 403), passed on from its title"),
+                                        (hits[2]["link"], "annual 2023, checked on the file's first pages")])   # the title's year when the cover has none

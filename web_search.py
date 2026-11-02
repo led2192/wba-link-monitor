@@ -27,11 +27,20 @@ A result is passed on only when all three hold:
   - it names one of the missing years.
 Passed documents go to companies.research_link, so the inbox (inbox.py, every 30 minutes) adds them
 with its duplicate and tombstone guards, attaches the file and has it typed and dated like any other
-document, marked as research. At most MAX_PER_FAMILY per family and company. Results on another site
-are not added on the quick test, but they are opened (up to 4 per family): when the company's name is on
-the first 15 pages or in the file's properties, the report and a missing year on the first pages, and the
-file has at least 8 pages, it is passed on as well (a company's report often sits on a CDN, a group site or an archive). The rest are listed in
-web_search_note with the reason.
+document, marked as research. At most MAX_PER_FAMILY per family and company.
+
+Every candidate is opened before it is passed on (2 Nov 2026: 37 of 167 documents brought in by the waves of
+1 and 2 Nov were other organisations' files or not reports; own-site files had never been opened). The
+quick test on the title and address only sorts results out (not a report, no family word, no missing year)
+and classes the site:
+  own        the company's sites: the cover must show the company, the report and a missing year, 8+ pages
+  doc host   a CDN, filing system, IR platform or mirror (DOC_HOSTS): also the whole name on the title page
+  other      any other site: also the name heading the file (first lines, properties or file name)
+  never      a government site, an academic repository, a foundation, a registry, a .org: not opened
+On every site a file is refused when its first lines say it is something else (an opinion, a rating, a
+release, a fund report), when its first pages say someone else wrote it, or when the company's name is
+printed only as part of a subsidiary's or affiliate's name (McCain Foods India, Lactalis Danmark A/S).
+The rest are listed in web_search_note with the reason.
 
 Modes (web_searched_on says when a company was last searched):
   --mode recovery   companies with a missing recent year that were never searched: the one-off sweep
@@ -58,28 +67,62 @@ MAX_PER_FAMILY = 3                      # documents passed on per company and fa
 YEARS_BACK = 3                          # recent years: expected_year() and the two before it
 WRITE_PAUSE = 0.22
 
-# Hosts that serve many listed companies' documents from a domain that is not the company's own. A result
-# there is added only when its title or address (not its snippet) carries the company's name (1 Nov 2026: an HKEXnews PDF is
-# named by a number, so without the name it can be any listed company's).
+# Hosts that serve many organisations' documents from a domain that is not the company's own: CDNs and
+# storage, investor-relations platforms, filing systems, news wires, site builders' asset hosts and report
+# mirrors. A file there is never taken on its address (1 Nov 2026: an HKEXnews PDF is named by a number;
+# 2 Nov 2026: Football Association of Wales files on amazonaws.com were passed for FAW the carmaker): it is
+# opened and its title page must carry the company's whole name.
 DOC_HOSTS = {"q4cdn.com", "hkexnews.hk", "mziq.com", "sitecorecloud.io", "cision.com", "globenewswire.com",
-             "amazonaws.com", "cloudfront.net", "azureedge.net", "sec.gov", "cninfo.com.cn", "sse.com.cn", "szse.cn",
-             "tdnet.info", "jpx.co.jp", "edinet-fsa.go.jp", "dart.fss.or.kr", "bseindia.com", "nseindia.com",
-             "londonstockexchange.com", "euronext.com", "asx.com.au"}
-# Domains that are never a company's own site, even when one of its monitored pages sits there (1 Nov 2026
-# dry run: a monitored SBTi page made sciencebasedtargets.org "the company's site", and its glossary was
-# passed on as an annual report): site builders, report archives of many companies, initiatives, governments.
-NOT_COMPANY = {"squarespace.com", "wixstatic.com", "wix.com", "website-files.com", "hubspotusercontent-na1.net",
-               "hubspotusercontent-eu1.net", "hubspot.com", "wordpress.com", "sciencebasedtargets.org", "lobbymap.org",
-               "responsibilityreports.com", "annualreports.com", "weps.org", "unglobalcompact.org", "cdp.net",
-               "globalreporting.org", "linkedin.com", "issuu.com", "yumpu.com", "scribd.com", "publicnow.com",
-               "marketscreener.com", "google.com", "youtube.com", "facebook.com", "x.com", "twitter.com"}
+             "prnewswire.com", "amazonaws.com", "cloudfront.net", "azureedge.net", "windows.net", "googleapis.com",
+             "digitaloceanspaces.com", "ctfassets.net", "website-files.com", "wixstatic.com", "squarespace.com",
+             "hubspotusercontent-na1.net", "hubspotusercontent-eu1.net", "sec.gov", "cninfo.com.cn", "sse.com.cn",
+             "szse.cn", "tdnet.info", "jpx.co.jp", "edinet-fsa.go.jp", "dart.fss.or.kr", "bseindia.com", "nseindia.com",
+             "londonstockexchange.com", "euronext.com", "asx.com.au", "annualreports.com", "responsibilityreports.com",
+             "companiesmarketcap.com", "craft.co", "issuu.com", "yumpu.com", "scribd.com", "publicnow.com",
+             "marketscreener.com"}
+# Domains that are never a company's own site and never hold its report (1 Nov 2026 dry run: a monitored SBTi
+# page made sciencebasedtargets.org "the company's site", and its glossary was passed on as an annual report):
+# initiatives, social networks, site builders' home domains.
+NOT_COMPANY = {"wix.com", "hubspot.com", "wordpress.com", "sciencebasedtargets.org", "lobbymap.org", "weps.org",
+               "unglobalcompact.org", "cdp.net", "globalreporting.org", "linkedin.com", "google.com", "youtube.com",
+               "facebook.com", "x.com", "twitter.com", "wwf.de", "wwf.org", "panda.org", "theclimategroup.org"}
+# Registered domains shared by many organisations, like a government's: a company's site under one is its
+# host, not the domain (2 Nov 2026: Axis Bank's and SBI's reports passed for Bank of India, all under bank.in).
+SHARED_SLD = {"bank.in"}
+# Company registries: their files are legal entities' accounts, a foreign group's local subsidiary as often as
+# the group (2 Nov 2026: Lactalis Danmark, Remondis A/S and SC Johnson Professional A/S from the Danish registry).
+REGISTRIES = {"cvrapi.dk", "virk.dk", "companieshouse.gov.uk", "brreg.no", "bolagsverket.se", "handelsregister.de",
+              "infogreffe.fr", "registroimprese.it", "kvk.nl", "zefix.ch"}
+# In a domain's label: a foundation, an institute or a registry is not the company (2 Nov 2026: the Digicel
+# Foundation's annual reports passed for Digicel).
+NOT_COMPANY_LABEL = re.compile(r"foundation|fundaci|funda[cs]ao|stiftung|fondation|fondazione|registry|institute", re.I)
+# Addresses of academic repositories (2 Nov 2026: a university thesis about Mercadona passed as its report).
+ACADEMIC = re.compile(r"\.edu(\.|/|$)|\.ac\.[a-z]{2,3}(/|$)|academic|/bitstreams?/|/handle/\d|dspace|repositor|/thesis|/tesis|eprints|\.uni-", re.I)
 # Words in a title or file name that mark a document that is not a report.
-NOT_A_REPORT = re.compile(r"press[ _-]?release|comunicado|communiqu|presentation|conference[ _-]?call|earnings|"
-                          r"prospectus|glossary|questionnaire|consultation|memo\b|tender|factsheet|fact[ _-]sheet|"
-                          r"basis[ _-]of[ _-]reporting|policy|\bq[1-4]\b|\b[1-4]q\d\d|interim|half[ _-]?year|"
-                          r"quarterly|webcast|invitation|agenda|minutes|newsletter|framework|grundsatzerkl|"
-                          r"semi[ _-]?annual|sample|plan[ _-]?document|summary[ _-]plan|\bfunds?[ _-](semi[ _-]?)?annual|"
-                          r"communication[ _-]file|downloadpubliccommunication", re.I)
+NOT_A_REPORT = re.compile(r"press[ _-]?release|news[ _-]?release|media[ _-]?release|comunicado|communiqu|presentation|"
+                          r"conference[ _-]?call|earnings|prospectus|glossary|questionnaire|consultation|memo\b|tender|"
+                          r"factsheet|fact[ _-]sheet|basis[ _-]of[ _-]reporting|policy|\bq[1-4]\b|\b[1-4]q(\d\d)?\b|interim|"
+                          r"half[ _-]?year|quarterly|webcast|invitation|agenda|minutes|newsletter|magazine|magazin\b|framework|"
+                          r"grundsatzerkl|semi[ _-]?annual|sample|plan[ _-]?document|summary[ _-]plan|"
+                          r"\bfunds?[ _-](semi[ _-]?)?annual|\betfs?\b|sicav|ucits|communication[ _-]file|"
+                          r"downloadpubliccommunication|trend[ _-]?report|white[ _-]?paper|outlook[ _-]for|"
+                          r"(investment|market|economic)[ _-]outlook|intimation|\bnotice\b|rating[ _-](rationale|report)|"
+                          r"second[ _-]party[ _-]opinion|assurance[ _-](statement|report)|verification[ _-]statement|"
+                          r"allocation[ _-](and[ _-]|&[ _-]?)?impact|use[ _-]of[ _-]proceeds|green[ _-]bond|bond[ _-](allocation|impact|report)|"
+                          r"financing[ _-]report|post[ _-]issuance|(^|[ _-])cover([ _.-]|$)|result[ _-]of[ _-]monitoring|"
+                          r"\bthesis\b|\btesis\b|dissertation|trabajo[ _-](de[ _-])?fin|\bforum\b|\bfoundation\b|fundaci[oó]n|"
+                          r"funda[cç][aã]o|stiftung|fondation|program(me)?[ _-]annual[ _-]report|terms[ _-]of[ _-]reference", re.I)
+
+
+def not_a_report(text, name=""):
+    """The word in a title, a file name or a cover's first lines that says the file is not a report, or None.
+    A word that is part of the company's own name does not count (Future Fund, Post Holdings)."""
+    own = set(fold(name).split())
+    for m in NOT_A_REPORT.finditer(text or ""):
+        w = fold(m.group(0))
+        if w and not any(x in own for x in w.split()):
+            return m.group(0).strip(" _-").lower()
+    return None
 
 
 FAMILIES = {
@@ -147,13 +190,148 @@ def in_gap(f):
 
 GOVERNMENT = re.compile(r"\.(gov|gob|gouv|gc|go|nic|govt|org)\.[a-z]{2,3}$|\.gov$|\.(gov|gob|gouv|mil)\.|\.gc\.ca$")
 
+# ISO 3166 alpha-3 (companies.hq_country) to the country-code top-level domain.
+ISO2 = {"AGO": "ao", "ARE": "ae", "ARG": "ar", "AUS": "au", "AUT": "at", "AZE": "az", "BEL": "be", "BGD": "bd", "BMU": "bm",
+        "BRA": "br", "CAN": "ca", "CHE": "ch", "CHL": "cl", "CHN": "cn", "CIV": "ci", "COD": "cd", "COL": "co", "CZE": "cz",
+        "DEU": "de", "DNK": "dk", "DZA": "dz", "ECU": "ec", "EGY": "eg", "ESP": "es", "EST": "ee", "ETH": "et", "FIN": "fi",
+        "FRA": "fr", "GBR": "uk", "GRC": "gr", "HKG": "hk", "HUN": "hu", "IDN": "id", "IND": "in", "IRL": "ie", "IRN": "ir",
+        "IRQ": "iq", "ISR": "il", "ITA": "it", "JAM": "jm", "JPN": "jp", "KAZ": "kz", "KEN": "ke", "KOR": "kr", "KWT": "kw",
+        "LBY": "ly", "LIE": "li", "LUX": "lu", "MAR": "ma", "MEX": "mx", "MUS": "mu", "MYS": "my", "NGA": "ng", "NLD": "nl",
+        "NOR": "no", "NPL": "np", "NZL": "nz", "OMN": "om", "PAK": "pk", "PER": "pe", "PHL": "ph", "POL": "pl", "PRT": "pt",
+        "PSE": "ps", "QAT": "qa", "RUS": "ru", "SAU": "sa", "SDN": "sd", "SGP": "sg", "SWE": "se", "THA": "th", "TKM": "tm",
+        "TUR": "tr", "TWN": "tw", "TZA": "tz", "UKR": "ua", "URY": "uy", "USA": "us", "VEN": "ve", "VNM": "vn", "ZAF": "za",
+        "ZWE": "zw"}
+# Two-letter top-level domains used as generic ones, not as a country's.
+GENERIC_TLD = {"co", "io", "ai", "me", "tv", "cc", "to", "ly", "fm", "gg", "ws", "eu", "us"}
+# Words that, next to the company's name, mark a local subsidiary or affiliate (novonordisk-us, McCain Foods India,
+# Lactalis Danmark, Watsons Türkiye): country codes, countries, demonyms and regions, folded.
+COUNTRY_MARKERS = set("""usa uk nz uae ksa
+america american americas usa united states canada canadian mexico mexican brasil brazil brazilian argentina chile colombia peru
+uruguay venezuela latam latin europe european deutschland germany german austria osterreich schweiz switzerland swiss france french
+espana spain spanish iberia iberica iberian portugal portuguese italia italy italian nederland netherlands holland dutch belgie
+belgique belgium belgian luxembourg danmark denmark danish sverige sweden swedish norge norway norwegian suomi finland finnish
+nordic nordics baltic baltics polska poland polish czech cesko hungary magyar romania greece hellas ireland irish britain british
+england scotland wales turkiye turkey turkish russia russian ukraine kazakhstan japan japanese nippon nihon china chinese korea
+korean india indian pakistan bangladesh sri lanka indonesia malaysia singapore thailand vietnam philippines taiwan hongkong
+hong kong macau australia australian zealand oceania pacific apac asean asia asian middle east gulf arabia saudi emirates uae
+qatar kuwait oman bahrain israel egypt morocco algeria tunisia kenya nigeria ghana africa african overseas""".split())
+# Legal forms that name a local company, with the countries where a group is itself registered under them. A
+# company printed under a form of another country is a local subsidiary (Remondis A/S for a German group).
+FORM_COUNTRIES = {"a s": {"DNK", "CZE", "SVK"}, "aps": {"DNK"}, "as": {"NOR", "TUR", "CZE", "SVK", "DNK", "EST", "LVA", "LTU"},
+                  "asa": {"NOR"}, "ab": {"SWE", "FIN"}, "oy": {"FIN"}, "oyj": {"FIN"}, "abp": {"FIN"},
+                  "gmbh": {"DEU", "AUT", "CHE", "LIE"}, "ag": {"DEU", "AUT", "CHE", "LIE"}, "kg": {"DEU", "AUT"}, "kgaa": {"DEU"},
+                  "pvt": {"IND", "PAK", "LKA", "BGD", "NPL", "SGP", "ZWE", "KEN"}, "private limited": {"IND", "PAK", "LKA", "BGD", "NPL", "SGP"},
+                  "pty": {"AUS", "ZAF", "NAM", "BWA"}, "sdn bhd": {"MYS"}, "bhd": {"MYS"}, "berhad": {"MYS"}, "pte": {"SGP"},
+                  "tbk": {"IDN"}, "kk": {"JPN"}, "ltda": {"BRA", "COL", "CHL", "PER", "ECU", "BOL", "PRY", "URY", "VEN", "PRT",
+                                                           "MOZ", "AGO", "CRI", "GTM", "HND", "NIC", "SLV", "DOM", "PAN"},
+                  "lda": {"PRT", "AGO", "MOZ"}, "spa": {"ITA", "DZA"}, "srl": {"ITA", "ROU", "ARG"}, "sl": {"ESP"}, "slu": {"ESP"},
+                  "sas": {"FRA", "COL"}, "sarl": {"FRA", "LUX", "CHE", "MAR", "DZA", "TUN"}, "bv": {"NLD", "BEL", "CUW", "SUR"},
+                  "nv": {"NLD", "BEL", "CUW", "SUR"}, "sa de cv": {"MEX"}, "sab de cv": {"MEX"}, "pao": {"RUS"}, "ojsc": {"RUS", "UKR"},
+                  "pjsc": {"RUS", "UKR", "ARE", "KWT", "QAT", "SAU", "EGY", "OMN", "BHR"},
+                  "inc": {"USA", "CAN", "PHL", "JPN", "KOR", "CHN", "TWN", "HKG", "SGP", "ISR", "BMU", "CYM", "MUS", "JAM", "PAN",
+                          "IRN", "IRQ", "LBY", "SDN", "ETH", "TZA", "ZWE", "CIV", "COD", "AGO", "AZE", "TKM", "LIE", "PSE", "NPL"}}
+FORM_WORDS = sorted(FORM_COUNTRIES, key=len, reverse=True)
+# A name made only of such words (Future Fund, National Development Fund) is shared by other organisations: off
+# the company's site the file must carry its website too, as a one-word name must.
+GENERIC_WORDS = set("""fund funds future national international general global united first central northern southern eastern
+western pacific atlantic bank capital energy power group partners trust financial holdings industries foods motors airways
+airlines oil gas steel chemical chemicals pharma health life care home land sea star sun new one world state city federal royal
+imperial standard premier prime alpha delta omega apex summit horizon pioneer liberty retirement systems system investments
+investment management insurance savings railways railway post telecom mobile electric water grid resources mining construction
+engineering development company corporation enterprises services solutions technologies technology digital data cloud media
+network networks communications pension wealth sovereign authority council board public private commercial""".split())
+
+
+def site_of(url, reg_domain, path_site=True):
+    """The site a company address names: its registered domain; the full host when that domain is a
+    government's or a shared one (every agency or bank under it: ptc.punjab.gov.pk, bankofindia.bank.in);
+    the domain plus the first path segment when the address is a folder of a bare government domain
+    (michigan.gov/ors, 2 Nov 2026: another Michigan agency's annual report passed for the retirement systems)."""
+    from urllib.parse import urlsplit
+    if not url:
+        return ""
+    u = url.strip() if "://" in url else "https://" + url.strip()
+    d = reg_domain(u) or ""
+    if not d:
+        return ""
+    host = (urlsplit(u).hostname or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    if GOVERNMENT.search(d) or d in SHARED_SLD:
+        if host != d:
+            return host
+        seg = [x for x in (urlsplit(u).path or "").split("/") if x]
+        if path_site and seg and GOVERNMENT.search(d) and "." not in seg[0]:
+            return d + "/" + seg[0].lower()
+    return d
+
 
 def on_sites(link, domains):
-    """True when the link's host is one of the company's sites (a registered domain, or a full host when the
-    site is a subdomain of a shared one) or below it."""
+    """True when the link is on one of the company's sites: a registered domain (or a full host when the
+    site is a subdomain of a shared one) or below it; for a site with a path (michigan.gov/ors), that host
+    and a path under it."""
     from urllib.parse import urlsplit
+    sp = urlsplit(link)
+    host = (sp.hostname or "").lower()
+    path = (sp.path or "").lower()
+    for d in domains:
+        dom, _, pre = d.partition("/")
+        if host == dom or host == "www." + dom or (not pre and host.endswith("." + dom)):
+            if not pre or path == "/" + pre or path.startswith("/" + pre + "/"):
+                return True
+    return False
+
+
+def cctld(domain):
+    """The country of a domain's top-level label (watsons.com.tr: tr), or "" for a generic one."""
+    last = domain.rsplit(".", 1)[-1].lower()
+    return last if len(last) == 2 and last not in GENERIC_TLD else ""
+
+
+def affiliate_site(domain, label, matched, iso):
+    """True when a monitored page's domain is a local affiliate's, not the group's: the company's name word
+    followed by a country marker (novonordisk-us, mccainindia) or a country top-level domain that is not the
+    company's own (watsons.com.tr for a Hong Kong group)."""
+    rest = label.lower()
+    for t in sorted(matched, key=len, reverse=True):
+        rest = rest.replace(t, " ")
+    words = [w for w in re.split(r"[-_ ]+", rest) if w]
+    if words and all(w in COUNTRY_MARKERS or w in ISO2.values() for w in words):
+        return True
+    cc = cctld(domain)
+    return bool(cc and iso and ISO2.get(iso) and cc != ISO2[iso])
+
+
+def site_class(link, domains, reg_domain):
+    """Where a result sits: "own" (the company's sites), "doc_host", "never" (a site that never holds the
+    company's own report: a government's, an academic repository, a registry, a foundation's, a .org, an
+    initiative's) or "third" (any other site)."""
+    from urllib.parse import urlsplit
+    if on_sites(link, domains):
+        return "own"
+    d = reg_domain(link) or ""
     host = (urlsplit(link).hostname or "").lower()
-    return any(host == d or host.endswith("." + d) for d in domains)
+    if d in DOC_HOSTS:
+        return "doc_host"
+    if d in NOT_COMPANY or d in REGISTRIES or host in REGISTRIES:
+        return "never"
+    if GOVERNMENT.search(d) or d.endswith(".org") or ACADEMIC.search(link) or NOT_COMPANY_LABEL.search(d.split(".")[0]):
+        return "never"
+    return "third"
+
+
+def never_why(link, reg_domain):
+    d = reg_domain(link) or ""
+    if d in REGISTRIES:
+        return f"a company registry ({d})"
+    if d in NOT_COMPANY:
+        return f"not a company's site ({d})"
+    if ACADEMIC.search(link):
+        return f"an academic repository ({d})"
+    if NOT_COMPANY_LABEL.search(d.split(".")[0]):
+        return f"a foundation's or an institute's site ({d})"
+    if GOVERNMENT.search(d):
+        return f"a government site ({d})"
+    return f"a .org site ({d})"
 
 
 def company_domains(f, page_urls, reg_domain):
@@ -163,32 +341,41 @@ def company_domains(f, page_urls, reg_domain):
     (ptc.punjab.gov.pk, metro.cdmx.gob.mx) counts as that host, not the whole domain: the domain is shared by
     every agency of that government (1 Nov 2026 wave: three other Punjab agencies' annual reports and a
     civil-protection notice about a running race passed as the company's)."""
-    from urllib.parse import urlsplit
     out = []
-    w = (f.get("website") or "").strip()
-    if w:
-        u = w if "://" in w else "https://" + w
-        d = reg_domain(u)
-        host = (urlsplit(u).hostname or "").lower()
-        if d and GOVERNMENT.search(d) and host not in (d, "www." + d):
-            d = host[4:] if host.startswith("www.") else host
-        if d and d not in DOC_HOSTS and d not in NOT_COMPANY:
-            out.append(d)
-    tokens = set(name_tokens(f.get("company_name"))) | ({out[0].split(".")[0]} if out else set())
-    for d, _ in collections.Counter(reg_domain(u) for u in page_urls if u).most_common():
-        if not d or d in out or d in DOC_HOSTS or d in NOT_COMPANY or re.search(r"\.gov(\.|$)|\.gob\.|\.gouv\.", d) or len(out) >= 4:
+    s = site_of(f.get("website") or "", reg_domain)
+    if s and s.split("/")[0] not in DOC_HOSTS and s.split("/")[0] not in NOT_COMPANY:
+        out.append(s)
+    tokens = set(name_tokens(f.get("company_name"))) | ({out[0].split(".")[0].split("/")[0]} if out else set())
+    iso = (f.get("hq_country") or "").strip().upper() or None
+    for d, _ in collections.Counter(site_of(u, reg_domain) for u in page_urls if u).most_common():
+        base = d.split("/")[0]
+        if not d or d in out or base in DOC_HOSTS or base in NOT_COMPANY or base in REGISTRIES or len(out) >= 4:
             continue
-        label = d.split(".")[0]
+        if GOVERNMENT.search(base) and "/" not in d and base == (reg_domain("https://" + base) or ""):
+            continue                        # a whole government domain is never the company's
+        label = base.split(".")[0]
         parts = re.split(r"[-_]", label)
-        if any(label.startswith(t) or t in parts or (len(t) >= 5 and t in label) for t in tokens if len(t) >= 3):
-            out.append(d)
+        matched = [t for t in tokens if len(t) >= 3 and (label.startswith(t) or t in parts or (len(t) >= 5 and t in label))]
+        if not matched or NOT_COMPANY_LABEL.search(label) or affiliate_site(base, label, matched, iso):
+            continue
+        out.append(d)
     return out
 
 
+LEGAL_STOP = {"the", "and", "group", "holding", "holdings", "company", "corp", "corporation", "inc", "ltd", "limited",
+              "plc", "sa", "ag", "nv", "se", "spa", "co", "of", "asa", "ab", "oyj", "bhd", "tbk", "pt", "berhad", "s.a.",
+              "a/s", "as", "oy", "gmbh", "llc", "lp", "bv", "sas", "kg", "sca", "pte", "pty", "pvt", "sdn", "ltda", "srl"}
+
+
 def name_tokens(name):
-    stop = {"the", "and", "group", "holding", "holdings", "company", "corp", "corporation", "inc", "ltd", "limited",
-            "plc", "sa", "ag", "nv", "se", "spa", "co", "of", "asa", "ab", "oyj", "bhd", "tbk", "pt", "berhad", "s.a."}
-    return [t for t in re.findall(r"[a-z0-9]+", (name or "").lower()) if t not in stop and len(t) > 2]
+    """The name's words of three letters or more, legal words removed: for matching domains and pages loosely."""
+    return [t for t in re.findall(r"[a-z0-9]+", (name or "").lower()) if t not in LEGAL_STOP and len(t) > 2]
+
+
+def core_name(name):
+    """The name without its legal words, every other word kept, folded: "SC Johnson" is "sc johnson", not
+    "johnson" (2 Nov 2026: Johnson Outdoors' annual report passed for SC Johnson on the word "johnson")."""
+    return " ".join(t for t in fold(name).split() if t not in LEGAL_STOP)
 
 
 def query(fam, years, domains=None, name=None):
@@ -225,14 +412,18 @@ def judge(r, fam, years, domains, name, reg_domain):
     last, folders = file_part(link)
     last, folders = last.lower(), folders.lower()
     d = reg_domain(link)
-    if not on_sites(link, domains) and d not in DOC_HOSTS:
+    cls = site_class(link, domains, reg_domain)
+    if cls == "never":
+        return False, "not the company's: " + never_why(link, reg_domain)
+    if cls == "third":
         return False, f"another site ({d})"
-    if d in DOC_HOSTS and not any(t in (title + " " + link.lower()) for t in name_tokens(name)[:2]):
+    if cls == "doc_host" and not any(t in (title + " " + link.lower()) for t in name_tokens(name)[:2]):
         return False, f"shared host without the company's name ({d})"
-    if ".pdf" not in link.lower() and d not in DOC_HOSTS:
+    w = not_a_report(title + " " + last.replace("_", " "), name)
+    if w:
+        return False, f"not a report ({w})"
+    if ".pdf" not in link.lower() and cls != "doc_host":
         return False, "not a PDF"
-    if NOT_A_REPORT.search(title) or NOT_A_REPORT.search(last.replace("_", " ")):
-        return False, "not a report (" + NOT_A_REPORT.search(title + " " + last.replace("_", " ")).group(0) + ")"
     named = title + " " + last + " " + folders
     if not any(w in named for w in FAMILIES[fam]["words"]):
         return False, "does not name the report"
@@ -244,11 +435,11 @@ def judge(r, fam, years, domains, name, reg_domain):
         ys = ys | {latest}
     if not ys & set(years):
         return False, "not one of the missing years" + (f" ({', '.join(str(y) for y in sorted(ys)[-3:])})" if ys else "")
-    if d in DOC_HOSTS and not on_sites(link, domains):
+    if cls == "doc_host":
         # Never passed on from its title and address alone: a shared host serves every organisation's files, and a
         # short name in the address proves nothing (2 Nov 2026 wave: two Football Association of Wales files on
         # amazonaws.com and cloudfront.net, "faw" in their addresses, were passed on for FAW, the carmaker). The
-        # file is opened and must pass the checks for a file on another site (cover_check, own_site=False).
+        # file is opened and must pass the checks for a file on another site (cover_check, site "doc_host").
         return False, f"on a shared host, to be opened ({d})"
     return True, f"{fam} {max(ys & set(years))}"
 
@@ -280,10 +471,27 @@ class Serper:
         return []
 
 
-CHECK_MAX = 4                           # files opened per company and family to check the cover
+CHECK_MAX = 4                           # files from other sites opened per company and family to check the cover
+CHECK_MAX_OWN = 6                       # files from the company's own sites opened per company and family
 CHECK_MB = 60                           # larger files are not opened (the inbox still could, but we cannot check)
 MIN_PAGES = 8                           # a report has at least this many pages; a release or a memo has fewer
 CHECKABLE = ("another site", "shared host without", "on a shared host", "not a PDF", "does not name")   # and a title with no year at all
+
+
+def master(path=None):
+    """{wba_id: {"iso": "DNK", "corporate_name": "Novo Nordisk A/S"}} from WBA's company master list in the
+    repository (data/sdg2000_2025.csv): the group's legal name says which legal form is its own."""
+    import csv
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "sdg2000_2025.csv")
+    out = {}
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            for row in csv.DictReader(fh):
+                out[row.get("WBA ID", "").strip()] = {"iso": (row.get("Location HQ ISO Code") or "").strip(),
+                                                      "corporate_name": (row.get("Corporate Name") or "").strip()}
+    except OSError:
+        pass
+    return out
 
 
 def reg_domain_of(website):
@@ -296,8 +504,11 @@ def reg_domain_of(website):
 
 
 def fold(t):
+    """Lower-case ASCII words: accents dropped, dots inside abbreviations removed ("A.S. Watson" is "as watson",
+    "S.A." is "sa"), every other punctuation a space."""
     import unicodedata
     t = unicodedata.normalize("NFKD", t or "").encode("ascii", "ignore").decode().lower()
+    t = re.sub(r"(?<![a-z])([a-z])\.(?=[a-z])", r"\1", t)
     return re.sub(r"[^a-z0-9]+", " ", t).strip()
 
 
@@ -317,8 +528,78 @@ THIRD_PARTY = re.compile(r"target price|price target|equity research|research re
                          r"overview of|status of|in figures|outlook 20\d\d|fund annual report|etf|disclaimer: this report|"
                          r"special rapporteur|special procedures|mandates? of the|human rights council|allegation|"
                          r"\bfederation\b|confederation|trade association|industry association|charitable|attorney general|"
-                         r"registry|semi-?annual report|plan document|sample report",
+                         r"registry|semi-?annual report|plan document|sample report|prepared by|on behalf of|affiliate of|"
+                         r"prepared for|rating rationale|credit rating|second[- ]party opinion",
                          re.I)
+# Signs, on any site, that the file is about a relative of the company, not the company (2 Nov 2026: Datang
+# International Power's ESG report passed for China Datang, which it names as its parent).
+OWNERSHIP = re.compile(r"\b(a|an|the) (wholly[- ]owned |indirect(ly)? |direct )?subsidiary of|controlling shareholder|"
+                       r"portfolio company|member firm of|joint venture (of|between)", re.I)
+# Signs, in a file's first lines or its name, that it is something else (2 Nov 2026: a DNV second-party
+# opinion, an ESG rating rationale, a trend report, fund reports on the companies' own sites).
+HEADLINE = re.compile(r"second[- ]party opinion|independent (limited )?assurance|assurance (statement|report)|"
+                      r"verification statement|rating rationale|credit rating|press release|news release|media release|"
+                      r"dissertation|\bthesis\b|\btesis\b|trabajo (de )?fin de|\btfg\b|\btfm\b|magazine|magazin\b|"
+                      r"newsletter|bulletin|\betfs?\b[^.]{0,60}(semi-?)?annual report|sicav|ucits|terms of reference|"
+                      r"white ?paper|trend report|outlook for|investment outlook|development program(me)? annual report|"
+                      r"\bfund annual report|semi-?annual report|club licensing|anti-doping", re.I)
+
+
+def headline_word(text, name=""):
+    """The word in a file's first lines or name that says it is something else, or None; words of the
+    company's own name do not count."""
+    own = set(fold(name).split())
+    for m in HEADLINE.finditer(text or ""):
+        w = fold(m.group(0))
+        if w and not any(x in own for x in w.split()):
+            return " ".join(m.group(0).split()).lower()
+    return None
+
+
+def legal_form(name):
+    """The legal form a folded name ends with ("novo nordisk a s": "a s"), or ""."""
+    n = fold(name)
+    for w in FORM_WORDS:
+        if n == w or n.endswith(" " + w):
+            return w
+    return ""
+
+
+def affiliate_name(front, name, f):
+    """The affiliate's or subsidiary's name the file prints instead of the company's, or "". Every time the
+    company's name (whole or without its legal words) appears on the first three pages, the words next to
+    it are read: a country marker ("McCain Foods India", "Lactalis Danmark", "Watsons Türkiye"), a legal form
+    of another country than the company's ("Remondis A/S" for a German group), or the group's own form
+    replaced by another ("Novo Nordisk Inc" for an A/S) mark that occurrence as a relative's. The file is
+    a relative's when every occurrence is (2 Nov 2026: eleven such files passed in two waves)."""
+    text = " " + fold(front[:6000]) + " "
+    whole, core = fold(name), core_name(name)
+    iso = (f.get("hq_country") or "").strip().upper()
+    own_form = legal_form(f.get("corporate_name") or name)
+    own_words = set(whole.split()) | set(fold(f.get("corporate_name") or "").split())
+    found, qualified = 0, ""
+    for n in sorted({whole, core} - {""}, key=len, reverse=True):
+        for m in re.finditer(r"(?<= )" + re.escape(n) + r"(?= )", text):
+            found += 1
+            after = text[m.end():].split()[:4]
+            tag = ""
+            for w in after[:2]:
+                if w in COUNTRY_MARKERS and w not in own_words:
+                    tag = w
+            for i in range(min(3, len(after))):          # the form within the next words: "Professional A/S"
+                tail = " ".join(after[i:])
+                form = next((x for x in FORM_WORDS if tail == x or tail.startswith(x + " ")), "")
+                if form:
+                    countries = FORM_COUNTRIES[form]
+                    if (iso and iso not in countries) or (own_form and own_form != form and form != "inc"):
+                        tag = tag or form
+                    break
+            if not tag:
+                return ""                        # a bare occurrence: the company itself
+            qualified = qualified or (n + " " + " ".join(after[:2])).strip()
+        if found:
+            break
+    return qualified if found else ""
 
 
 def report_titled(text, fam):
@@ -335,45 +616,74 @@ def report_titled(text, fam):
     return False
 
 
-def cover_check(text, pages, f, fam, years, own_site=True):
+def cover_check(text, pages, f, fam, years, own_site=True, site=None, title_years=None):
     """(True, why) when a file's first pages show it is the company's report of a missing year: the company's
     name (all its name words, or the whole name), the report family and a missing year, and at least MIN_PAGES
     pages. Not the cover alone (the owner's warning, 1 Nov 2026: a cover may carry only a logo): `text` is
     {"front": pages 1-3, "more": pages 4-15, "meta": the PDF's title, author and subject, "file": its name},
     or a plain string for pages 1-3. The name may be anywhere in those; the report and the year in the first
-    five pages or the metadata (deeper pages print every comparison year, so they would prove nothing)."""
+    five pages or the metadata (deeper pages print every comparison year, so they would prove nothing).
+
+    site: "own" (the company's sites), "doc_host" (a CDN, a filing system, a mirror) or "third" (any other
+    site); own_site=False means "third". title_years: the years the result's title named, used when the
+    file's first pages give none (an own-site file whose cover is a picture)."""
+    site = site or ("own" if own_site else "third")
     if isinstance(text, str):
         text = {"front": text}
     front, more, meta, fname = (text.get(k) or "" for k in ("front", "more", "meta", "file"))
-    tokens = name_tokens(f.get("company_name"))
-    whole = fold(f.get("company_name"))
+    name = f.get("company_name") or ""
+    tokens = name_tokens(name)
+    whole, core = fold(name), core_name(name)
     anywhere = " " + fold(" ".join([front, more, meta, fname])) + " "
-    if not tokens or not (f" {whole} " in anywhere or all(f" {tok} " in anywhere for tok in tokens)):
+    if not whole or not (f" {whole} " in anywhere or (core and f" {core} " in anywhere)
+                         or (tokens and all(f" {tok} " in anywhere for tok in tokens))):
         return False, "the company's name is not on its first 15 pages or in its properties"
     if pages is not None and pages < MIN_PAGES:
         return False, f"{pages} pages, not a report"
-    if not own_site:
+    if site != "own":
         # Not on the company's own site: it must be the company's report, not a document about it (1 Nov 2026
         # wave: parent's and subsidiary's reports, broker notes and studies that mention the company passed).
         # The whole name on the title page (the first 1,500 characters) or in the file's properties or name,
         # else at least twice on pages 1 to 3 (a cover may carry only a logo); never only on deeper pages.
-        core = " ".join(tokens)                      # the name without its legal words ("Holdings Inc.")
         cover = " " + fold(front[:1500] + " " + meta + " " + fname) + " "
-        if not any(f" {n} " in cover or (" " + fold(front) + " ").count(f" {n} ") >= 2 for n in {whole, core}):
+        names = {n for n in (whole, core) if n}
+        if not any(f" {n} " in cover or (" " + fold(front) + " ").count(f" {n} ") >= 2 for n in names):
             return False, "on another site and its title page does not carry the company's whole name"
         hit = THIRD_PARTY.search(front[:3000] + " " + meta)
         if hit:
             return False, f"on another site and written by someone else ({hit.group(0).strip().lower()})"
-        site = reg_domain_of(f.get("website"))
-        if len(tokens) == 1 and len(tokens[0]) <= 5 and site and f" {fold(site)} " not in " " + fold(front + " " + more + " " + meta) + " ":
-            # a short name or acronym (ADIA) is shared by other organisations: its website must be in the file
-            return False, f"on another site, a short name, and {site} is not in the file"
+        if site == "third":
+            # An unrelated site (another company's, a news service's): the company's name must head the file,
+            # in its first lines, its properties or its name (2 Nov 2026: Virgin Australia's and JD Sports'
+            # reports passed for the shareholders and brands they name further down the cover).
+            top = " " + fold(front[:300] + " " + meta + " " + fname) + " "
+            if not any(f" {n} " in top for n in names):
+                return False, "on an unrelated site and the company's name does not head the file"
+        website = reg_domain_of(f.get("website"))
+        generic = (len(tokens) == 1 and len(tokens[0]) <= 5) or (core and all(w in GENERIC_WORDS for w in core.split()))
+        legal = fold(f.get("corporate_name") or "")
+        if legal and legal != whole and f" {legal} " in cover:
+            generic = False                  # the group's full legal name on the title page settles it (Dole plc)
+        if generic and website and f" {fold(website)} " not in " " + fold(front + " " + more + " " + meta) + " ":
+            # a short name or acronym (ADIA) or a name of common words (Future Fund) is shared by other
+            # organisations: its website must be in the file
+            return False, f"on another site, a shared name, and {website} is not in the file"
+    hit = headline_word(front[:400] + " " + fname.replace("-", " ").replace("_", " "), name)
+    if hit:
+        return False, f"its first lines say it is something else ({hit})"
+    hit = OWNERSHIP.search(front[:3000])
+    if hit:
+        return False, f"about a relative of the company ({hit.group(0).strip().lower()})"
+    rel = affiliate_name(front, name, f)
+    if rel:
+        return False, f"a subsidiary's or affiliate's document ({rel})"
     if not report_titled(" ".join([front[:3000], meta, fname.replace("-", " ").replace("_", " ")]), fam):
         return False, "its title page does not name the report"
     # The report's own year: the one its properties or file name give, else the FIRST year printed on its first
     # page (1 Nov 2026 dry run: a 2022 report passed as 2025 because its cover named its 2025 targets).
     first = [int(y) for y in re.findall(r"(?<!\d)(20\d\d)(?!\d)", front[:1500])]
-    own = years_in(meta + " " + fname) or ({first[0]} if first else set()) or years_in(more[:6000])
+    own = years_in(meta + " " + fname) or ({first[0]} if first else set()) or years_in(more[:6000]) \
+        or (set(title_years or ()) if site == "own" else set())
     latest = max(years)
     if latest == expected_year() and latest + 1 in own:
         own = own | {latest}
@@ -427,10 +737,12 @@ def open_cover(link, sess=None):
 def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
     """{"looked_for": [...], "found": [(url, why)], "not_added": [(url, why)], "queries": n, "opened": n}
 
-    A result that fails the quick test only because it sits on another site, has no year or report word in
-    its title, or is not a .pdf address is opened (up to CHECK_MAX per family) and kept when its first pages
-    show the company's name, the report and a missing year (1 Nov 2026: a company's report is often on a
-    CDN, a group site or an archive, and those must not be lost)."""
+    Every candidate is opened (2 Nov 2026) and kept when its first pages pass cover_check for its site class:
+    a result on the company's own sites that passes the quick test, and a result that fails it only because
+    it sits on another site or a shared host, has no year or report word in its title, or is not a .pdf
+    address (up to CHECK_MAX per family off the company's sites, CHECK_MAX_OWN on them). An own-site file
+    that cannot be fetched from here (the site refuses robots) is passed on from its title, so the inbox and
+    the office-network runner can try; a file elsewhere that cannot be opened is not."""
     name = f.get("company_name") or ""
     domains = company_domains(f, page_urls, reg_domain)
     out = {"looked_for": [], "found": [], "not_added": [], "queries": 0, "opened": 0}
@@ -443,7 +755,7 @@ def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
             tried.append(query(fam, ys, domains=domains))
         if name:
             tried.append(query(fam, ys, name=name))
-        got, opened = 0, 0
+        got, opened, opened_own = 0, 0, 0
         for q in tried:
             results = api.search(q)
             if results is None:
@@ -455,20 +767,34 @@ def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
                 if got >= MAX_PER_FAMILY or link in {u for u, _ in out["found"]}:
                     continue
                 ok, why = judge(r, fam, ys, domains, name, reg_domain)
+                cls = site_class(link, domains, reg_domain)
+                title = (r.get("title") or "") + " " + file_part(link)[0].replace("_", " ")
                 # a title or file name that names only other years is not opened: it says which year the file is
-                tf = years_in((r.get("title") or "") + " " + file_part(link)[0])
+                tf = years_in(title)
                 allowed = set(ys) | ({max(ys) + 1} if max(ys) == expected_year() else set())
                 titled_other = bool(tf) and not tf & allowed
-                if not ok and (why.startswith(CHECKABLE) or why == "not one of the missing years") and not titled_other \
-                        and opened < CHECK_MAX and not NOT_A_REPORT.search(
-                        (r.get("title") or "") + " " + file_part(link)[0].replace("_", " ")):
-                    opened += 1; out["opened"] += 1
+                candidate = (ok or why.startswith(CHECKABLE) or why == "not one of the missing years") \
+                    and not titled_other and not not_a_report(title, name)
+                room = opened_own < CHECK_MAX_OWN if cls == "own" else opened < CHECK_MAX
+                if candidate and room and opener is not None:
+                    if cls == "own":
+                        opened_own += 1
+                    else:
+                        opened += 1
+                    out["opened"] += 1
                     text, pages = opener(link)
                     if text is None:
-                        why = f"{why}; opened: {pages}"
+                        if ok and cls == "own" and str(pages).startswith(("HTTP", "could not be read", "over ")):
+                            why = f"{why}; could not be opened ({pages}), passed on from its title"
+                        else:
+                            ok, why = False, f"{why}; opened: {pages}"
                     else:
-                        ok, why2 = cover_check(text, pages, f, fam, ys, own_site=on_sites(link, domains))
-                        why = why2 if ok else f"{why}; opened: {why2}"
+                        ok2, why2 = cover_check(text, pages, f, fam, ys, site=cls, title_years=tf & allowed)
+                        ok, why = ok2, (why2 if ok2 else f"{why}; opened: {why2}")
+                elif candidate and ok and cls == "own" and not room:
+                    ok, why = False, f"{why}; not opened: {CHECK_MAX_OWN} files of this family were already opened"
+                elif candidate and opener is None and not ok:
+                    pass                      # nothing to open with: only a quick-test pass on the company's site counts
                 if ok:
                     out["found"].append((link, why)); got += 1
                 elif len(out["not_added"]) < 10 and not why.startswith("does not name"):
@@ -522,7 +848,13 @@ def main():
     today = date.today()
     years = recent_years(today)
     comps = fetch(H, base, "companies", ["wba_id", "company_name", "website", "sust_years", "coverage_breakdown",
-                                         "gap_pages", "overdue_reports", "web_searched_on", "web_search_note", "research_link"])
+                                         "gap_pages", "overdue_reports", "web_searched_on", "web_search_note", "research_link",
+                                         "hq_country"])
+    legal = master()
+    for r in comps:
+        m = legal.get(r["fields"].get("wba_id") or "", {})
+        r["fields"].setdefault("hq_country", m.get("iso"))
+        r["fields"]["corporate_name"] = m.get("corporate_name")
     wanted = {x.strip() for x in a.wba.split(",") if x.strip()}
     c = collections.Counter()
     busy = sum(1 for r in comps if (r["fields"].get("research_link") or "").strip())
