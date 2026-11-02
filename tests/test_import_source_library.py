@@ -44,6 +44,23 @@ class Plan(unittest.TestCase):
         self.assertIn("appLkf0N4Tc26ojYD", I.SL_BASES)                # the 2026 base is guarded as read only too
 
 
+class Purged(unittest.TestCase):
+    def test_a_purged_row_never_comes_back(self):
+        # 2 Nov 2026: purge_discarded.py deletes old discards (often misattributed reports); the library no longer
+        # holds them, so only the tombstone's library_id stops the next morning's import from adding them again
+        a, b = src("Climate Report", 2025, 50, "wales.pdf"), src("Climate Report", 2024, 51, "ok.pdf")
+        got = {s["filename"]: v for s, v in I.plan([a, b], HELD, set(), ["2026"], {I.library_id(a)})}
+        self.assertEqual(got, {"wales.pdf": "skip:discarded and purged", "ok.pdf": "add"})
+
+    def test_reads_the_purge_tombstones(self):
+        import gzip, tempfile
+        p = os.path.join(tempfile.mkdtemp(), "t.tsv.gz")
+        with gzip.open(p, "wt") as fh:
+            fh.write("PT_1-doc\tPT_1-abc\t2026-11-02\tWrong company\nPT_2-doc\t\t2026-11-02\t\n")
+        self.assertEqual(I.read_purged(p), {"PT_1-abc"})
+        self.assertEqual(I.read_purged(p + ".missing"), set())
+
+
 class Origin(unittest.TestCase):
     def test_new_rows_say_where_they_came_from(self):
         row = I.row_for(src("Policy Documents", 2025, 10, "p.pdf", tag="2026"), {"PT_1": "Acme"})
