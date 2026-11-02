@@ -65,6 +65,10 @@ SOURCE_LIBRARIES = {
 # Standing documents: no reporting period, imported whatever their year.
 STANDING = {"Code of Conduct", "Human Rights Policy", "Policy Documents", "Statutory Documents", "Certifications", "Other"}
 MAX_REPORT_ROWS = 420_000           # report_library rows after an import at most (the base holds 500,000 in all)
+MAX_BASE_RECORDS = 450_000          # records in the whole base after an import at most: 90% of Airtable's 500,000 cap,
+                                    # counted over every table (2 Nov 2026: 389,675 records, of them 292,737 report rows)
+MAX_ADD_GB = 60.0                   # attachments one import may add; Airtable's API cannot read the base's attachment
+                                    # space (2 Nov 2026: 760.8 GB of 1,000 GB), so the size of each import is capped instead
 FAMILY = {"Sustainability Report": "SUST", "ESG Report": "SUST", "CSR Report": "SUST", "Impact Report": "SUST",
           "Integrated Report": "INT", "Annual Report": "ANN", "10K Form": "ANN",
           "Code of Conduct": "COC", "Human Rights Policy": "HRP"}
@@ -95,6 +99,12 @@ def get_all(token, base, table, fields, formula=None):
         if not offset:
             return out
         time.sleep(0.21)
+
+
+def base_records(token, base):
+    """Records in every Disclosure Library table except report_library (counted apart), for the base's record cap."""
+    from base_health import TABLES
+    return sum(len(get_all(token, base, t, [])) for t in TABLES if t != "report_library")
 
 
 def fname_of(u):
@@ -267,6 +277,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--plan-out", default="source_library_plan.csv")
+    ap.add_argument("--max-gb", type=float, default=MAX_ADD_GB, help="attachments one import may add, in GB "
+                    f"(default {MAX_ADD_GB:g}; the API cannot read the base's attachment space, so check it in Airtable)")
     ap.add_argument("--types", default="all", choices=["all", "reports"], help="all documents (default) or reports only")
     ap.add_argument("--tag-existing", action="store_true", help="only set origin on rows imported before the field existed "
                     "(Reviewer notes starting 'From Source Library <base>' or 'Found by research'), then stop")
@@ -315,6 +327,15 @@ def main():
     if not a.commit:
         print("DRY RUN. Re-run with --commit to create the rows.")
         return
+    gb = mb / 1024
+    if gb > a.max_gb:
+        sys.exit(f"Refusing: this import would add {gb:,.1f} GB of attachments, over --max-gb {a.max_gb:g}. Check the base's "
+                 "attachment space in Airtable first (1,000 GB per base), then raise --max-gb or use --limit.")
+    others = base_records(token, base)
+    if n + others + len(adds) > MAX_BASE_RECORDS:
+        sys.exit(f"Refusing: the base would hold {n + others + len(adds):,} records ({n:,} report rows, {others:,} in other "
+                 f"tables, {len(adds):,} new), over {MAX_BASE_RECORDS:,} (90% of Airtable's 500,000). Use --limit, or free "
+                 "room first (purge_discarded.py).")
     if n + len(adds) > MAX_REPORT_ROWS:
         sys.exit(f"Refusing: report_library would hold {n + len(adds):,} rows, over {MAX_REPORT_ROWS:,} (the base holds "
                  "500,000 in all). Use --limit, or free room first (purge_discarded.py).")
