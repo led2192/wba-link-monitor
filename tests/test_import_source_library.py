@@ -44,5 +44,16 @@ class Plan(unittest.TestCase):
         self.assertIn("appLkf0N4Tc26ojYD", I.SL_BASES)                # the 2026 base is guarded as read only too
 
 
+class Origin(unittest.TestCase):
+    def test_new_rows_say_where_they_came_from(self):
+        row = I.row_for(src("Policy Documents", 2025, 10, "p.pdf", tag="2026"), {"PT_1": "Acme"})
+        self.assertEqual(row["origin"], "Source Library 2026")
+
+    def test_older_rows_from_their_notes(self):
+        self.assertEqual(I.origin_from_notes("From Source Library 2025 (record recX): Annual Report 2024"), "Source Library 2025")
+        self.assertEqual(I.origin_from_notes("Found by research (2026-11-02)"), "web search or research")
+        self.assertIsNone(I.origin_from_notes("Discarded: not a report"))
+
+
 if __name__ == "__main__":
     unittest.main()

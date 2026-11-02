@@ -221,9 +221,43 @@ def row_for(s, names):
             "file": [{"url": s["file_url"], "filename": s["filename"]}],
             **({"found_on": s["link"]} if s["link"] else {}),
             "doc_year": str(s["year"]), "doc_year_from": "source library",
-            "source_type": s["type"], "first_seen": date.today().isoformat(),
+            "source_type": s["type"], "first_seen": date.today().isoformat(), "origin": f"Source Library {s['src']}",
             "Reviewer notes": (f"From Source Library {s['src']} (record {s['rec']}): {s['type']} {s['year']}"
                                f" — \"{s['name']}\". Type and year set by an analyst.")}
+
+
+def origin_from_notes(notes):
+    """The origin of a row added before the origin field existed, from its Reviewer notes, or None."""
+    n = (notes or "").strip()
+    for tag in SOURCE_LIBRARIES:
+        if n.startswith(f"From Source Library {tag}"):
+            return f"Source Library {tag}"
+    if n.startswith("Found by research"):
+        return "web search or research"
+    return None
+
+
+def tag_existing(token, base, commit):
+    """Sets origin on the rows whose Reviewer notes say where they came from and whose origin is blank
+    (2 Nov 2026: the owner's rule that analyst-imported documents stay identified, because they show the
+    library's completeness, not what the pipeline's discovery found). Dry run unless commit."""
+    from monitor_core import airtable_request
+    rows = get_all(token, base, "report_library", ["Reviewer notes", "origin"],
+                   "AND({origin}='', OR(LEFT({Reviewer notes}, 19)='From Source Library', LEFT({Reviewer notes}, 17)='Found by research'))")
+    ups = [{"id": r["id"], "fields": {"origin": o}} for r in rows
+           for o in [origin_from_notes(r["fields"].get("Reviewer notes"))] if o]
+    c = collections.Counter(u["fields"]["origin"] for u in ups)
+    print(f">>> origin to set on {len(ups):,} rows: " + "; ".join(f"{k} {v:,}" for k, v in c.most_common())
+          + ("" if commit else " (dry run: nothing written)"), flush=True)
+    if not commit:
+        return
+    url = f"{API}/{base}/report_library"
+    assert base not in SL_BASES
+    H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    for i in range(0, len(ups), 10):
+        airtable_request("PATCH", url, H, {"records": ups[i:i + 10], "typecast": False})
+        time.sleep(0.22)
+    print(f">>> origin set on {len(ups):,} rows.", flush=True)
 
 
 def main():
@@ -234,6 +268,8 @@ def main():
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--plan-out", default="source_library_plan.csv")
     ap.add_argument("--types", default="all", choices=["all", "reports"], help="all documents (default) or reports only")
+    ap.add_argument("--tag-existing", action="store_true", help="only set origin on rows imported before the field existed "
+                    "(Reviewer notes starting 'From Source Library <base>' or 'Found by research'), then stop")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
     sl_token = os.environ.get("SOURCE_LIBRARY_TOKEN")
@@ -241,6 +277,8 @@ def main():
         sys.exit("Set AIRTABLE_TOKEN, AIRTABLE_BASE and SOURCE_LIBRARY_TOKEN (read-only).")
     if base in SL_BASES:
         sys.exit("AIRTABLE_BASE is a Source Library base: refusing to run (this script never writes there).")
+    if a.tag_existing:
+        return tag_existing(token, base, a.commit)
     order = [b.strip() for b in a.bases.split(",") if b.strip()]
     sources = []
     for tag in order:
