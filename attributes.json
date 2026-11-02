@@ -242,7 +242,10 @@
         "wanted": "location-based",
         "other": "market-based",
         "default": true
-      }
+      },
+      "siblings": [
+        "GMC_00001.1"
+      ]
     },
     "GMC_00003.1": {
       "name": "Scope 2 emissions, market-based",
@@ -297,7 +300,10 @@
         "wanted": "market-based",
         "other": "location-based",
         "default": false
-      }
+      },
+      "siblings": [
+        "GMC_00001.1"
+      ]
     },
     "GMC_00064.1": {
       "name": "Low-carbon capital expenditure",
@@ -363,7 +369,10 @@
         "Interim Reports"
       ],
       "period": "fiscal_year",
-      "scope": "group"
+      "scope": "group",
+      "siblings": [
+        "GMC_00048.1"
+      ]
     },
     "GMC_01933.1": {
       "name": "Climate expertise on the highest governance body",
@@ -493,5 +502,6 @@
         "ifrs-full:NumberOfEmployees"
       ]
     }
-  }
+  },
+  "_about_siblings": "siblings: attributes whose figure is printed on the same page or next to it (2 Nov 2026, 331 company-years: Scope 1 and Scope 2 on the same page 89 to 93% of the time, revenue and low-carbon capex 46%, within two pages 70%). The sibling's best page is found first and the attribute's pages there and next to it score higher (extract_eval.sibling_pages)."
 }

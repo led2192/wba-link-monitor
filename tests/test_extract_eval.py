@@ -148,6 +148,31 @@ class Neighbours(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres (after tests/test_load_supabase.py)")
 class AgainstPostgres(unittest.TestCase):
+    def test_a_sibling_attributes_page_brings_in_an_unlabelled_figure(self):
+        # 2 Nov 2026: Scope 1 and Scope 2 are printed on the same page 9 times in 10. Here Scope 2 sits on the page
+        # after the Scope 1 table under a heading that names neither "Scope 2" nor "location": only the sibling's
+        # page brings it into the pool
+        import psycopg
+        with psycopg.connect(os.environ["PG_TEST_URL"]) as c:
+            if not c.execute("select to_regclass('public.pages')").fetchone()[0]:
+                self.skipTest("run tests/test_load_supabase.py first")
+            c.execute("delete from public.pages where library_id like 'xsib%'"); c.execute("delete from public.documents where library_id like 'xsib%'")
+            c.execute("insert into public.documents (library_id, wba_id, company, year, doc_type, period_end) values "
+                      "('xsib1', 'PT_09991', 'Sibco', 2024, 'Sustainability Report', '2024-12')")
+            rows = [(p, f"Sibco Sustainability Report 2024\nNarrative on page {p}.") for p in range(1, 60) if p not in (40, 41)]
+            rows.append((40, "Greenhouse gas emissions (tCO2e) 2024 2023\nScope 1 emissions 4,074 4,500\nof which stationary 3,000 3,300"))
+            rows.append((41, "Purchased electricity, grid average factors (tCO2e) 2024 2023\nTotal 12,345 13,000\nRenewable share 40% 35%"))
+            c.cursor().executemany("insert into public.pages (library_id, page, body) values ('xsib1', %s, %s)", rows)
+            X.SIBLING_CACHE.clear(); X.FY_CACHE.clear() if hasattr(X, "FY_CACHE") else None
+            cur = c.cursor()
+            sib = X.sibling_pages(cur, "PT_09991", 2024, A["GMC_00002.1"], SPEC)
+            self.assertEqual(sib.get(("xsib1", 40)), 1.0); self.assertEqual(sib.get(("xsib1", 41)), 0.6)
+            r = X.evaluate(cur, {"wba": "PT_09991", "year": 2024, "value": 12345.0, "unit": "tCO2e"}, A["GMC_00002.1"], SPEC)
+            self.assertTrue(r["in_docs"]); self.assertTrue(r["sibling_hit"]); self.assertTrue(r["in_pages"])
+            self.assertEqual(X.sibling_pages(cur, "PT_09991", 2024, A["GMC_00001.1"], SPEC), {})     # Scope 1 has no sibling
+            X.SIBLING_CACHE.clear()
+            c.execute("delete from public.pages where library_id like 'xsib%'"); c.execute("delete from public.documents where library_id like 'xsib%'")
+
     def test_a_march_year_end_reads_the_document_dated_the_year_after(self):
         # 2 Nov 2026: ORIX. Reporting year 2024 is April 2024 to March 2025: the document dated 2025 (the year its
         # period ends, the library's convention), not the one dated 2024, which is reporting year 2023's

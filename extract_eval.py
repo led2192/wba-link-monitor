@@ -42,6 +42,8 @@ MORE_TERMS_TIMEOUT = "4s"            # the second query (an attribute's more_ter
 MORE_POOL = 30                       # pages it may add (bodies are read for these only)
 INDEX_WEIGHT = 1.5                   # page score added to a page the report's own content index cites (content_index.py)
 NEIGHBOUR_WEIGHT = 0.5               # page score added for a well-scored page next to this one (neighbours, 1 Nov 2026)
+SIBLING_WEIGHT = 1.0                 # page score added to the page where a sibling attribute's figure is (siblings, 2 Nov 2026)
+SIBLING_NEAR = {0: 1.0, 1: 0.6, 2: 0.3}   # share of SIBLING_WEIGHT by distance from the sibling's page
 NEIGHBOUR_DECAY = {1: 1.0, 2: 0.4}   # share of the neighbour's score that reaches this page, by distance in pages
 NEIGHBOUR_TOP = 10                   # the best pages whose missing next and previous pages are fetched and scored
 from company_memory import MEMORY_WEIGHT  # page score added to a page carrying the line the company used another year
@@ -231,7 +233,7 @@ def label_query(labels):
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
 
-def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0, memory_boost=0.0):
+def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0, memory_boost=0.0, sibling_boost=0.0):
     """How likely a page holds the attribute's figure for the year, from five signals, each in 0 to 1:
     the label match of the word index, the best rule candidate on the page, how much of a table it is
     (numbers of four digits or more), whether it prints the year (or its fiscal label), how often the
@@ -245,7 +247,7 @@ def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_b
     hits = min(len(label_positions(body or "", labels, exclude)), 5) / 5
     c = max(cand, 0) / 8 if cand is not None else 0.0
     return (1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight + INDEX_WEIGHT * index_boost
-            + MEMORY_WEIGHT * memory_boost)
+            + MEMORY_WEIGHT * memory_boost + SIBLING_WEIGHT * sibling_boost)
 
 
 def retrieval_miss(holding, rows, forms):
@@ -402,12 +404,51 @@ def with_neighbours(rows, weight=None, decay=None):
     return out
 
 
-def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None):
+SIBLING_CACHE = {}
+SIBLINGS_ON = True
+
+
+def sibling_pages(cur, wba, year, attr, spec):
+    """{(library_id, page): share} for the attribute's siblings (attributes.json "siblings"): the best page the
+    rule reader finds for each sibling's figure, that page 1.0, the next and previous 0.6, two away 0.3. A
+    sibling is read first and once per company and year (cached). 2 Nov 2026, measured on 331 company-years
+    with validated answers: Scope 1 and Scope 2 are printed on the same page 89 to 93% of the time, revenue and
+    low-carbon capex 46% (70% within two pages), while Scope 2 and capex are the attributes whose page the
+    reader misses most."""
+    out = {}
+    for code in attr.get("siblings") or []:
+        sib = spec["attributes"].get(code)
+        if not sib:
+            continue
+        key = (wba, year, code)
+        if key not in SIBLING_CACHE:
+            best = None
+            docs, weight = year_documents(cur, wba, year, sib)
+            if docs:
+                rows = ranked_pages(cur, [d[0] for d in docs], weight, year, sib, spec)
+                with_cand = [r for r in rows if r[4]]
+                if with_cand:
+                    top = max(with_cand, key=lambda r: r[0])
+                    best = (top[1], top[2])
+            SIBLING_CACHE[key] = best
+        best = SIBLING_CACHE[key]
+        if best:
+            lid, page = best
+            for dist, share in SIBLING_NEAR.items():
+                for p in {page - dist, page + dist}:
+                    if p >= 1:
+                        out[(lid, p)] = max(out.get((lid, p), 0.0), share)
+    return out
+
+
+def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, siblings=None):
     """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents,
     plus the pages the documents' own content index cites for the attribute (content_index.py, 31 Oct 2026),
     which get INDEX_WEIGHT and join the pool even when no label is on them, plus (memory, from
     company_memory.memory_for, 1 Nov 2026) the pages carrying the line the company printed the figure on
-    another year, which get MEMORY_WEIGHT. info, a dict when given, receives "cited": {(library_id, page): weight}."""
+    another year, which get MEMORY_WEIGHT, plus (siblings, from sibling_pages, 2 Nov 2026) the pages where a
+    sibling attribute's figure is and the ones next to it, which get SIBLING_WEIGHT times their share. info, a
+    dict when given, receives "cited": {(library_id, page): weight} and "siblings": the sibling pages."""
     import content_index, company_memory
     cited = content_index.cited(cur, ids, attr)
     if info is not None:
@@ -418,7 +459,10 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None):
                 (label_query(attr["labels"]), ids, label_query(attr["labels"]), POOL))
     found = cur.fetchall()
     found += more_terms_pages(cur, ids, attr, {(lid, page) for lid, page, _, _ in found}, info)
-    missing = set(cited) - {(lid, page) for lid, page, _, _ in found}
+    siblings = {k: v for k, v in (siblings or {}).items() if k[0] in set(ids)}
+    if info is not None:
+        info["siblings"] = dict(siblings)
+    missing = (set(cited) | set(siblings)) - {(lid, page) for lid, page, _, _ in found}
     if missing:
         cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and page = any(%s)",
                     (sorted({l for l, _ in missing}), sorted({p for _, p in missing})))
@@ -429,7 +473,8 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None):
         cs = candidates(body, year, attr, spec)
         top = max(cs, key=lambda c: c[0]) if cs else None
         sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []) + attr.get("more_terms", []),
-                        attr.get("exclude", []), weight.get(lid, 0), cited.get((lid, page), 0.0), company_memory.boost(body, memory))
+                        attr.get("exclude", []), weight.get(lid, 0), cited.get((lid, page), 0.0), company_memory.boost(body, memory),
+                        siblings.get((lid, page), 0.0))
         return (sc, lid, page, body, top)
     rows = [score(lid, page, body, rk) for lid, page, body, rk in found]
     # the pages next to the best ones join the pool (a table running on, the page after an index entry)
@@ -511,7 +556,8 @@ def read_values(cur, wba, year, attr, spec, usage, known=None):
     memory = memory_for(cur, wba, attr, year, known, year_documents) if known else None
     if memory:
         usage["with a memory from another year"] += 1
-    pages = keep_pages(ranked_pages(cur, [d[0] for d in docs], weight, year, attr, spec, memory=memory))
+    pages = keep_pages(ranked_pages(cur, [d[0] for d in docs], weight, year, attr, spec, memory=memory,
+                                    siblings=sibling_pages(cur, wba, year, attr, spec)))
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
     best = pages_for_model(scored, MODEL_PAGES)
     if not best:
@@ -557,12 +603,16 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     memory = memory_for(cur, g["wba"], attr, g["year"], known, year_documents) if known else None
     r["memory"] = bool(memory)
     r["fy_shift"] = document_year(g["year"], fy_end_month(cur, g["wba"])) != g["year"]   # a January-to-June year end
-    rows = ranked_pages(cur, ids, weight, g["year"], attr, spec, info, memory)
+    rows = ranked_pages(cur, ids, weight, g["year"], attr, spec, info, memory,
+                        siblings=sibling_pages(cur, g["wba"], g["year"], attr, spec) if SIBLINGS_ON else None)
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
     r["more_terms"] = info.get("more_terms")
     r["index_cited"] = bool(info.get("cited"))                       # the report's own index named a page
     r["index_hit"] = any((lid, page) in info.get("cited", {}) for lid, page, _ in holding)
+    r["sibling_pages"] = bool(info.get("siblings"))
+    r["sibling_hit"] = any(info.get("siblings", {}).get((lid, page), 0) >= 0.6 for lid, page, _ in holding)   # the number within one page of the sibling's
+    r["sibling_kept"] = r["sibling_hit"] and r["in_pages"]
     r["neighbour_pages"] = len(info.get("neighbours", ()))
     r["neighbour_hit"] = any((lid, page) in info.get("neighbours", ()) for lid, page, _ in holding)   # the number sits on a page brought in as a neighbour
     r["neighbour_kept"] = any((lid, page) in info.get("neighbours", ()) and any(found_on(body, v) for v, _, _ in forms) for _, lid, page, body, _ in pages)
@@ -604,8 +654,11 @@ def main():
     ap.add_argument("--budget", type=int, default=100)
     ap.add_argument("--reader", default="rules", choices=["rules", "model"])
     ap.add_argument("--memory", default="on", choices=["on", "off"], help="use the company's right answer for another year (company_memory.py)")
+    ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
     a = ap.parse_args()
     a.memory = a.memory == "on"
+    global SIBLINGS_ON
+    SIBLINGS_ON = a.siblings == "on"
     if a.reader == "model" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("extract_eval.md", "w").write("### Extraction: the model reader needs ANTHROPIC_API_KEY (a repository secret); nothing run.\n")
         return 0
@@ -660,6 +713,7 @@ def main():
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
             s["index cited"] += bool(r.get("index_cited")); s["index hit"] += bool(r.get("index_hit"))
+            s["sibling answers"] += bool(r.get("sibling_pages")); s["sibling hit"] += bool(r.get("sibling_hit")); s["sibling kept"] += bool(r.get("sibling_kept"))
             s["neighbour pages"] += r.get("neighbour_pages", 0); s["neighbour hit"] += bool(r.get("neighbour_hit")); s["neighbour kept"] += bool(r.get("neighbour_kept"))
             if r.get("fy_shift"):
                 s["fy shift"] += 1; s["fy shift right"] += bool(r["right"]); s["fy shift proposal"] += bool(r["proposal"])
@@ -753,6 +807,15 @@ def main():
     for c in codes:
         s = stats[c]
         md.append(f"| {c} {spec['attributes'][c]['name']} | {s['neighbour pages'] / (s['answers'] or 1):.1f} | {s['neighbour hit']:,} | {s['neighbour kept']:,} |")
+    md.append("")
+    md += ["Siblings (2 Nov 2026): the best page of a sibling attribute's figure (Scope 1 for Scope 2, revenue for low-carbon capex) "
+           "and the pages next to it join the pool and score higher" + ("" if SIBLINGS_ON else " (switched off in this run)")
+           + ". Answers with a sibling page, answers whose validated number is on it or one page away, and of those, kept among the ranked pages:", "",
+           "| Attribute | With a sibling page | Number on or next to it | Kept |", "| --- | --: | --: | --: |"]
+    for c in codes:
+        s = stats[c]
+        if spec["attributes"][c].get("siblings"):
+            md.append(f"| {c} {spec['attributes'][c]['name']} | {s['sibling answers']:,} | {s['sibling hit']:,} | {s['sibling kept']:,} |")
     md.append("")
     md += ["The company's memory (company_memory.py): answers where the validated value for another year was found in that "
            "year's documents, so the line the company printed it on was searched for and boosted this year"
