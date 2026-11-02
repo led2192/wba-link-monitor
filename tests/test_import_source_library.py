@@ -55,5 +55,42 @@ class Origin(unittest.TestCase):
         self.assertIsNone(I.origin_from_notes("Discarded: not a report"))
 
 
+class Guards(unittest.TestCase):
+    """2 Nov 2026: the whole base counts against Airtable's 500,000 records (389,675 then, of them 292,737 report rows),
+    and an import's attachments are capped because the API cannot read the base's attachment space (760.8 GB of 1,000)."""
+    def run_main(self, n_adds, size, others, extra=()):
+        import tempfile
+        from unittest import mock
+        adds = [src("Policy Documents", 2025, 1000 + i, f"p{i}.pdf") for i in range(n_adds)]
+        for s in adds:
+            s["size"] = size
+        out = os.path.join(tempfile.mkdtemp(), "plan.csv")
+        env = {"AIRTABLE_TOKEN": "t", "AIRTABLE_BASE": "appTEST", "SOURCE_LIBRARY_TOKEN": "r"}
+        with mock.patch.dict(os.environ, env), \
+             mock.patch.object(I, "read_sources", return_value=[]), \
+             mock.patch.object(I, "read_library", return_value=(HELD, 300_000)), \
+             mock.patch.object(I, "read_deleted", return_value=set()), \
+             mock.patch.object(I, "plan", return_value=[(s, "add") for s in adds]), \
+             mock.patch.object(I, "base_records", return_value=others), \
+             mock.patch.object(I, "get_all", side_effect=AssertionError("no write expected")), \
+             mock.patch.object(sys, "argv", ["x", "--bases", "2026", "--commit", "--plan-out", out, *extra]):
+            I.main()
+
+    def test_the_whole_base_counts(self):
+        with self.assertRaises(SystemExit) as e:
+            self.run_main(5, 10, others=149_999)
+        self.assertIn("other tables", str(e.exception))
+
+    def test_attachments_are_capped(self):
+        with self.assertRaises(SystemExit) as e:
+            self.run_main(2, 40 * 2 ** 30, others=0)
+        self.assertIn("--max-gb", str(e.exception))
+
+    def test_a_raised_cap_lets_it_through_to_the_record_check(self):
+        with self.assertRaises(SystemExit) as e:
+            self.run_main(2, 40 * 2 ** 30, others=149_999, extra=("--max-gb", "100"))
+        self.assertIn("other tables", str(e.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
