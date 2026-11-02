@@ -41,5 +41,15 @@ class Quotes(unittest.TestCase):
         self.assertEqual((s["elements"], s["score Met"], s["quotes"], s["sources"], s["type Webpage"]), (2, 1, 3, 3, 1))
 
 
+class Looser(unittest.TestCase):
+    def test_same_kind_held(self):
+        typed = {("PT_1", "SUST"): {2024}, ("PT_1", "Code of Conduct"): {0, 2023}}
+        self.assertTrue(E.same_kind_held({"type": "ESG Report", "year": "2024"}, "PT_1", typed))        # same family
+        self.assertTrue(E.same_kind_held({"type": "Sustainability Report", "year": "2023"}, "PT_1", typed))  # the next year's
+        self.assertFalse(E.same_kind_held({"type": "Sustainability Report", "year": "2021"}, "PT_1", typed))
+        self.assertTrue(E.same_kind_held({"type": "Code of Conduct", "year": "2023"}, "PT_1", typed))
+        self.assertFalse(E.same_kind_held({"type": "Human Rights Policy", "year": "2023"}, "PT_1", typed))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -103,6 +103,51 @@ def summarize(rows, key):
     return out
 
 
+KIND_FAMILY = {"Sustainability Report": "SUST", "ESG Report": "SUST", "CSR Report": "SUST", "Impact Report": "SUST",
+               "Integrated Report": "ANN", "Annual Report": "ANN", "10K Form": "ANN", "Registration Document": "ANN"}
+
+
+def same_kind_held(src, wba, typed):
+    """True when the library holds a document of the same company, the same kind (reports by family, others by
+    type) and the same year or the next (a reissued file, a copy from another address): the looser match, an
+    upper bound of what the library holds."""
+    t = src.get("type") or ""
+    fam = KIND_FAMILY.get(t, t)
+    try:
+        y = int(str(src.get("year") or "0")[:4])
+    except ValueError:
+        y = 0
+    held = typed.get((wba, fam), set())
+    return bool(held) and (not y or bool(held & {y, y + 1}) or t not in KIND_FAMILY and y == 0)
+
+
+def library_types(token, base, wbas):
+    """{(wba, family or type): {years}} of the library's documents (not discarded) of the given companies."""
+    from monitor_core import airtable_request
+    H = {"Authorization": f"Bearer {token}"}
+    out, wbas = collections.defaultdict(set), sorted(set(w for w in wbas if w))
+    for i in range(0, len(wbas), 40):
+        formula = "AND(NOT({discard}), OR(" + ",".join(f"{{wba_id}}='{w}'" for w in wbas[i:i + 40]) + "))"
+        params = [("pageSize", "100"), ("filterByFormula", formula)] + [("fields[]", x) for x in ("wba_id", "year", "source_type_check", "source_type")]
+        offset = None
+        while True:
+            j = airtable_request("GET", f"https://api.airtable.com/v0/{base}/report_library", H,
+                                 params=params + ([("offset", offset)] if offset else [])).json()
+            for r in j.get("records", []):
+                f = r["fields"]
+                t = name_of(f.get("source_type_check")) or name_of(f.get("source_type"))
+                try:
+                    y = int(float(f.get("year")))
+                except (TypeError, ValueError):
+                    y = 0
+                out[((f.get("wba_id") or "").strip(), KIND_FAMILY.get(t, t))].add(y)
+            offset = j.get("offset")
+            if not offset:
+                break
+            time.sleep(0.2)
+    return out
+
+
 # ----------------------------------------------------------------------------------------------
 # Airtable (read only)
 # ----------------------------------------------------------------------------------------------
@@ -186,11 +231,12 @@ def main():
            f"{statistics.median([len(r['sources']) for r in rows]):.0f}; quotes per element: median "
            f"{statistics.median([len(r['quotes']) for r in rows]):.0f}.", "",
            f"Kinds of source cited (Sources: Source Type), all elements: {shares(tot, 10)}.", "",
+           f"WBA scores: {shares(collections.Counter(r['score'] for r in rows), 8)}.", "",
            f"Document types named in the quotes' tags: {shares(tags, 10)}.", ""]
 
     def table(key, title, top=None, min_n=30):
         groups = summarize(rows, key)
-        md.extend([f"#### By {title}", "", f"| {title.capitalize()} | Elements | Met | Partially | Unmet | Sources per element | Kinds of source cited |",
+        md.extend([f"#### By {title}", "", f"| {title.capitalize()} | Elements | Met | Unmet | Other scores | Sources per element | Kinds of source cited |",
                    "| --- | --: | --: | --: | --: | --: | --- |"])
         items = sorted(groups.items(), key=lambda kv: -kv[1]["elements"])
         for g, s in items[:top] if top else items:
@@ -198,8 +244,9 @@ def main():
             if n < min_n:
                 continue
             types = collections.Counter({k[5:]: v for k, v in s.items() if k.startswith("type ")})
-            md.append(f"| {g} | {n:,} | {s['score Met'] / n:.0%} | {s['score Partially Met'] / n + s['score Partially met'] / n:.0%} | "
-                      f"{s['score Unmet'] / n:.0%} | {s['sources'] / n:.1f} | {shares(types, 5)} |")
+            other = n - s["score Met"] - s["score Unmet"]
+            md.append(f"| {g} | {n:,} | {s['score Met'] / n:.0%} | {s['score Unmet'] / n:.0%} | {other / n:.0%} | "
+                      f"{s['sources'] / n:.1f} | {shares(types, 5)} |")
         md.append("")
 
     table("benchmark", "benchmark")
@@ -224,6 +271,7 @@ def main():
             if by_bm[bm] and len(sample) < a.sample:
                 sample.append(by_bm[bm].pop())
     lib = library_rows(os.environ["AIRTABLE_TOKEN"], os.environ["AIRTABLE_BASE"], [r["wba"] for r in sample])
+    typed = library_types(os.environ["AIRTABLE_TOKEN"], os.environ["AIRTABLE_BASE"], [r["wba"] for r in sample])
     c = collections.defaultdict(collections.Counter)
     t0, cut = time.time(), False
     import psycopg
@@ -239,6 +287,7 @@ def main():
             s["sources"] += len(r["sources"]); s["webpage sources"] += len(r["sources"]) - len(docs)
             pairs = match([dict(d, wba=r["wba"]) for d in docs], [x for x in lib if x.get("wba_id") == r["wba"]])
             s["document sources"] += len(docs); s["in library"] += len(pairs)
+            s["same type and year held"] += sum(1 for d in docs if same_kind_held(d, r["wba"], typed))
             held = [p[1]["library_id"] for p in pairs if p[1].get("library_id")]
             in_db = [lid for lid in held if doc_in_db(cur, lid)]
             s["text in database"] += len(in_db)
@@ -260,12 +309,12 @@ def main():
     md += ["#### The library against the cited sources (sample" + (", cut by the time budget" if cut else "") + ")", "",
            "Element rows spread over the benchmarks. A document source is held when the library has the same company's file of the "
            "same size or specific name; webpage sources are counted apart (the library holds pages, not their text).", "",
-           "| Benchmark | Elements | Sources | Webpages | Documents held | Text in database | Elements with every document held | A quote found in our text |",
-           "| --- | --: | --: | --: | --: | --: | --: | --: |"]
+           "| Benchmark | Elements | Sources | Webpages | Documents held (same file) | Same company, type and year held | Text in database | Elements with every document held | A quote found in our text |",
+           "| --- | --: | --: | --: | --: | --: | --: | --: | --: |"]
     for bm, s in sorted(c.items(), key=lambda kv: -kv[1]["elements"]):
         n, d = s["elements"] or 1, s["document sources"] or 1
         md.append(f"| {bm} | {s['elements']:,} | {s['sources']:,} | {s['webpage sources'] / (s['sources'] or 1):.0%} | "
-                  f"{s['in library'] / d:.0%} | {s['text in database'] / d:.0%} | {s['every document source held'] / n:.0%} | "
+                  f"{s['in library'] / d:.0%} | {s['same type and year held'] / d:.0%} | {s['text in database'] / d:.0%} | {s['every document source held'] / n:.0%} | "
                   f"{s['a quote found in our text'] / n:.0%} |")
     md.append("")
     text = "\n".join(md) + "\n"
