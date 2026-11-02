@@ -21,6 +21,13 @@ added, or the company is still watched through another live page of that type, t
 unticked (monitor off) with a dated note; when nothing is found the page is unticked with a note too
 (a 404 read every night teaches nothing) and the company is searched again after RECHECK_DAYS.
 
+Gone web-report pages (since 2 Nov 2026): a page of type sustainability_report (one edition of a
+report published as web pages, such as /2023-sustainability-report/introduction) was never handled:
+105 such pages answered 404 every night for 12 days, each a High PAGE_GONE row with no owner. It is
+now handled like the others: covered by any live sustainability_report page or report listing of the
+company, otherwise a reports hub is searched for (a gone edition is replaced by the page that lists
+the editions), and unticked with a note either way.
+
 A gone page that LISTS reports (its address names reports, an annual report, a library, downloads,
 publications, disclosures, filings, results or ESG data) counts as covered only by another live page
 of its type that also lists reports (since 26 Oct 2026): on 25 Oct, 307 of 317 gone pages were unticked
@@ -47,7 +54,12 @@ RECHECK_DAYS = 60
 MAX_CRAWL = 25
 WANT = {"Report hub page": "reports_hub", "Sustainability page": "sustainability_page"}
 MAX_PER_TYPE = 2
-GONE_TYPES = ("reports_hub", "sustainability_page", "investor_relations", "policies")
+GONE_TYPES = ("reports_hub", "sustainability_page", "investor_relations", "policies", "sustainability_report")
+# the type searched for when a gone page of this type has no live cover: a gone edition of a web report is
+# replaced by the page that lists the editions
+SEARCH_AS = {"sustainability_report": "reports_hub"}
+# live page types that cover a gone page of this type, besides its own type
+ALSO_COVERED_BY = {"sustainability_report": ("reports_hub", "sustainability_page", "investor_relations")}
 MIN_DOCS_AUTO = 3
 # an address that lists reports: losing it loses the documents, whatever else of the type is watched
 LISTING = re.compile(r"report|annual|librar|download|publication|disclos|document|filing|result|"
@@ -110,15 +122,23 @@ def covered_by(g, pages, gone_ids):
             continue
         if pf.get("type") == t and (not need_listing or is_listing(pf.get("url"))):
             return True
+        # a gone web-report edition is covered by another type only when that page lists reports
+        if pf.get("type") in ALSO_COVERED_BY.get(t, ()) and is_listing(pf.get("url")):
+            return True
     return False
+
+
+def search_type(t):
+    """The page type to search for when a gone page of type t has no live cover."""
+    return SEARCH_AS.get(t, t)
 
 
 def decide_gone(gone_here, pages):
     """(types to search a replacement for, {gone page id: covered})."""
     gone_ids = {g["id"] for g in gone_here}
     covered = {g["id"]: covered_by(g, pages, gone_ids) for g in gone_here}
-    replace = [t for t in GONE_TYPES
-               if any(g["fields"].get("type") == t and not covered[g["id"]] for g in gone_here)]
+    replace = list(dict.fromkeys(search_type(t) for t in GONE_TYPES
+                                 if any(g["fields"].get("type") == t and not covered[g["id"]] for g in gone_here)))
     return replace, covered
 
 
@@ -306,7 +326,7 @@ def main():
             gf = g["fields"]; t = gf.get("type")
             recheck = not gf.get("monitor")
             # a replacement is credited only to the gone pages it was searched for (not covered ones)
-            repl = None if covered[g["id"]] else added.get(t)
+            repl = None if covered[g["id"]] else added.get(search_type(t))
             note = gone_note(today, gf.get("http_status"), replacement=repl, other_live=covered[g["id"]],
                              recheck=recheck)
             page_updates.append({"id": g["id"], "fields": {"monitor": False,

@@ -149,5 +149,78 @@ class GoneRunDryRun(unittest.TestCase):
         self.assertIn("| gone pages, company still watched through another page of the type | 1 |", md)
 
 
+class GoneWebReportPages(unittest.TestCase):
+    """Real cases of 22 Oct to 2 Nov 2026: 105 gone pages of type sustainability_report (one edition of a
+    report published as web pages) answered 404 every night, each a High PAGE_GONE row, because the
+    gone-page search skipped the type."""
+
+    def test_a_gone_web_report_page_is_gone(self):
+        f = page("g1", "https://www.ussteel.com/2023-sustainability-report/introduction/overview",
+                 "sustainability_report", status="dead")["fields"]
+        self.assertTrue(dp.is_gone(f))
+
+    def test_xcel_brief_is_covered_by_the_live_report_page(self):
+        gone = page("g1", "https://www.xcelenergy.com/company/corporate_responsibility_report/library_of_briefs/"
+                    "employee_safety", "sustainability_report", status="dead")
+        live = page("p1", "https://www.xcelenergy.com/company/corporate_responsibility_report", "sustainability_report")
+        replace, covered = dp.decide_gone([gone], [gone, live])
+        self.assertTrue(covered["g1"])
+        self.assertEqual(replace, [])
+
+    def test_kuehne_nagel_edition_is_covered_by_a_report_listing_of_another_type(self):
+        gone = page("g1", "https://home.kuehne-nagel.com/en/-/company/sustainability-report-2022",
+                    "sustainability_report", status="dead")
+        hub = page("p1", "https://investor.kuehne-nagel.com/annual-reports", "reports_hub")
+        replace, covered = dp.decide_gone([gone], [gone, hub])
+        self.assertTrue(covered["g1"])
+
+    def test_a_topic_page_does_not_cover_a_gone_edition(self):
+        gone = page("g1", "https://www.ussteel.com/2023-sustainability-report/protecting-our-planet",
+                    "sustainability_report", status="dead")
+        topic = page("p1", "https://www.ussteel.com/about-us/community-engagement/overview", "sustainability_page")
+        replace, covered = dp.decide_gone([gone], [gone, topic])
+        self.assertFalse(covered["g1"])
+        self.assertEqual(replace, ["reports_hub"])
+
+    def test_search_type(self):
+        self.assertEqual(dp.search_type("sustainability_report"), "reports_hub")
+        self.assertEqual(dp.search_type("policies"), "policies")
+
+    def test_main_replaces_a_gone_edition_with_a_reports_hub(self):
+        import os, sys, tempfile, types
+        from unittest import mock
+        gone = page("g1", "https://www.ussteel.com/2023-sustainability-report/introduction", "sustainability_report",
+                    status="dead")
+        topic = page("p1", "https://www.ussteel.com/about-us/community-engagement/overview", "sustainability_page")
+        company = {"id": "recC", "fields": {"wba_id": "PT_01852", "company_name": "U.S. Steel",
+                                            "website": "https://www.ussteel.com"}}
+        for p in (gone, topic):
+            p["fields"]["wba_id"] = "PT_01852"
+        searched, written = [], []
+
+        def fake_get(table, params):
+            return [company] if table == "companies" else [gone, topic]
+
+        def fake_explore(AS, sess, home, want, have):
+            searched.append(list(want))
+            return [("reports_hub", "https://www.ussteel.com/sustainability/reports", "why", 6)], None
+        fake_as = types.ModuleType("active_search"); fake_as.normalize = lambda u: (u.lower().rstrip("/"), u)
+        fake_inbox = types.ModuleType("inbox"); fake_inbox.load_page_tombstones = lambda: {}
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(sys.modules, {"active_search": fake_as, "inbox": fake_inbox}), \
+                mock.patch.object(dp, "TOKEN", "t"), mock.patch.object(dp, "BASE", "b"), \
+                mock.patch.object(dp, "get", fake_get), mock.patch.object(dp, "candidates", lambda *a: []), \
+                mock.patch.object(dp, "gone_by_company", lambda w=None: {"PT_01852": [gone]}), \
+                mock.patch.object(dp, "explore", fake_explore), mock.patch.object(sys, "argv", ["discover_pages.py"]):
+            cwd = os.getcwd(); os.chdir(d)
+            try:
+                dp.main()
+                md = open("discover_pages.md").read()
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(searched, [["reports_hub"]])
+        self.assertIn("| gone pages replaced | 1 |", md)
+
+
 if __name__ == "__main__":
     unittest.main()
