@@ -735,7 +735,8 @@ def open_cover(link, sess=None):
 
 
 JUDGE_SYSTEM = ("You check whether a PDF is a company's own report. You get the company, what is being looked for, "
-                "the file's address and the text of its first pages. Answer with JSON only.")
+                "the file's address and the text of its first pages. Answer with one JSON object only: no code fence, "
+                "no text before or after it.")
 FAMILY_KINDS = {"sustainability": {"sustainability report", "esg report", "csr report", "integrated report", "impact report"},
                 "annual": {"annual report", "integrated report", "10-k", "20-f", "universal registration document"}}
 
@@ -772,11 +773,22 @@ def model_judge(usage=None, sess=None):
     usage = usage if usage is not None else collections.Counter()
 
     def judge(f, fam, years, link, text):
-        reply = parse_reply(call([{"role": "user", "content": judge_prompt(f, fam, years, link, text)}], usage, sess,
-                                 model=os.environ.get("JUDGE_MODEL") or None, system=JUDGE_SYSTEM, max_tokens=300))
-        usage["judge calls"] += 1
+        raw, reply = "", None
+        for attempt in range(2):            # one retry: an empty or unreadable reply is usually a passing overload
+            errors = usage["model_errors"]
+            raw = call([{"role": "user", "content": judge_prompt(f, fam, years, link, text)}], usage, sess,
+                       model=os.environ.get("JUDGE_MODEL") or None, system=JUDGE_SYSTEM, max_tokens=600)
+            usage["judge calls"] += 1
+            reply = parse_reply(raw)
+            if isinstance(reply, dict):
+                break
+            usage["judge unreadable replies"] += 1
         if not isinstance(reply, dict):
-            return False, "the judge gave no answer"
+            # refused, and said why, so the next audit can tell an API error from a reply that was not JSON
+            # (2 Nov 2026: 10 of 14 judged files came back with "no answer" in the first dry run)
+            if usage["model_errors"] > errors:
+                return False, "the judge could not be reached (API error)"
+            return False, "the judge's reply was not JSON: " + re.sub(r"\s+", " ", raw or "(empty)")[:100]
         who = str(reply.get("publisher") or "?")[:60]
         kind = str(reply.get("kind") or "").strip().lower()
         if reply.get("is_company") is not True:
@@ -1018,6 +1030,8 @@ def main():
             print(f"  {i}/{len(due)}: {api.used} searches, {c['documents passed on']} documents", flush=True)
     c["searches (credits)"] = api.used
     c["judge calls"] = cover_judge.usage["judge calls"]
+    c["judge unreadable replies"] = cover_judge.usage["judge unreadable replies"]
+    c["judge API errors"] = cover_judge.usage["model_errors"]
     from model_reader import cost
     c["judge cost in USD (estimate)"] = round(cost(cover_judge.usage), 3)
     if api.stopped:

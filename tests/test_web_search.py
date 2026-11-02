@@ -580,7 +580,9 @@ class ModelJudge(unittest.TestCase):
         self.assertFalse(ok); self.assertIn("not a missing year", why)
         (ok, why), _ = self.run_judge({"publisher": "China Datang", "is_company": True, "kind": "annual report", "period_end": "2024-12"})
         self.assertFalse(ok)                                         # an annual report is not a sustainability report
-        self.assertEqual(self.run_judge("not json")[0], (False, "the judge gave no answer"))
+        (ok, why), sess = self.run_judge("not json")
+        self.assertFalse(ok); self.assertTrue(why.startswith("the judge's reply was not JSON"), why)
+        self.assertEqual(len(sess.sent), 2)                          # asked twice before refusing
 
     def test_the_companys_own_report_passes(self):
         (ok, why), _ = self.run_judge({"publisher": "China Datang Corporation Ltd.", "is_company": True, "kind": "sustainability report",
