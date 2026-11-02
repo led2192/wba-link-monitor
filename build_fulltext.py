@@ -72,8 +72,8 @@ LIB = os.environ.get("AIRTABLE_LIBRARY_TABLE", "report_library")
 # report_library fields
 F_ID = "library_id"; F_WBA = "wba_id"; F_NAME = "company_name"; F_FILE = "file"; F_DISCARD = "discard"
 F_TYPE_AI = "source_type_check"; F_TYPE_KW = "source_type"; F_YEAR = "year"; F_LANG = "doc_language"
-F_PAGES = "page_count"; F_LABEL = "doc_label"; F_URL = "document_url"; F_FSTATUS = "file_status"
-SWEEP_FIELDS = [F_ID, F_WBA, F_NAME, F_FILE, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_LANG, F_PAGES, F_LABEL, F_URL, F_FSTATUS]
+F_PAGES = "page_count"; F_LABEL = "doc_label"; F_URL = "document_url"; F_FSTATUS = "file_status"; F_END = "period_end"
+SWEEP_FIELDS = [F_ID, F_WBA, F_NAME, F_FILE, F_TYPE_AI, F_TYPE_KW, F_YEAR, F_LANG, F_PAGES, F_LABEL, F_URL, F_FSTATUS, F_END]
 # a row whose PDF is over Airtable's 5 MB upload limit has no attachment: read it from its address
 HAS_PDF = f"OR({{{F_FILE}}}, AND({{{F_FSTATUS}}}='too_big', {{{F_URL}}}!=''), " \
           f"FIND('sec.gov/Archives/edgar/data/', {{{F_URL}}}), FIND('filings.xbrl.org/', {{{F_URL}}}))"
@@ -168,7 +168,7 @@ def row_doc(rec):
     return {"id": lid, "rec": rec["id"], "wba": (f.get(F_WBA) or "").strip(), "co": f.get(F_NAME) or "",
             "type": eff_type(f), "year": y if y is not None else "", "lang": f.get(F_LANG) or "",
             "label": f.get(F_LABEL) or "", "url": f.get(F_URL) or "", "pages": int(f.get(F_PAGES) or 0),
-            "att": att.get("id") or "", "size": int(att.get("size") or 0), "web": bool(web)}
+            "end": (f.get(F_END) or "").strip(), "att": att.get("id") or "", "size": int(att.get("size") or 0), "web": bool(web)}
 
 
 def refresh_rows(rec_ids):

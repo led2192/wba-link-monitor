@@ -131,6 +131,32 @@ class ModelReader(unittest.TestCase):
         self.assertEqual(M.column_year("Year ended 31 March 2025"), 2025)
         self.assertEqual(M.column_year("FY'24"), 2024); self.assertIsNone(M.column_year("Group"))
 
+    def test_the_period_end_decides_the_reporting_year(self):
+        # 2 Nov 2026: ORIX (year end March). The statements print "for the years ended March 31, 2022, 2023 and 2024"
+        # over columns headed 2022, 2023, 2024; the model took the 2024 column for reporting year 2024. That column
+        # ends March 2024, which is reporting year 2023. With the period end given, the year follows the period.
+        text = ('{"values": [{"page": "P2", "printed": "106,848", "scale": "millions", "year": 2024, "column": "2024", "period_end": "2024-03"}, '
+                '{"page": "P2", "printed": "102,502", "scale": "millions", "year": 2023, "column": "2023", "period_end": "2023-03"}]}')
+        got = M.read_years(dict(G, fy_month=3), REV, PAGES, X.collections.Counter(), Sess((200, text)))
+        self.assertEqual([(e["year"], e["value"]) for e in got], [(2023, 106848e6), (2022, 102502e6)])   # shifted, no 2024
+        # a period ending in another month than the company's year end is a misread column and is dropped
+        text = ('{"values": [{"page": "P2", "printed": "106,848", "scale": "millions", "year": 2024, "column": "2024", "period_end": "2024-12"}]}')
+        self.assertEqual(M.read_years(dict(G, fy_month=3), REV, PAGES, X.collections.Counter(), Sess((200, text))), [])
+        # the same reply for a calendar-year company keeps its year
+        self.assertEqual([e["year"] for e in M.read_years(dict(G, fy_month=12), REV, PAGES, X.collections.Counter(), Sess((200, text)))], [2024])
+        self.assertEqual(M.period_year("2025-03"), (2024, 3)); self.assertEqual(M.period_year("2024-12"), (2024, 12))
+        self.assertEqual(M.period_year("2024"), (None, None)); self.assertEqual(M.period_year(None), (None, None))
+
+    def test_the_prompt_says_when_the_fiscal_year_ends(self):
+        note = M.fiscal_note({"year": 2024, "fy_month": 3})
+        self.assertIn("ends in March: reporting year 2024 is the year from April 2024 to March 2025", note)
+        self.assertIn("year ended March 2025", note); self.assertIn("FY2025", note); self.assertIn("(in Japan) FY2024", note)
+        self.assertIn("not the one for the year ended March 2024", note)
+        self.assertIn("calendar year: reporting year 2024 is the year ended December 31, 2024", M.fiscal_note({"year": 2024, "fy_month": 12}))
+        self.assertIn("ends in September: reporting year 2024 is the year from October 2023 to September 2024", M.fiscal_note({"year": 2024, "fy_month": 9}))
+        self.assertEqual(M.fiscal_note({"year": 2024}), "")
+        self.assertIn("period_end", M.prompt(dict(G, fy_month=3), REV, PAGES))
+
     def test_only_other_years_is_no_proposal_for_the_year_asked(self):
         note = {}
         text = '{"values": [{"page": "P2", "printed": "106,848", "scale": "millions", "year": 2023, "column": "2023"}]}'

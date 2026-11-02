@@ -277,3 +277,12 @@ class Propose(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FiscalMonths(unittest.TestCase):
+    def test_parse_months(self):
+        import propose_values as P
+        self.assertEqual(P.parse_months("1-6"), {1, 2, 3, 4, 5, 6})
+        self.assertEqual(P.parse_months("3,6"), {3, 6})
+        self.assertEqual(P.parse_months(""), set())
+        self.assertEqual(P.parse_months("0-14"), set(range(1, 13)))

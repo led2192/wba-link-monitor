@@ -148,6 +148,38 @@ class Neighbours(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres (after tests/test_load_supabase.py)")
 class AgainstPostgres(unittest.TestCase):
+    def test_a_march_year_end_reads_the_document_dated_the_year_after(self):
+        # 2 Nov 2026: ORIX. Reporting year 2024 is April 2024 to March 2025: the document dated 2025 (the year its
+        # period ends, the library's convention), not the one dated 2024, which is reporting year 2023's
+        import psycopg
+        with psycopg.connect(os.environ["PG_TEST_URL"]) as c:
+            if not c.execute("select to_regclass('public.pages')").fetchone()[0]:
+                self.skipTest("run tests/test_load_supabase.py first")
+            c.execute("delete from public.pages where library_id like 'xfy%'"); c.execute("delete from public.documents where library_id like 'xfy%'")
+            c.execute("insert into public.documents (library_id, wba_id, company, year, doc_type, period_end) values "
+                      "('xfy24', 'PT_09994', 'Fyco', 2024, 'Annual Report', '2024-03'), ('xfy25', 'PT_09994', 'Fyco', 2025, 'Annual Report', '2025-03'), "
+                      "('xfy26', 'PT_09994', 'Fyco', 2026, 'Annual Report', '2026-03'), ('xcal', 'PT_09993', 'Calco', 2024, 'Annual Report', '2024-12')")
+            X.FY_CACHE.clear()
+            cur = c.cursor()
+            self.assertEqual(X.fy_end_month(cur, "PT_09994"), 3)
+            self.assertEqual(X.fy_end_month(cur, "PT_09993"), 12)
+            self.assertIsNone(X.fy_end_month(cur, "PT_09992"))
+            self.assertEqual(X.document_year(2024, 3), 2025); self.assertEqual(X.document_year(2024, 12), 2024); self.assertEqual(X.document_year(2024, None), 2024)
+            docs, weight = X.year_documents(cur, "PT_09994", 2024, A["GMC_00048.1"])
+            self.assertEqual([d[0] for d in docs], ["xfy25", "xfy26"])              # 2025 first, 2026 as the comparison column
+            self.assertGreater(weight["xfy25"], weight["xfy26"])
+            docs, _ = X.year_documents(cur, "PT_09993", 2024, A["GMC_00048.1"])
+            self.assertEqual([d[0] for d in docs], ["xcal"])
+            # without period_end the month is read from the pages
+            c.execute("update public.documents set period_end = null where wba_id = 'PT_09994'")
+            c.cursor().executemany("insert into public.pages (library_id, page, body) values ('xfy25', %s, %s)",
+                                   [(1, "Fyco Annual Report 2025"), (2, "Consolidated statement of income for the year ended March 31, 2025"),
+                                    (3, "This report covers the fiscal year from April 1, 2024 to March 31, 2025.")])
+            X.FY_CACHE.clear()
+            self.assertEqual(X.fy_end_month(cur, "PT_09994"), 3)
+            X.FY_CACHE.clear()
+            c.execute("delete from public.pages where library_id like 'xfy%'"); c.execute("delete from public.documents where library_id like 'xfy%'")
+
     def test_a_table_that_runs_on_to_the_next_page_is_found(self):
         # 1 Nov 2026: the label and the year columns are on page 50, the Scope 1 row on page 51, which carries
         # no label: only its neighbour brings it in

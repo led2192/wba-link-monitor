@@ -297,15 +297,66 @@ def pages_for_model(scored, n):
 
 
 # ----------------------------------------------------------------------------------------------
+FY_TYPES = ["Annual Report", "Integrated Report", "10K Form", "Financial Statement", "Registration Document"]
+FY_CACHE = {}
+
+
+def fy_end_month(cur, wba):
+    """The month (1-12) the company's fiscal year ends, or None when its documents do not say. The commonest
+    month among its annual-family documents' period_end (documents.period_end, from report_library); when none
+    carries one yet, read from the first twelve pages of up to three of those documents with fiscal_year.decide.
+    Cached for the run. A year ending January to June is the reporting year before (the pipeline's rule), so
+    for such a company reporting year 2024 is the document dated 2025 (2 Nov 2026: ORIX, year end March, had
+    its integrated report dated 2024, April 2023 to March 2024, read as 2024's: the "2024" column of the
+    statements was the year ended March 31, 2024, which is reporting year 2023)."""
+    if wba in FY_CACHE:
+        return FY_CACHE[wba]
+    month = None
+    try:
+        cur.execute("select substr(period_end, 6, 2), count(*) from public.documents where wba_id = %s "
+                    "and period_end ~ '^[0-9]{4}-[0-9]{2}$' and doc_type = any(%s) group by 1 order by 2 desc, 1 limit 1",
+                    (wba, FY_TYPES))
+        row = cur.fetchone()
+        if row and 1 <= int(row[0]) <= 12:
+            month = int(row[0])
+    except Exception:
+        cur.connection.rollback()
+    if month is None:
+        try:
+            import fiscal_year as FY
+            cur.execute("select library_id from public.documents where wba_id = %s and doc_type = any(%s) and year is not null "
+                        "order by year desc, library_id limit 3", (wba, FY_TYPES))
+            months = collections.Counter()
+            for (lid,) in cur.fetchall():
+                cur.execute("select page, body from public.pages where library_id = %s and page <= 12 order by page", (lid,))
+                _, end, score, *_ = FY.decide(cur.fetchall())
+                if end and len(end) == 7 and score >= 45:
+                    months[int(end[5:7])] += 1
+            if months:
+                month = months.most_common(1)[0][0]
+        except Exception:
+            cur.connection.rollback()
+    FY_CACHE[wba] = month
+    return month
+
+
+def document_year(year, fy_month):
+    """The documents' year (the year the period ends, the library's convention) for a reporting year: the
+    reporting year itself, or the next when the company's fiscal year ends January to June."""
+    return year + 1 if fy_month and fy_month <= 6 else year
+
+
 def year_documents(cur, wba, year, attr):
-    """([(library_id, doc_type, year)], {library_id: weight}): the company's documents of the year or the
-    next, preferred types first, at most MAX_DOCS; the weight favours the preferred types and the year itself."""
+    """([(library_id, doc_type, year)], {library_id: weight}): the company's documents of the reporting year
+    (document_year: the year after it for a fiscal year ending January to June) or the next, preferred types
+    first, at most MAX_DOCS; the weight favours the preferred types and the year's own document."""
     ranks = {t: i for i, t in enumerate(attr.get("doc_types", []))}
+    want = document_year(year, fy_end_month(cur, wba))
     cur.execute("select library_id, coalesce(doc_type, ''), coalesce(year, 0) from public.documents "
-                "where wba_id = %s and year in (%s, %s)", (wba, year, year + 1))
-    docs = sorted(cur.fetchall(), key=lambda d: (ranks.get(d[1], 99), d[2] != year, d[0]))[:MAX_DOCS]
+                "where wba_id = %s and year in (%s, %s)", (wba, want, want + 1))
+    docs = sorted(cur.fetchall(), key=lambda d: (ranks.get(d[1], 99), d[2] != want, d[0]))[:MAX_DOCS]
     nt = max(len(ranks), 1)
-    weight = {d[0]: (1 - ranks[d[1]] / nt if d[1] in ranks else 0.0) * (1.0 if d[2] == year else 0.7) for d in docs}
+    weight = {d[0]: (1 - ranks[d[1]] / nt if d[1] in ranks else 0.0) * (1.0 if d[2] == want else 0.7) for d in docs}
     return docs, weight
 
 
@@ -465,7 +516,8 @@ def read_values(cur, wba, year, attr, spec, usage, known=None):
     best = pages_for_model(scored, MODEL_PAGES)
     if not best:
         return []
-    got = read_years({"wba": wba, "year": year, "hint": hint(memory)}, attr, [(lid, page, body) for _, _, lid, page, body in best], usage)
+    got = read_years({"wba": wba, "year": year, "hint": hint(memory), "fy_month": fy_end_month(cur, wba)}, attr,
+                     [(lid, page, body) for _, _, lid, page, body in best], usage)
     for e in got:
         e["asked"] = year
     return got
@@ -504,6 +556,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     from company_memory import memory_for, hint
     memory = memory_for(cur, g["wba"], attr, g["year"], known, year_documents) if known else None
     r["memory"] = bool(memory)
+    r["fy_shift"] = document_year(g["year"], fy_end_month(cur, g["wba"])) != g["year"]   # a January-to-June year end
     rows = ranked_pages(cur, ids, weight, g["year"], attr, spec, info, memory)
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
@@ -522,7 +575,8 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         from model_reader import read_years
         best_pages = pages_for_model(scored, MODEL_PAGES)
         note = {}
-        all_got = read_years(dict(g, hint=hint(memory)), attr, [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
+        all_got = read_years(dict(g, hint=hint(memory), fy_month=fy_end_month(cur, g["wba"])), attr,
+                             [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
         got = next((e for e in all_got if e["year"] == g["year"]), None)
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
         r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
@@ -607,6 +661,8 @@ def main():
             s["model_pages"] += bool(r.get("model_pages_have_number"))
             s["index cited"] += bool(r.get("index_cited")); s["index hit"] += bool(r.get("index_hit"))
             s["neighbour pages"] += r.get("neighbour_pages", 0); s["neighbour hit"] += bool(r.get("neighbour_hit")); s["neighbour kept"] += bool(r.get("neighbour_kept"))
+            if r.get("fy_shift"):
+                s["fy shift"] += 1; s["fy shift right"] += bool(r["right"]); s["fy shift proposal"] += bool(r["proposal"])
             if r.get("memory"):
                 s["memory"] += 1; s["memory in_pages"] += bool(r["in_pages"]); s["memory right"] += bool(r["right"])
             else:
@@ -708,6 +764,14 @@ def main():
         md.append(f"| {c} {spec['attributes'][c]['name']} | {s['memory']:,} | {s['memory in_pages'] / (s['memory'] or 1):.0%} | "
                   f"{s['memory right'] / (s['memory'] or 1):.0%} | {s['no memory']:,} | {s['no memory in_pages'] / (s['no memory'] or 1):.0%} | "
                   f"{s['no memory right'] / (s['no memory'] or 1):.0%} |")
+    md.append("")
+    md += ["Fiscal years ending January to June (2 Nov 2026): the reporting year's document is the one dated the year after, "
+           "and the model is told the year end. Answers of such companies, proposals and right:", "",
+           "| Attribute | Answers with a January-to-June year end | Proposal | Right |", "| --- | --: | --: | --: |"]
+    for c in codes:
+        s = stats[c]
+        md.append(f"| {c} {spec['attributes'][c]['name']} | {s['fy shift']:,} | {s['fy shift proposal'] / (s['fy shift'] or 1):.0%} | "
+                  f"{s['fy shift right'] / (s['fy shift'] or 1):.0%} |")
     md.append("")
     for c in codes:
         if wrong[c]:
