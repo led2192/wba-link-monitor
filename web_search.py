@@ -734,7 +734,69 @@ def open_cover(link, sess=None):
         return None, f"could not be read ({type(e).__name__})"
 
 
-def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
+JUDGE_SYSTEM = ("You check whether a PDF is a company's own report. You get the company, what is being looked for, "
+                "the file's address and the text of its first pages. Answer with JSON only.")
+FAMILY_KINDS = {"sustainability": {"sustainability report", "esg report", "csr report", "integrated report", "impact report"},
+                "annual": {"annual report", "integrated report", "10-k", "20-f", "universal registration document"}}
+
+
+def judge_prompt(f, fam, years, link, text):
+    """The question for the cover judge: who published the file, what it is, and which period it covers."""
+    want = "an annual report (or integrated report, 10-K, 20-F, universal registration document)" if fam == "annual" else \
+        "a sustainability report (or ESG, CSR, integrated or impact report) covering the whole company"
+    return "\n".join([
+        f"Company: {f.get('company_name') or ''}" + (f" (legal name: {f['corporate_name']})" if f.get("corporate_name") else "")
+        + (f", website {f.get('website')}" if f.get("website") else "") + (f", headquarters {f['hq_country']}" if f.get("hq_country") else ""),
+        f"Looking for: {want} published by this company itself, for reporting year {', '.join(str(y) for y in sorted(years))}.",
+        f"File address: {link}",
+        f"File properties: {(text.get('meta') or '')[:300]}",
+        "First pages:", "<pages>", (text.get("front") or "")[:3500], "</pages>",
+        "Questions. publisher: who publishes this document, as printed. is_company: true only when the publisher is this "
+        "company (the group itself), not a subsidiary or local affiliate (a country unit, a listed subsidiary, an Indian or "
+        "Danish entity of a foreign group), not its parent, a fund it manages, a foundation, a portfolio company, a partner, "
+        "an auditor or verifier, a rating agency, a regulator, a university, a news service or another company that only "
+        "mentions it. kind: one of \"annual report\", \"integrated report\", \"10-k\", \"20-f\", \"universal registration "
+        "document\", \"sustainability report\", \"esg report\", \"csr report\", \"impact report\", \"other\" (anything else: "
+        "a magazine, a newsletter, a release, a quarterly or half-year report, a fund report, an opinion or assurance "
+        "statement, a policy, a framework, a presentation, a thesis, a programme's report). period_end: the month the "
+        "period the document covers ends, YYYY-MM.",
+        'Reply: {"publisher": "...", "is_company": true or false, "kind": "...", "period_end": "YYYY-MM", "why": "ten words"}'])
+
+
+def model_judge(usage=None, sess=None):
+    """A cover judge backed by the model (JUDGE_MODEL, default the reader's Haiku): (ok, why). 2 Nov 2026: the
+    rules alone let through, in a dry run on the 34 companies of the audit, a subsidiary's BRSR on NSE, a listed
+    subsidiary's ESG report on a news wire, a forum's report, fund reports and a magazine; a short question to the
+    model about each candidate costs a fraction of a cent."""
+    from model_reader import call, parse_reply
+    usage = usage if usage is not None else collections.Counter()
+
+    def judge(f, fam, years, link, text):
+        reply = parse_reply(call([{"role": "user", "content": judge_prompt(f, fam, years, link, text)}], usage, sess,
+                                 model=os.environ.get("JUDGE_MODEL") or None, system=JUDGE_SYSTEM, max_tokens=300))
+        usage["judge calls"] += 1
+        if not isinstance(reply, dict):
+            return False, "the judge gave no answer"
+        who = str(reply.get("publisher") or "?")[:60]
+        kind = str(reply.get("kind") or "").strip().lower()
+        if reply.get("is_company") is not True:
+            return False, f"the judge: published by {who}"
+        if kind not in FAMILY_KINDS[fam]:
+            return False, f"the judge: {kind or 'not a report'} ({str(reply.get('why') or '')[:60]})"
+        pe = str(reply.get("period_end") or "")
+        m = re.search(r"((?:19|20)\d\d)(?:-(\d\d?))?", pe)
+        y = None
+        if m:                                # the reporting year: a period ending January to June is the year before
+            y = int(m.group(1)) - (1 if m.group(2) and 1 <= int(m.group(2)) <= 6 else 0)
+        allowed = set(years) | ({max(years) + 1} if max(years) == expected_year() else set())
+        if y and y not in allowed:
+            return False, f"the judge: covers {reply.get('period_end')}, not a missing year"
+        return True, f"the judge: {kind} by {who}"
+    judge.usage = usage
+    return judge
+
+
+def search_company(f, page_urls, years, api, reg_domain, opener=open_cover, cover_judge=None):
     """{"looked_for": [...], "found": [(url, why)], "not_added": [(url, why)], "queries": n, "opened": n}
 
     Every candidate is opened (2 Nov 2026) and kept when its first pages pass cover_check for its site class:
@@ -742,9 +804,13 @@ def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
     it sits on another site or a shared host, has no year or report word in its title, or is not a .pdf
     address (up to CHECK_MAX per family off the company's sites, CHECK_MAX_OWN on them). An own-site file
     that cannot be fetched from here (the site refuses robots) is passed on from its title, so the inbox and
-    the office-network runner can try; a file elsewhere that cannot be opened is not."""
+    the office-network runner can try; a file elsewhere that cannot be opened is not. cover_judge, when given
+    (model_judge), reads every file the rules passed and must agree: published by the company itself, an
+    annual or sustainability report, a missing year."""
     name = f.get("company_name") or ""
     domains = company_domains(f, page_urls, reg_domain)
+    website_site = site_of(f.get("website") or "", reg_domain)
+    website_site = website_site if website_site in domains else ""
     out = {"looked_for": [], "found": [], "not_added": [], "queries": 0, "opened": 0}
     for fam, ys in missing(f, years).items():
         if not ys:
@@ -784,12 +850,19 @@ def search_company(f, page_urls, years, api, reg_domain, opener=open_cover):
                     out["opened"] += 1
                     text, pages = opener(link)
                     if text is None:
-                        if ok and cls == "own" and str(pages).startswith(("HTTP", "could not be read", "over ")):
+                        # passed from its title only on the website's own domain, never on a domain taken from the
+                        # company's monitored pages (2 Nov 2026 dry run: fidelityinternational.com, another company in
+                        # the universe, for Fidelity Investments)
+                        if ok and website_site and on_sites(link, [website_site]) and str(pages).startswith(("HTTP", "could not be read", "over ")):
                             why = f"{why}; could not be opened ({pages}), passed on from its title"
                         else:
                             ok, why = False, f"{why}; opened: {pages}"
                     else:
                         ok2, why2 = cover_check(text, pages, f, fam, ys, site=cls, title_years=tf & allowed)
+                        if ok2 and cover_judge is not None:
+                            # the rules passed it: the model reads the cover too, and must agree (2 Nov 2026)
+                            ok2, why3 = cover_judge(f, fam, ys, link, text if isinstance(text, dict) else {"front": text})
+                            why2 = f"{why2}; {why3}"
                         ok, why = ok2, (why2 if ok2 else f"{why}; opened: {why2}")
                 elif candidate and ok and cls == "own" and not room:
                     ok, why = False, f"{why}; not opened: {CHECK_MAX_OWN} files of this family were already opened"
@@ -841,6 +914,11 @@ def main():
     if not key:
         open("web_search.md", "w").write("### Web search: SERPER_API_KEY is not set (a repository secret); nothing run.\n")
         return 0
+    if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+        open("web_search.md", "w").write("### Web search: ANTHROPIC_API_KEY is not set: every file is checked by the model "
+                                         "before it is passed on (2 Nov 2026), so nothing is run.\n")
+        return 0
+    cover_judge = model_judge()
     from propose_values import fetch
     from monitor_core import reg_domain
     base, H = os.environ["AIRTABLE_BASE"], {"Authorization": f"Bearer {os.environ['AIRTABLE_TOKEN']}"}
@@ -915,7 +993,7 @@ def main():
             c["stopped at the time budget"] = 1
             break
         f = r["fields"]
-        res = search_company(f, pages.get(f["wba_id"], []), years, api, reg_domain)
+        res = search_company(f, pages.get(f["wba_id"], []), years, api, reg_domain, cover_judge=cover_judge)
         if res.get("cut"):
             break                        # cut by the budget: not marked as searched, picked up next run
         c["companies searched"] += 1
@@ -939,6 +1017,9 @@ def main():
         if i % 50 == 0:
             print(f"  {i}/{len(due)}: {api.used} searches, {c['documents passed on']} documents", flush=True)
     c["searches (credits)"] = api.used
+    c["judge calls"] = cover_judge.usage["judge calls"]
+    from model_reader import cost
+    c["judge cost in USD (estimate)"] = round(cost(cover_judge.usage), 3)
     if api.stopped:
         c["stopped: " + api.stopped] = 1
     if a.commit and updates:

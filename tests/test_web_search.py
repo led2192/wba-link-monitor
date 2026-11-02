@@ -541,3 +541,75 @@ class ThirdWaveCases(unittest.TestCase):
         self.assertEqual(res["found"], [(hits[0]["link"], "annual 2025, checked on the file's first pages"),
                                         (hits[1]["link"], "annual 2024; could not be opened (HTTP 403), passed on from its title"),
                                         (hits[2]["link"], "annual 2023, checked on the file's first pages")])   # the title's year when the cover has none
+
+
+class ModelJudge(unittest.TestCase):
+    """2 Nov 2026: the dry run of the rules on the 34 audited companies still passed a listed subsidiary's ESG
+    report, an Indian subsidiary's BRSR, a forum's report, fund reports and a magazine. The model reads every
+    cover the rules passed and must agree."""
+    class Sess:
+        def __init__(self, reply):
+            self.reply, self.sent = reply, []
+
+        def post(self, url, headers=None, json=None, timeout=None):
+            self.sent.append(json)
+            import json as J
+            body = {"content": [{"type": "text", "text": J.dumps(self.reply)}], "usage": {"input_tokens": 900, "output_tokens": 40}}
+            return type("R", (), {"status_code": 200, "json": lambda s: body, "text": "", "headers": {}})()
+
+    F = {"company_name": "China Datang", "corporate_name": "China Datang Corporation Ltd.", "website": "http://en.china-cdt.com", "hq_country": "CHN"}
+    TEXT = {"front": "Datang International Power Generation Co., Ltd.\nEnvironmental, Social and Governance Report 2023", "meta": "", "file": "e00991__ESG.pdf"}
+
+    def run_judge(self, reply, fam="sustainability", years=(2025, 2024, 2023)):
+        os.environ.setdefault("ANTHROPIC_API_KEY", "test")
+        sess = self.Sess(reply)
+        return W.model_judge(sess=sess)(self.F, fam, list(years), "https://mmx.prnewswire.com/media/2369954/e00991__ESG.pdf", self.TEXT), sess
+
+    def test_a_subsidiary_is_refused(self):
+        (ok, why), sess = self.run_judge({"publisher": "Datang International Power Generation Co., Ltd.", "is_company": False,
+                                          "kind": "esg report", "period_end": "2023-12", "why": "listed subsidiary"})
+        self.assertFalse(ok); self.assertIn("published by Datang International Power", why)
+        prompt = sess.sent[0]["messages"][0]["content"]
+        self.assertIn("legal name: China Datang Corporation Ltd.", prompt); self.assertIn("e00991__ESG.pdf", prompt)
+        self.assertEqual(sess.sent[0]["system"], W.JUDGE_SYSTEM)
+
+    def test_not_a_report_and_the_wrong_year_are_refused(self):
+        (ok, why), _ = self.run_judge({"publisher": "China Datang", "is_company": True, "kind": "other", "period_end": "2023-07"})
+        self.assertFalse(ok); self.assertIn("the judge: other", why)
+        (ok, why), _ = self.run_judge({"publisher": "China Datang", "is_company": True, "kind": "esg report", "period_end": "2021-12"})
+        self.assertFalse(ok); self.assertIn("not a missing year", why)
+        (ok, why), _ = self.run_judge({"publisher": "China Datang", "is_company": True, "kind": "annual report", "period_end": "2024-12"})
+        self.assertFalse(ok)                                         # an annual report is not a sustainability report
+        self.assertEqual(self.run_judge("not json")[0], (False, "the judge gave no answer"))
+
+    def test_the_companys_own_report_passes(self):
+        (ok, why), _ = self.run_judge({"publisher": "China Datang Corporation Ltd.", "is_company": True, "kind": "sustainability report",
+                                       "period_end": "2024-12"})
+        self.assertTrue(ok); self.assertEqual(why, "the judge: sustainability report by China Datang Corporation Ltd.")
+        (ok, _), _ = self.run_judge({"publisher": "China Datang", "is_company": True, "kind": "integrated report", "period_end": "2025-03"},
+                                    fam="annual")
+        self.assertTrue(ok)                                          # March 2025 is reporting year 2024
+
+    def test_search_company_asks_the_judge_after_the_rules(self):
+        F = {"wba_id": "PT_1", "company_name": "Acme Group", "website": "acme.com", "sust_years": "", "coverage_breakdown": "", "hq_country": "USA"}
+        hits = [{"link": "https://www.acme.com/ir/acme-annual-report-2025.pdf", "title": "Acme Annual Report 2025"},
+                {"link": "https://www.acme.com/ir/acme-annual-report-2024.pdf", "title": "Acme Annual Report 2024"}]
+        cover = lambda u: ({"front": "Acme Group\nAnnual Report " + u[-8:-4], "more": "", "meta": "", "file": u.rsplit("/", 1)[1]}, 150)
+        asked = []
+        def cover_judge(f, fam, ys, link, text):
+            asked.append(link)
+            return ("2025" in link, "the judge: annual report by Acme Group" if "2025" in link else "the judge: published by Acme Foundation")
+        res = W.search_company(F, [], YEARS, Stub({'site:acme.com ("annual report"': hits}), reg_domain, opener=cover, cover_judge=cover_judge)
+        self.assertEqual(asked, [h["link"] for h in hits])
+        self.assertEqual([u for u, _ in res["found"]], [hits[0]["link"]])
+        self.assertIn("published by Acme Foundation", dict(res["not_added"])[hits[1]["link"]])
+
+    def test_a_refused_file_on_a_page_domain_is_not_passed_from_its_title(self):
+        F = {"wba_id": "PT_1", "company_name": "Fidelity Investments", "website": "https://www.fidelity.com", "sust_years": "",
+             "coverage_breakdown": "", "hq_country": "USA"}
+        hit = [{"link": "https://www.fidelityinvestments-reports.com/ar/fidelity-investments-annual-report-2025.pdf",
+                "title": "Fidelity Investments Annual Report 2025"}]
+        api = Stub({'(site:fidelity.com OR site:fidelityinvestments-reports.com) ("annual report"': hit})
+        res = W.search_company(F, ["https://www.fidelityinvestments-reports.com/x"], YEARS, api, reg_domain,
+                               opener=lambda u: (None, "HTTP 403"))
+        self.assertEqual(res["found"], [])
