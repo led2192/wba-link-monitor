@@ -193,7 +193,7 @@ def read_deleted():
     return out
 
 
-def plan(sources, held, deleted, order):
+def plan(sources, held, deleted, order, purged=frozenset()):
     """[(source, verdict)] verdict in add / skip:<reason> / review:<reason>."""
     rank = {tag: i for i, tag in enumerate(order)}           # earlier in --bases = preferred
     sources = sorted(sources, key=lambda s: (rank[s["src"]], -s["size"]))
@@ -204,6 +204,8 @@ def plan(sources, held, deleted, order):
             out.append((s, "skip:already held (same file)")); continue
         if (w, s["size"]) in deleted or (w, s["filename"].lower()) in deleted:
             out.append((s, "skip:deleted by hand")); continue
+        if library_id(s) in purged:
+            out.append((s, "skip:discarded and purged")); continue
         if (w, s["size"]) in seen_size:
             out.append((s, "skip:same file in another Source Library")); continue
         if fam in REPORTS:
@@ -224,9 +226,24 @@ def plan(sources, held, deleted, order):
     return out
 
 
-def row_for(s, names):
+def library_id(s):
+    """The row's id (inbox.py's add_file rule): a purged row keeps it in the tombstone list."""
     key = f"upload:{s['wba']}:{s['filename'].lower()}:{s['size']}"
-    return {"library_id": f"{s['wba']}-{hashlib.sha1(key.encode()).hexdigest()[:10]}",
+    return f"{s['wba']}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
+
+
+def read_purged(path="state/tombstones_report_library.tsv.gz"):
+    """library_ids of every purged row (purge_discarded.py, second column). A purged row was discarded, often as
+    misattributed: without this, its Source Library file would come back the next morning."""
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            return {l.split("\t")[1] for l in fh if l.count("\t") >= 1 and l.split("\t")[1]}
+    except FileNotFoundError:
+        return set()
+
+
+def row_for(s, names):
+    return {"library_id": library_id(s),
             "wba_id": s["wba"], "company_name": names.get(s["wba"], ""),
             "file": [{"url": s["file_url"], "filename": s["filename"]}],
             **({"found_on": s["link"]} if s["link"] else {}),
@@ -302,7 +319,7 @@ def main():
         sources += got
     held, n = read_library(token, base)
     print(f">>> Disclosure Library: {n} rows read.", flush=True)
-    items = plan(sources, held, read_deleted(), order)
+    items = plan(sources, held, read_deleted(), order, read_purged())
     adds = [s for s, v in items if v == "add"]
     if a.limit:
         adds = adds[:a.limit]
