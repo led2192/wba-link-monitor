@@ -58,14 +58,16 @@ class Judge(unittest.TestCase):
     def test_rules(self):
         self.assertEqual(self.j("https://www.acme.com/docs/acme-sustainability-report-2025.pdf", "Sustainability Report 2025"),
                          (True, "sustainability 2025"))
-        self.assertTrue(self.j("https://s2.q4cdn.com/123/files/doc_downloads/2025/ESG.pdf", "Acme ESG Report")[0])   # IR host, named
+        self.assertEqual(self.j("https://s2.q4cdn.com/123/files/doc_downloads/2025/ESG.pdf", "Acme ESG Report")[1],
+                         "on a shared host, to be opened (q4cdn.com)")                                 # IR host, named: opened
         self.assertEqual(self.j("https://www.other.com/acme-sr-2025.pdf", "Acme Sustainability Report 2025")[1], "another site (other.com)")
         self.assertEqual(self.j("https://www.acme.com/r/2023.pdf", "Sustainability Report 2023")[1], "not one of the missing years (2023)")
         self.assertEqual(self.j("https://www.acme.com/r/menu-2025.pdf", "Canteen menu 2025")[1], "does not name the report")
         self.assertTrue(self.j("https://www.acme.com/gb2025.pdf", "Geschäftsbericht 2025", fam="annual")[0])  # another language
         # a shared host needs the company's name in the result
         self.assertFalse(self.j("https://bucket.s3.amazonaws.com/sr-2025.pdf", "Sustainability report 2025")[0])
-        self.assertTrue(self.j("https://bucket.s3.amazonaws.com/acme-sr-2025.pdf", "Acme Sustainability report 2025")[0])
+        self.assertTrue(self.j("https://bucket.s3.amazonaws.com/acme-sr-2025.pdf", "Acme Sustainability report 2025")[1]
+                        .startswith("on a shared host, to be opened"))
 
 
 class Search(unittest.TestCase):
@@ -123,14 +125,14 @@ class DryRunCases(unittest.TestCase):
         self.assertFalse(self.j("https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0325/2025032501525.pdf",
                                 "ESG Report 2024")[0])
         self.assertTrue(self.j("https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0325/2025032501525.pdf",
-                               "ACME GROUP - ESG Report 2024")[0])
+                               "ACME GROUP - ESG Report 2024")[1].startswith("on a shared host, to be opened"))
 
     def test_name_in_a_snippet_is_not_enough(self):
         # a NIQ annual report on q4cdn passed for SHEIN: the snippet named SHEIN, the title and address did not
         self.assertFalse(self.j("https://s206.q4cdn.com/369/files/doc_financials/2025/ar/NIQ-2025-Annual-Report.pdf",
                                 "NIQ 2025 Annual Report", snippet="clients such as Acme Group", fam="annual")[0])
         self.assertTrue(self.j("https://acme-prod-asset.s3.us-east-2.amazonaws.com/uploads/2024-03/Acme_Sustainability_Report_2024.pdf",
-                               "Sustainability Report 2024")[0])                     # the name in the address
+                               "Sustainability Report 2024")[1].startswith("on a shared host, to be opened"))  # the name in the address
 
     def test_not_a_report_or_not_a_pdf(self):
         self.assertEqual(self.j("https://www.acme.com/2023-ifpr-disclosures/", "2023 IFPR disclosures")[1], "not a PDF")
@@ -322,3 +324,41 @@ class Writes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SharedHostCases(unittest.TestCase):
+    """2 Nov 2026 wave: two Football Association of Wales files on amazonaws.com and cloudfront.net were passed on
+    for FAW (the carmaker) because "faw" was in their addresses. A file on a shared host is now always opened."""
+    F = {"company_name": "FAW", "website": "http://www.faw.com", "sust_years": "", "coverage_breakdown": ""}
+
+    def run_with(self, hits, cover):
+        api = Stub({"site:faw.com": [], '"FAW"': hits})
+        opened = []
+        def opener(u):
+            opened.append(u); return cover, 60
+        return W.search_company(self.F, [], YEARS, api, reg_domain, opener=opener), opened
+
+    def test_another_organisation_with_the_same_acronym_is_not_passed(self):
+        hits = [{"link": "https://media-faw-cymru.s3.eu-west-2.amazonaws.com/faw/20240905130454/"
+                         "FAW-Mens-Tier-1-Club-Licensing-and-Financial-Sustainability-Regulations-2024.pdf",
+                 "title": "FAW Mens Tier 1 Club Licensing and Financial Sustainability Regulations 2024"},
+                {"link": "https://d1zqj8o9na6wgl.cloudfront.net/faw/20260120161259/FAW-Anti-Doping-Annual-Report-2024-25-Website20-Read-Only.pdf",
+                 "title": "FAW Anti-Doping Annual Report 2024-25"}]
+        cover = {"front": "FAW Football Association of Wales\nAnti-Doping Annual Report 2024-25", "more": "www.faw.cymru",
+                 "meta": "", "file": "FAW-Anti-Doping-Annual-Report-2024-25.pdf"}
+        res, opened = self.run_with(hits, cover)
+        self.assertEqual(res["found"], [])
+        self.assertTrue(opened)                              # opened, not trusted from the address
+
+    def test_the_companys_own_file_on_a_cdn_still_passes(self):
+        hits = [{"link": "https://d1zqj8o9na6wgl.cloudfront.net/uploads/2025/FAW-Annual-Report-2025.pdf",
+                 "title": "FAW Annual Report 2025"}]
+        cover = {"front": "FAW\nChina FAW Group Co., Ltd.\nAnnual Report 2025", "more": "www.faw.com", "meta": "", "file": "x.pdf"}
+        res, _ = self.run_with(hits, cover)
+        self.assertEqual([u for u, _ in res["found"]], [hits[0]["link"]])
+
+    def test_another_companys_report_on_an_ir_host_is_not_passed(self):
+        # Morningstar's annual report on q4cdn.com was passed on for Mesirow Financial (1 Nov 2026 wave)
+        f = {"company_name": "Mesirow Financial", "website": "https://www.mesirow.com"}
+        doc = {"front": "2025 Annual Report\nMorningstar, Inc.\nLetter to Shareholders", "more": "", "meta": "", "file": "2025AnnualReport.pdf"}
+        self.assertFalse(W.cover_check(doc, 120, f, "annual", [2025], own_site=False)[0])
