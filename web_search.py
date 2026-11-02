@@ -20,8 +20,9 @@ and, only when that finds nothing usable, one question by name:
     "Acme Group" (sustainability OR ESG OR ...) (2025 OR 2024) filetype:pdf
 
 A result is passed on only when all three hold:
-  - it is on one of the company's sites (its website and the domains of its monitored pages) or on a
-    document host that serves many companies' reports (DOC_HOSTS: q4cdn, HKEXnews...);
+  - it is on one of the company's sites (its website and the domains of its monitored pages); a file on a
+    document host that serves many organisations' files (DOC_HOSTS: q4cdn, HKEXnews, CDNs...) is always
+    opened and checked like a file on another site (2 Nov 2026);
   - its title, address or snippet names the family, in English or one of the common report languages;
   - it names one of the missing years.
 Passed documents go to companies.research_link, so the inbox (inbox.py, every 30 minutes) adds them
@@ -243,6 +244,12 @@ def judge(r, fam, years, domains, name, reg_domain):
         ys = ys | {latest}
     if not ys & set(years):
         return False, "not one of the missing years" + (f" ({', '.join(str(y) for y in sorted(ys)[-3:])})" if ys else "")
+    if d in DOC_HOSTS and not on_sites(link, domains):
+        # Never passed on from its title and address alone: a shared host serves every organisation's files, and a
+        # short name in the address proves nothing (2 Nov 2026 wave: two Football Association of Wales files on
+        # amazonaws.com and cloudfront.net, "faw" in their addresses, were passed on for FAW, the carmaker). The
+        # file is opened and must pass the checks for a file on another site (cover_check, own_site=False).
+        return False, f"on a shared host, to be opened ({d})"
     return True, f"{fam} {max(ys & set(years))}"
 
 
@@ -276,7 +283,7 @@ class Serper:
 CHECK_MAX = 4                           # files opened per company and family to check the cover
 CHECK_MB = 60                           # larger files are not opened (the inbox still could, but we cannot check)
 MIN_PAGES = 8                           # a report has at least this many pages; a release or a memo has fewer
-CHECKABLE = ("another site", "shared host without", "not a PDF", "does not name")   # and a title with no year at all
+CHECKABLE = ("another site", "shared host without", "on a shared host", "not a PDF", "does not name")   # and a title with no year at all
 
 
 def reg_domain_of(website):
