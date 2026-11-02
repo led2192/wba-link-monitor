@@ -1,0 +1,48 @@
+"""Offline tests for import_source_library.py: which analyst documents are added and which are skipped, with
+no Airtable. 2 Nov 2026: every document type comes in, not only reports; policies are told apart by file."""
+import os, sys, unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import import_source_library as I  # noqa: E402
+
+
+def src(t, year, size, filename, wba="PT_1", tag="2026"):
+    return {"src": tag, "rec": f"rec{size}", "wba": wba, "type": t, "fam": I.family(t), "year": year, "link": "",
+            "name": filename, "file_url": "u", "filename": filename, "size": size}
+
+
+HELD = {"size": {("PT_1", 999)}, "name": {("PT_1", "held.pdf")}, "fam_years": {("PT_1", "SUST"): {2024}},
+        "types": {"PT_1": {"Code of Conduct"}}}
+
+
+class Plan(unittest.TestCase):
+    def verdicts(self, sources, held=HELD, order=("2026", "2025")):
+        return [(s["filename"], v) for s, v in I.plan(sources, held, set(), list(order))]
+
+    def test_policies_come_in_even_when_one_of_the_type_is_held(self):
+        got = dict(self.verdicts([src("Code of Conduct", 2025, 10, "supplier-code.pdf"), src("Policy Documents", 2021, 11, "anti-bribery.pdf"),
+                                  src("Policy Documents", 2021, 12, "whistleblowing.pdf"), src("Human Rights Policy", 2020, 13, "hr.pdf")]))
+        self.assertEqual(set(got.values()), {"add"})
+
+    def test_the_same_file_is_never_added_twice(self):
+        got = self.verdicts([src("Policy Documents", 2025, 999, "x.pdf"), src("Policy Documents", 2025, 20, "held.pdf"),
+                             src("Policy Documents", 2025, 21, "a.pdf"), src("Policy Documents", 2025, 21, "a-copy.pdf", tag="2025")])
+        got = {f: v.split(":")[0] for f, v in got}
+        self.assertEqual(got, {"x.pdf": "skip", "held.pdf": "skip", "a.pdf": "add", "a-copy.pdf": "skip"})   # 2026 preferred
+
+    def test_reports_keep_their_year_guards(self):
+        got = dict(self.verdicts([src("Sustainability Report", 2024, 30, "sr24.pdf"), src("Sustainability Report", 2025, 31, "sr25.pdf"),
+                                  src("Climate Report", 2024, 32, "tcfd24.pdf")]))
+        self.assertTrue(got["sr24.pdf"].startswith("skip:we hold this report type"))
+        self.assertTrue(got["sr25.pdf"].startswith("review"))
+        self.assertEqual(got["tcfd24.pdf"], "add")                    # another type: told apart by file
+
+    def test_families(self):
+        self.assertEqual(I.family("ESG Report"), "SUST"); self.assertEqual(I.family("Registration Document"), "DOC:Registration Document")
+        self.assertEqual(I.family(""), "")
+        self.assertIn("Policy Documents", I.STANDING); self.assertNotIn("Climate Report", I.STANDING)
+        self.assertIn("appLkf0N4Tc26ojYD", I.SL_BASES)                # the 2026 base is guarded as read only too
+
+
+if __name__ == "__main__":
+    unittest.main()

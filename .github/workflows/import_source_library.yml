@@ -1,10 +1,14 @@
 name: Import Source Library
 
-# Brings the reports analysts collected in the Source Library bases into report_library, skipping
-# anything already held (same file, same name, same report type and year, deleted by hand).
-# Manual only. Dry run by default: the summary and source_library_plan.csv show what would be added.
+# Brings the documents analysts collected in the Source Library bases into report_library (every type
+# since 2 Nov 2026, not only reports; webpages never), skipping anything already held (same file, same name,
+# same report type and year, deleted by hand). Manual: dry run by default, the summary and
+# source_library_plan.csv show what would be added. Daily at 05:17 the current cycle's base (2026) is
+# imported with --commit, so what the analysts add reaches the library the next morning.
 
 on:
+  schedule:
+    - cron: "17 5 * * *"
   workflow_dispatch:
     inputs:
       commit:
@@ -13,13 +17,16 @@ on:
         default: false
       bases:
         description: "Source Library bases, preferred first"
-        default: "2025,2024"
+        default: "2026,2025,2024"
       min_year:
         description: "Oldest report year to import"
         default: "2023"
       limit:
         description: "At most this many rows (0 = all)"
         default: "0"
+      types:
+        description: "all (every document an analyst saved) or reports (the old scope)"
+        default: "all"
 
 concurrency:
   group: import-source-library
@@ -41,8 +48,12 @@ jobs:
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           SOURCE_LIBRARY_TOKEN: ${{ secrets.SOURCE_LIBRARY_TOKEN }}   # read-only, Source Library bases only
         run: |
-          ARGS="--bases ${{ inputs.bases }} --min-year ${{ inputs.min_year }} --limit ${{ inputs.limit }}"
-          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            ARGS="--bases 2026 --min-year 2023 --limit 2000 --types all --commit"
+          else
+            ARGS="--bases ${{ inputs.bases }} --min-year ${{ inputs.min_year }} --limit ${{ inputs.limit }} --types ${{ inputs.types }}"
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          fi
           python import_source_library.py $ARGS
       - uses: actions/upload-artifact@v4
         if: always()
