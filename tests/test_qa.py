@@ -107,6 +107,21 @@ class QaTests(unittest.TestCase):
         self.assertEqual(len(run._failures), 1)
         self.assertEqual(run.counts["PAGE_GONE"], 1)
 
+    def test_evaluations_go_to_evals_once_per_target_version_and_run(self):
+        # 3 Nov 2026: the scoreboard. Two readers scored in one job are two rows; a re-run adds none.
+        run = qa.Run("extract_eval.py")
+        run.evaluation("reader GMC_00001.1 Revenue", 40, 0.575, version="model reader", high_stakes=0.8, suite="validated answers")
+        run.evaluation("reader GMC_00001.1 Revenue", 40, 0.30, version="rules reader", suite="validated answers")
+        run.finish("ok")
+        rows = [r["fields"] for r in self.fake.tables["evals"]]
+        self.assertEqual(len(rows), 2)
+        m = [r for r in rows if r["version"] == "model reader"][0]
+        self.assertEqual((m["n_cases"], m["accuracy"], m["high_stakes_accuracy"], m["commit_sha"]), (40, 0.575, 0.8, "abc1234"))
+        again = qa.Run("extract_eval.py")
+        again.evaluation("reader GMC_00001.1 Revenue", 40, 0.575, version="model reader", suite="validated answers")
+        again.finish("ok")
+        self.assertEqual(len(self.fake.tables["evals"]), 2)
+
     def test_dry_run_writes_nothing(self):
         os.environ["QA_COMMIT"] = "false"
         run = qa.Run("x.py")

@@ -147,6 +147,7 @@ class Run:
         self.do_commit = _env("QA_COMMIT").lower() in ("true", "1", "yes")
         self._failures = {}            # failure_key -> dict of fields
         self._labels = {}              # label_id -> dict of fields
+        self._evals = {}               # eval_id -> dict of fields (one scoring per target and run)
         self._bad_codes = set()
         self._run_record_id = None
         self.counts = collections.Counter()
@@ -203,6 +204,26 @@ class Run:
         row.update({k: v for k, v in fields.items() if v not in (None, "")})
         self._labels[label_id] = row
         return label_id
+
+    def evaluation(self, target, n_cases, accuracy, version="", high_stakes=None, per_class=None, notes="",
+                   suite="pipeline", verdict="measured"):
+        """Record one scoring for the scoreboard (Pipeline QA evals): what was measured (target), on how many
+        cases, and the share right. One row per target, version and run (eval_id = target@suite@version@run_key:
+        one job may score two readers), so a re-run of
+        the same job updates nothing and every run adds its point to the trend. 3 Nov 2026: until then only
+        sl_labels.py wrote here; the reader, element and web search figures lived in pull request comments."""
+        version = version or self.script
+        eid = f"{target}@{suite}@{version}@{self.run_key}"
+        row = {"eval_id": eid, "run_on": _now(), "target": target, "version": version,
+               "n_cases": int(n_cases), "accuracy": round(float(accuracy), 4), "verdict": verdict, "notes": notes[:5000]}
+        if self.commit_sha:
+            row["commit_sha"] = self.commit_sha
+        if high_stakes is not None:
+            row["high_stakes_accuracy"] = round(float(high_stakes), 4)
+        if per_class:
+            row["per_class"] = json.dumps(per_class, ensure_ascii=False)[:90000]
+        self._evals[eid] = row
+        return eid
 
     # ---- writing ------------------------------------------------------------------------------
     def _headers(self):
@@ -327,12 +348,19 @@ class Run:
         self._write(T_LABELS, to_create, "POST")
         return len(to_create)
 
+    def _write_evals(self):
+        if not self._evals:
+            return 0
+        existing = self._existing_by_key(T_EVALS, "eval_id", list(self._evals), ["eval_id"])
+        self._write(T_EVALS, [{"fields": row} for eid, row in self._evals.items() if eid not in existing], "POST")
+        return len(self._evals) - len(existing)
+
     def finish(self, status="ok", rows_in=None, rows_out=None, counters=None, notes=None):
         """Write the run row, then the failures and labels. Prints a summary either way."""
         self._print_summary(status, counters)
         if not self.do_commit:
             print(f">>> qa: dry run, nothing written ({len(self._failures)} failure rows, "
-                  f"{len(self._labels)} label rows collected). Set QA_COMMIT=true to write.", flush=True)
+                  f"{len(self._labels)} label rows, {len(self._evals)} evals collected). Set QA_COMMIT=true to write.", flush=True)
             return None
         if not self.token:
             print(">>> qa: AIRTABLE_QA_TOKEN not set; nothing written.", flush=True)
@@ -341,8 +369,9 @@ class Run:
             rid = self._write_run(status, rows_in, rows_out, counters, notes)
             created, updated = self._write_failures()
             labels = self._write_labels()
+            evals = self._write_evals()
             print(f">>> qa: run {self.run_key} written ({status}); failures {created} new, {updated} updated; "
-                  f"labels {labels} new.", flush=True)
+                  f"labels {labels} new; evals {evals} new.", flush=True)
             return rid
         except Exception as e:
             if STRICT:
