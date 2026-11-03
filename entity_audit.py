@@ -128,6 +128,10 @@ def main():
     for wba, (co, n, k) in sorted(per.items(), key=lambda kv: (-kv[1][2] / max(kv[1][1], 1), -kv[1][2]))[:40]:
         if k:
             md.append(f"| {wba} {co} | {n} | {k} | {k / n:.0%} |")
+    md += ["", "Examples (one in every few suspects, spread over the companies), to judge the audit itself:", ""]
+    step = max(1, len(rows) // 60)
+    for r in rows[::step][:60]:
+        md.append(f"- {r[1]} | {r[3]} {r[4]} | {r[5][:70]} | page 1: \"{r[7][:110]}\"")
     md += ["", "Every suspect is in entity_audit.csv (the run's artifact) with the first words of page 1."]
     text = "\n".join(md) + "\n"
     open("entity_audit.md", "w").write(text); print(text, flush=True)
