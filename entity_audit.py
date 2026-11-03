@@ -21,6 +21,9 @@ LEGAL = {"inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "
          "a", "nv", "bv", "spa", "ab", "asa", "as", "oyj", "kgaa", "gmbh", "llc", "lp", "holdings", "holding", "group",
          "the", "and", "of", "de", "tbk", "pt", "bhd", "berhad", "pcl", "public", "jsc", "pjsc", "oao", "ooo", "kk", "k"}
 FIRST_PAGES = 3
+MIN_YEAR = 2020        # older reports carry former names (EADS for Airbus, Barclays Africa for Absa, Akzo for AkzoNobel)
+OTHER_ENTITY = re.compile(r"((?:[A-Z][\w&'.-]*\s+){1,5}(?:B\.V\.|N\.V\.|Limited|Ltd\.?|Inc\.?|AG|SE|S\.A\.|SA|GmbH|plc|PLC|LLC|"
+                          r"Corporation|Co\.,? Ltd\.?|S\.p\.A\.|A/S|AB|ASA|Oyj|Tbk|Berhad|Bhd))(?![\w])")
 
 
 KEY_TYPES = ("Sustainability Report", "Annual Report", "Integrated Report", "ESG Report", "Climate Report", "CSR Report",
@@ -67,7 +70,8 @@ def suspects(cur, wba, company, corporate, website=""):
         "select d.library_id, coalesce(d.doc_type, ''), coalesce(d.year, 0), coalesce(d.label, ''), coalesce(d.url, ''), "
         "left(coalesce(p1.body, ''), 300) from public.documents d "
         "left join public.pages p1 on p1.library_id = d.library_id and p1.page = 1 "
-        "where d.wba_id = %s and d.text_status = 'ok' and d.doc_type = any(%s) "
+        f"where d.wba_id = %s and d.text_status = 'ok' and d.doc_type = any(%s) and coalesce(d.year, 0) >= {MIN_YEAR} "
+        "and length(coalesce(p1.body, '')) >= 40 "
         f"and not exists (select 1 from public.pages p where p.library_id = d.library_id and p.page <= {FIRST_PAGES} "
         f"and ({' or '.join(conds)}))", [wba, list(KEY_TYPES)] + params)
     return cur.fetchall()
@@ -114,16 +118,21 @@ def main():
                 print(f"    {wba}: {type(e).__name__}: {str(e)[:100]}", flush=True); continue
             per[wba] = (company, n, len(got))
             for lid, dt, y, label, url, cover in got:
-                rows.append([wba, company, lid, dt, y, label, url, re.sub(r"\s+", " ", cover)[:300]])
+                cover = re.sub(r"\s+", " ", cover)[:300]
+                other = next((m.group(1).strip() for m in OTHER_ENTITY.finditer(cover)), "")
+                rows.append([wba, company, lid, dt, y, label, url, cover, other])
             if i % 200 == 0:
                 print(f"  {i:,}/{len(comps):,} companies, {len(rows):,} suspects", flush=True)
     with open("entity_audit.csv", "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh); w.writerow(["wba_id", "company", "library_id", "doc_type", "year", "label", "url", "page 1 begins"]); w.writerows(rows)
+        w = csv.writer(fh); w.writerow(["wba_id", "company", "library_id", "doc_type", "year", "label", "url", "page 1 begins", "names another entity"]); w.writerows(rows)
     docs = sum(v[1] for v in per.values()); sus = sum(v[2] for v in per.values())
     by_type = collections.Counter(r[3] or "(untyped)" for r in rows)
+    strong = [r for r in rows if r[8]]
     md = ["### Entity audit: documents whose first pages never name the company (suspects, not verdicts)", "",
           f"{len(per):,} companies, {docs:,} reports with text (the types the reader reads); {sus:,} suspects ({sus / (docs or 1):.1%}).", "",
           "By type: " + ", ".join(f"{t} {n:,}" for t, n in by_type.most_common(12)) + ".", "",
+          f"Of them, {len(strong):,} name another legal entity on page 1 (the strong suspects; the others name no one, "
+          "often a logo or a slogan):", ""] + [f"- {r[1]} | {r[3]} {r[4]} | {r[5][:60]} | names \"{r[8]}\"" for r in strong[:60]] + ["",
           "| Company | Documents | Suspects | Share |", "| --- | --: | --: | --: |"]
     for wba, (co, n, k) in sorted(per.items(), key=lambda kv: (-kv[1][2] / max(kv[1][1], 1), -kv[1][2]))[:40]:
         if k:

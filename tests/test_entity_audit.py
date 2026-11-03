@@ -35,5 +35,15 @@ class Names(unittest.TestCase):
         self.assertTrue(matches(("MN",), "MN Jaarverslag 2024", ci=False))
 
 
+class OtherEntity(unittest.TestCase):
+    def test_a_cover_that_names_another_legal_entity(self):
+        # 3 Nov 2026 run: ABN AMRO's library held International Card Services B.V.'s annual reports
+        f = lambda t: (E.OTHER_ENTITY.search(t) or [None, None])[1]
+        self.assertEqual(f("ANNUAL REPORT - FOR THE YEAR ENDING ON 31 DECEMBER 2020 International Card Services B.V. Annual Report"),
+                         "International Card Services B.V.")
+        self.assertEqual(f("JSW Infrastructure Limited Integrated Report 2024-25"), "JSW Infrastructure Limited")
+        self.assertIsNone(f("2022 SUSTAINABILITY REPORT"))
+
+
 if __name__ == "__main__":
     unittest.main()
