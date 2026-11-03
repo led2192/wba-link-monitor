@@ -65,6 +65,10 @@ SOURCE_LIBRARIES = {
 # Standing documents: no reporting period, imported whatever their year.
 STANDING = {"Code of Conduct", "Human Rights Policy", "Policy Documents", "Statutory Documents", "Certifications", "Other"}
 MAX_REPORT_ROWS = 420_000           # report_library rows after an import at most (the base holds 500,000 in all)
+MAX_BASE_RECORDS = 450_000          # records in the whole base after an import at most: 90% of Airtable's 500,000 cap,
+                                    # counted over every table (2 Nov 2026: 389,675 records, of them 292,737 report rows)
+MAX_ADD_GB = 60.0                   # attachments one import may add; Airtable's API cannot read the base's attachment
+                                    # space (2 Nov 2026: 760.8 GB of 1,000 GB), so the size of each import is capped instead
 FAMILY = {"Sustainability Report": "SUST", "ESG Report": "SUST", "CSR Report": "SUST", "Impact Report": "SUST",
           "Integrated Report": "INT", "Annual Report": "ANN", "10K Form": "ANN",
           "Code of Conduct": "COC", "Human Rights Policy": "HRP"}
@@ -95,6 +99,12 @@ def get_all(token, base, table, fields, formula=None):
         if not offset:
             return out
         time.sleep(0.21)
+
+
+def base_records(token, base):
+    """Records in every Disclosure Library table except report_library (counted apart), for the base's record cap."""
+    from base_health import TABLES
+    return sum(len(get_all(token, base, t, [])) for t in TABLES if t != "report_library")
 
 
 def fname_of(u):
@@ -183,7 +193,7 @@ def read_deleted():
     return out
 
 
-def plan(sources, held, deleted, order):
+def plan(sources, held, deleted, order, purged=frozenset()):
     """[(source, verdict)] verdict in add / skip:<reason> / review:<reason>."""
     rank = {tag: i for i, tag in enumerate(order)}           # earlier in --bases = preferred
     sources = sorted(sources, key=lambda s: (rank[s["src"]], -s["size"]))
@@ -194,6 +204,8 @@ def plan(sources, held, deleted, order):
             out.append((s, "skip:already held (same file)")); continue
         if (w, s["size"]) in deleted or (w, s["filename"].lower()) in deleted:
             out.append((s, "skip:deleted by hand")); continue
+        if library_id(s) in purged:
+            out.append((s, "skip:discarded and purged")); continue
         if (w, s["size"]) in seen_size:
             out.append((s, "skip:same file in another Source Library")); continue
         if fam in REPORTS:
@@ -214,9 +226,24 @@ def plan(sources, held, deleted, order):
     return out
 
 
-def row_for(s, names):
+def library_id(s):
+    """The row's id (inbox.py's add_file rule): a purged row keeps it in the tombstone list."""
     key = f"upload:{s['wba']}:{s['filename'].lower()}:{s['size']}"
-    return {"library_id": f"{s['wba']}-{hashlib.sha1(key.encode()).hexdigest()[:10]}",
+    return f"{s['wba']}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
+
+
+def read_purged(path="state/tombstones_report_library.tsv.gz"):
+    """library_ids of every purged row (purge_discarded.py, second column). A purged row was discarded, often as
+    misattributed: without this, its Source Library file would come back the next morning."""
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            return {l.split("\t")[1] for l in fh if l.count("\t") >= 1 and l.split("\t")[1]}
+    except FileNotFoundError:
+        return set()
+
+
+def row_for(s, names):
+    return {"library_id": library_id(s),
             "wba_id": s["wba"], "company_name": names.get(s["wba"], ""),
             "file": [{"url": s["file_url"], "filename": s["filename"]}],
             **({"found_on": s["link"]} if s["link"] else {}),
@@ -267,6 +294,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--plan-out", default="source_library_plan.csv")
+    ap.add_argument("--max-gb", type=float, default=MAX_ADD_GB, help="attachments one import may add, in GB "
+                    f"(default {MAX_ADD_GB:g}; the API cannot read the base's attachment space, so check it in Airtable)")
     ap.add_argument("--types", default="all", choices=["all", "reports"], help="all documents (default) or reports only")
     ap.add_argument("--tag-existing", action="store_true", help="only set origin on rows imported before the field existed "
                     "(Reviewer notes starting 'From Source Library <base>' or 'Found by research'), then stop")
@@ -290,7 +319,7 @@ def main():
         sources += got
     held, n = read_library(token, base)
     print(f">>> Disclosure Library: {n} rows read.", flush=True)
-    items = plan(sources, held, read_deleted(), order)
+    items = plan(sources, held, read_deleted(), order, read_purged())
     adds = [s for s, v in items if v == "add"]
     if a.limit:
         adds = adds[:a.limit]
@@ -315,6 +344,15 @@ def main():
     if not a.commit:
         print("DRY RUN. Re-run with --commit to create the rows.")
         return
+    gb = mb / 1024
+    if gb > a.max_gb:
+        sys.exit(f"Refusing: this import would add {gb:,.1f} GB of attachments, over --max-gb {a.max_gb:g}. Check the base's "
+                 "attachment space in Airtable first (1,000 GB per base), then raise --max-gb or use --limit.")
+    others = base_records(token, base)
+    if n + others + len(adds) > MAX_BASE_RECORDS:
+        sys.exit(f"Refusing: the base would hold {n + others + len(adds):,} records ({n:,} report rows, {others:,} in other "
+                 f"tables, {len(adds):,} new), over {MAX_BASE_RECORDS:,} (90% of Airtable's 500,000). Use --limit, or free "
+                 "room first (purge_discarded.py).")
     if n + len(adds) > MAX_REPORT_ROWS:
         sys.exit(f"Refusing: report_library would hold {n + len(adds):,} rows, over {MAX_REPORT_ROWS:,} (the base holds "
                  "500,000 in all). Use --limit, or free room first (purge_discarded.py).")
