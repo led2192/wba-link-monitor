@@ -472,6 +472,8 @@ class Serper:
 
 
 CHECK_MAX = 4                           # files from other sites opened per company and family to check the cover
+REFUSED = re.compile(r"HTTP 40[13]\b|over ")  # the site refused the robot, or the file is too large to check here: the
+                                               # only failures a title may stand in for (the file is there)
 CHECK_MAX_OWN = 6                       # files from the company's own sites opened per company and family
 CHECK_MB = 60                           # larger files are not opened (the inbox still could, but we cannot check)
 MIN_PAGES = 8                           # a report has at least this many pages; a release or a memo has fewer
@@ -759,7 +761,8 @@ def judge_prompt(f, fam, years, link, text):
         "mentions it. kind: one of \"annual report\", \"integrated report\", \"10-k\", \"20-f\", \"universal registration "
         "document\", \"sustainability report\", \"esg report\", \"csr report\", \"impact report\", \"other\" (anything else: "
         "a magazine, a newsletter, a release, a quarterly or half-year report, a fund report, an opinion or assurance "
-        "statement, a policy, a framework, a presentation, a thesis, a programme's report). period_end: the month the "
+        "statement, a policy, a framework, a presentation, a thesis, a programme's report, guidelines, a form, an "
+        "application or grant document). period_end: the month the "
         "period the document covers ends, YYYY-MM.",
         'Reply: {"publisher": "...", "is_company": true or false, "kind": "...", "period_end": "YYYY-MM", "why": "ten words"}'])
 
@@ -864,8 +867,11 @@ def search_company(f, page_urls, years, api, reg_domain, opener=open_cover, cove
                     if text is None:
                         # passed from its title only on the website's own domain, never on a domain taken from the
                         # company's monitored pages (2 Nov 2026 dry run: fidelityinternational.com, another company in
-                        # the universe, for Fidelity Investments)
-                        if ok and website_site and on_sites(link, [website_site]) and str(pages).startswith(("HTTP", "could not be read", "over ")):
+                        # the universe, for Fidelity Investments), and only when the site refused our robot (HTTP 401
+                        # or 403) or the file is over CHECK_MB: the file is there. A timeout or a TLS error says
+                        # nothing about the file, so it is not added this time (3 Nov 2026 audit: a Banorte newsletter
+                        # after a ReadTimeout and an HP file after an SSLError were passed from their titles)
+                        if ok and website_site and on_sites(link, [website_site]) and REFUSED.match(str(pages)):
                             why = f"{why}; could not be opened ({pages}), passed on from its title"
                         else:
                             ok, why = False, f"{why}; opened: {pages}"

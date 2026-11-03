@@ -185,3 +185,7 @@ The gone-page search (`discover_pages.py`) listed the page types it looks after 
 
 ## Airtable's caps count the whole base, and one of them cannot be read (2 Nov 2026)
 The 500,000 record cap counts every table, not report_library alone: on 2 Nov 2026 the base held 389,675 records, of which 292,737 were report rows, so a guard on report rows only (420,000) would have let the base pass 500,000. The attachment cap (1,000 GB per base, 760.8 GB used on 2 Nov) is not readable through the API at all: it shows only in the workspace's billing page. Any bulk import checks the whole base's records and caps the size it adds, and before a large one a person looks at the attachment space by hand. A purge also removes what the importers check against: anything that adds rows must read the tombstones too (the Source Library import did not until #181). A new table must also be added to `base_health.TABLES`: attribute_values was not, and the health report missed about 12,000 records for weeks.
+
+## A failed download is not evidence that the file exists (3 Nov 2026)
+Web search passed an own-site file from its title whenever it could not be opened. A refusal (HTTP 401 or 403) means the server has the file and does not want robots; a timeout or a TLS error means nothing. Two of the three wrong documents in the first audit after the judge came through that door (a newsletter, an unrelated file). Only a refusal or a file too large to check may stand in for the cover now.
+
