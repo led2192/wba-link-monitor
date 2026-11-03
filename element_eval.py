@@ -125,6 +125,31 @@ def write_shares(rows, path="element_source_shares.csv"):
     return len(out)
 
 
+def record_scores(run, c):
+    """The library stage as four scoreboard rows (Pipeline QA evals), over the whole sample, with each benchmark
+    in per_class. Discovery (held), capture (text in the database) and extraction (a quote found)."""
+    tot = collections.Counter()
+    for s in c.values():
+        tot.update(s)
+    d, n = tot["document sources"], tot["elements"]
+    if not n:
+        return
+    per = lambda k, base: {bm: {"n": s[base], "share": round(s[k] / (s[base] or 1), 4)} for bm, s in c.items()}
+    for target, k, base, note in [
+            ("cited documents held (same file)", "in library", "document sources",
+             "Share of the documents the analysts cited in 2025 (element level) that the library holds as the same file."),
+            ("cited documents held (same company, type and year)", "same type and year held", "document sources",
+             "Share of the cited documents for which the library holds a document of the same company, type and year."),
+            ("cited documents with text in the database", "text in database", "document sources",
+             "Share of the cited documents held whose text is in the evidence database."),
+            ("elements with a quote found", "a quote found in our text", "elements",
+             "Share of sampled elements where one of the analyst's quotes is found in our text.")]:
+        nb = tot[base]
+        if nb:
+            run.evaluation(target, nb, tot[k] / nb, version="element_eval.py", per_class=per(k, base), notes=note,
+                           suite="analyst citations 2025")
+
+
 def summarize(rows, key):
     """{group: Counter} over element rows (dicts from read_elements), grouped by row[key]."""
     out = collections.defaultdict(collections.Counter)
@@ -359,6 +384,7 @@ def main():
     text = "\n".join(md) + "\n"
     open("element_eval.md", "w").write(text)
     print(text, flush=True)
+    record_scores(run, c)
     run.finish("ok", rows_in=len(rows), rows_out=sum(s["elements"] for s in c.values()),
                counters={"element rows": len(rows), "sampled": sum(s["elements"] for s in c.values())})
     return 0

@@ -11,7 +11,7 @@ Design document (21 Oct 2026, inventory of all 34 scripts at the time, the reaso
 | `runs` | script execution (`run_key` = workflow + GitHub run id, plus `.` and `QA_RUN_PART` when one run has several parts, such as the shards of Propose values) | `qa.Run.finish()` |
 | `failures` | distinct failure (`failure_key` = sha1 of code + key); `occurrences`, `last_seen`, `last_commit` move on each recurrence | `qa.Run.failure()`, `qa_sync.py` |
 | `labels` | one judged fact about one document, page or company (the golden set) | the daily sampler and review, corrections, Source Library, audits; the owner's answers on the cards |
-| `evals` | one scoring of one rule or prompt against the labels | `sl_labels.py` (baseline scores); pull request measurements are posted as PR comments by `year_eval.py` and the coverage comparison |
+| `evals` | one scoring of one rule, prompt or stage against known answers: the scoreboard. One row per target, version and run (`eval_id`), so the trend is the rows of one target over time | `sl_labels.py` (type and year against the Source Library labels), `extract_eval.py` (reader per attribute against the validated answers: right, and the number on the ranked pages), `element_eval.py` (cited documents held, held by type and year, with text, a quote found), audits recorded by hand (web search precision); written by `qa.Run.evaluation()` on committed runs only. Pull request runs still post a comment and write nothing |
 
 Interface "Pipeline QA": **Check Claude's answers** (the day's cards left for the owner), **Open failures** (by code, severity, stage), **Runs**.
 
@@ -97,7 +97,7 @@ Writes only with `QA_COMMIT=true` and `AIRTABLE_QA_TOKEN` set; never raises into
 Rule changes to the year (`fiscal_year.py`, `date_documents.py`) are gated by `year_eval.py`: on the pull request it recomputes the {year} formula for every document with a sure true year, once with the rules on main and once with the branch, and posts accuracy plus the documents that flip either way. Merge only when it fixes more than it breaks; run the bulk rewrite after the merge.
 
 ## The ship rule
-A change to a rule or a prompt merges only when, on the evaluation labels, overall accuracy does not fall, accuracy on the classes that move a completeness check does not fall, and no regression case flips from right to wrong. Today the measurement is the pull request comment (`year_eval.py`, coverage comparison); a general `eval.py` that writes every scoring to `evals` is not built yet.
+A change to a rule or a prompt merges only when, on the evaluation labels, overall accuracy does not fall, accuracy on the classes that move a completeness check does not fall, and no regression case flips from right to wrong. The measurement on a pull request is still its comment (`year_eval.py`, coverage comparison, the reader and element evaluations); the manual and scheduled runs of the evaluators write their scores to `evals` (since 3 Nov 2026), which is the scoreboard to read for trends.
 
 ## Snapshot: week of 2 Nov 2026 (second weekly review)
 Open failures: 44,393 distinct rows (39,048 a week ago). TYPE_DISAGREE 12,555, DOC_FETCH_FAIL 6,328, TYPE_MISSING 5,283, PAGE_UNREACHABLE 4,934, CO_GAP 3,578, PAGE_EMPTY 3,466, DOC_DUPLICATE 3,417, DOC_UNREADABLE 1,764, PAGE_GONE 1,418, DOC_WRONG_ROW 534, PAGE_BLOCKED 475 domains, LABEL_CORRECTION 428, PAGE_UNHARVESTED 209, DOC_FLAGGED 4 (all four checked and cleared on 2 Nov). Expected 15, fixed 1, none closed silently yet (the first silent closes come on 21 Nov).

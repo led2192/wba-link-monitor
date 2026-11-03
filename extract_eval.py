@@ -841,6 +841,15 @@ def main():
             md += [f"Wrong proposals, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]
     open("extract_eval.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
+    for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
+        s = stats[c]; n = s["answers"] - s["database did not answer"]
+        if n > 0:
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader",
+                           high_stakes=s["in_pages"] / n, suite="validated answers",
+                           per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
+                                      "number on the ranked pages": round(s["in_pages"] / n, 4)},
+                           notes="accuracy: the proposal matches the validated answer. high_stakes_accuracy: the validated "
+                                 "number is on the ranked pages (finding, before reading).")
     run.finish("ok", rows_in=len(todo), rows_out=sum(s["right"] for s in stats.values()), counters={c: dict(stats[c]) for c in codes})
     return 0
 
