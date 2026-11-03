@@ -39,7 +39,7 @@ concurrency:
 jobs:
   import:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 330   # 2 Nov 2026: the full import (13,884 rows, 37 GB) hit 120 minutes after about 13,500 rows
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
