@@ -106,6 +106,38 @@ class Propose(unittest.TestCase):
         finally:
             psycopg.connect, extract_eval.read_values, P.T0 = real
 
+    def test_a_refused_call_keeps_what_was_read(self):
+        # 3 Nov 2026: the credit ran out four hours into the second pass and all 8 shards died with nothing written
+        import types, collections, psycopg, extract_eval, model_reader
+        class Cur:
+            def execute(self, *a): pass
+        class Conn:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def cursor(self): return Cur()
+        calls = []
+        def fake(cur, wba, year, attr, spec, usage, known=None):
+            calls.append(wba)
+            if wba == "PT_2":
+                raise model_reader.ModelRefused("Messages API refused the call: HTTP 400 credit balance is too low")
+            return [dict(value=5.0, printed=5.0, scale=1, library_id="L", page=1, unit="tCO2e", year=year, column=str(year), asked=year)]
+        real = (psycopg.connect, extract_eval.read_values, P.library_docs)
+        psycopg.connect = lambda *a, **k: Conn(); extract_eval.read_values = fake; P.library_docs = lambda *a: {}
+        os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
+        a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024", companies="PT_1,PT_2,PT_3", limit=0, max_usd=1.0, budget=300)
+        spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number", "unit_family": "tco2e"}}
+        P.REFUSED.clear()
+        try:
+            c = collections.Counter()
+            rows = P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c)
+        finally:
+            psycopg.connect, extract_eval.read_values, P.library_docs = real
+        self.assertEqual(calls, ["PT_1", "PT_2"])                         # stops at the refusal, PT_3 is not read
+        self.assertEqual([r["wba_id"] for r in rows], ["PT_1"])            # PT_1's figure is kept
+        self.assertEqual(c["model reader: stopped, the API refused a call"], 1)
+        self.assertIn("credit balance", P.REFUSED[0])
+        P.REFUSED.clear()
+
     def test_a_year_asked_is_read_and_its_own_figure_wins(self):
         # 31 Oct 2026: a 2025 read returns 2025, 2024 and 2023. 1 Nov 2026: comparison figures matched the validated
         # answer less often (66% against 76%), so 2024 is still read and its own figure replaces the comparison one

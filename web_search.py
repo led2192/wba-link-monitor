@@ -1005,13 +1005,22 @@ def main():
         pages[l["fields"].get("wba_id")].append(l["fields"].get("url") or "")
     api = Serper(key, a.max_queries)
     updates, examples, written = [], [], 0
+    refused = ""
     t0 = time.time()
     for i, r in enumerate(due, 1):
         if time.time() - t0 > a.minutes * 60:
             c["stopped at the time budget"] = 1
             break
         f = r["fields"]
-        res = search_company(f, pages.get(f["wba_id"], []), years, api, reg_domain, cover_judge=cover_judge)
+        try:
+            res = search_company(f, pages.get(f["wba_id"], []), years, api, reg_domain, cover_judge=cover_judge)
+        except Exception as e:
+            if type(e).__name__ != "ModelRefused":
+                raise
+            # the judge's API said no (3 Nov 2026: the credit ran out mid-wave and the run died): this company is
+            # not marked as searched, what the wave found so far is written, and the run fails at the end
+            refused = str(e)[:300]; c["stopped, the judge's API refused a call"] = 1
+            break
         if res.get("cut"):
             break                        # cut by the budget: not marked as searched, picked up next run
         c["companies searched"] += 1
@@ -1059,8 +1068,11 @@ def main():
     print(text, flush=True)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(text)
-    run.finish("ok" if not api.stopped or "budget" in api.stopped else "partial",
+    run.finish("ok" if (not api.stopped or "budget" in api.stopped) and not refused else "partial",
                rows_in=len(due), rows_out=c["documents passed on"], counters=dict(c))
+    if refused:
+        print(f">>> stopped: the judge's API refused a call; what the wave found is written. {refused}", flush=True)
+        return 1
     return 0
 
 
