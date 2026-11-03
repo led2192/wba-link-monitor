@@ -189,3 +189,6 @@ The 500,000 record cap counts every table, not report_library alone: on 2 Nov 20
 ## A failed download is not evidence that the file exists (3 Nov 2026)
 Web search passed an own-site file from its title whenever it could not be opened. A refusal (HTTP 401 or 403) means the server has the file and does not want robots; a timeout or a TLS error means nothing. Two of the three wrong documents in the first audit after the judge came through that door (a newsletter, an unrelated file). Only a refusal or a file too large to check may stand in for the cover now.
 
+## A refused API call must not throw away the run (3 Nov 2026)
+The model reader raised on a refusal from the API so the run would fail visibly. When the credit ran out four hours into a Propose values pass, that also meant all 8 shards died before their write step, and every read of those four hours was lost. A refusal now ends the reading like the time budget does: write first, then fail with the reason. The same holds for any long job that pays per call.
+

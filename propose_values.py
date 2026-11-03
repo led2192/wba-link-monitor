@@ -285,6 +285,9 @@ def parse_months(text):
     return {m for m in out if 1 <= m <= 12}
 
 
+REFUSED = []      # the API's refusal, when one stopped the model reader (written first, then the run fails)
+
+
 def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     """Model-reader proposals for the companies, attributes and years asked. Revenue is skipped for a
     company and year that already has a SEC or ESEF row: the filing is the better source."""
@@ -341,7 +344,12 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                         got = read_values(cur, wba, y, spec[code], full, usage, known)
                     except Exception as e:
                         if type(e).__name__ == "ModelRefused":
-                            raise
+                            # the API said no (3 Nov 2026: the credit ran out after four hours of the second pass,
+                            # and the shards died with everything they had read unwritten). Stop reading, write
+                            # what was read, and fail the run at the end so the reason shows
+                            REFUSED.append(str(e)[:300])
+                            c["model reader: stopped, the API refused a call"] = 1; stop = True
+                            break
                         if not c["model reader: errors"]:
                             traceback.print_exc()
                             c[f"model reader: first error {type(e).__name__}: {str(e)[:120]}"] = 1
@@ -610,7 +618,10 @@ def main():
           "| | Count |", "| --- | --: |"] + [f"| {k} | {v:,} |" for k, v in sorted(c.items())] + [""]
     open("propose_values.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
-    run.finish("ok", rows_in=len(proposals), rows_out=len(creates) + len(updates), counters=dict(c))
+    run.finish("partial" if REFUSED else "ok", rows_in=len(proposals), rows_out=len(creates) + len(updates), counters=dict(c))
+    if REFUSED:
+        print(f">>> the model reader stopped because the API refused a call; what was read is written. {REFUSED[0]}", flush=True)
+        return 1
     return 0
 
 
