@@ -543,6 +543,33 @@ class ThirdWaveCases(unittest.TestCase):
                                         (hits[2]["link"], "annual 2023, checked on the file's first pages")])   # the title's year when the cover has none
 
 
+class TitlePassOnlyWhenRefused(unittest.TestCase):
+    """3 Nov 2026 audit of the waves since the judge: a Banorte newsletter (ReadTimeout) and an HP file (SSLError)
+    were passed from their titles. Only a refusal (HTTP 401 or 403) means the file is there; anything else waits."""
+    F = {"wba_id": "PT_1", "company_name": "Acme Group", "website": "acme.com", "sust_years": "", "coverage_breakdown": "", "hq_country": "USA"}
+    hit = [{"link": "https://www.acme.com/ir/acme-annual-report-2024.pdf", "title": "Acme Annual Report 2024"}]
+
+    def run_with(self, failure):
+        api = Stub({'site:acme.com ("annual report"': self.hit})
+        return W.search_company(self.F, [], YEARS, api, reg_domain, opener=lambda u: (None, failure))
+
+    def test_refused_is_passed_from_its_title(self):
+        for failure in ("HTTP 403", "HTTP 401", "over 60 MB"):
+            self.assertEqual(len(self.run_with(failure)["found"]), 1, failure)
+
+    def test_a_timeout_or_tls_error_waits(self):
+        for failure in ("could not be read (ReadTimeout)", "could not be read (SSLError)", "HTTP 500"):
+            res = self.run_with(failure)
+            self.assertEqual(res["found"], [], failure)
+            self.assertIn(f"opened: {failure}", dict(res["not_added"])[self.hit[0]["link"]])
+
+    def test_the_judge_is_told_guidelines_and_forms_are_not_reports(self):
+        q = W.judge_prompt({"company_name": "State Street"}, "sustainability", [2024],
+                           "https://files.doublethedonation.com/forms/State-Street-Corporation-volunteer_grant_guidelines.pdf",
+                           {"front": "State Street Corporation Volunteer Grant Guidelines"})
+        self.assertIn("guidelines, a form, an application or grant document", q)
+
+
 class ModelJudge(unittest.TestCase):
     """2 Nov 2026: the dry run of the rules on the 34 audited companies still passed a listed subsidiary's ESG
     report, an Indian subsidiary's BRSR, a forum's report, fund reports and a magazine. The model reads every
