@@ -34,7 +34,9 @@ PURGE_DAYS = int(os.environ.get("PURGE_DAYS") or 30)
 HEALTH = "base_health"
 # Every table counts toward the base limit. One cheap field per table is enough to count rows.
 TABLES = {"report_library": None, "monitored_links": None, "webpage_library": None,
-          "companies": None, "mention_searches": None, "mention_hits": None, "base_health": None}
+          "companies": None, "mention_searches": None, "mention_hits": None, "base_health": None,
+          # added 2 Nov 2026: it was missing, so records_total read 377,628 when Airtable showed 389,675
+          "attribute_values": None}
 CHECKS = [("Report hub page", "missing_report_hub"), ("Sustainability page", "missing_sust_page"),
           ("Sustainability report (recent)", "missing_sust_report"),
           ("Annual report (recent)", "missing_annual_report"),
