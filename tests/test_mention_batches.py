@@ -41,3 +41,15 @@ class Batches(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpenLink(unittest.TestCase):
+    """3 Nov 2026: 28 of the 207 hits of the first climate search had no link, because their documents came in
+    from the Source Library as files with no address. Those open the library row, where the PDF is attached."""
+    def test_a_document_with_an_address_opens_on_its_page(self):
+        self.assertEqual(M.open_url({"url": "https://x.com/r.pdf", "rec": "recA"}, 39), "https://x.com/r.pdf#page=39")
+
+    def test_a_file_without_an_address_opens_its_library_row(self):
+        with mock.patch.dict(os.environ, {"AIRTABLE_BASE": "appTEST"}):
+            self.assertEqual(M.open_url({"url": "", "rec": "recA"}, 39), f"https://airtable.com/appTEST/{M.LIB_TABLE_ID}/recA")
+        self.assertEqual(M.open_url({"url": "", "rec": ""}, 39), "")
