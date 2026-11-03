@@ -344,11 +344,25 @@ def headline(q, r):
             "text": text}
 
 
+LIB_TABLE_ID = os.environ.get("AIRTABLE_LIBRARY_TABLE_ID", "tblgfIUT83OCcrAc8")   # report_library, for row links
+
+
 def page_url(url, page):
     """Open a PDF on the page of the mention. '#page=N' is honoured by every browser viewer."""
     if not url or not page:
         return url or ""
     return url.split("#", 1)[0] + f"#page={int(page)}"
+
+
+def open_url(m, page):
+    """Where to open the mention: the document's address on the page, or, for a document that came in as a
+    file with no address (the Source Library imports: 28 of the 207 hits of the first climate search on
+    3 Nov 2026 had no link at all), the document's row in the library, where the PDF is attached."""
+    if m.get("url"):
+        return page_url(m["url"], page)
+    if m.get("rec") and os.environ.get("AIRTABLE_BASE"):
+        return f"https://airtable.com/{os.environ['AIRTABLE_BASE']}/{LIB_TABLE_ID}/{m['rec']}"
+    return ""
 
 
 def md_url(url):
@@ -363,7 +377,7 @@ def evidence(h, m, look):
         if look == LOOK_COVER:
             label = "**first pages**"
         else:
-            u = page_url(m.get("url"), p)
+            u = page_url(m.get("url"), p)                   # the row link carries no page: plain page labels there
             label = f"**[p. {p}]({md_url(u)})**" if u.startswith("http") else f"**p. {p}**"
         if gap is not None:
             label += f" ({gap} word{'' if gap == 1 else 's'} apart)"
@@ -382,7 +396,7 @@ def hit_fields(q, h, m, look):
     return {H_ID: f"{q.key}|{h['id']}", H_SEARCH: [q.key], H_CO: m.get("co") or "", H_WBA: m.get("wba") or "",
             H_LIB: h["id"], H_DOC: (m.get("label") or h["id"])[:250], H_YEAR: m.get("year") or None,
             H_TYPE: m.get("type") or "", H_PAGES: pages, H_MENTIONS: h["mentions"],
-            H_DIST: h["gap"], H_EVID: evidence(h, m, look), H_OPEN: page_url(m.get("url"), first_page) or None,
+            H_DIST: h["gap"], H_EVID: evidence(h, m, look), H_OPEN: open_url(m, first_page) or None,
             H_STALE: False}
 
 

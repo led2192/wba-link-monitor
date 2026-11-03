@@ -290,7 +290,7 @@ One row per document that matches a search in mention_searches, written by the M
 | `pages` | text | robot | Pages of the PDF where it is mentioned. "first pages" means the row comes from a first-pages run, which has no page numbers. |
 | `distance` | number | robot | Fewest words between a name and a nearby word in this document. Blank when the search has no nearby words. Filter on it to tighten a result without a new run. |
 | `mentions` | number | robot | How many separate mentions the document holds. |
-| `open` | link | robot | The document on the company's site, opened on the page of the closest mention. |
+| `open` | link | robot | The document on the company's site, opened on the page of the closest mention. For a document that came in as a file with no address (the Source Library imports), the document's row in report_library, where the PDF is attached (since 3 Nov 2026). |
 | `notes` | long text | you | Anything worth keeping about this hit. Never overwritten. |
 | `year` | number | robot |  |
 | `doc_type` | text | robot |  |
