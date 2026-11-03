@@ -88,6 +88,39 @@
         "headcount",
         "workforce"
       ]
+    },
+    "GMC_01930.1": {
+      "name": "Highest governance body responsible for the sustainability strategy",
+      "type": "boolean",
+      "queries": [
+        "board oversight sustainability strategy",
+        "board responsible sustainability",
+        "sustainability committee of the board",
+        "board approves sustainability strategy",
+        "governance of sustainability board"
+      ]
+    },
+    "GMC_01931.1": {
+      "name": "Highest governance body responsible for the climate strategy or transition plan",
+      "type": "boolean",
+      "queries": [
+        "board oversight climate",
+        "board responsible climate strategy",
+        "board approves transition plan",
+        "climate governance board committee",
+        "TCFD governance board oversight"
+      ]
+    },
+    "GMC_01932.1": {
+      "name": "Functions, teams or committees responsible for implementing sustainability plans",
+      "type": "multiple select",
+      "queries": [
+        "sustainability committee responsible",
+        "sustainability team implementation",
+        "management committee sustainability",
+        "chief sustainability officer responsible",
+        "ESG committee executive"
+      ]
     }
   }
 }
