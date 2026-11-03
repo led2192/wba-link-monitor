@@ -1,0 +1,53 @@
+name: Entity audit
+
+# Library documents whose first pages never name the company they are filed under (entity_audit.py):
+# suspects of another entity's report (a subsidiary, a sibling, a namesake). Read-only against the evidence
+# database; writes nothing. The suspects are in the run's artifact (entity_audit.csv). Manual; a pull request
+# touching it runs 60 companies and posts the summary.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "companies (0 = all)"
+        default: "0"
+      wba:
+        description: "wba ids, comma-separated (blank = by limit)"
+        default: ""
+  pull_request:
+    paths: [entity_audit.py, .github/workflows/entity_audit.yml]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Audit
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 60 --budget 40"
+          else ARGS="--limit ${{ inputs.limit }}"; [ -n "${{ inputs.wba }}" ] && ARGS="$ARGS --wba ${{ inputs.wba }}"; fi
+          python entity_audit.py $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: entity-audit
+          path: |
+            entity_audit.md
+            entity_audit.csv
+          if-no-files-found: ignore
+      - name: Post the summary on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s entity_audit.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file entity_audit.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Entity audit: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
