@@ -17,6 +17,11 @@ class Names(unittest.TestCase):
         ns = E.names_of("JSW Steel", "JSW Steel Limited")
         self.assertIn(("JSW", "Steel", "Limited"), ns); self.assertIn(("JSW", "Steel"), ns)
 
+    def test_short_and_website_names(self):
+        ns = E.names_of("Air Products and Chemicals", "Air Products and Chemicals, Inc.", "https://www.airproducts.com")
+        self.assertIn(("Air", "Products"), ns); self.assertIn(("airproducts",), ns)
+        self.assertTrue(matches(("Air", "Products"), "Air Products 2024 Sustainability Report"))
+
     def test_a_subsidiary_cover_does_not_name_the_parent(self):
         ws = ("JSW", "Steel")
         self.assertTrue(matches(ws, "JSW STEEL LIMITED Integrated Report 2024-25"))
