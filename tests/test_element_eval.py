@@ -41,6 +41,21 @@ class Quotes(unittest.TestCase):
         self.assertEqual((s["elements"], s["score Met"], s["quotes"], s["sources"], s["type Webpage"]), (2, 1, 3, 3, 1))
 
 
+class Shares(unittest.TestCase):
+    def test_share_table_counts_all_and_met(self):
+        rows = ([{"benchmark": "B", "theme": "T", "country": "FRA", "gec": "GEC_1", "score": "Met",
+                  "source_types": ["Registration Document"]}] * 15 +
+                [{"benchmark": "B", "theme": "T", "country": "FRA", "gec": "GEC_1", "score": "Unmet",
+                  "source_types": ["Sustainability Report"]}] * 10)
+        out = E.share_rows(rows, min_n=20)
+        got = {(r["dimension"], r["source_type"]): r for r in out}
+        self.assertEqual({d for d, _ in got}, {"all", "benchmark", "theme", "country", "element", "benchmark x country"})
+        rd = got[("country", "Registration Document")]
+        self.assertEqual((rd["citations"], rd["share"], rd["citations_met"], rd["share_met"]), (15, 0.6, 15, 1.0))
+        self.assertEqual(got[("all", "Sustainability Report")]["share_met"], 0.0)
+        self.assertEqual(E.share_rows(rows, min_n=30), [])
+
+
 class Looser(unittest.TestCase):
     def test_same_kind_held(self):
         typed = {("PT_1", "SUST"): {2024}, ("PT_1", "Code of Conduct"): {0, 2023}}
