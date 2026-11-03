@@ -88,6 +88,43 @@ def shares(counter, top=6):
     return ", ".join(f"{k or '(none)'} {v / n:.0%}" for k, v in counter.most_common(top))
 
 
+SHARE_DIMS = [("all", lambda r: "all"), ("benchmark", lambda r: r.get("benchmark")), ("theme", lambda r: r.get("theme")),
+              ("country", lambda r: r.get("country")), ("element", lambda r: r.get("gec")),
+              ("benchmark x country", lambda r: f"{r.get('benchmark')} | {r.get('country')}")]
+
+
+def share_rows(rows, min_n=20):
+    """One row per (dimension, group, source type): how often that type was cited, over all element rows and over
+    the Met ones only (a Met element cites where the evidence was found; an Unmet one often cites what was checked).
+    3 Nov 2026: shared with the Ode team to weight sources per question, so it is a plain table, not prose."""
+    out = []
+    for dim, key in SHARE_DIMS:
+        groups = collections.defaultdict(list)
+        for r in rows:
+            groups[key(r) or "(none)"].append(r)
+        for g, rs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            if len(rs) < min_n:
+                continue
+            met = [r for r in rs if r["score"] == "Met"]
+            allc = collections.Counter(t for r in rs for t in r["source_types"])
+            metc = collections.Counter(t for r in met for t in r["source_types"])
+            na, nm = sum(allc.values()) or 1, sum(metc.values()) or 1
+            for t, v in allc.most_common():
+                out.append({"dimension": dim, "group": g, "elements": len(rs), "elements_met": len(met),
+                            "source_type": t or "(none)", "citations": v, "share": round(v / na, 4),
+                            "citations_met": metc.get(t, 0), "share_met": round(metc.get(t, 0) / nm, 4) if met else ""})
+    return out
+
+
+def write_shares(rows, path="element_source_shares.csv"):
+    out = share_rows(rows)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(out[0]) if out else ["dimension"])
+        w.writeheader()
+        w.writerows(out)
+    return len(out)
+
+
 def summarize(rows, key):
     """{group: Counter} over element rows (dicts from read_elements), grouped by row[key]."""
     out = collections.defaultdict(collections.Counter)
@@ -249,6 +286,8 @@ def main():
                       f"{s['sources'] / n:.1f} | {shares(types, 5)} |")
         md.append("")
 
+    n_shares = write_shares(rows)
+    print(f">>> element_source_shares.csv: {n_shares:,} rows (dimension, group, source type)", flush=True)
     table("benchmark", "benchmark")
     table("theme", "theme", top=25)
     table("score", "WBA score", min_n=1)

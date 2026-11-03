@@ -43,7 +43,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: element-eval
-          path: element_eval.md
+          path: |
+            element_eval.md
+            element_source_shares.csv
           if-no-files-found: ignore
       - name: Post the result on the pull request
         if: github.event_name == 'pull_request' && always()
