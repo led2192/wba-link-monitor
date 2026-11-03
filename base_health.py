@@ -20,7 +20,7 @@ Modes: dry run by default (prints the row); --commit writes it.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, RECORD_LIMIT, PURGE_DAYS (default 30),
      GITHUB_TOKEN + GITHUB_REPOSITORY (optional, for failed jobs; set by Actions).
 """
-import argparse, collections, os, sys, time
+import argparse, collections, os, re, sys, time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -203,6 +203,57 @@ def failed_jobs(now):
     return [f"{w['name']} ({w['created_at'][:16].replace('T', ' ')} UTC): {w['html_url']}" for w in bad]
 
 
+SPEND_WORKFLOWS = ("propose_values.yml", "extract_eval.yml", "web_search.yml")   # the jobs that call the model
+SPEND_WEEK_USD = float(os.environ.get("SPEND_WEEK_USD") or 15)   # Check when the last 7 days pass this
+SPEND_PATTERNS = (re.compile(r"cost in USD \(estimate\) \| ([\d.]+) \|"),   # Propose values, web search tables
+                  re.compile(r"cost about \$([\d.]+)"))                         # Generic reader report
+
+
+def spend_in_log(text):
+    """USD the model calls of one job cost, from the estimates its log prints."""
+    return sum(float(m.group(1)) for pat in SPEND_PATTERNS for m in pat.finditer(text))
+
+
+def model_spend(now, get=None):
+    """{"24h", "7d", "by"}: estimated Anthropic spend of the runs of SPEND_WORKFLOWS (pull request runs and dry
+    runs included), from their logs. 3 Nov 2026: the prepaid credit ran out four hours into a Propose values
+    pass and nobody had seen it go: each run printed its own estimate, nothing added them up. None when the
+    GitHub token is missing. Read-only."""
+    import io, zipfile
+    tok, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
+    if not (tok and repo):
+        return None
+    h = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}
+    get = get or (lambda url, **kw: requests.get(url, headers=h, timeout=120, **kw))
+    since = now - timedelta(days=7)
+    out = {"24h": 0.0, "7d": 0.0, "by": collections.Counter()}
+    try:
+        for wf in SPEND_WORKFLOWS:
+            r = get(f"https://api.github.com/repos/{repo}/actions/workflows/{wf}/runs",
+                    params={"created": f">={since.strftime('%Y-%m-%dT%H:%M:%SZ')}", "per_page": 100})
+            r.raise_for_status()
+            for run in r.json().get("workflow_runs", []):
+                if run.get("status") != "completed":
+                    continue
+                z = get(f"https://api.github.com/repos/{repo}/actions/runs/{run['id']}/logs")
+                if z.status_code != 200:
+                    continue
+                usd = 0.0
+                with zipfile.ZipFile(io.BytesIO(z.content)) as zf:
+                    for name in zf.namelist():
+                        if "/" in name:          # the per-step files repeat the job's own file
+                            continue
+                        usd += spend_in_log(zf.read(name).decode("utf-8", "replace"))
+                out["7d"] += usd; out["by"][run.get("name") or wf] += usd
+                if parse_ts(run["created_at"]) >= now - timedelta(days=1):
+                    out["24h"] += usd
+                time.sleep(0.2)
+    except requests.RequestException as e:
+        print(f"    could not read the model spend: {e}", flush=True)
+        return None
+    return out
+
+
 def evidence_backlog():
     """(pages files of the text store not yet in the evidence database, their size in MB, day of the last
     file loaded) or None when the store or the database cannot be read. 28 Oct 2026: 216 files (about
@@ -257,6 +308,7 @@ def main():
     prev = previous_avg(today)
     qs = qa_stats()
     eb = evidence_backlog()
+    spend = model_spend(now)
 
     total = sum(counts.values())
     full = total / RECORD_LIMIT
@@ -286,6 +338,10 @@ def main():
         attention.append(f"{eb[0]:,} pages files ({eb[1]:,.0f} MB) of text are waiting to load into the evidence "
                          f"database (last file loaded {eb[2]}); searches miss them. Run 'Evidence database load' "
                          "(commit) in the evening.")
+    if spend and spend["7d"] >= SPEND_WEEK_USD:
+        status = "Check" if status == "OK" else status
+        attention.append(f"The model calls cost about ${spend['7d']:.2f} in 7 days (${spend['24h']:.2f} in 24h), over "
+                         f"${SPEND_WEEK_USD:g}. Check the Anthropic credit before the next long run.")
     if fails is None:
         attention.append("Failed-job check skipped (no GitHub token in this run).")
     if qs:
@@ -318,6 +374,9 @@ def main():
     if eb:
         row.update({"evidence_files_waiting": eb[0], "evidence_mb_waiting": round(eb[1]),
                     "evidence_last_load": eb[2].isoformat() if eb[2] else None})
+    if spend:
+        row.update({"model_spend_24h": round(spend["24h"], 2), "model_spend_7d": round(spend["7d"], 2),
+                    "model_spend_by_job": "\n".join(f"{k}: ${v:.2f}" for k, v in spend["by"].most_common() if v)})
     for tag, field in CHECKS:
         row[field] = co["miss"].get(tag, 0)
 
