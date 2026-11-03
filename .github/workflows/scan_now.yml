@@ -8,6 +8,12 @@ name: Scan now
 # 3 minutes; the schedule tries every 30 minutes and, with the concurrency group below, at most
 # one run is watching and one is queued behind it. Every Airtable call retries, and a failed pass
 # is logged and retried at the next check instead of failing the run.
+#
+# On 2 Nov 2026 the schedule still started nothing between 12:44 and 21:30 UTC, so the inbox left the
+# web search's links waiting for hours (and web search waits when 20 companies hold research_link).
+# So each watching run now starts the next one when it ends: the chain no longer depends on GitHub's
+# scheduler, which stays as a fallback. To stop the chain, set the repository variable
+# SCAN_CHAIN to "off" (Settings > Secrets and variables > Actions > Variables), or cancel the running watch.
 
 on:
   schedule:
@@ -43,3 +49,8 @@ jobs:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           GITHUB_TOKEN: ${{ github.token }}
+      - name: Start the next watch
+        if: ${{ !cancelled() && (inputs.watch_minutes || '330') != '0' && vars.SCAN_CHAIN != 'off' }}
+        run: gh workflow run scan_now.yml --repo "${{ github.repository }}" --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}
