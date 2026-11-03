@@ -29,6 +29,14 @@ class Replies(unittest.TestCase):
         self.assertEqual(a, {"Sustainability", "Transition Plan"})
         self.assertEqual(N.read_reply(None, BOOL), (None, None, ""))
 
+    def test_a_cut_reply_keeps_its_answer(self):
+        cut = '{"answer": "yes", "page": 12, "quote": "The Board of Directors oversees the sustainability strategy and'
+        self.assertEqual(N.salvage(cut), {"answer": "yes"})
+        self.assertEqual(N.salvage('{"answer": ["Sustainability", "Climate mitigation"], "page": 4, "quote": "The ESG'),
+                         {"answer": ["Sustainability", "Climate mitigation"]})
+        self.assertIsNone(N.salvage("I cannot tell from these pages."))
+        self.assertEqual(N.read_reply({"values": [], "cut": True}, BOOL), (None, None, ""))
+
     def test_scores(self):
         s = collections.Counter()
         self.assertTrue(N.score(s, BOOL, True, True)); self.assertFalse(N.score(s, BOOL, False, True))

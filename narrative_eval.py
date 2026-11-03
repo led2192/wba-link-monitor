@@ -98,11 +98,11 @@ def prompt(attr, pages, company):
     lines = [f"Question: {attr['question']}"]
     if kind == "boolean":
         lines.append('Answer "yes" only when a page states it; "no" when the pages do not.')
-        shape = '{"answer": "yes" or "no", "page": the page number or null, "quote": "the sentence that shows it, copied", "why": "ten words"}'
+        shape = '{"answer": "yes" or "no", "page": the page number or null, "quote": "at most 25 words copied from the page", "why": "ten words"}'
     else:
         opts = attr["options"]
         lines.append("Options: " + "; ".join(opts) + ". Pick every option the pages show, none if they show none.")
-        shape = '{"answer": [the options shown], "page": the page number or null, "quote": "the sentence that shows it, copied", "why": "ten words"}'
+        shape = '{"answer": [the options shown], "page": the page number or null, "quote": "at most 25 words copied from the page", "why": "ten words"}'
     lines += ["Pages:", ""]
     for lid, dtype, page, body in pages:
         lines += [f"<page document=\"{dtype or 'report'}\" number=\"{page}\">", body[:PAGE_CHARS], "</page>", ""]
@@ -110,9 +110,24 @@ def prompt(attr, pages, company):
     return "\n".join(lines)
 
 
+ANSWER = re.compile(r'"answer"\s*:\s*("(?:yes|no|true|false)"|\[[^\]]*\])', re.I)
+
+
+def salvage(raw):
+    """The answer of a reply whose JSON does not parse (cut at the token limit inside a long quote, 3 Nov 2026:
+    most of the first run's "no reply"): the "answer" field alone, read with a pattern."""
+    m = ANSWER.search(raw or "")
+    if not m:
+        return None
+    try:
+        return {"answer": json.loads(m.group(1))}
+    except ValueError:
+        return None
+
+
 def read_reply(reply, attr):
     """(answer, page, quote) from the model's JSON: True/False, or a frozenset of known options."""
-    if not isinstance(reply, dict):
+    if not isinstance(reply, dict) or "answer" not in reply:
         return None, None, ""
     a = reply.get("answer")
     if attr["type"] == "boolean":
@@ -158,7 +173,8 @@ def report(codes, cfg, stats, wrong, usage, cost):
             per = ", ".join(f"{o} {s[f'option {o}: right'] / n:.0%}" for o in a["options"])
             md.append(f"| {c} {a['name']} | {s['answers']} | {s['right']} ({s['right'] / n:.0%}) exact; per option: {per} | "
                       f"{s['no pages']} | {s['answers'] - s['truth empty']} with an option | {s['answers'] - s['said empty']} | | |")
-    md += ["", f"Model calls: {usage['calls']} ({usage['model_errors']} failed); cost about ${cost:.2f}.", ""]
+    md += ["", f"Model calls: {usage['calls']} ({usage['model_errors']} failed); unreadable replies after a retry: "
+           f"{sum(stats[c]['no reply'] for c in codes)}; cost about ${cost:.2f}.", ""]
     for c in codes:
         if wrong[c]:
             md += [f"Wrong, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]
@@ -213,12 +229,21 @@ def main():
                 s["no pages"] += 1; answer = (False if attr["type"] == "boolean" else frozenset()); page, quote = None, ""
             else:
                 try:
-                    raw = call([{"role": "user", "content": prompt(attr, pages, g["wba"])}], usage, system=SYSTEM, max_tokens=400)
+                    for attempt in range(2):          # one retry: an empty or unreadable reply is usually an overload
+                        raw = call([{"role": "user", "content": prompt(attr, pages, g["wba"])}], usage, system=SYSTEM, max_tokens=800)
+                        reply = parse_reply(raw)
+                        if not (isinstance(reply, dict) and "answer" in reply):
+                            reply = salvage(raw)
+                        if reply:
+                            break
+                        s["unreadable replies"] += 1
                 except Exception as e:
                     if type(e).__name__ == "ModelRefused":
                         stop = f"the API refused a call ({str(e)[:120]})"; break
                     raise
-                answer, page, quote = read_reply(parse_reply(raw), attr)
+                if not reply and len(wrong[g["attribute"]]) < 3:
+                    print(f"    unreadable reply for {g['id']}: {re.sub(r'\s+', ' ', raw or '(empty)')[:200]}", flush=True)
+                answer, page, quote = read_reply(reply, attr)
             ok = score(s, attr, g["truth"], answer)
             if not ok and len(wrong[g["attribute"]]) < 12:
                 t = (lambda v: ("yes" if v else "no") if isinstance(v, bool) else (", ".join(sorted(v)) or "none"))
