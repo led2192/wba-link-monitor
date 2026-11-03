@@ -203,7 +203,7 @@ def failed_jobs(now):
     return [f"{w['name']} ({w['created_at'][:16].replace('T', ' ')} UTC): {w['html_url']}" for w in bad]
 
 
-SPEND_WORKFLOWS = ("propose_values.yml", "extract_eval.yml", "web_search.yml")   # the jobs that call the model
+SPEND_WORKFLOWS = ("propose_values.yml", "extract_eval.yml", "web_search.yml", "narrative_eval.yml")   # the jobs that call the model
 SPEND_WEEK_USD = float(os.environ.get("SPEND_WEEK_USD") or 15)   # Check when the last 7 days pass this
 SPEND_PATTERNS = (re.compile(r"cost in USD \(estimate\) \| ([\d.]+) \|"),   # Propose values, web search tables
                   re.compile(r"cost about \$([\d.]+)"))                         # Generic reader report
@@ -231,6 +231,8 @@ def model_spend(now, get=None):
         for wf in SPEND_WORKFLOWS:
             r = get(f"https://api.github.com/repos/{repo}/actions/workflows/{wf}/runs",
                     params={"created": f">={since.strftime('%Y-%m-%dT%H:%M:%SZ')}", "per_page": 100})
+            if r.status_code == 404:          # a workflow not on main yet
+                continue
             r.raise_for_status()
             for run in r.json().get("workflow_runs", []):
                 if run.get("status") != "completed":

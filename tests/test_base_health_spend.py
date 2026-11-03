@@ -38,6 +38,8 @@ class Spend(unittest.TestCase):
                          "propose (1)/3_Run.txt": "| model reader: cost in USD (estimate) | 0.63 |"}),
                 2: logs({"0_evaluate.txt": "cost about $0.31 ($1.29 per 1,000 answers)"})}
         def get(url, **kw):
+            if url.endswith("/workflows/narrative_eval.yml/runs"):
+                return Resp(status=404)
             for wf, rs in runs.items():
                 if url.endswith(f"/workflows/{wf}/runs"):
                     return Resp({"workflow_runs": rs})
