@@ -101,6 +101,8 @@ What matters is the right value, not the analyst's document (owner's rule, 28 Oc
 
 Whatever model reads the passages later cannot be right about a page that is not among them, so this is the floor. Reads the gold bases with the read-only secret `GOLD_TOKEN`; writes nothing anywhere but `gold_eval.md` and the run's counters in Pipeline QA. Two things the gold data showed: some validated answers are calculated, not copied (a board share worked out from "1 of 12"), which is why `datapoints.method` distinguishes stated from calculated; and of 480 validated low-carbon capex answers only 29 carry a quote, so attributes with many quotes weigh more.
 
+Element-level evidence (2 Nov 2026). The Social and non-Social benchmarks were verified per element, not per attribute; `element_eval.py` reads those element rows (Indicators bases, Elements, Sources and Methodologies tables) to report what kinds of source the analysts cited for each benchmark, theme and country, and whether the library holds those documents and their quotes. It is the yardstick for narrative questions; attribute values of those benchmarks are not used as right answers.
+
 ## 7. Where this is going
 
 In order, as of 26 Oct 2026:
