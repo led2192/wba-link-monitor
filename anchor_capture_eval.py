@@ -36,7 +36,14 @@ import requests
 
 import qa
 from anchor_eval import GENERIC, fetch, text_type, text_year
+from company_coverage import ANNUAL_FAMILY, SUST_FAMILY
 from monitor_core import doc_links, is_framework_host, normalize, reg_domain
+
+# What the completeness checks need: the sustainability and annual report families, the code of conduct and
+# the human rights policy. A find of another type (statutory documents, presentations) is a document, but
+# not one that closes a gap.
+KEY_TYPES = SUST_FAMILY | ANNUAL_FAMILY | {"Code of Conduct", "Human Rights Policy"}
+RECENT = 2023
 
 PAGE_TYPES = ("reports_hub", "sustainability_page", "investor_relations")
 REPORT_WORD = re.compile(r"\b(report|annual|sustainab\w*|integrated|esg|csr|impact|climate|tcfd|"
@@ -250,12 +257,22 @@ def fetch_inputs(H, base, companies):
     return {w: by[w] for w in chosen}, held
 
 
+def find_year(r):
+    """The year a find is labelled with: its link text's, else the latest year in its address ('' if none)."""
+    if r.get("label_year"):
+        return int(r["label_year"])
+    ys = [int(y) for y in re.findall(r"(?<!\d)(20[0-3]\d)(?!\d)", r.get("found_pdf") or "")]
+    return max(ys) if ys else 0
+
+
 def summary(rows, counters, n_companies, cut):
     finds = [r for r in rows if r["find"]]
     new = [r for r in finds if r["find"] in ("direct", "one hop")]
     per_company = collections.Counter(r["company"] or r["wba_id"] for r in new)
     top3 = sum(n for _, n in per_company.most_common(3))
-    recent = sum(1 for r in new if r["label_year"] and int(r["label_year"]) >= 2023)
+    recent = sum(1 for r in new if find_year(r) >= RECENT)
+    key = [r for r in new if r["type_named"] in KEY_TYPES]
+    key_recent = [r for r in key if find_year(r) >= RECENT]
     kind = collections.Counter(r["find"] for r in finds)
     comp = lambda k: len({r["wba_id"] for r in finds if r["find"] == k})
     types = collections.Counter(r["type_named"] or "(no type named)" for r in new)
@@ -270,12 +287,15 @@ def summary(rows, counters, n_companies, cut):
           f"| held elsewhere | {kind['held elsewhere']:,} | {comp('held elsewhere'):,} | A PDF with the same file name is held under another address (a CDN copy): not new |",
           "", f"Concentration: the three companies with most finds hold {top3:,} of the {len(new):,} direct and one-hop finds "
           f"({top3 / (len(new) or 1):.0%}): " + "; ".join(f"{c} {n:,}" for c, n in per_company.most_common(3)) + ". "
-          f"Finds whose link text names 2023 or later: {recent:,}.",
+          f"Finds labelled {RECENT} or later: {recent:,}.", "",
+          f"What could close a gap: {len(key):,} finds of a key type (sustainability or annual report family, code of conduct, "
+          f"human rights policy) in {len({r['wba_id'] for r in key}):,} companies; {len(key_recent):,} of them labelled {RECENT} or later, "
+          f"in {len({r['wba_id'] for r in key_recent}):,} companies. A nightly rule would keep only these.",
           "", "Type named by the link text, direct and one-hop finds:", ""]
     md += [f"- {t}: {n:,}" for t, n in types.most_common(12)]
     md += ["", "Examples (the year is the document's label as the company names it, not its reporting year):", ""]
     shown = collections.Counter()
-    for r in new:
+    for r in key_recent + [r for r in new if r not in key_recent]:
         if shown[r["wba_id"]] >= 2 or sum(shown.values()) >= 20:
             continue
         shown[r["wba_id"]] += 1

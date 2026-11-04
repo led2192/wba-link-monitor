@@ -93,7 +93,14 @@ class Capture(unittest.TestCase):
         rows[0]["label_year"] = "2024"
         md = "\n".join(A.summary(rows, {"pages read": 1, "page not read": 0, "named links opened": 3}, 1, False))
         self.assertIn("| direct | 1 | 1 |", md)
-        self.assertIn("Finds whose link text names 2023 or later: 1.", md)
+        self.assertIn("Finds labelled 2023 or later: 1.", md)
+        self.assertIn("1 finds of a key type", md)
+        self.assertIn("1 of them labelled 2023 or later", md)
+
+    def test_find_year_falls_back_to_the_address(self):
+        self.assertEqual(A.find_year({"label_year": "", "found_pdf": "https://x.com/2026/09/rs-dexco-2025_1310.pdf"}), 2026)
+        self.assertEqual(A.find_year({"label_year": "2024", "found_pdf": "https://x.com/2026/a.pdf"}), 2024)
+        self.assertEqual(A.find_year({"label_year": "", "found_pdf": "https://x.com/a.pdf"}), 0)
 
 
 if __name__ == "__main__":
