@@ -76,7 +76,7 @@ def or_query(queries):
 
 def company_pages(cur, wba, year, queries, fy_month=None):
     """[(library_id, doc_type, page, body)]: the best pages for the queries in the company's documents of the
-    reporting year (the year after it when the fiscal year ends January to June) or the next."""
+    reporting year (the year after it when the fiscal year ends January to May) or the next."""
     from extract_eval import document_year
     want = document_year(year, fy_month)
     cur.execute("select library_id, coalesce(doc_type, ''), coalesce(year, 0) from public.documents "

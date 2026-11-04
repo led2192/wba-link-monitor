@@ -200,3 +200,6 @@ Documents imported from the Source Library as files have no document_url, so a v
 
 ## origin is blank on most harvested documents (4 Nov 2026)
 report_library.origin was added after most documents were harvested, and those rows were never filled, so a filter on origin = 'discovery' matches nothing (the link text evaluation's first run read zero documents). Treat blank as discovery: OR({origin}='', {origin}='discovery').
+
+## A 30 June year end is its own year (4 Nov 2026)
+"January to June counts as the previous year" was one month too wide. The guidance's table puts the year ending 30 June 2024 in fiscal year 2024 and the year ending 29 June 2025 in 2024 too (52/53-week years). Use `reporting_year.from_end_date` when the day is known and `from_end_month` (January to May shift) when only the month is; never write the month test inline.
