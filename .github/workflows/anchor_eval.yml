@@ -1,0 +1,52 @@
+name: Link text evaluation
+
+# Does the text of the link a document was found under tell its type and year better than its address?
+# (anchor_eval.py) Read-only against the Disclosure Library; no model calls. Manual; a pull request touching it
+# samples 80 companies and posts the summary. The rows are in the run's artifact (anchor_eval.csv).
+on:
+  workflow_dispatch:
+    inputs:
+      companies:
+        description: "companies to sample (0 = all)"
+        default: "0"
+  pull_request:
+    paths: [anchor_eval.py, .github/workflows/anchor_eval.yml]
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then python anchor_eval.py --companies 80
+          else python anchor_eval.py --companies ${{ inputs.companies }}; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anchor-eval
+          path: |
+            anchor_eval.md
+            anchor_eval.csv
+          if-no-files-found: ignore
+      - name: Post the summary on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s anchor_eval.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file anchor_eval.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Link text evaluation: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
