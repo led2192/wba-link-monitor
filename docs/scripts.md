@@ -8,10 +8,10 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 
 | Script | Workflow, trigger | What it does | Writes |
 | --- | --- | --- | --- |
-| `airtable_monitor.py` | Monitor links (daily), 02:23 | Reads pages due today with plain requests; diffs document links; hands JavaScript pages to the browser lane | `monitored_links`: status, http_status, last_checked, seen_links, new_links, last_change, alert_status, page_language, needs_browser |
+| `airtable_monitor.py` | Monitor links (daily), 02:23 | Reads pages due today with plain requests; diffs document links; hands JavaScript pages to the browser lane; also writes link_texts (every document link's text) | `monitored_links`: status, http_status, last_checked, seen_links, new_links, last_change, alert_status, page_language, needs_browser |
 | `playwright_monitor.py` | Browser monitor, 00:03 and 12:03 | Renders the browser lane in Chromium, oldest first, 4,000 pages, 180-minute budget | same fields plus final_url |
 | `monitor_core.py` | library | Which links count as documents (`doc_links`, `DOC_ENDPOINTS`, `DAM_SUFFIXES`, framework hosts), the diff, Airtable retries | |
-| `harvest_reports.py` | Harvest report PDFs, after Monitor | seen_links of report-type pages into documents; doc_id and tombstone guards; shared-document guard (5+ companies); page health | `report_library` rows; `unharvested_links`, `unharvested_sample` |
+| `harvest_reports.py` | Harvest report PDFs, after Monitor | seen_links of report-type pages into documents; doc_id and tombstone guards; shared-document guard (5+ companies); page health; copies the page's link text to link_text (new rows, and up to LINK_TEXT_MAX 30,000 existing rows a run with only that field) | `report_library` rows; `unharvested_links`, `unharvested_sample` |
 | `doc_probe.py` | inside harvest (`--probe`) | Opens links that do not look like files; resolves viewer pages (Widen) | probe cache |
 | `classify_library.py` | Classify report library, after Harvest; `--from-file` and `--retype-untyped` in Dedupe | Type from the address; then title, type and year from file name and cover; rows with no type at all (mostly non-English) typed from the file name and cover title, including other languages (`cover_terms.json`) | source_type, match_confidence, auto_title, doc_year |
 | `attach_files.py` | Attach report PDFs, after Classify | Asks Airtable to fetch each document's file | file |
