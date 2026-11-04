@@ -215,3 +215,6 @@ A concurrency group keyed on the branch with cancel-in-progress cancels any olde
 
 ## The monthly Metadata bases are not all one layout (4 Nov 2026)
 Base One (app6oIEJuBV9fkwux) has Boolean, Number and Select Options Text but no Selected Value in Metadata and no Definition in Metadata Codes; April to October have both. GOLD_TOKEN was also refused there (403). Check a base's fields before adding it to a list read by name, and read each base so that one refusal is skipped and reported, not fatal.
+
+## The same PDF lives at two addresses (4 Nov 2026)
+The first link text capture sample counted 1,135 PDFs we did not hold, but the examples were Arcos Dorados reports the library had: www.arcosdorados.com/wp-content/uploads/2025/07/AD_2024_ESP.pdf and the copy at ddhnb9vx8lz57.cloudfront.net/wp-content/uploads/2025/07/29174027/AD_2024_ESP.pdf. A normalised address is not a file. Anything that says "not held" also compares the file name (`anchor_capture_eval.file_key`, ignoring generic names such as report.pdf), and the content fingerprint once the text is read (dup_audit.py).

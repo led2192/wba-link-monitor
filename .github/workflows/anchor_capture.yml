@@ -1,0 +1,59 @@
+name: Link text capture experiment
+
+# Would the text of a link find documents the monitors miss today? (anchor_capture_eval.py) Reads the report
+# pages the plain monitor reads and opens the links named like a document that are not held and not a .pdf
+# address: a PDF answer is a direct find, a landing page's PDFs are one-hop finds. Read-only against the
+# Disclosure Library; no model calls. Manual; a pull request touching it samples 30 companies.
+on:
+  workflow_dispatch:
+    inputs:
+      companies:
+        description: "companies, spread across the list (0 = all)"
+        default: "150"
+      per_page:
+        description: "named links opened per page at most"
+        default: "12"
+      budget:
+        description: "minutes"
+        default: "100"
+  pull_request:
+    paths: [anchor_capture_eval.py, .github/workflows/anchor_capture.yml]
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then python anchor_capture_eval.py --companies 30 --budget 20
+          else python anchor_capture_eval.py --companies ${{ inputs.companies }} --per-page ${{ inputs.per_page }} --budget ${{ inputs.budget }}; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anchor-capture
+          path: |
+            anchor_capture.md
+            anchor_capture.csv
+          if-no-files-found: ignore
+      - name: Post the summary on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s anchor_capture.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file anchor_capture.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Link text capture experiment: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
