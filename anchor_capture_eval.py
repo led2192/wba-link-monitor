@@ -49,6 +49,43 @@ UA = {"User-Agent": "Mozilla/5.0 (compatible; WBA-LinkMonitor/1.0)",
 HTML_MAX = 2_000_000
 
 
+GENERIC_NAME = re.compile(r"^(report|download|document|file|index|annual[-_ ]?report|sustainability[-_ ]?report|pdf)\d{0,2}\.pdf$", re.I)
+
+
+def file_key(url):
+    """The file name of a PDF address, lower case and decoded ('ad_2024_esp.pdf'), or '' when it is too
+    generic to identify a file. The same report is often served from the company's site and from a CDN
+    under another path (Arcos Dorados, 4 Nov 2026: www.arcosdorados.com/wp-content/uploads/2025/07/AD_2024_ESP.pdf
+    and ddhnb9vx8lz57.cloudfront.net/wp-content/uploads/2025/07/29174027/AD_2024_ESP.pdf), so an address
+    match alone counts a held report as new."""
+    from urllib.parse import unquote
+    name = unquote(urlsplit(url).path.rsplit("/", 1)[-1]).strip().lower()
+    if not name.endswith(".pdf") or len(name) < 10 or GENERIC_NAME.match(name):
+        return ""
+    return name
+
+
+class Held:
+    """The documents a company's library holds, by normalised address and by file name."""
+    def __init__(self, urls=()):
+        self.addresses, self.names = set(), set()
+        for u in urls:
+            self.add(u)
+
+    def add(self, url):
+        self.addresses.add(normalize(url))
+        k = file_key(url)
+        if k:
+            self.names.add(k)
+
+    def __contains__(self, url_or_key):
+        return url_or_key in self.addresses or normalize(url_or_key) in self.addresses
+
+    def by_name(self, url):
+        k = file_key(url)
+        return bool(k) and k in self.names
+
+
 def named(text):
     """True when a link's text names a document: a document type, or a report word."""
     t = (text or "").strip()
@@ -130,13 +167,14 @@ def open_link(session, url, timeout=20):
 
 
 def one_hop_pdfs(html, base, held):
-    """PDF-shaped document links of a landing page that the library does not hold."""
+    """PDF-shaped document links of a landing page that the library does not hold at that address:
+    [(url, text, held under another address with the same file name)]."""
     out = []
     for n, (u, text) in doc_links(html, base).items():
         if n in held:
             continue
         if urlsplit(u).path.lower().endswith(".pdf"):
-            out.append((u, text))
+            out.append((u, text, held.by_name(u)))
     return out
 
 
@@ -172,19 +210,19 @@ def company_run(wba, pages, held, per_page, deadline, session_factory=requests.S
                    "answer": got, "find": "", "found_pdf": "", "found_text": "",
                    "type_named": text_type(text), "label_year": text_year(text)}
             if got == "pdf":
-                n = normalize(final2 or u)
-                if n not in held:
-                    row["find"] = "probe reach" if shaped else "direct"
-                    row["found_pdf"] = final2 or u
-                    held.add(n)
+                pdf = final2 or u
+                if pdf not in held:
+                    row["find"] = "held elsewhere" if held.by_name(pdf) else "probe reach" if shaped else "direct"
+                    row["found_pdf"] = pdf
+                    held.add(pdf)
                 rows.append(row)
             elif got == "html":
                 found = one_hop_pdfs(body, final2 or u, held)
                 if not found:
                     rows.append(row)
-                for pu, ptext in found:
-                    held.add(normalize(pu))
-                    rows.append({**row, "find": "one hop", "found_pdf": pu, "found_text": ptext,
+                for pu, ptext, elsewhere in found:
+                    held.add(pu)
+                    rows.append({**row, "find": "held elsewhere" if elsewhere else "one hop", "found_pdf": pu, "found_text": ptext,
                                  "type_named": text_type(ptext) or row["type_named"],
                                  "label_year": text_year(ptext) or row["label_year"]})
             else:
@@ -202,21 +240,25 @@ def fetch_inputs(H, base, companies):
         if f.get("wba_id") and f.get("url"):
             by[f["wba_id"]].append({"url": f["url"], "type": f.get("type", ""), "company": f.get("company_name", "")})
     chosen = spread(list(by), companies)
-    held = collections.defaultdict(set)
+    held = collections.defaultdict(Held)
     for i in range(0, len(chosen), 25):
         ors = ",".join(f"{{wba_id}}='{w}'" for w in chosen[i:i + 25])
         for r in fetch(H, base, "report_library", ["wba_id", "document_url"], f"OR({ors})"):
             f = r["fields"]
             if f.get("document_url"):
-                held[f["wba_id"]].add(normalize(f["document_url"]))
+                held[f["wba_id"]].add(f["document_url"])
     return {w: by[w] for w in chosen}, held
 
 
 def summary(rows, counters, n_companies, cut):
     finds = [r for r in rows if r["find"]]
+    new = [r for r in finds if r["find"] in ("direct", "one hop")]
+    per_company = collections.Counter(r["company"] or r["wba_id"] for r in new)
+    top3 = sum(n for _, n in per_company.most_common(3))
+    recent = sum(1 for r in new if r["label_year"] and int(r["label_year"]) >= 2023)
     kind = collections.Counter(r["find"] for r in finds)
     comp = lambda k: len({r["wba_id"] for r in finds if r["find"] == k})
-    types = collections.Counter(r["type_named"] or "(no type named)" for r in finds if r["find"] != "probe reach")
+    types = collections.Counter(r["type_named"] or "(no type named)" for r in new)
     md = ["### Link text for capture: documents the monitors miss today", "",
           f"{n_companies:,} companies; {counters['pages read']:,} report pages read ({counters['page not read']:,} did not answer "
           f"with a page); {counters['named links opened']:,} links named like a document opened (not held, not a .pdf address)"
@@ -225,10 +267,18 @@ def summary(rows, counters, n_companies, cut):
           f"| direct | {kind['direct']:,} | {comp('direct'):,} | The link's address says nothing, its text names a document, and it serves the PDF: today's rules never open it |",
           f"| one hop | {kind['one hop']:,} | {comp('one hop'):,} | The named link leads to a landing page whose PDFs we do not hold: never seen today |",
           f"| probe reach | {kind['probe reach']:,} | {comp('probe reach'):,} | The address rules take the link and the nightly probe would find the PDF (already in reach; not new) |",
+          f"| held elsewhere | {kind['held elsewhere']:,} | {comp('held elsewhere'):,} | A PDF with the same file name is held under another address (a CDN copy): not new |",
+          "", f"Concentration: the three companies with most finds hold {top3:,} of the {len(new):,} direct and one-hop finds "
+          f"({top3 / (len(new) or 1):.0%}): " + "; ".join(f"{c} {n:,}" for c, n in per_company.most_common(3)) + ". "
+          f"Finds whose link text names 2023 or later: {recent:,}.",
           "", "Type named by the link text, direct and one-hop finds:", ""]
     md += [f"- {t}: {n:,}" for t, n in types.most_common(12)]
     md += ["", "Examples (the year is the document's label as the company names it, not its reporting year):", ""]
-    for r in [r for r in finds if r["find"] != "probe reach"][:20]:
+    shown = collections.Counter()
+    for r in new:
+        if shown[r["wba_id"]] >= 2 or sum(shown.values()) >= 20:
+            continue
+        shown[r["wba_id"]] += 1
         md.append(f"- {r['company'] or r['wba_id']}: \"{r['link_text'][:60]}\" ({r['find']}) -> {r['found_pdf'][:110]}")
     md += ["", "Every opened link is in anchor_capture.csv. Nothing was changed."]
     return md
@@ -269,7 +319,7 @@ def main():
     open("anchor_capture.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
     run.finish("partial" if cut else "ok", rows_in=counters["named links opened"],
-               rows_out=sum(1 for r in rows if r["find"]), counters=dict(counters))
+               rows_out=sum(1 for r in rows if r["find"] in ("direct", "one hop")), counters=dict(counters))
     return 0
 
 
