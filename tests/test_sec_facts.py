@@ -29,7 +29,10 @@ class Rule(unittest.TestCase):
     def test_wba_year(self):
         self.assertEqual(S.wba_year("2025-03-31"), 2024)
         self.assertEqual(S.wba_year("2024-12-31"), 2024)
-        self.assertEqual(S.wba_year("2024-06-30"), 2023)
+        # SDG2000 data collection guidance (Aug 2025): FY2024 = years ending 30 June 2024 to 29 June 2025
+        self.assertEqual(S.wba_year("2024-06-30"), 2024)
+        self.assertEqual(S.wba_year("2025-06-29"), 2024)
+        self.assertEqual(S.wba_year("2024-06-29"), 2023)
 
     def test_only_annual_revenue_facts(self):
         facts = S.annual_facts(FACTS)

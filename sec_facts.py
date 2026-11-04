@@ -12,7 +12,7 @@ the "retrieval and rules before any model" plan of 28 Oct 2026):
   (companies.sec_cik), the annual revenue facts of the company are read and the one for the answer's
   year is chosen by rule:
     - annual: a 10-K, 20-F or 40-F (or their amendments), a period of 330 to 380 days;
-    - the year by WBA's convention: a period ending January to June counts as the previous year;
+    - the year by WBA's convention: a period ending January to May counts as the previous year;
     - the largest of the revenue concepts reported for the year (REVENUE_CONCEPTS), each as first filed: the top line;
     - the earliest filing that reports the period (what the analyst read; later filings may restate it).
   A match is the same currency and a value within MATCH_TOLERANCE of the validated one. The table also
@@ -47,9 +47,9 @@ REVENUE_CONCEPTS = [
 
 
 def wba_year(end):
-    """WBA's fiscal year of a period end: January to June counts as the previous year."""
-    d = date.fromisoformat(end)
-    return d.year - 1 if d.month <= 6 else d.year
+    """WBA's reporting year of a period end (reporting_year.py: ending before 30 June counts as the year before)."""
+    from reporting_year import from_end_date
+    return from_end_date(end)
 
 
 def annual_facts(companyfacts):
