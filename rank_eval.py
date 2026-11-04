@@ -5,7 +5,7 @@ rank_eval.py: would a better page ranking find the page the analyst cited more o
 An offline experiment (proposals 1 and 2 of the information retrieval review, 4 Nov 2026). It takes the
 same validated answers as gold_eval.py (a quote, a source, the cited document in the library, its text in
 the evidence database, and the quote found in that text, so the cited page is known in our numbering) and
-ranks every page of the cited document seven ways:
+ranks every page of the cited document nine ways:
   ts best-of     today's ts_rank_cd, best rank over the attribute's alternative queries (what gold_eval.py
                  reports; generous, as it picks the luckiest query after the fact);
   ts single      ts_rank_cd of one query holding all the alternatives (one list, as a reader would get);
@@ -13,6 +13,8 @@ ranks every page of the cited document seven ways:
   bm25 best-of   BM25 per alternative query, best rank over them;
   ts fused,      each alternative query ranked on its own, the lists merged by reciprocal rank fusion (a page
   bm25 fused     several queries put high comes first): one list, with no hindsight about which query fits;
+  zones single,  BM25F: a query word in a table row or a heading counts more than in running text (weights in
+  zones fused    ZONE_WEIGHTS, by attribute kind), as one query and fused over the alternatives;
   learned        a logistic regression over page features (both scores, word coverage, phrase hits, labels at a
                  line start, number density, the year, position in the document), trained on the cited pages
                  of the other companies (five folds split by company, so no company scores its own pages).
@@ -35,9 +37,15 @@ FOLDS = 5
 NEGATIVES = 20                  # training pages per answer that are not cited: the 12 best by BM25 and 8 at random
 EPOCHS, RATE, L2 = 200, 0.5, 1e-3
 RRF_K = 60                      # reciprocal rank fusion constant, the usual default
-METHODS = ["ts best-of", "ts single", "ts fused", "bm25 single", "bm25 best-of", "bm25 fused", "learned"]
+METHODS = ["ts best-of", "ts single", "ts fused", "bm25 single", "bm25 best-of", "bm25 fused", "zones single",
+           "zones fused", "learned"]
+# Zone weights for BM25F (proposal 3): a query word counts this many times when it sits in a table row (a short
+# line holding numbers), a heading (a short line with no closing punctuation) or running text. Numbers live in
+# table rows; who is responsible for what is announced in headings ("Board oversight of climate").
+ZONE_WEIGHTS = {"numeric": {"table": 3.0, "heading": 1.5, "prose": 1.0},
+                "narrative": {"table": 1.0, "heading": 2.5, "prose": 1.0}}
 FEATURES = ["bm25 share", "bm25 rank", "ts share", "ts rank", "coverage", "phrases", "line labels", "numbers",
-            "numbers x numeric", "year", "position", "length", "fused rank"]
+            "numbers x numeric", "year", "position", "length", "fused rank", "in table rows", "in headings"]
 NUMERIC = {"GMC_00001.1", "GMC_00002.1", "GMC_00003.1", "GMC_00048.1", "GMC_02526.1", "GMC_00064.1"}
 WORD = re.compile(r"[^\W_]+")
 NUM = re.compile(r"^\d[\d.,]*$")
@@ -102,6 +110,55 @@ def recip_ranks(scores):
     return {p: 1.0 / i for i, p in enumerate(order(scores), 1)}
 
 
+def line_zone(line):
+    """'table', 'heading' or 'prose' for one line of page text (None for an empty line)."""
+    toks = tokens(line)
+    if not toks:
+        return None
+    nums = sum(1 for w in toks if NUM.match(w))
+    if nums and len(toks) <= 30 and nums / len(toks) >= 0.15:
+        return "table"
+    if len(toks) <= 12 and not line.rstrip().endswith((".", ";", ",", ":")):
+        return "heading"
+    return "prose"
+
+
+def zone_tf(body):
+    """{zone: Counter of words} for one page."""
+    out = {"table": collections.Counter(), "heading": collections.Counter(), "prose": collections.Counter()}
+    for line in (body or "").splitlines():
+        z = line_zone(line)
+        if z:
+            out[z].update(tokens(line))
+    return out
+
+
+def bm25f(ztf, length, avg_len, terms, idfs, weights, k1=K1, b=B):
+    """BM25F: each word's frequency is the zone-weighted sum over the zones, then saturated once, so a word
+    repeated in a table row counts more than in running text without one zone running away."""
+    s = 0.0
+    norm = k1 * (1 - b + b * length / (avg_len or 1))
+    for t in terms:
+        f = sum(w * ztf[z].get(t, 0) for z, w in weights.items())
+        if f:
+            s += idfs.get(t, 0.0) * f * (k1 + 1) / (f + norm)
+    return s
+
+
+def zone_scores(pages, attr, queries, idfs, avg_len):
+    """({page: BM25F of all the query words}, [{page: BM25F} per alternative query])."""
+    w = ZONE_WEIGHTS["numeric" if attr in NUMERIC else "narrative"]
+    terms = list(dict.fromkeys(t for q in queries for t in query_terms(q)))
+    single, per = {}, [{} for _ in queries]
+    for p, body in pages.items():
+        ztf = zone_tf(body)
+        length = len(set(tokens(body)))
+        single[p] = bm25f(ztf, length, avg_len, terms, idfs, w)
+        for i, q in enumerate(queries):
+            per[i][p] = bm25f(ztf, length, avg_len, query_terms(q), idfs, w)
+    return single, per
+
+
 def fuse(rankings, k=RRF_K):
     """Reciprocal rank fusion: each ranking (a dict of page scores; pages scoring 0 left out) gives a page
     1 / (k + its rank), summed over the rankings. A page that several alternative queries rank high comes
@@ -134,13 +191,16 @@ def page_features(pages, attr, year, queries, idfs, avg_len, ts):
     out = {}
     for p, t in toks.items():
         s = set(t)
+        ztf = zone_tf(pages[p])
+        hits = sum(1 for z in ztf for w in terms if ztf[z].get(w)) or 1
         nums = sum(1 for w in t if NUM.match(w))
         dens = nums / (len(t) or 1)
         out[p] = [bm[p] / bm_max, bm_r[p], tsa[p] / ts_max, ts_r[p] if tsa[p] else 0.0,
                   len(s & set(terms)) / (len(terms) or 1), sum(has_phrase(t, ph) for ph in phrases) / (len(phrases) or 1),
                   min(line_labels(pages[p], terms), 10) / 10, min(dens * 5, 1.0), min(dens * 5, 1.0) * (attr in NUMERIC),
                   float(str(year) in s or str(year - 1) in s), p / last, min(math.log1p(len(t)) / 8, 1.0),
-                  fused_r.get(p, 0.0)]
+                  fused_r.get(p, 0.0),
+                  sum(1 for w in terms if ztf["table"].get(w)) / hits, sum(1 for w in terms if ztf["heading"].get(w)) / hits]
     return out, bm, per_bm
 
 
@@ -323,6 +383,7 @@ def main():
             if not target:
                 skipped["cited page not located"] += 1; continue
             feats, bm, per_bm = page_features(pages, g["attribute"], g["year"] or 0, queries, idfs, avg_len, ts)
+            zs, per_zs = zone_scores(pages, g["attribute"], queries, idfs, avg_len)
             cases.append({"attribute": g["attribute"], "wba": g["wba"], "id": g["id"], "target": target, "features": feats,
                           "bm25": bm, "ranks": {
                               "ts best-of": best_of(per_ts, target),
@@ -330,7 +391,9 @@ def main():
                               "ts fused": G.rank_of(target, order(fuse(per_ts))),
                               "bm25 single": G.rank_of(target, order(bm)),
                               "bm25 best-of": best_of(per_bm, target),
-                              "bm25 fused": G.rank_of(target, order(fuse(per_bm)))}})
+                              "bm25 fused": G.rank_of(target, order(fuse(per_bm))),
+                              "zones single": G.rank_of(target, order(zs)),
+                              "zones fused": G.rank_of(target, order(fuse(per_zs)))}})
     weights = cross_validate(cases)
 
     table = {}
