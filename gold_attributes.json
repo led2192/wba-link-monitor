@@ -98,7 +98,8 @@
         "sustainability committee of the board",
         "board approves sustainability strategy",
         "governance of sustainability board"
-      ]
+      ],
+      "question": "Does the company attribute decision-making and oversight responsibility over the sustainability strategy to its highest governance body (the board of directors, the supervisory board, or a committee of the board)?"
     },
     "GMC_01931.1": {
       "name": "Highest governance body responsible for the climate strategy or transition plan",
@@ -109,7 +110,8 @@
         "board approves transition plan",
         "climate governance board committee",
         "TCFD governance board oversight"
-      ]
+      ],
+      "question": "Does the company assign decision-making and oversight responsibility for its climate change mitigation strategy or climate transition plan to its highest governance body (the board of directors, the supervisory board, or a committee of the board)?"
     },
     "GMC_01932.1": {
       "name": "Functions, teams or committees responsible for implementing sustainability plans",
@@ -120,7 +122,14 @@
         "management committee sustainability",
         "chief sustainability officer responsible",
         "ESG committee executive"
+      ],
+      "question": "Which topics have functions, teams or committees within the company (below or beside the board: a sustainability team, an executive or management committee, a climate working group) that are responsible for implementing them? Sustainability = sustainability plans, strategy or activities in general; Climate mitigation = the climate mitigation strategy or emissions reduction; Transition Plan = the climate transition plan.",
+      "options": [
+        "Sustainability",
+        "Climate mitigation",
+        "Transition Plan"
       ]
     }
-  }
+  },
+  "_about_narrative": "Entries with a question are read by narrative_eval.py: the model answers the question on the company's best pages for the queries, scored against the analysts' validated answers (No Evidence = no)."
 }
