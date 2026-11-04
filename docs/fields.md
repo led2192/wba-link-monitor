@@ -378,6 +378,9 @@ One row per night, written by base_health.py (wba-link-monitor) at the end of th
 | `qa_labels_reviewed` | number | robot | Sure, reviewed labels in the golden set (yours, corrections, Source Library 2025). |
 | `disclosure_completeness_avg` | percent | robot | Average disclosure completeness across companies (the four disclosure checks). The headline for WBA's work. |
 | `page_completeness_avg` | percent | robot | Average page completeness across companies (report hub and sustainability page watched). The health of the collection. |
+| `model_spend_24h` | currency | robot | Estimated Anthropic spend of the model calls in the last 24 hours (Propose values, Generic reader, web search judge), summed from the runs' logs, pull request and dry runs included. Since 3 Nov 2026. |
+| `model_spend_7d` | currency | robot | The same over 7 days. Status turns Check above SPEND_WEEK_USD (default 15): look at the Anthropic credit before the next long run. |
+| `model_spend_by_job` | long text | robot | The 7 days' estimate per workflow, most expensive first. |
 
 ## Pipeline QA (`appJQ2mRtjHjzLq9E`)
 
