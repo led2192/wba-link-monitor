@@ -5,12 +5,14 @@ rank_eval.py: would a better page ranking find the page the analyst cited more o
 An offline experiment (proposals 1 and 2 of the information retrieval review, 4 Nov 2026). It takes the
 same validated answers as gold_eval.py (a quote, a source, the cited document in the library, its text in
 the evidence database, and the quote found in that text, so the cited page is known in our numbering) and
-ranks every page of the cited document five ways:
+ranks every page of the cited document seven ways:
   ts best-of     today's ts_rank_cd, best rank over the attribute's alternative queries (what gold_eval.py
                  reports; generous, as it picks the luckiest query after the fact);
   ts single      ts_rank_cd of one query holding all the alternatives (one list, as a reader would get);
   bm25 single    Okapi BM25 over all the attributes' query words, with idf from a sample of public.pages;
   bm25 best-of   BM25 per alternative query, best rank over them;
+  ts fused,      each alternative query ranked on its own, the lists merged by reciprocal rank fusion (a page
+  bm25 fused     several queries put high comes first): one list, with no hindsight about which query fits;
   learned        a logistic regression over page features (both scores, word coverage, phrase hits, labels at a
                  line start, number density, the year, position in the document), trained on the cited pages
                  of the other companies (five folds split by company, so no company scores its own pages).
@@ -32,9 +34,10 @@ SAMPLE_PCT = 1                  # share of public.pages sampled for document fre
 FOLDS = 5
 NEGATIVES = 20                  # training pages per answer that are not cited: the 12 best by BM25 and 8 at random
 EPOCHS, RATE, L2 = 200, 0.5, 1e-3
-METHODS = ["ts best-of", "ts single", "bm25 single", "bm25 best-of", "learned"]
+RRF_K = 60                      # reciprocal rank fusion constant, the usual default
+METHODS = ["ts best-of", "ts single", "ts fused", "bm25 single", "bm25 best-of", "bm25 fused", "learned"]
 FEATURES = ["bm25 share", "bm25 rank", "ts share", "ts rank", "coverage", "phrases", "line labels", "numbers",
-            "numbers x numeric", "year", "position", "length"]
+            "numbers x numeric", "year", "position", "length", "fused rank"]
 NUMERIC = {"GMC_00001.1", "GMC_00002.1", "GMC_00003.1", "GMC_00048.1", "GMC_02526.1", "GMC_00064.1"}
 WORD = re.compile(r"[^\W_]+")
 NUM = re.compile(r"^\d[\d.,]*$")
@@ -99,16 +102,31 @@ def recip_ranks(scores):
     return {p: 1.0 / i for i, p in enumerate(order(scores), 1)}
 
 
+def fuse(rankings, k=RRF_K):
+    """Reciprocal rank fusion: each ranking (a dict of page scores; pages scoring 0 left out) gives a page
+    1 / (k + its rank), summed over the rankings. A page that several alternative queries rank high comes
+    first, without having to know beforehand which query suits this company's wording."""
+    fused = collections.defaultdict(float)
+    for sc in rankings:
+        for i, p in enumerate(order({p: v for p, v in sc.items() if v > 0}), 1):
+            fused[p] += 1.0 / (k + i)
+    return dict(fused)
+
+
 def page_features(pages, attr, year, queries, idfs, avg_len, ts):
-    """{page: [features]} for every page of one document. pages: {page: body}; ts: {page: ts_rank_cd of the
-    single query} (absent when the page does not match)."""
+    """({page: [features]}, {page: BM25 of all the query words}, [{page: BM25} per alternative query]) for every
+    page of one document. pages: {page: body}; ts: {page: ts_rank_cd of the single query} (absent when the
+    page does not match)."""
     terms = list(dict.fromkeys(t for q in queries for t in query_terms(q)))
     phrases = [p for q in queries for p in query_phrases(q)]
     toks = {p: tokens(b) for p, b in pages.items()}
-    bm = {}
+    bm, per_bm = {}, [{} for _ in queries]
     for p, t in toks.items():
         tf = collections.Counter(t)
         bm[p] = bm25(tf, len(tf), avg_len, terms, idfs)
+        for i, q in enumerate(queries):
+            per_bm[i][p] = bm25(tf, len(tf), avg_len, query_terms(q), idfs)
+    fused_r = recip_ranks(fuse(per_bm))
     tsa = {p: ts.get(p, 0.0) for p in pages}
     bm_max, ts_max = max(bm.values(), default=0) or 1, max(tsa.values(), default=0) or 1
     bm_r, ts_r = recip_ranks(bm), recip_ranks(tsa)
@@ -121,8 +139,9 @@ def page_features(pages, attr, year, queries, idfs, avg_len, ts):
         out[p] = [bm[p] / bm_max, bm_r[p], tsa[p] / ts_max, ts_r[p] if tsa[p] else 0.0,
                   len(s & set(terms)) / (len(terms) or 1), sum(has_phrase(t, ph) for ph in phrases) / (len(phrases) or 1),
                   min(line_labels(pages[p], terms), 10) / 10, min(dens * 5, 1.0), min(dens * 5, 1.0) * (attr in NUMERIC),
-                  float(str(year) in s or str(year - 1) in s), p / last, min(math.log1p(len(t)) / 8, 1.0)]
-    return out, bm
+                  float(str(year) in s or str(year - 1) in s), p / last, min(math.log1p(len(t)) / 8, 1.0),
+                  fused_r.get(p, 0.0)]
+    return out, bm, per_bm
 
 
 def best_of(per_query_scores, target):
@@ -303,15 +322,15 @@ def main():
             target = G.locate(found, g["pages"]) & set(pages)
             if not target:
                 skipped["cited page not located"] += 1; continue
-            feats, bm = page_features(pages, g["attribute"], g["year"] or 0, queries, idfs, avg_len, ts)
-            tfs = {p: collections.Counter(tokens(b)) for p, b in pages.items()}
-            per_bm = [{p: bm25(tf, len(tf), avg_len, query_terms(q), idfs) for p, tf in tfs.items()} for q in queries]
+            feats, bm, per_bm = page_features(pages, g["attribute"], g["year"] or 0, queries, idfs, avg_len, ts)
             cases.append({"attribute": g["attribute"], "wba": g["wba"], "id": g["id"], "target": target, "features": feats,
                           "bm25": bm, "ranks": {
                               "ts best-of": best_of(per_ts, target),
                               "ts single": G.rank_of(target, order(ts)),
+                              "ts fused": G.rank_of(target, order(fuse(per_ts))),
                               "bm25 single": G.rank_of(target, order(bm)),
-                              "bm25 best-of": best_of(per_bm, target)}})
+                              "bm25 best-of": best_of(per_bm, target),
+                              "bm25 fused": G.rank_of(target, order(fuse(per_bm)))}})
     weights = cross_validate(cases)
 
     table = {}

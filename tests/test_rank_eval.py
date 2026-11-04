@@ -39,7 +39,8 @@ class Scoring(unittest.TestCase):
         pages = {1: "Our emissions strategy. " * 30 + "scope",
                  2: "Scope 1 emissions tCO2e 12,300\nScope 2 emissions tCO2e 4,100\nScope 3 emissions 90,000"}
         idfs = {"scope": 3.0, "1": 1.0, "emissions": 1.5, "tco2e": 4.0}
-        feats, bm = R.page_features(pages, "GMC_00001.1", 2024, ['"scope 1" emissions tCO2e'], idfs, 60, {})
+        feats, bm, per_bm = R.page_features(pages, "GMC_00001.1", 2024, ['"scope 1" emissions tCO2e'], idfs, 60, {})
+        self.assertEqual(len(per_bm), 1)
         self.assertEqual(R.order(bm)[0], 2)
         self.assertEqual(len(feats[2]), len(R.FEATURES))
         self.assertTrue(all(0 <= v <= 1 for v in feats[2]))
@@ -48,6 +49,12 @@ class Scoring(unittest.TestCase):
         self.assertEqual(R.order({3: 1.0, 1: 1.0, 2: 5.0}), [2, 1, 3])
         self.assertEqual(R.best_of([{1: 2.0, 2: 1.0}, {2: 3.0}], {2}), 1)
         self.assertIsNone(R.best_of([{1: 2.0}], {2}))
+
+    def test_fusion_rewards_agreement_between_queries(self):
+        # page 2 is second for both queries; pages 1 and 3 are each first for one query and absent from the other
+        fused = R.fuse([{1: 9.0, 2: 5.0}, {3: 9.0, 2: 5.0}])
+        self.assertEqual(R.order(fused)[0], 2)
+        self.assertNotIn(4, R.fuse([{4: 0.0, 1: 1.0}]))  # a page with no match is not ranked
 
     def test_metrics(self):
         m = R.metrics([1, 2, 5, None])
