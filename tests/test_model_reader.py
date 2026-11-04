@@ -197,7 +197,9 @@ class ModelReader(unittest.TestCase):
     def test_reading_notes_reach_the_prompt(self):
         capex = SPEC["attributes"]["GMC_00064.1"]
         self.assertIn("Notes: Reports rarely call this", M.prompt(G, capex, PAGES))
-        self.assertNotIn("Notes:", M.prompt(G, REV, PAGES))
+        self.assertNotIn("Notes:", M.prompt(G, {k: v for k, v in REV.items() if k != "reading_notes"}, PAGES))
+        # the data collection guidance's revenue rules reach the reader (4 Nov 2026)
+        self.assertIn("own reporting currency", M.prompt(G, REV, PAGES))
 
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)
