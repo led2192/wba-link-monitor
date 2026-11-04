@@ -8,7 +8,7 @@ For each company it works out which recent years it lacks for each family:
   sustainability   Sustainability, ESG, CSR, Integrated or Impact Report; years held from `sust_years`
   annual           Annual Report, Integrated Report, 10-K; latest held from `coverage_breakdown`
 Years are reporting years, as everywhere in the pipeline: the year the period ends, a fiscal year ending
-January to June counting as the year before. Recent years are the three up to the latest that should be out
+January to May counting as the year before. Recent years are the three up to the latest that should be out
 by now (company_coverage's expected_year: in November 2026, 2023 to 2025). A report for 2025 is published
 in 2026, so 2026 is searched and accepted too, as 2025: reports are often titled by their publication year
 ("Sustainability Report 2026") or by a fiscal year ending in 2026; and a document we hold dated 2026 counts
@@ -174,7 +174,7 @@ def held_years(f):
 
 def missing(f, years):
     held = held_years(f)
-    # A document dated after the latest expected year is a fiscal year that ended in January to June of the
+    # A document dated after the latest expected year is a fiscal year that ended in January to May of the
     # current year (a 2026 report of a March year end): by the reporting-year rule it is that latest year.
     for fam in held:
         if any(y > max(years) for y in held[fam]):
@@ -429,7 +429,7 @@ def judge(r, fam, years, domains, name, reg_domain):
         return False, "does not name the report"
     ys = years_in(title) | years_in(last) or years_in(folders)
     # titled by the publication year: a 2026 report of the latest expected reporting year (published in 2026,
-    # or a fiscal year ending January to June 2026); the inbox's typing then dates it from the cover
+    # or a fiscal year ending January to May 2026); the inbox's typing then dates it from the cover
     latest = max(years)
     if latest == expected_year() and latest + 1 in ys and latest not in ys:
         ys = ys | {latest}
@@ -801,8 +801,9 @@ def model_judge(usage=None, sess=None):
         pe = str(reply.get("period_end") or "")
         m = re.search(r"((?:19|20)\d\d)(?:-(\d\d?))?", pe)
         y = None
-        if m:                                # the reporting year: a period ending January to June is the year before
-            y = int(m.group(1)) - (1 if m.group(2) and 1 <= int(m.group(2)) <= 6 else 0)
+        if m:                                # the reporting year: a period ending January to May is the year before
+            from reporting_year import from_end_month
+            y = from_end_month(int(m.group(1)), m.group(2))
         allowed = set(years) | ({max(years) + 1} if max(years) == expected_year() else set())
         if y and y not in allowed:
             return False, f"the judge: covers {reply.get('period_end')}, not a missing year"

@@ -307,7 +307,7 @@ def fy_end_month(cur, wba):
     """The month (1-12) the company's fiscal year ends, or None when its documents do not say. The commonest
     month among its annual-family documents' period_end (documents.period_end, from report_library); when none
     carries one yet, read from the first twelve pages of up to three of those documents with fiscal_year.decide.
-    Cached for the run. A year ending January to June is the reporting year before (the pipeline's rule), so
+    Cached for the run. A year ending January to May is the reporting year before (the pipeline's rule), so
     for such a company reporting year 2024 is the document dated 2025 (2 Nov 2026: ORIX, year end March, had
     its integrated report dated 2024, April 2023 to March 2024, read as 2024's: the "2024" column of the
     statements was the year ended March 31, 2024, which is reporting year 2023)."""
@@ -344,13 +344,14 @@ def fy_end_month(cur, wba):
 
 def document_year(year, fy_month):
     """The documents' year (the year the period ends, the library's convention) for a reporting year: the
-    reporting year itself, or the next when the company's fiscal year ends January to June."""
-    return year + 1 if fy_month and fy_month <= 6 else year
+    reporting year itself, or the next when the company's fiscal year ends January to May (reporting_year.py)."""
+    from reporting_year import shifted
+    return year + 1 if shifted(fy_month) else year
 
 
 def year_documents(cur, wba, year, attr):
     """([(library_id, doc_type, year)], {library_id: weight}): the company's documents of the reporting year
-    (document_year: the year after it for a fiscal year ending January to June) or the next, preferred types
+    (document_year: the year after it for a fiscal year ending January to May) or the next, preferred types
     first, at most MAX_DOCS; the weight favours the preferred types and the year's own document."""
     ranks = {t: i for i, t in enumerate(attr.get("doc_types", []))}
     want = document_year(year, fy_end_month(cur, wba))
@@ -854,9 +855,9 @@ def main():
                   f"{s['memory right'] / (s['memory'] or 1):.0%} | {s['no memory']:,} | {s['no memory in_pages'] / (s['no memory'] or 1):.0%} | "
                   f"{s['no memory right'] / (s['no memory'] or 1):.0%} |")
     md.append("")
-    md += ["Fiscal years ending January to June (2 Nov 2026): the reporting year's document is the one dated the year after, "
+    md += ["Fiscal years ending January to May (2 Nov 2026): the reporting year's document is the one dated the year after, "
            "and the model is told the year end. Answers of such companies, proposals and right:", "",
-           "| Attribute | Answers with a January-to-June year end | Proposal | Right |", "| --- | --: | --: | --: |"]
+           "| Attribute | Answers with a January-to-May year end | Proposal | Right |", "| --- | --: | --: | --: |"]
     for c in codes:
         s = stats[c]
         md.append(f"| {c} {spec['attributes'][c]['name']} | {s['fy shift']:,} | {s['fy shift proposal'] / (s['fy shift'] or 1):.0%} | "
