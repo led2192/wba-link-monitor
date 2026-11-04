@@ -218,3 +218,6 @@ Base One (app6oIEJuBV9fkwux) has Boolean, Number and Select Options Text but no 
 
 ## The same PDF lives at two addresses (4 Nov 2026)
 The first link text capture sample counted 1,135 PDFs we did not hold, but the examples were Arcos Dorados reports the library had: www.arcosdorados.com/wp-content/uploads/2025/07/AD_2024_ESP.pdf and the copy at ddhnb9vx8lz57.cloudfront.net/wp-content/uploads/2025/07/29174027/AD_2024_ESP.pdf. A normalised address is not a file. Anything that says "not held" also compares the file name (`anchor_capture_eval.file_key`, ignoring generic names such as report.pdf), and the content fingerprint once the text is read (dup_audit.py).
+
+## Every phase after a budgeted loop needs its own budget (5 Nov 2026)
+rank_eval.py stopped reading at its 100-minute budget, then spent 50 silent minutes counting expansion words and was cancelled by the 150-minute job timeout, so nothing was written (the second full run lost). A budget on the loop is not a budget on the run: give each later phase a deadline, print when each starts, and keep the job timeout above the sum.

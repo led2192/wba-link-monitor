@@ -336,15 +336,18 @@ STATS_CHUNK = 40                # words counted per pass over the sample (4 Nov 
                                 # the 300-second limit after 100 minutes of reading, and the run was lost)
 
 
-def collection_stats(cur, terms, pct=SAMPLE_PCT, chunk=STATS_CHUNK):
+def collection_stats(cur, terms, pct=SAMPLE_PCT, chunk=STATS_CHUNK, deadline=None):
     """(pages in the sample, {term: pages holding it}, average page length in words) from a repeatable
     sample of public.pages, counting up to `chunk` words per pass. A pass the database cancels leaves its
     words out (no idf: they count for nothing) instead of failing the run; the connection is rolled back
-    so the run goes on."""
+    so the run goes on. Past `deadline` (a time.time() value) the remaining passes are skipped the same way."""
     terms = sorted(set(terms))
     n, avg, dfs = 0, 0.0, {}
     for i in range(0, max(len(terms), 1), chunk):
         part = terms[i:i + chunk]
+        if deadline and time.time() > deadline:
+            print(f"  word counts for the last {len(terms) - i} words skipped (time); they are left out", flush=True)
+            break
         cols = ", ".join(f"count(*) filter (where words @@ to_tsquery('simple', %s))" for _ in part)
         try:
             cur.execute(f"select count(*), avg(length(words)){', ' + cols if cols else ''} "
@@ -382,6 +385,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="answers per attribute (dry run default 20; 0 = all)")
     ap.add_argument("--attributes", default="", help="comma-separated GMC codes (default: all in gold_attributes.json)")
     ap.add_argument("--budget", type=int, default=100, help="minutes for reading documents; then it scores what it has")
+    ap.add_argument("--post-budget", type=int, default=15, help="minutes for the expansion words' counts after the read")
     a = ap.parse_args()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
@@ -464,24 +468,33 @@ def main():
         everyone = {code: expansion(cases, code, {t for q in cfg["attributes"][code]["queries"] for t in query_terms(q)})
                     for code in codes}
         new_terms = {t for ts in list(expanded_by.values()) + list(everyone.values()) for t in ts} - set(idfs)
+        print(f">>> {len(cases):,} usable answers read in {(time.time() - t0) / 60:.0f} min; word counts for "
+              f"{len(new_terms):,} expansion words", flush=True)
         if new_terms:
-            cur.execute("set statement_timeout = '300s'")
-            _, dfs2, _ = collection_stats(cur, new_terms)
-            idfs.update({t: idf(dfs2.get(t, 0), n_sample) for t in new_terms})
+            # 4 Nov 2026: this pass ran unlogged for 50 minutes after a 100-minute read and the job hit its
+            # timeout, losing the whole run. It now has its own deadline; words it cannot count are dropped
+            # from the expansions, so no expansion word scores without an idf.
+            cur.execute("set statement_timeout = '120s'")
+            _, dfs2, _ = collection_stats(cur, new_terms, deadline=time.time() + a.post_budget * 60)
+            idfs.update({t: idf(dfs2[t], n_sample) for t in new_terms if t in dfs2})
+            dropped = {t for t in new_terms if t not in dfs2}
+            if dropped:
+                print(f"  {len(dropped):,} expansion words without a count are left out", flush=True)
+                expanded_by = {k: [t for t in v if t not in dropped] for k, v in expanded_by.items()}
+                everyone = {k: [t for t in v if t not in dropped] for k, v in everyone.items()}
     for c in cases:
         extra = expanded_by.get((fold_of(c["wba"]), c["attribute"]), [])
         base = {t for q in cfg["attributes"][c["attribute"]]["queries"] for t in query_terms(q)}
         wts = {**{t: EXPAND_WEIGHT for t in extra}, **{t: 1.0 for t in base}}
         pages = {int(k): v for k, v in json.loads(zlib.decompress(c.pop("pages_z"))).items()}
-        exp = {}
-        for p, body in pages.items():
-            tf = collections.Counter(tokens(body))
-            exp[p] = bm25_weighted(tf, len(tf), avg_len, wts, idfs)
-        only_extra = {p: bm25_weighted(collections.Counter(tokens(b)), len(set(tokens(b))), avg_len,
-                                       {t: 1.0 for t in extra}, idfs) for p, b in pages.items()} if extra else {}
+        tfs = {p: collections.Counter(tokens(body)) for p, body in pages.items()}       # once per page, not twice
+        exp = {p: bm25_weighted(tf, len(tf), avg_len, wts, idfs) for p, tf in tfs.items()}
+        only_extra = {p: bm25_weighted(tf, len(tf), avg_len, {t: 1.0 for t in extra}, idfs)
+                      for p, tf in tfs.items()} if extra else {}
         c["ranks"]["expanded single"] = G.rank_of(c["target"], order(exp))
         c["ranks"]["expanded fused"] = G.rank_of(c["target"], order(fuse(c.pop("per_bm") + ([only_extra] if extra else []))))
         c.pop("marks", None)
+    print(f">>> expansion scored, {(time.time() - t0) / 60:.0f} min; learning the ranker", flush=True)
     weights = cross_validate(cases)
 
     table = {}
