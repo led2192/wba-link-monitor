@@ -159,7 +159,7 @@ def main():
     types = {c: collections.Counter() for c in codes}
     st = {c: collections.Counter() for c in codes}
     t0, cut = time.time(), False
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '60s'")
         cur.execute("select body from public.pages tablesample system (0.05) limit %s", (BACKGROUND,))

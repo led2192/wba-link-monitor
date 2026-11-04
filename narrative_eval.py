@@ -275,7 +275,7 @@ def main():
     print(">>> " + "; ".join(f"{c}: {len(by[c])} answers" for c in codes), flush=True)
     stats = collections.defaultdict(collections.Counter); wrong = collections.defaultdict(list)
     usage = collections.Counter(); stop = ""
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor(); cur.execute("set statement_timeout = '60s'")
         queue = [g for i in range(max((len(v) for v in by.values()), default=0)) for c in codes if i < len(by[c]) for g in [by[c][i]]]
         for g in queue:

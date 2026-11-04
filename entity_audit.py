@@ -97,7 +97,7 @@ def main():
     import psycopg
     m = master()
     rows, per, t0 = [], {}, time.time()
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor(); cur.execute("set statement_timeout = '120s'")
         cur.execute("select wba_id, max(company), count(*) from public.documents where text_status = 'ok' and wba_id <> '' "
                     "and doc_type = any(%s) group by wba_id order by wba_id", (list(KEY_TYPES),))

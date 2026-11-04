@@ -349,7 +349,7 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     full = json.load(open(os.path.join(HERE, "attributes.json"), encoding="utf-8"))
     usage, got_rows, versions, reads = collections.Counter(), [], [], []
     stop = False
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '90s'")
         months = parse_months(getattr(a, "fy_months", ""))

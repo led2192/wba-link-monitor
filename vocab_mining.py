@@ -101,7 +101,7 @@ def main():
     comp = {c: collections.defaultdict(set) for c in codes}
     n = {c: collections.Counter() for c in codes}
     t0, cut = time.time(), False
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '60s'")
         for i, g in enumerate(todo, 1):

@@ -102,7 +102,7 @@ def passage_row(ln, lexicon):
 # ----------------------------------------------------------------------------------------------
 def connect(url):
     import psycopg
-    conn = psycopg.connect(url.strip(), connect_timeout=30)
+    conn = __import__("evidence_db").connect(url)
     with conn.cursor() as c:
         c.execute("set statement_timeout = 0")
     conn.commit()
