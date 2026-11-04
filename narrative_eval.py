@@ -86,11 +86,10 @@ def company_pages(cur, wba, year, queries, fy_month=None):
     if not docs:
         return []
     types = {d[0]: d[1] for d in docs}
-    q = or_query(queries)
-    cur.execute("select library_id, page, body from public.pages, to_tsquery('simple', %s) q "
-                "where library_id = any(%s) and words @@ q order by ts_rank_cd(words, q, 32) desc limit %s",
-                (q, list(types), PAGES))
-    return [(lid, types.get(lid, ""), page, body or "") for lid, page, body in cur.fetchall()]
+    # BM25 over any of the query words (page_ranker.py, 4 Nov 2026), instead of ts_rank_cd over pages holding
+    # all the words of one wording: a third of the answers had no page at all that way
+    from page_ranker import RANKER
+    return [(lid, types.get(lid, ""), page, body) for lid, page, body, _ in RANKER.rank(cur, list(types), queries, PAGES)]
 
 
 def prompt(attr, pages, company):
