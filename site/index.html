@@ -36,6 +36,7 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 main { padding-block: 22px 60px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
 #signin { max-width: 440px; margin: 40px auto; }
+.result.cited { border-left: 4px solid var(--accent); }
 #signin h1 { font-size: 20px; margin: 0 0 6px; }
 #signin p { color: var(--muted); margin: 0 0 14px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -245,7 +246,37 @@ a { color: var(--accent); }
     $("app").classList.toggle("hidden", !session);
     $("who").innerHTML = session
       ? `${esc(session.user.email)} <button type="button" id="out">Sign out</button>` : "";
-    if (session) { $("signin-msg").textContent = ""; $("out").onclick = async () => { await sb.auth.signOut(); showSession(null); }; loadCompanies(); }
+    if (session) { $("signin-msg").textContent = ""; $("out").onclick = async () => { await sb.auth.signOut(); showSession(null); }; loadCompanies(); openLinked(); }
+  }
+
+  // A link from Airtable (attribute_values.evidence_link): ?doc=<library_id>&page=<n>&q=<words>&alt=<word>
+  // opens that one document, searched for q (the number as printed), with the cited page first and marked.
+  // When q finds nothing (the number is split differently in our text), alt (a word from the attribute's
+  // name) is searched instead. Runs once per page load, after sign-in.
+  const linked = new URLSearchParams(location.search);
+  let linkedDone = false;
+  async function openLinked() {
+    const doc = linked.get("doc");
+    if (linkedDone || !doc) return;
+    linkedDone = true;
+    const page = Number(linked.get("page")) || null;
+    const tries = [linked.get("q"), linked.get("alt")].filter((x) => x && x.trim());
+    $("status").innerHTML = "Opening the document…";
+    let rows = [], used = "";
+    for (const q of tries) {
+      const r = await rpc("search_pages", { q, doc_filter: doc, max_rows: 200 });
+      if (r.error) { $("status").innerHTML = `<span class="error">${esc(r.error.message)}</span>`; return; }
+      rows = r.data || []; used = q;
+      if (rows.length) break;
+    }
+    $("q").value = used;
+    rows.sort((a, b) => (b.page === page) - (a.page === page) || a.page - b.page);
+    lastRows = rows; lastArgs = { q: used, company_filter: null, year_from: null, year_to: null, type_filter: null };
+    const label = rows[0] ? (rows[0].label || rows[0].library_id) : doc;
+    $("status").innerHTML = rows.length
+      ? `<span><strong>${esc(label)}</strong>: ${rows.length} page${rows.length === 1 ? "" : "s"} with “${esc(used)}”${page ? `, page ${page} first` : ""}</span>`
+      : `<span>Nothing found for “${esc(tries.join("” or “"))}” in ${esc(doc)}. The document may not have its text in the database yet.</span>`;
+    $("results").innerHTML = rows.map((r) => r.page === page ? render(r).replace('class="result"', 'class="result cited"') : render(r)).join("");
   }
 
   async function show() {
@@ -266,7 +297,7 @@ a { color: var(--accent); }
     e.preventDefault();
     const email = $("email").value.trim();
     $("signin-msg").textContent = "Sending…";
-    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname + location.search } });
     $("signin-msg").textContent = error
       ? (/rate limit/i.test(error.message) ? "Too many emails sent in the last hour; try again later. If you already have a code from an earlier email, type it below."
                                            : `Could not send the code: ${error.message}`)

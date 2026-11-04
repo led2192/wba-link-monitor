@@ -40,6 +40,10 @@ on:
       shards:
         description: "parallel jobs, each taking a fixed slice of the companies (1 to 8). Each job reads for up to five hours and has its own cost limit."
         default: "1"
+      fill_links:
+        description: "only give existing model-reader rows their evidence_link (no reading, no cost), with commit ticked to write"
+        type: boolean
+        default: false
       fy_months:
         description: "model reader: only companies whose fiscal year ends in these months, e.g. 1-6 (blank = all); with fresh_days 0 for the re-read after the fiscal-year fix"
         default: ""
@@ -91,6 +95,7 @@ jobs:
             [ -n "${{ inputs.companies }}" ] && ARGS="$ARGS --companies ${{ inputs.companies }}"
             [ -n "${{ inputs.fy_months }}" ] && ARGS="$ARGS --fy-months ${{ inputs.fy_months }}"
             [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+            [ "${{ inputs.fill_links }}" = "true" ] && ARGS="$ARGS --fill-links"
             if [ "${{ matrix.shard }}" != "1/1" ]; then
               ARGS="$ARGS --shard ${{ matrix.shard }}"
               export QA_RUN_PART="shard$(echo '${{ matrix.shard }}' | tr / -)"   # one Pipeline QA row per shard, not one overwritten by each

@@ -48,6 +48,7 @@ MAX_NEW = 20000                     # rows a run may add (the base holds at most
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+SEARCH_PAGE = "https://led2192.github.io/wba-link-monitor/"   # the evidence search page (site/index.html)
 DEFAULT_YEARS = "2018-"              # 2018 to last year: the years WBA's benchmarks and trends look at
 
 
@@ -158,6 +159,47 @@ def printed_text(x):
     return s
 
 
+def evidence_url(library_id, page, printed, word=""):
+    """The evidence search page opened at this document, with the number searched and the given page first.
+    Works for every document with text in the evidence database, including those with no web address
+    (Source Library files), where source_url stays blank."""
+    from urllib.parse import urlencode
+    if not library_id:
+        return None
+    q = {"doc": library_id, "page": int(page or 0) or "", "q": f'"{printed}"' if printed else word}
+    if printed and word:
+        q["alt"] = word
+    return SEARCH_PAGE + "?" + urlencode({k: v for k, v in q.items() if v != ""})
+
+
+PRINTED = __import__("re").compile(r"^Printed as ([0-9][0-9.,]*)")
+
+
+def fill_links(H, base, commit):
+    """One-off: give every model-reader row without one its evidence_link, from library_id, page and the
+    number printed in detail. Writes only evidence_link; statuses and labels are untouched."""
+    rows = fetch(H, base, TABLE, ["library_id", "page", "detail", "attribute_name", "evidence_link"],
+                 "AND({method}='model reader', {library_id}!='', {evidence_link}='')")
+    ups = []
+    for r in rows:
+        f = r["fields"]
+        m = PRINTED.match(f.get("detail") or "")
+        url = evidence_url(f.get("library_id"), f.get("page"), m.group(1) if m else "", key_word(f.get("attribute_name")))
+        if url:
+            ups.append((r["id"], {"evidence_link": url}))
+    print(f">>> {len(rows):,} model-reader rows without evidence_link; {len(ups):,} to fill" + ("" if commit else " (dry run)"), flush=True)
+    if commit:
+        write(H, base, [], ups)
+    return len(ups)
+
+
+def key_word(name):
+    """A fallback search word from the attribute's name ('Total number of employees' -> employees)."""
+    words = [w for w in __import__("re").findall(r"[A-Za-z]+", name or "") if len(w) > 3
+             and w.lower() not in {"total", "number", "based", "location", "market", "scope"}]
+    return words[-1].lower() if words else ""
+
+
 def validated_fields(g):
     """Where the analyst took the validated value from, for a reviewer to check it too: the cited
     document (name and link), the page as the analyst wrote it, the quoted evidence and a link to the
@@ -181,6 +223,7 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
          "attribute_name": attr["name"], "year": year, "value": got["value"], "unit": unit, "method": "model reader",
          "library_id": got["library_id"], "page": int(got["page"]), "last_run": now,
          "source_url": (doc.get("url") + f"#page={int(got['page'])}") if doc.get("url") else None,
+         "evidence_link": evidence_url(got["library_id"], got["page"], printed_text(got["printed"]), key_word(attr["name"])),
          "detail": f"Printed as {printed_text(got['printed'])} ({scale})"
                    + (f" in the column \"{got['column']}\"" if got.get("column") else "") + f" on page {int(got['page'])}"
                    + (f" of {doc['label']}" if doc.get("label") else "") + ". Read by a language model; the number was checked to be on that page."
@@ -505,6 +548,7 @@ def main():
                     "in the last N days (0 = read again), so a run carries on where the last one stopped")
     ap.add_argument("--fy-months", default="", help="model reader: only companies whose fiscal year ends in these months, "
                     "e.g. 1-6 or 3,6 (blank = every company); for the re-read after the fiscal-year fix of 2 Nov 2026")
+    ap.add_argument("--fill-links", action="store_true", help="only give existing model-reader rows their evidence_link, then stop")
     ap.add_argument("--shard", default="", help="i/N: only the i-th of N slices of the companies (parallel jobs)")
     a = ap.parse_args()
     shard_i, shard_n = (int(x) for x in a.shard.split("/")) if a.shard else (1, 1)
@@ -516,6 +560,9 @@ def main():
     years = parse_years(a.years)
     methods = set(a.methods.split(","))
     base, H = os.environ["AIRTABLE_BASE"], {"Authorization": f"Bearer {os.environ['AIRTABLE_TOKEN']}"}
+    if a.fill_links:
+        fill_links(H, base, a.commit)
+        return 0
     run = qa.Run("propose_values.py")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     spec = json.load(open(os.path.join(HERE, "attributes.json"), encoding="utf-8"))["attributes"]
