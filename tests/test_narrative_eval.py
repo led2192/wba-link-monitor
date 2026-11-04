@@ -79,5 +79,38 @@ class ProviderTier(unittest.TestCase):
         self.assertEqual(len(got), 1)                                     # deduplicated across bases
         self.assertIn("QC Complete", calls[-1][2]); self.assertIn("NOT({Data Reviewed})", calls[-1][2])
 
+    def test_a_refused_base_is_skipped_and_codes_come_from_the_next(self):
+        from unittest import mock
+        import requests
+        import narrative_eval as N
+        N.SKIPPED.clear()
+        def fake_get_all(token, base, table, fields, formula=None):
+            if base == "appOld":
+                r = requests.Response(); r.status_code = 403
+                raise requests.HTTPError("403 Client Error: Forbidden", response=r)
+            if table == "Metadata Codes":
+                return [{"fields": {"Global Metadata Code (GMC)": "GMC_00566.1", "Description": "Does the company require FPIC",
+                                    "Data Type": "Boolean"}}]
+            if "GMC Type" in fields:
+                return [{"fields": {"Metadata ID": "PT_00001-GMC_00566.1-2024", "GMC Type": ["Boolean"]}}]
+            return [{"fields": {"Metadata ID": "PT_00001-GMC_00566.1-2024", "Selected Value": "true"}}]
+        with mock.patch.object(N, "get_all", side_effect=fake_get_all):
+            cfg = N.auto_attributes("t", ["appOld", "appA"], "provider", 1, set())
+            got = N.gold_answers("t", ["GMC_00566.1"], ["appOld", "appA"], "provider")
+        self.assertEqual(list(cfg), ["GMC_00566.1"])
+        self.assertEqual(len(got), 1)
+        self.assertIn(("appOld", "Metadata", "HTTP 403"), N.SKIPPED)
+        self.assertNotIn("app6oIEJuBV9fkwux", N.MONTHLY_BASES.values())
+
+    def test_other_errors_still_stop_the_run(self):
+        from unittest import mock
+        import requests
+        import narrative_eval as N
+        r = requests.Response(); r.status_code = 500
+        with mock.patch.object(N, "get_all", side_effect=requests.HTTPError("500", response=r)):
+            with self.assertRaises(requests.HTTPError):
+                N.read_base("t", "appA", "Metadata", [])
+
+
 if __name__ == "__main__":
     unittest.main()
