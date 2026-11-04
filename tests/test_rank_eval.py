@@ -74,6 +74,28 @@ class Scoring(unittest.TestCase):
         self.assertEqual(R.order(zs)[0], 2)                          # BM25F prefers the table row
         self.assertEqual(len(per), 1)
 
+    def test_marking_terms(self):
+        pages = {1: "the company annual report sustainability", 2: "the company headcount employees workforce 30,100",
+                 3: "the company annual report finance"}
+        m = R.marking_terms(pages, {2})
+        self.assertAlmostEqual(m["headcount"], 1 - 1 / 3)       # only on the cited page
+        self.assertEqual(m["company"], 0)                        # on every page: marks nothing
+        self.assertNotIn("100", m)                               # numbers do not carry over to another company
+
+    def test_expansion_needs_support_and_skips_the_query(self):
+        cases = [{"attribute": "A", "marks": {"headcount": 0.9, "employees": 0.9, "acme": 0.95}} for _ in range(3)]
+        cases.append({"attribute": "A", "marks": {"zebra": 0.99}})
+        cases.append({"attribute": "B", "marks": {"tco2e": 0.9}})
+        self.assertEqual(R.expansion(cases, "A", {"employees"}), ["acme", "headcount"])
+        self.assertEqual(R.expansion(cases, "A", {"employees"}, support=4), [])
+
+    def test_weighted_bm25(self):
+        tf = {"employees": 1, "headcount": 1}
+        full = R.bm25_weighted(tf, 10, 10, {"employees": 1.0, "headcount": 1.0}, {"employees": 1, "headcount": 1})
+        low = R.bm25_weighted(tf, 10, 10, {"employees": 1.0, "headcount": 0.3}, {"employees": 1, "headcount": 1})
+        self.assertLess(low, full)
+        self.assertAlmostEqual(low, R.bm25(tf, 10, 10, ["employees"], {"employees": 1}) * 1.3)
+
     def test_metrics(self):
         m = R.metrics([1, 2, 5, None])
         self.assertEqual(m["top 1"], 0.25)
