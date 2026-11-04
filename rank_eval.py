@@ -5,7 +5,7 @@ rank_eval.py: would a better page ranking find the page the analyst cited more o
 An offline experiment (proposals 1 and 2 of the information retrieval review, 4 Nov 2026). It takes the
 same validated answers as gold_eval.py (a quote, a source, the cited document in the library, its text in
 the evidence database, and the quote found in that text, so the cited page is known in our numbering) and
-ranks every page of the cited document nine ways:
+ranks every page of the cited document eleven ways:
   ts best-of     today's ts_rank_cd, best rank over the attribute's alternative queries (what gold_eval.py
                  reports; generous, as it picks the luckiest query after the fact);
   ts single      ts_rank_cd of one query holding all the alternatives (one list, as a reader would get);
@@ -15,6 +15,8 @@ ranks every page of the cited document nine ways:
   bm25 fused     several queries put high comes first): one list, with no hindsight about which query fits;
   zones single,  BM25F: a query word in a table row or a heading counts more than in running text (weights in
   zones fused    ZONE_WEIGHTS, by attribute kind), as one query and fused over the alternatives;
+  expanded       BM25 with words added to the query that mark the cited page in other companies' reports
+  single, fused  (learned per attribute on the other folds' cited pages, weight 0.3), as one query and fused;
   learned        a logistic regression over page features (both scores, word coverage, phrase hits, labels at a
                  line start, number density, the year, position in the document), trained on the cited pages
                  of the other companies (five folds split by company, so no company scores its own pages).
@@ -38,7 +40,10 @@ NEGATIVES = 20                  # training pages per answer that are not cited: 
 EPOCHS, RATE, L2 = 200, 0.5, 1e-3
 RRF_K = 60                      # reciprocal rank fusion constant, the usual default
 METHODS = ["ts best-of", "ts single", "ts fused", "bm25 single", "bm25 best-of", "bm25 fused", "zones single",
-           "zones fused", "learned"]
+           "zones fused", "expanded single", "expanded fused", "learned"]
+# Query expansion (proposal 4): words that mark the cited page within its document, learned per attribute from
+# the other companies' cited pages (same folds as the learned ranker), added to the query at a lower weight.
+EXPAND_TERMS, EXPAND_WEIGHT, EXPAND_SUPPORT = 10, 0.3, 3
 # Zone weights for BM25F (proposal 3): a query word counts this many times when it sits in a table row (a short
 # line holding numbers), a heading (a short line with no closing punctuation) or running text. Numbers live in
 # table rows; who is responsible for what is announced in headings ("Board oversight of climate").
@@ -157,6 +162,45 @@ def zone_scores(pages, attr, queries, idfs, avg_len):
         for i, q in enumerate(queries):
             per[i][p] = bm25f(ztf, length, avg_len, query_terms(q), idfs, w)
     return single, per
+
+
+def marking_terms(pages, target):
+    """{word: how well it marks the cited pages of this document}: for each word on a cited page, 1 minus the
+    share of the document's pages that hold it. A word on every page scores 0; a word only on the cited page
+    scores close to 1. Numbers and stop words are left out (they do not carry over to another company)."""
+    sets = {p: set(tokens(b)) for p, b in pages.items()}
+    n = len(sets) or 1
+    cited = set().union(*(sets[p] for p in target if p in sets)) if target else set()
+    out = {}
+    for w in cited:
+        if len(w) < 3 or w in G.STOP or not w.isalpha():
+            continue
+        out[w] = 1 - sum(1 for s in sets.values() if w in s) / n
+    return out
+
+
+def expansion(cases, attr, exclude, k=EXPAND_TERMS, support=EXPAND_SUPPORT):
+    """The k words that best mark the cited page across these cases of one attribute (their marking scores
+    summed), found on the cited pages of at least `support` cases and not already in the query."""
+    total, seen = collections.Counter(), collections.Counter()
+    for c in cases:
+        if c["attribute"] != attr:
+            continue
+        for w, v in c["marks"].items():
+            total[w] += v; seen[w] += 1
+    ranked = [w for w, _ in total.most_common() if seen[w] >= support and w not in exclude]
+    return ranked[:k]
+
+
+def bm25_weighted(tf, length, avg_len, weights, idfs, k1=K1, b=B):
+    """BM25 with a weight per query word (1 for the query's own words, EXPAND_WEIGHT for added ones)."""
+    s = 0.0
+    norm = k1 * (1 - b + b * length / (avg_len or 1))
+    for t, wt in weights.items():
+        f = tf.get(t, 0)
+        if f:
+            s += wt * idfs.get(t, 0.0) * f * (k1 + 1) / (f + norm)
+    return s
 
 
 def fuse(rankings, k=RRF_K):
@@ -385,7 +429,8 @@ def main():
             feats, bm, per_bm = page_features(pages, g["attribute"], g["year"] or 0, queries, idfs, avg_len, ts)
             zs, per_zs = zone_scores(pages, g["attribute"], queries, idfs, avg_len)
             cases.append({"attribute": g["attribute"], "wba": g["wba"], "id": g["id"], "target": target, "features": feats,
-                          "bm25": bm, "ranks": {
+                          "bm25": bm, "per_bm": per_bm, "marks": marking_terms(pages, target),
+                          "pages_z": zlib.compress(json.dumps(pages).encode()), "ranks": {
                               "ts best-of": best_of(per_ts, target),
                               "ts single": G.rank_of(target, order(ts)),
                               "ts fused": G.rank_of(target, order(fuse(per_ts))),
@@ -394,6 +439,34 @@ def main():
                               "bm25 fused": G.rank_of(target, order(fuse(per_bm))),
                               "zones single": G.rank_of(target, order(zs)),
                               "zones fused": G.rank_of(target, order(fuse(per_zs)))}})
+        # query expansion, per fold so no company's own cited page shapes its query
+        expanded_by = {}
+        for f in range(FOLDS):
+            train_cases = [c for c in cases if fold_of(c["wba"]) != f]
+            for code in codes:
+                base = {t for q in cfg["attributes"][code]["queries"] for t in query_terms(q)}
+                expanded_by[(f, code)] = expansion(train_cases, code, base)
+        everyone = {code: expansion(cases, code, {t for q in cfg["attributes"][code]["queries"] for t in query_terms(q)})
+                    for code in codes}
+        new_terms = {t for ts in list(expanded_by.values()) + list(everyone.values()) for t in ts} - set(idfs)
+        if new_terms:
+            cur.execute("set statement_timeout = '300s'")
+            _, dfs2, _ = collection_stats(cur, new_terms)
+            idfs.update({t: idf(dfs2.get(t, 0), n_sample) for t in new_terms})
+    for c in cases:
+        extra = expanded_by.get((fold_of(c["wba"]), c["attribute"]), [])
+        base = {t for q in cfg["attributes"][c["attribute"]]["queries"] for t in query_terms(q)}
+        wts = {**{t: EXPAND_WEIGHT for t in extra}, **{t: 1.0 for t in base}}
+        pages = {int(k): v for k, v in json.loads(zlib.decompress(c.pop("pages_z"))).items()}
+        exp = {}
+        for p, body in pages.items():
+            tf = collections.Counter(tokens(body))
+            exp[p] = bm25_weighted(tf, len(tf), avg_len, wts, idfs)
+        only_extra = {p: bm25_weighted(collections.Counter(tokens(b)), len(set(tokens(b))), avg_len,
+                                       {t: 1.0 for t in extra}, idfs) for p, b in pages.items()} if extra else {}
+        c["ranks"]["expanded single"] = G.rank_of(c["target"], order(exp))
+        c["ranks"]["expanded fused"] = G.rank_of(c["target"], order(fuse(c.pop("per_bm") + ([only_extra] if extra else []))))
+        c.pop("marks", None)
     weights = cross_validate(cases)
 
     table = {}
@@ -416,6 +489,9 @@ def main():
         name = "All attributes" if c == "all" else f"{c} {cfg['attributes'][c]['name']}"
         cells = [f"{m['top 1']:.0%} / {m['top 3']:.0%} / {m['top 10']:.0%}, {m['mrr']:.2f}" for m in (table[c][k] for k in METHODS)]
         md.append(f"| {name} | {n:,} | " + " | ".join(cells) + " |")
+    md += ["", "Words added to each attribute's query (learned from all usable answers' cited pages; each run "
+           "scores a company with words learned from the other companies only):", ""]
+    md += [f"- {c} {cfg['attributes'][c]['name']}: {', '.join(everyone.get(c, [])) or 'none'}" for c in codes if everyone.get(c)]
     md += ["", "Learned weights (trained on all usable answers; features scaled 0 to 1): "
            + ", ".join(f"{f} {w:+.2f}" for f, w in sorted(zip(FEATURES, weights), key=lambda t: -abs(t[1]))) + "."]
     open("rank_eval.md", "w").write("\n".join(md) + "\n")
