@@ -117,6 +117,7 @@ How to use the fields day to day is in [guide.md](guide.md).
 | `file_size_mb` | number | robot | Size of the attached file in MB, written by the robot from the attachment. Very small values (under ~0.1 MB) usually mean an error page or a cut-off download. |
 | `doc_year_from` | pick one | robot | Where doc_year came from (written by date_documents.py): file name = a year in the file name; cover = the reporting period printed on the first pages; address = the upload folder in the link (weakest); waiting for cover = provisional until the file's first pages are read; filing = regulator filing's own year; none = nothing found. Values: file name, cover, address, waiting for cover, filing, none, source library. |
 | `fiscal_year` | number | robot | Year in which the reporting period this document covers ENDS (Source Library convention), read from the full text by fiscal_years.py. Trust it when year_score is 60 or more. |
+| `fiscal_year_wba` | formula | formula | The WBA reporting year from fiscal_year and the year-end month: a year ending January to May counts as the year before, June to December as its own (`<= 5` since 4 Nov 2026, #205; it was `<= 6`). Same rule as `reporting_year.py`. |
 | `year_score` | number | robot | Confidence in fiscal_year, 0-100. Checked against analysts' fiscal-year-end dates: 80+ was right 99% of the time, 60-79 about 96%, below 60 not reliable (the year formula ignores it). |
 | `year_basis` | pick one | robot | What decided fiscal_year: scope = the report says what period it covers; period = 'year ended <date>' statements; title = the report title; label = FY labels / balance dates only; none = no evidence found. Values: scope, period, title, label, none. |
 | `year_evidence` | long text | robot | The sentence (and page) that decided fiscal_year, so anyone can check it in the PDF. |
@@ -314,7 +315,7 @@ One row per company, benchmark attribute, year and method: a value proposed by a
 | `wba_id` | text | robot |  |
 | `attribute` | text | robot | WBA metadata code, e.g. GMC_00048.1. |
 | `attribute_name` | text | robot | From attributes.json. |
-| `year` | number | robot | WBA reporting year (a fiscal year ending January to June counts as the previous year). |
+| `year` | number | robot | WBA reporting year (`reporting_year.py`: a year ending 30 June Y to 29 June Y+1 is year Y; with only the month known, January to May count as the previous year, June as its own). |
 | `value` | number | robot | In full units (not thousands or millions). |
 | `unit` | text | robot | Currency code or tCO2e. |
 | `method` | pick one | robot | How the value was found: SEC XBRL, ESEF XBRL, rules reader, model reader. |
