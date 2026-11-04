@@ -134,7 +134,8 @@
         "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
         "ifrs-full:Revenue",
         "ifrs-full:RevenueFromContractsWithCustomers"
-      ]
+      ],
+      "reading_notes": "The revenue as the company reports it, in its own reporting currency, not a convenience translation to US dollars. Financial institutions: take the revenue line they report (operating income, net banking income, total income, insurance revenue)."
     },
     "GMC_00001.1": {
       "name": "Scope 1 emissions",
@@ -187,7 +188,8 @@
         "Annual Report"
       ],
       "period": "fiscal_year",
-      "scope": "group"
+      "scope": "group",
+      "reading_notes": "Gross emissions for the whole company in tCO2e, not net of offsets or removals. Watch the unit: kt and Mt mean thousands and millions of tonnes, but 'MtCO2e' is sometimes used for metric tonnes; check it against the other figures in the same table."
     },
     "GMC_00002.1": {
       "name": "Scope 2 emissions, location-based",
@@ -245,7 +247,8 @@
       },
       "siblings": [
         "GMC_00001.1"
-      ]
+      ],
+      "reading_notes": "Gross emissions for the whole company in tCO2e, not net of offsets or removals. Watch the unit: kt and Mt mean thousands and millions of tonnes, but 'MtCO2e' is sometimes used for metric tonnes; check it against the other figures in the same table."
     },
     "GMC_00003.1": {
       "name": "Scope 2 emissions, market-based",
@@ -303,7 +306,8 @@
       },
       "siblings": [
         "GMC_00001.1"
-      ]
+      ],
+      "reading_notes": "Gross emissions for the whole company in tCO2e, not net of offsets or removals. Watch the unit: kt and Mt mean thousands and millions of tonnes, but 'MtCO2e' is sometimes used for metric tonnes; check it against the other figures in the same table."
     },
     "GMC_00064.1": {
       "name": "Low-carbon capital expenditure",
@@ -432,7 +436,7 @@
     },
     "GMC_02526.1": {
       "name": "Total number of employees",
-      "definition": "Total number of employees of the company (headcount at the end of the reporting year, whole group).",
+      "definition": "Total number of employees of the company for the reporting year, whole group: the highest employment figure the company reports, including contractors and temporary employees when they are reported (SDG2000 data collection guidance, FY2024 update).",
       "type": "number",
       "unit_family": "count",
       "labels": [
@@ -500,7 +504,8 @@
       "xbrl": [
         "dei:EntityNumberOfEmployees",
         "ifrs-full:NumberOfEmployees"
-      ]
+      ],
+      "reading_notes": "When the report gives several figures (end of year, average, FTE, headcount, permanent only, by region), take the highest figure for the whole group, and prefer a printed total that includes contractors and temporary employees when there is one ('total workforce including contractors'). Give a number the page prints, never a sum you make. A figure for one country or one business is not the group's total."
     }
   },
   "_about_siblings": "siblings: attributes whose figure is printed on the same page or next to it (2 Nov 2026, 331 company-years: Scope 1 and Scope 2 on the same page 89 to 93% of the time, revenue and low-carbon capex 46%, within two pages 70%). The sibling's best page is found first and the attribute's pages there and next to it score higher (extract_eval.sibling_pages)."
