@@ -61,22 +61,23 @@ MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Augus
 def fiscal_note(g):
     """The sentence that says when this company's fiscal year ends and which period is the reporting year
     asked, when the year end is known (g["fy_month"], from the company's documents). For a year ending
-    January to June the reporting year is the period ending in the following calendar year (2 Nov 2026: ORIX,
+    January to May the reporting year is the period ending in the following calendar year (2 Nov 2026: ORIX,
     year end March, had the column "2024", the year ended March 31, 2024, read as reporting year 2024)."""
     m = g.get("fy_month")
     y = g["year"]
     if not m or not 1 <= int(m) <= 12:
         return ""
     m = int(m)
-    end_year = y + 1 if m <= 6 else y
+    from reporting_year import shifted
+    end_year = y + 1 if shifted(m) else y
     if m == 12:
         return (f"This company's fiscal year is the calendar year: reporting year {y} is the year ended December 31, {y}. "
                 f"A column headed {y} is that year.")
     start = f"{MONTHS[m % 12]} {end_year - 1}"
     return (f"This company's fiscal year ends in {MONTHS[m - 1]}: reporting year {y} is the year from {start} to "
             f"{MONTHS[m - 1]} {end_year}, printed as \"year ended {MONTHS[m - 1]} {end_year}\", FY{end_year}, "
-            f"FY{str(end_year - 1)[2:]}/{str(end_year)[2:]}" + (f" or (in Japan) FY{end_year - 1}" if m <= 6 else "")
-            + f". Take that column" + (f", not the one for the year ended {MONTHS[m - 1]} {end_year - 1}" if m <= 6 else "")
+            f"FY{str(end_year - 1)[2:]}/{str(end_year)[2:]}" + (f" or (in Japan) FY{end_year - 1}" if shifted(m) else "")
+            + f". Take that column" + (f", not the one for the year ended {MONTHS[m - 1]} {end_year - 1}" if shifted(m) else "")
             + ". For every figure give \"period_end\": the month the column's period ends, as YYYY-MM.")
 
 
@@ -87,7 +88,7 @@ def prompt(g, attr, pages):
              f"Definition: {attr.get('definition', '').strip()}" if attr.get("definition") else "",
              f"Notes: {attr['reading_notes'].strip()}" if attr.get("reading_notes") else "",
              f"Labels it may appear under: {labels}." if labels else "",
-             f"Reporting year: {g['year']}. A fiscal year ending between January and June of {g['year'] + 1} is also "
+             f"Reporting year: {g['year']}. A fiscal year ending between January and May of {g['year'] + 1} is also "
              f"reporting year {g['year']}: a column headed FY{g['year'] + 1}, FY{str(g['year'] + 1)[2:]} or {g['year']}/{str(g['year'] + 1)[2:]} "
              f"for such a year is the one to take, not the column headed {g['year'] - 1} or FY{g['year']} of a company "
              f"whose year ends in March. When several year columns are printed, take the one for this reporting year, "
@@ -181,19 +182,20 @@ def column_year(column):
 
 def period_year(period_end):
     """(reporting year, month) from a period end "YYYY-MM": the year the period ends, or the year before when
-    it ends January to June; (None, None) when there is no month."""
+    it ends January to May (reporting_year.py); (None, None) when there is no month."""
     m = re.fullmatch(r"\s*((?:19|20)\d\d)-(\d\d?)\s*", str(period_end or ""))
     if not m or not 1 <= int(m.group(2)) <= 12:
         return None, None
     y, mo = int(m.group(1)), int(m.group(2))
-    return (y - 1 if mo <= 6 else y), mo
+    from reporting_year import from_end_month
+    return from_end_month(y, mo), mo
 
 
 def check(reply, pages, to_number, numbers_on, fy_month=None):
     """{'value', 'printed', 'scale', 'library_id', 'page', 'unit', 'year', 'column'} when the entry names a page
     that prints the number, else None (nothing usable) or False (a number the page does not print).
     to_number and numbers_on are the rule reader's own parsers. The year must be a reporting year the column
-    heading allows: the heading's year or the one before it (a fiscal year ending January to June). When the
+    heading allows: the heading's year or the one before it (a fiscal year ending January to May). When the
     entry gives the period's end month, the reporting year is taken from it (2 Nov 2026: the model called the
     year ended March 31, 2024 reporting year 2024; it is 2023), and when the company's year end is known
     (fy_month) a period ending in another month is a misread column and the entry is dropped."""

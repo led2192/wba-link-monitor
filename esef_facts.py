@@ -9,7 +9,7 @@ them and serves each one also as xBRL-JSON (`json_url`), a plain list of facts. 
 validated 2025-benchmark revenue answer of a company with an LEI (companies.lei), the company's filings for
 the answer's year and the next, keeps the annual revenue facts with no other dimension (the group total,
 not a segment), and applies sec_facts.py's rule and score unchanged: concept by priority (ESEF_CONCEPTS),
-WBA's fiscal year (a period ending January to June counts as the previous year), the earliest filing that
+WBA's fiscal year (a period ending January to May counts as the previous year), the earliest filing that
 reports the period, a match within 0.5 % in the same currency.
 
 xBRL-JSON writes a duration as "start/end" with the end as the instant after the last day
