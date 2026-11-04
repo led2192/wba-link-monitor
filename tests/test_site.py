@@ -40,5 +40,11 @@ class SitePage(unittest.TestCase):
         self.assertNotIn("render(data.session)", s)
 
 
+    def test_linked_document_is_opened_after_sign_in(self):
+        js = page_script()
+        self.assertIn("openLinked()", re.search(r"function showSession\(session\) \{(.*?)\n  \}", js, flags=re.S).group(1))
+        for p in ('linked.get("doc")', 'linked.get("q")', 'linked.get("alt")', "doc_filter: doc"):
+            self.assertIn(p, js)
+
 if __name__ == "__main__":
     unittest.main()

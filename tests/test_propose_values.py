@@ -74,6 +74,28 @@ class Propose(unittest.TestCase):
         self.assertEqual((f["unit"], f["source_url"], f["matches_validated"]), ("tCO2e", None, "no validated answer"))
         self.assertNotIn("document", f)
 
+    def test_evidence_link_even_without_a_web_address(self):
+        # PACCAR, 4 Nov 2026: a Source Library file with no document_url left source_url and evidence_link blank
+        got = {"value": 30100, "printed": 30100.0, "scale": 1, "library_id": "PT_01360-154b2a9cfe", "page": 2, "unit": ""}
+        f = P.model_row("PT_01360", "GMC_02526.1", {"name": "Total number of employees", "unit_family": "count"}, 2024,
+                        got, {"id": "recDoc", "url": "", "label": "x"}, {}, None, NOW)
+        self.assertIsNone(f["source_url"])
+        self.assertEqual(f["evidence_link"], "https://led2192.github.io/wba-link-monitor/?doc=PT_01360-154b2a9cfe"
+                                             "&page=2&q=%2230%2C100%22&alt=employees")
+        self.assertIsNone(P.evidence_url("", 2, "1"))
+
+    def test_fill_links_reads_the_number_from_detail(self):
+        rows = [{"id": "rec1", "fields": {"library_id": "PT_1-a", "page": 7, "attribute_name": "Scope 1 emissions",
+                                          "detail": "Printed as 41,709.13 (units) on page 7 of x."}},
+                {"id": "rec2", "fields": {"library_id": "PT_1-b", "page": 3, "attribute_name": "Revenue", "detail": ""}}]
+        written = []
+        from unittest import mock
+        with mock.patch.object(P, "fetch", return_value=rows), mock.patch.object(P, "write", side_effect=lambda H, b, c, u: written.extend(u)):
+            self.assertEqual(P.fill_links({}, "appX", commit=True), 2)
+        self.assertIn("q=%2241%2C709.13%22&alt=emissions", written[0][1]["evidence_link"])
+        self.assertTrue(written[1][1]["evidence_link"].endswith("doc=PT_1-b&page=3&q=revenue"))
+        self.assertEqual(set(written[0][1]), {"evidence_link"})          # nothing else is touched
+
     def test_printed_text_keeps_every_digit(self):
         self.assertEqual(P.printed_text(41709.13), "41,709.13")
         self.assertEqual(P.printed_text(2804.0), "2,804")

@@ -192,3 +192,6 @@ Web search passed an own-site file from its title whenever it could not be opene
 ## A refused API call must not throw away the run (3 Nov 2026)
 The model reader raised on a refusal from the API so the run would fail visibly. When the credit ran out four hours into a Propose values pass, that also meant all 8 shards died before their write step, and every read of those four hours was lost. A refusal now ends the reading like the time budget does: write first, then fail with the reason. The same holds for any long job that pays per call.
 
+
+## source_url is blank when the document has no web address (4 Nov 2026)
+Documents imported from the Source Library as files have no document_url, so a value read from them had no link at all (PACCAR employees 2024, page 2), and evidence_link existed as a field that no script wrote. The evidence search page now opens a document by library_id (`?doc=`), which only needs its text in the evidence database. Do not fall back to the Airtable attachment's URL for source_url: those addresses expire after a few hours.
