@@ -18,8 +18,12 @@ and for each site it also records whether robots.txt allows the page and whether
 readable (the robot-friendly door used by the next step, sitemap monitoring).
 
 One request at a time per site, with a pause, so no site sees more than a trickle.
-Output: blocked_diagnosis.csv (one row per page) + a summary in the job log and job summary.
-Env: AIRTABLE_TOKEN, AIRTABLE_BASE.  Options: --limit N (0 = all), --codes 401,403,429
+It then does the same robots.txt check for the documents whose download was refused (report_library,
+file_status blocked, not discarded), so both layers answer "how much of this is robots.txt?".
+
+Output: blocked_diagnosis.csv (one row per page), blocked_documents_robots.csv (one row per refused
+document) + a summary in the job log and job summary.
+Env: AIRTABLE_TOKEN, AIRTABLE_BASE.  Options: --limit N (0 = all), --codes 401,403,429, --no-documents
 """
 import argparse, collections, csv, os, re, sys, time, threading
 from concurrent.futures import ThreadPoolExecutor
@@ -125,6 +129,25 @@ def site_info(url):
     return home_ok, allowed, sm_ok
 
 
+def robots_summary(rows, key, label):
+    """Markdown lines: how many rows robots.txt disallows, allows, or leaves unknown (no readable robots.txt:
+    absent, refused like the pages themselves, or served as an HTML page)."""
+    c = collections.Counter(r["robots_allows"] for r in rows)
+    n = len(rows) or 1
+    hosts = {r["host"] for r in rows if r["robots_allows"] == "no"}
+    return [f"| {label} | {len(rows):,} | {c.get('no', 0):,} ({c.get('no', 0) / n:.1%}) | {c.get('yes', 0):,} "
+            f"| {c.get('unknown', 0):,} | {len({r[key] for r in rows if r['robots_allows'] == 'no'}):,} companies, "
+            f"{len(hosts):,} sites |"]
+
+
+def document_row(rec):
+    f = rec["fields"]; url = f.get("document_url", "")
+    _, allowed, _ = site_info(url)
+    return {"library_id": f.get("library_id", ""), "wba_id": f.get("wba_id", ""),
+            "company": f.get("company_name", ""), "url": url, "host": urlsplit(url).hostname or "",
+            "robots_allows": allowed}
+
+
 def diagnose(rec):
     f = rec["fields"]; url = f.get("url", "")
     base = Site.get(url, MONITOR_HEADERS)
@@ -155,6 +178,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--codes", default="401,403,429")
+    ap.add_argument("--no-documents", action="store_true", help="skip the refused documents")
     a = ap.parse_args()
     if not (TOKEN and BASE):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
@@ -202,6 +226,32 @@ def main():
         lines.append(f"| {labels[k]} | {g.get(k, 0):,} | {comp.get(k, 0):,} |")
     lines += ["", f"Of the {still:,} still refused, **{sm:,}** are on a site whose sitemap we can read.",
               "", "Bot-wall vendors: " + ", ".join(f"{k} {v:,}" for k, v in walls.most_common())]
+
+    docs = []
+    if not a.no_documents:
+        drecs = list(sweep("report_library", ["library_id", "wba_id", "company_name", "document_url"],
+                           "AND({file_status}='blocked', NOT({discard}))"))
+        if a.limit:
+            drecs = drecs[:a.limit]
+        print(f">>> {len(drecs):,} documents whose download was refused; checking robots.txt", flush=True)
+        with ThreadPoolExecutor(max_workers=24) as ex:
+            docs = list(ex.map(document_row, drecs))
+        with open("blocked_documents_robots.csv", "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(docs[0].keys()) if docs else ["url"])
+            w.writeheader(); w.writerows(docs)
+    lines += ["", "### How much of it is robots.txt?", "",
+              "robots.txt is a request to crawlers, not a lock: \"disallows\" means the site asks robots not to "
+              "fetch that address; \"unknown\" means we could not read a robots.txt (none, or refused like the "
+              "pages, or an HTML page in its place).", "",
+              "| what | rows | robots.txt disallows | allows | unknown | where it disallows |",
+              "|---|---:|---:|---:|---:|---|"]
+    for k in ["bot_wall", "page_refused", "fixed_by_headers", "works_now", "page_gone"]:
+        sub = [r for r in rows if r["group"] == k]
+        if sub:
+            lines += robots_summary(sub, "wba_id", f"Pages: {labels[k]}")
+    lines += robots_summary(rows, "wba_id", "**All refused pages**")
+    if docs:
+        lines += robots_summary(docs, "wba_id", "**Documents whose download was refused**")
     out = "\n".join(lines)
     print(out, flush=True)
     if os.environ.get("GITHUB_STEP_SUMMARY"):

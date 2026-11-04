@@ -1,7 +1,8 @@
 name: Diagnose refused pages (manual)
 
 # Read-only. Sorts the monitored pages that answer 401/403/429 into: fixable on our side, page
-# gone, wrong address, or a real bot wall (not bypassed), and checks robots.txt and sitemaps.
+# gone, wrong address, or a real bot wall (not bypassed), and checks robots.txt and sitemaps; then
+# checks robots.txt for every document whose download was refused (file_status blocked).
 on:
   workflow_dispatch:
     inputs:
@@ -13,7 +14,7 @@ on:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,5 +30,7 @@ jobs:
         if: always()
         with:
           name: blocked_diagnosis
-          path: blocked_diagnosis.csv
+          path: |
+            blocked_diagnosis.csv
+            blocked_documents_robots.csv
           if-no-files-found: ignore
