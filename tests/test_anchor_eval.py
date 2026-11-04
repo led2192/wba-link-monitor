@@ -22,5 +22,11 @@ class LinkText(unittest.TestCase):
         self.assertEqual(A.parse_new_links(nl), {"acme.com/ar24.pdf": "Annual Report 2024"})
 
 
+class Filter(unittest.TestCase):
+    def test_rows_with_blank_origin_count_as_found_on_pages(self):
+        # 4 Nov 2026: origin = 'discovery' alone matched no row; harvested rows from before the field are blank
+        self.assertIn("{origin}=''", A.FOUND_ON_PAGES)
+
+
 if __name__ == "__main__":
     unittest.main()

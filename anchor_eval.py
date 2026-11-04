@@ -7,7 +7,7 @@ Proposal 6 of the information retrieval review (4 Nov 2026). On a company's repo
 says what the file is ("Annual Report 2024", "Sustainability Report 2023 (PDF, 12 MB)") while the address is
 often a number (/media/download/3162, /getattachment/8f2c.../). The monitors keep that link text since June
 2026, but only in monitored_links.new_links ("<address>  [<link text>]"), for links that appeared after a
-page's first visit; report_library does not hold it, so type and year never used it.
+page's first visit, and since 4 Nov 2026 for every link in monitored_links.link_texts (and report_library.link_text).
 
 This script measures, before anything is built:
   coverage   how many library documents have link text, and how many of those name a type or a year;
@@ -29,6 +29,9 @@ from monitor_core import airtable_request, normalize
 API = "https://api.airtable.com/v0"
 ENTRY = re.compile(r"(\S+)  \[([^\]]*)\]")
 YEAR = re.compile(r"(?<!\d)(20[0-3]\d)(?:\s*[/-]\s*(\d{2,4}))?(?!\d)")
+# Documents the monitors found on a company page. origin is blank on rows harvested before the field
+# existed (first run, 4 Nov 2026: origin = 'discovery' matched no row at all), so blank counts too.
+FOUND_ON_PAGES = "OR({origin}='', {origin}='discovery')"
 GENERIC = re.compile(r"^(download|pdf|here|click here|read more|view|open|link|report|document|more|\W*)$", re.I)
 
 
@@ -95,12 +98,15 @@ def main():
     a = ap.parse_args()
     base, H = os.environ["AIRTABLE_BASE"], {"Authorization": f"Bearer {os.environ['AIRTABLE_TOKEN']}"}
     run = qa.Run("anchor_eval.py")
-    pages = fetch(H, base, "monitored_links", ["wba_id", "new_links"], "{new_links}!=''")
+    from monitor_core import parse_link_texts
+    pages = fetch(H, base, "monitored_links", ["wba_id", "new_links", "link_texts"], "OR({new_links}!='', {link_texts}!='')")
     anchors = collections.defaultdict(dict)                    # wba_id -> {key: text}
     for r in pages:
         f = r["fields"]
-        for k, t in parse_new_links(f.get("new_links")).items():
-            anchors[f.get("wba_id") or ""].setdefault(k, t)
+        # link_texts (every link, since 4 Nov 2026) first, then the texts kept in new_links before that
+        for k, t in list(parse_link_texts(f.get("link_texts")).items()) + list(parse_new_links(f.get("new_links")).items()):
+            if not GENERIC.match(t):
+                anchors[f.get("wba_id") or ""].setdefault(k, t)
     companies = sorted(w for w in anchors if w)
     if a.companies:
         companies = companies[:a.companies]
@@ -112,9 +118,9 @@ def main():
     if a.companies:
         for i in range(0, len(companies), 25):
             ors = ",".join(f"{{wba_id}}='{w}'" for w in companies[i:i + 25])
-            lib += fetch(H, base, "report_library", fields, f"AND({{origin}}='discovery', NOT({{discard}}), OR({ors}))")
+            lib += fetch(H, base, "report_library", fields, f"AND({FOUND_ON_PAGES}, NOT({{discard}}), OR({ors}))")
     else:
-        lib = fetch(H, base, "report_library", fields, "AND({origin}='discovery', NOT({discard}))")
+        lib = fetch(H, base, "report_library", fields, f"AND({FOUND_ON_PAGES}, NOT({{discard}}))")
     keep = set(companies)
     rows, c = [], collections.Counter()
     for r in lib:
