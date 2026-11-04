@@ -53,12 +53,32 @@ def truth_of(value, null_reason, kind):
 
 # The monthly Metadata 2025 bases (research provider data, 4 Nov 2026): same tables as ACT Core Climate. Their
 # answers were checked by the provider (RP Metadata Status = QC Complete) and only some by WBA (Data Reviewed).
-MONTHLY_BASES = {"Base One": "app6oIEJuBV9fkwux", "04 April": "appOh8lbdjRU08tip", "05 May": "appLyRVbDKcYETefX",
+# Base One (app6oIEJuBV9fkwux) is left out: it is the older layout (no Selected Value in Metadata, no Definition
+# in Metadata Codes) and GOLD_TOKEN is refused there (403, 4 Nov 2026). Pass its id in --bases to try it anyway.
+MONTHLY_BASES = {"04 April": "appOh8lbdjRU08tip", "05 May": "appLyRVbDKcYETefX",
                  "06 June": "appBpCZ7Eubjp5qnE", "07 July": "appmw5rspmqzXex8F", "08 August": "appISahYczxmATrPs",
                  "09 September": "appwor3cfMbuxvl7N", "10 October": "appsCozkZy4WJKakY", "00 ACT Core ESGDS": "app22yRgus8TlNxBW"}
 TIERS = {"reviewed": "{Data Reviewed}",                              # checked by WBA: the validated answers
          "provider": "{RP Metadata Status}='QC Complete'"}           # checked by the research provider only
 TYPES = {"Boolean": "boolean", "Multiple Select": "multiple select", "Single Select": "multiple select"}
+
+
+SKIPPED = []                            # (base, table, reason) for every base that refused a read: in the report
+
+
+def read_base(token, base, table, fields, formula=None):
+    """get_all, but a base the token cannot read (401, 403, 404) or that lacks a field (422) is skipped and
+    noted in SKIPPED, so one refused base does not stop the run over the others."""
+    import requests
+    try:
+        return get_all(token, base, table, fields, formula)
+    except requests.HTTPError as e:
+        code = getattr(e.response, "status_code", None)
+        if code not in (401, 403, 404, 422):
+            raise
+        SKIPPED.append((base, table, f"HTTP {code}"))
+        print(f"  skipped {base} {table}: HTTP {code}", flush=True)
+        return []
 
 
 def gold_answers(token, codes, bases=(GOLD_BASE,), tier="reviewed"):
@@ -67,7 +87,7 @@ def gold_answers(token, codes, bases=(GOLD_BASE,), tier="reviewed"):
     formula = f"AND({where}, OR(" + ",".join(f"FIND('-{c}-', {{Metadata ID}})" for c in codes) + "))"
     rows = []
     for b in bases:
-        rows += get_all(token, b, "Metadata", ["Metadata ID", "Selected Value", "Null Value Reasoning", "Evidence", "Page Number"],
+        rows += read_base(token, b, "Metadata", ["Metadata ID", "Selected Value", "Null Value Reasoning", "Evidence", "Page Number"],
                         formula)
     out, seen = [], set()
     for r in rows:
@@ -91,7 +111,7 @@ def auto_attributes(token, bases, tier, n, have):
     where = TIERS[tier] if tier == "reviewed" else f"AND({TIERS[tier]}, NOT({{Data Reviewed}}))"
     count = C.Counter()
     for b in bases:
-        for r in get_all(token, b, "Metadata", ["Metadata ID", "GMC Type", "Null Value Reasoning"],
+        for r in read_base(token, b, "Metadata", ["Metadata ID", "GMC Type", "Null Value Reasoning"],
                          f"AND({where}, OR(FIND('Boolean', {{GMC Type}}&''), FIND('Select', {{GMC Type}}&'')))"):
             f = r["fields"]
             nr = f.get("Null Value Reasoning")
@@ -101,9 +121,12 @@ def auto_attributes(token, bases, tier, n, have):
                 count[code] += 1
     codes = [c for c, _ in count.most_common() if c not in have][:max(n * 3, n)]
     meta = {}
-    for r in get_all(token, bases[0], "Metadata Codes", ["Global Metadata Code (GMC)", "Description", "Definition", "Data Type", "Select Options"]):
-        f = r["fields"]
-        meta[(f.get("Global Metadata Code (GMC)") or "").strip()] = f
+    for b in bases:                     # the first base that answers: Metadata Codes is the same list in each
+        for r in read_base(token, b, "Metadata Codes", ["Global Metadata Code (GMC)", "Description", "Definition", "Data Type", "Select Options"]):
+            f = r["fields"]
+            meta[(f.get("Global Metadata Code (GMC)") or "").strip()] = f
+        if meta:
+            break
     out = {}
     for c in codes:
         f = meta.get(c) or {}
@@ -316,7 +339,9 @@ def main():
               + ("reviewed by WBA (Data Reviewed)." if a.tier == "reviewed" else
                  "checked by the research provider only (QC Complete, not reviewed by WBA): a second-tier reference, "
                  "where a miss may be the provider's.")
-              + (" Attributes chosen by number of answers, their question taken from Metadata Codes." if a.auto else ""))
+              + (" Attributes chosen by number of answers, their question taken from Metadata Codes." if a.auto else "")
+              + ("" if not SKIPPED else " Skipped (refused or missing a field): "
+                 + "; ".join(sorted({f"{b} {t} ({why})" for b, t, why in SKIPPED})) + "."))
     md = report(codes, cfg, stats, wrong, usage, cost(usage), source)
     if stop:
         md += f"\nStopped at {stop}.\n"

@@ -209,3 +209,9 @@ One query with a count per word over the 1% page sample is fine for 60 words and
 
 ## The evidence database takes 15 clients at once (4 Nov 2026)
 The Supabase session pooler allows 15 connections. Propose values with 8 shards plus another with 4 held 12, and two evaluations started beside them failed on connect (EMAXCONNSESSION). Open the database with `evidence_db.connect()`, which waits for a place; and keep shards modest when other database jobs are queued.
+
+## Manual runs of one workflow can cancel each other (4 Nov 2026)
+A concurrency group keyed on the branch with cancel-in-progress cancels any older run on that branch, manual ones included. Two Generic reader runs started from main a minute apart (ts and bm25) left only the second. Key the group on the run id for workflow_dispatch and on the ref only for pull requests.
+
+## The monthly Metadata bases are not all one layout (4 Nov 2026)
+Base One (app6oIEJuBV9fkwux) has Boolean, Number and Select Options Text but no Selected Value in Metadata and no Definition in Metadata Codes; April to October have both. GOLD_TOKEN was also refused there (403). Check a base's fields before adding it to a list read by name, and read each base so that one refusal is skipped and reported, not fatal.
