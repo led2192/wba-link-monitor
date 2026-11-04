@@ -56,6 +56,24 @@ class Scoring(unittest.TestCase):
         self.assertEqual(R.order(fused)[0], 2)
         self.assertNotIn(4, R.fuse([{4: 0.0, 1: 1.0}]))  # a page with no match is not ranked
 
+    def test_zones(self):
+        self.assertEqual(R.line_zone("Total revenue 4,120 3,980"), "table")
+        self.assertEqual(R.line_zone("Board oversight of climate-related issues"), "heading")
+        self.assertEqual(R.line_zone("Our revenue grew because customers bought more of our products in every region."), "prose")
+        self.assertIsNone(R.line_zone("   "))
+
+    def test_zones_lift_the_table_over_the_narrative(self):
+        # the Revenue case: the word is on every page, the table row is what marks the right one
+        pages = {1: "Revenue grew strongly this year as revenue from new markets rose and sales per customer improved.",
+                 2: "Consolidated income statement\nRevenue 4,120 3,980\nCost of sales (2,100) (2,050)"}
+        idfs = {"revenue": 0.5, "total": 0.4}
+        plain, _ = {p: R.bm25(__import__("collections").Counter(R.tokens(b)), len(set(R.tokens(b))), 12, ["revenue"], idfs)
+                    for p, b in pages.items()}, None
+        self.assertEqual(R.order(plain)[0], 1)                       # plain BM25 prefers the page that repeats the word
+        zs, per = R.zone_scores(pages, "GMC_00048.1", ["revenue"], idfs, 12)
+        self.assertEqual(R.order(zs)[0], 2)                          # BM25F prefers the table row
+        self.assertEqual(len(per), 1)
+
     def test_metrics(self):
         m = R.metrics([1, 2, 5, None])
         self.assertEqual(m["top 1"], 0.25)
