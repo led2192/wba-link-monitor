@@ -515,3 +515,17 @@ One row per scoring of one rule or prompt against the golden set. Today written 
 | `regressions` | long text | robot | Cases that were right in the live version and wrong in this one, one label_id and the two answers per line |
 | `verdict` | pick one | robot | ship = passes the ship rule; hold = does not; baseline = the live version's own score Values: ship, hold, baseline. |
 | `notes` | long text | robot |  |
+
+### attribute_guidance
+
+| Field | Kind | Who writes it | What it means |
+| --- | --- | --- | --- |
+| `guidance_id` | text | robot | dimension, indicator and attribute: the key a reload matches on. |
+| `dimension`, `area`, `indicator`, `indicator_statement`, `attribute` | text / pick one | robot | Where the attribute sits in the methodology. |
+| `gmc_code` | text | you | The GMC code once the attribute has one. |
+| `type`, `type_as_written` | pick one / text | robot | boolean, multiple select, single select or number; and the type as the document writes it. |
+| `options`, `unit`, `entity_type`, `null_codes` | long text | robot | As in the document. |
+| `description`, `collection_guidance`, `evaluation_guidance` | long text | robot | What the attribute asks, what text to collect, how to judge it. The readers put these in their prompt. |
+| `source_document`, `status` | text / pick one | robot | Which document and whether it is a draft or final. |
+| `edited` | checkbox | you | Tick after correcting a row by hand: reloads leave it alone. |
+| `notes` | long text | you | Free notes. |
