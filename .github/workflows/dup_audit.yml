@@ -1,0 +1,56 @@
+name: Near-duplicate audit
+
+# Documents of one company that are the same report, or one inside another (dup_audit.py): page fingerprints
+# compared within each company in the evidence database. Read-only; nothing is discarded. The pairs are in
+# the run's artifact (near_duplicates.csv). Manual; a pull request touching it runs 60 companies and posts
+# the summary.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "companies (0 = all)"
+        default: "0"
+      wba:
+        description: "wba ids, comma-separated (blank = by limit)"
+        default: ""
+  pull_request:
+    paths: [dup_audit.py, .github/workflows/dup_audit.yml]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Audit
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 60 --budget 40"
+          else ARGS="--limit ${{ inputs.limit }}"; [ -n "${{ inputs.wba }}" ] && ARGS="$ARGS --wba ${{ inputs.wba }}"; fi
+          python dup_audit.py $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: near-duplicates
+          path: |
+            near_duplicates.md
+            near_duplicates.csv
+          if-no-files-found: ignore
+      - name: Post the summary on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s near_duplicates.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file near_duplicates.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Near-duplicate audit: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
