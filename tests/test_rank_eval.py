@@ -135,5 +135,27 @@ class Learning(unittest.TestCase):
         self.assertEqual(len(rows), 2 + R.NEGATIVES)
 
 
+class Stats(unittest.TestCase):
+    def test_word_counts_in_chunks_and_a_cancelled_chunk_is_left_out(self):
+        class Conn:
+            rolled = 0
+            def rollback(self): Conn.rolled += 1
+        class Cur:
+            connection = Conn()
+            calls = 0
+            def execute(self, sql, args):
+                Cur.calls += 1
+                if Cur.calls == 2:
+                    raise RuntimeError("canceling statement due to statement timeout")
+                self.row = (1000, 300.0) + tuple(7 for _ in args)
+            def fetchone(self): return self.row
+        terms = [f"w{i:03d}" for i in range(100)]
+        n, dfs, avg = R.collection_stats(Cur(), terms, chunk=40)
+        self.assertEqual((n, avg), (1000, 300.0))
+        self.assertEqual(Cur.calls, 3)                       # 40 + 40 + 20
+        self.assertEqual(len(dfs), 60)                       # the second chunk was cancelled
+        self.assertEqual(Conn.rolled, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

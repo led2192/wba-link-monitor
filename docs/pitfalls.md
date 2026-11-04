@@ -203,3 +203,6 @@ report_library.origin was added after most documents were harvested, and those r
 
 ## A 30 June year end is its own year (4 Nov 2026)
 "January to June counts as the previous year" was one month too wide. The guidance's table puts the year ending 30 June 2024 in fiscal year 2024 and the year ending 29 June 2025 in 2024 too (52/53-week years). Use `reporting_year.from_end_date` when the day is known and `from_end_month` (January to May shift) when only the month is; never write the month test inline.
+
+## Count many words in small passes (4 Nov 2026)
+One query with a count per word over the 1% page sample is fine for 60 words and times out for 550 (rank_eval.py lost a 100-minute run at its very end). `rank_eval.collection_stats` now counts 40 words a pass and skips a pass the database cancels. Anything that runs after a long read should not be able to fail the whole run.

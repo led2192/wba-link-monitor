@@ -332,16 +332,31 @@ def metrics(ranks):
 # ----------------------------------------------------------------------------------------------
 # Evidence database (read only)
 # ----------------------------------------------------------------------------------------------
-def collection_stats(cur, terms, pct=SAMPLE_PCT):
+STATS_CHUNK = 40                # words counted per pass over the sample (4 Nov 2026: 550 words in one pass hit
+                                # the 300-second limit after 100 minutes of reading, and the run was lost)
+
+
+def collection_stats(cur, terms, pct=SAMPLE_PCT, chunk=STATS_CHUNK):
     """(pages in the sample, {term: pages holding it}, average page length in words) from a repeatable
-    sample of public.pages: one pass, instead of one count per word over the whole table."""
+    sample of public.pages, counting up to `chunk` words per pass. A pass the database cancels leaves its
+    words out (no idf: they count for nothing) instead of failing the run; the connection is rolled back
+    so the run goes on."""
     terms = sorted(set(terms))
-    cols = ", ".join(f"count(*) filter (where words @@ to_tsquery('simple', %s))" for _ in terms)
-    cur.execute(f"select count(*), avg(length(words)){', ' + cols if cols else ''} "
-                f"from public.pages tablesample system ({pct}) repeatable (42)", terms)
-    r = cur.fetchone()
-    n = r[0] or 1
-    return n, {t: r[2 + i] for i, t in enumerate(terms)}, float(r[1] or 0)
+    n, avg, dfs = 0, 0.0, {}
+    for i in range(0, max(len(terms), 1), chunk):
+        part = terms[i:i + chunk]
+        cols = ", ".join(f"count(*) filter (where words @@ to_tsquery('simple', %s))" for _ in part)
+        try:
+            cur.execute(f"select count(*), avg(length(words)){', ' + cols if cols else ''} "
+                        f"from public.pages tablesample system ({pct}) repeatable (42)", part)
+            r = cur.fetchone()
+        except Exception as e:
+            print(f"  word counts for {len(part)} words not read ({type(e).__name__}); they are left out", flush=True)
+            cur.connection.rollback()
+            continue
+        n, avg = n or (r[0] or 1), avg or float(r[1] or 0)
+        dfs.update({t: r[2 + j] for j, t in enumerate(part)})
+    return n or 1, dfs, avg
 
 
 def doc_pages(cur, lid, single, ors):
