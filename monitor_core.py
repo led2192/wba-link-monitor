@@ -116,7 +116,10 @@ FRAMEWORK_SUFFIXES = (
 # Status codes that mean "the site refuses robots", not "the page is gone" (ADB, ASML, Air Products,
 # ~2,000 monitored pages in Oct 2026, all labelled dead while working fine in a normal browser).
 # Those pages get status 'blocked'. We do not try to get around the block.
-BLOCKED_CODES = {401, 403, 429}
+# Since 4 Nov 2026 also the codes firewalls use to turn robots away without saying 403: 405 (CNPC's
+# neighbours, Central Pattana: 151 pages), 412 (CNPC, 31), 418, 444 (no response) and 567 (a vendor's own
+# code, 21). They were labelled dead, which hid about 215 refused pages among the broken ones.
+BLOCKED_CODES = {401, 403, 429, 405, 412, 418, 444, 567}
 
 DAM_SUFFIXES = ("widen.net", "widencdn.net", "bynder.com", "brandfolder.com", "brandfolder.io",
                 "frontify.com", "canto.com", "ctfassets.net")
