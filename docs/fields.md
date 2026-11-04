@@ -29,6 +29,7 @@ How to use the fields day to day is in [guide.md](guide.md).
 | `content_hash` | long text | robot |  |
 | `notes` | long text | you | Free notes about this page: why it was added, why monitoring was turned off, quirks of the site. |
 | `seen_links` | long text | robot | Every document link ever seen on this page. This is what the harvester turns into library rows, so an empty list on a page full of documents is a collection bug worth escalating. |
+| `link_texts` | long text | robot | The text of every document link on the page, one per line: address, a tab, the link text ("Annual Report 2024"). Written by the monitors on every read since 4 Nov 2026; harvest copies each text to report_library.link_text. |
 | `new_links` | long text | robot | Document links that appeared on this page since the previous check, newest first with the date. This is where a fresh publication shows up first. |
 | `assigned_analyst` | person | you |  |
 | `report_library` | link to rows | robot | Documents harvested from this page. |
@@ -89,6 +90,7 @@ How to use the fields day to day is in [guide.md](guide.md).
 | `Reviewer notes` | long text | you | Free notes for anything the fields cannot express: doubts, group structures, why you chose a type. Read during pilot reviews. |
 | `origin` | pick one | robot | How the document reached the library: discovery (the monitor and the harvest), web search or research (Serper and the daily research, through research_link), added by hand (add_link, add_file), Source Library 2024 / 2025 / 2026 (imported from the analysts' collection). Since 2 Nov 2026; older Source Library and research rows are tagged from their Reviewer notes (`import_source_library.py --tag-existing`), the rest of the older rows are blank, which means discovery. Imported rows show how complete the library is, not how good the discovery is: measure the discovery without them. |
 | `found_on` | link | robot | The company page this document was found on. Useful when you suspect a misattribution: open it and see whose site it is. |
+| `link_text` | text | robot | The text of the link the document was found under on the company's page ("Annual Report 2024", "Chapter 3: Environment"). Often says type, year, scope and language better than the address. Written by harvest since 4 Nov 2026; older rows fill in over the next harvests. |
 | `page_type` | pick one | robot | Type of the page the document was found on. Values: investor_relations, sustainability_page, policies, reports_hub, sustainability_report. |
 | `doc_year` | text | robot | Year from the rules (file name, cover, filing, address). One input to `year`; doc_year_from says where it came from. |
 | `source_link_id` | text | robot |  |

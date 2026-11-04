@@ -41,7 +41,7 @@ API = "https://api.airtable.com/v0"
 F_WBA="wba_id"; F_NAME="company_name"; F_URL="url"; F_FREQ="frequency"; F_MON="monitor"
 F_TYPE="type"; F_STATUS="status"; F_HTTP="http_status"; F_FINAL="final_url"
 F_CHECKED="last_checked"; F_HASH="content_hash"
-F_SEEN="seen_links"; F_NEW="new_links"; F_CHANGE="last_change"; F_ALERT="alert_status"
+F_SEEN="seen_links"; F_LINK_TEXTS="link_texts"; F_NEW="new_links"; F_CHANGE="last_change"; F_ALERT="alert_status"
 F_BROWSER="needs_browser"
 F_LANG="page_language"
 
@@ -308,6 +308,32 @@ def page_language(html):
         return None
 
 
+def link_texts_field(current, limit=90000):
+    """monitored_links.link_texts from doc_links' {key: (url, text)}: '<url>\t<text>' per line, sorted by key,
+    tabs and line breaks in the text flattened, cut to `limit` characters at a line end."""
+    lines, size = [], 0
+    for n in sorted(current):
+        url, text = current[n]
+        text = re.sub(r"\s+", " ", (text or "")).strip()
+        if not text:
+            continue
+        line = f"{url}\t{text}"
+        if size + len(line) + 1 > limit:
+            break
+        lines.append(line); size += len(line) + 1
+    return "\n".join(lines)
+
+
+def parse_link_texts(value):
+    """{normalize(url): text} from a monitored_links.link_texts value."""
+    out = {}
+    for line in (value or "").split("\n"):
+        url, _, text = line.partition("\t")
+        if url and text.strip():
+            out.setdefault(normalize(url.strip()), text.strip())
+    return out
+
+
 def detection_fields(f, upd, current, had_baseline, today):
     """Diff the page's report links vs what we saw last time, write seen_links/new_links,
     gate the alert, and build the detection rows. `today` is a datetime.date.
@@ -322,6 +348,11 @@ def detection_fields(f, upd, current, had_baseline, today):
 
     # Store the FETCHABLE absolute URL, not the dedup key, so links are clickable/downloadable.
     upd[F_SEEN] = "\n".join(current[n][0] for n in sorted(cur))[:90000]
+    # The link text of every document link on the page, "<fetchable URL>\t<text>" one per line (4 Nov 2026):
+    # what the company calls the file ("Annual Report 2024", "Chapter 3: Environment") tells type, year,
+    # scope and language better than an address that is often a number. Harvest copies it to
+    # report_library.link_text. Links with no text are left out.
+    upd[F_LINK_TEXTS] = link_texts_field(current)
 
     if not (had_baseline and new):                       # first visit = baseline, no false alert
         return False, False, []

@@ -44,7 +44,8 @@ ALL_TYPES = ["reports_hub", "sustainability_page", "sustainability_report",
              "investor_relations", "policies"]
 
 F_WBA = "wba_id"; F_NAME = "company_name"; F_URL = "url"; F_TYPE = "type"
-F_SEEN = "seen_links"; F_IS_PDF = "is_pdf"
+F_SEEN = "seen_links"; F_IS_PDF = "is_pdf"; F_LINK_TEXTS = "link_texts"
+LINK_TEXT_MAX = int(os.environ.get("LINK_TEXT_MAX", "30000") or 30000)   # link_text fills per run on existing rows
 YEAR = re.compile(r"(20[12]\d)")
 REPORT_NAME = re.compile(r"annual|sustainab|integrated|\besg\b|\bcsr\b|report|memoria|"
                          r"rapport|informe|bericht|disclosure|statement|20[12]\d", re.I)
@@ -140,8 +141,10 @@ def build(records, types, reports_only):
     rows = {}
     per_company = collections.Counter()
     per_type = collections.Counter()
+    from monitor_core import parse_link_texts
     for fields in records:
         wba = fields.get(F_WBA, ""); name = fields.get(F_NAME, ""); typ = fields.get(F_TYPE, "")
+        texts = parse_link_texts(fields.get(F_LINK_TEXTS))
         for doc, page in pdfs_from_row(fields, types):
             if reports_only and not looks_like_report(doc):
                 continue
@@ -158,6 +161,8 @@ def build(records, types, reports_only):
                 rows[lib_id] = {"library_id": lib_id, "wba_id": wba, "company_name": name,
                                 "document_url": doc, "found_on": page, "page_type": typ,
                                 "doc_year": year_of(doc), "source_link_id": slid}
+            if texts.get(key) and not rows[lib_id].get("link_text"):
+                rows[lib_id]["link_text"] = texts[key][:200]   # the first page with a text for it
     rows, shared_summary = drop_shared_docs(rows)
     if shared_summary:
         print(f">>> shared-document guard: skipped {len(shared_summary)} documents linked by "
@@ -241,7 +246,8 @@ def existing_library(base, token, table, formula=None):
     url = f"{API}/{base}/{quote(table)}"
     headers = {"Authorization": f"Bearer {token}"}
     base_params = [("pageSize", "100"), ("fields[]", "library_id"),
-                   ("fields[]", "document_url"), ("fields[]", "first_seen"), ("fields[]", "wba_id")]
+                   ("fields[]", "document_url"), ("fields[]", "first_seen"), ("fields[]", "wba_id"),
+                   ("fields[]", "link_text")]
     if formula:
         base_params.append(("filterByFormula", formula))
     out = {}; offset = None
@@ -254,7 +260,7 @@ def existing_library(base, token, table, formula=None):
             if f.get("library_id"):
                 out[f["library_id"]] = {"url": f.get("document_url", ""),
                                         "first_seen": f.get("first_seen", ""),
-                                        "id": rec["id"],
+                                        "id": rec["id"], "link_text": f.get("link_text", ""),
                                         "wba": f.get("wba_id") or f["library_id"].rsplit("-", 1)[0]}
         offset = j.get("offset"); time.sleep(0.22)
         if not offset: break
@@ -344,13 +350,16 @@ def upsert(rows, id_by_url, base, token, lib_table, full=False, existing=None):
     tomb = load_tombstones()
     known_docs |= tomb
     print(f"doc_id guard: {len(known_docs):,} known documents ({len(tomb):,} from purge tombstones).")
-    to_update = []; to_create = []; blocked = 0
+    to_update = []; to_create = []; to_text = []; blocked = 0
     for r in rows:
         prev = existing.get(r["library_id"])
         if prev:
             r["first_seen"] = prev.get("first_seen") or TODAY_ISO   # keep original date
             if full or prev.get("url") != r["document_url"]:
                 to_update.append({"id": prev["id"], "fields": r})
+            elif r.get("link_text") and r["link_text"] != prev.get("link_text") and len(to_text) < LINK_TEXT_MAX:
+                # only the link text: an existing row gets it without any other field being rewritten
+                to_text.append({"id": prev["id"], "fields": {"link_text": r["link_text"]}})
         else:
             did = doc_id(r["wba_id"], r["document_url"])
             if did in known_docs:
@@ -364,6 +373,10 @@ def upsert(rows, id_by_url, base, token, lib_table, full=False, existing=None):
           f"{blocked} new URLs skipped as known documents (doc_id guard).")
     created = write_records(base, token, lib_table, to_create, "POST")
     write_records(base, token, lib_table, to_update, "PATCH")
+    if to_text:
+        print(f"link_text: {len(to_text):,} existing rows get the text of the link they were found under"
+              + (f" (capped at LINK_TEXT_MAX {LINK_TEXT_MAX:,}; the rest follow on the next runs)" if len(to_text) >= LINK_TEXT_MAX else ""))
+        write_records(base, token, lib_table, to_text, "PATCH")
     return created, len(to_update), blocked, known_docs
 
 
