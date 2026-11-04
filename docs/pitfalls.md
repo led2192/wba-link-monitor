@@ -192,3 +192,6 @@ Web search passed an own-site file from its title whenever it could not be opene
 ## A refused API call must not throw away the run (3 Nov 2026)
 The model reader raised on a refusal from the API so the run would fail visibly. When the credit ran out four hours into a Propose values pass, that also meant all 8 shards died before their write step, and every read of those four hours was lost. A refusal now ends the reading like the time budget does: write first, then fail with the reason. The same holds for any long job that pays per call.
 
+
+## A firewall does not always say 403 (4 Nov 2026)
+Bot protection often answers 405, 412, 418, 444 or a vendor's own code (567) instead of 401/403/429. The monitors labelled those pages dead, so about 215 refused pages (CNPC 412, Central Pattana 405) were counted as broken links and never reached the refused-page tools. `monitor_core.BLOCKED_CODES` now holds them. When a whole site answers an odd 4xx to robots but opens in a browser, add the code there rather than treating the pages as gone.
