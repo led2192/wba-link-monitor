@@ -442,6 +442,28 @@ def sibling_pages(cur, wba, year, attr, spec):
     return out
 
 
+TEXT_RANK = "ts"          # the text score in page_score: "ts" (ts_rank_cd) or "bm25" (--text-rank, 4 Nov 2026)
+
+
+def bm25_text_rank(cur, found, attr):
+    """found with its text score replaced by BM25 over the attribute's label words, scaled 0 to 1 by the best
+    page (page_ranker.py: 63% of cited pages in the top 3 against 45% for ts_rank_cd in the ranking
+    experiment). Same pool of pages; only the text signal of page_score changes."""
+    import collections
+    import rank_eval as R
+    from page_ranker import RANKER
+    terms = list(dict.fromkeys(t for l in attr.get("labels", []) + attr.get("more_terms", []) for t in R.query_terms(l)))
+    if not terms or not found:
+        return found
+    RANKER._ensure(cur, terms)
+    scores = []
+    for lid, page, body, _ in found:
+        tf = collections.Counter(R.tokens(body))
+        scores.append(R.bm25(tf, len(tf), RANKER.avg_len, terms, RANKER.idfs))
+    top = max(scores) or 1.0
+    return [(lid, page, body, s / top) for (lid, page, body, _), s in zip(found, scores)]
+
+
 def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, siblings=None):
     """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents,
     plus the pages the documents' own content index cites for the attribute (content_index.py, 31 Oct 2026),
@@ -470,6 +492,8 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, sib
         found += [(lid, page, body, 0.0) for lid, page, body in cur.fetchall() if (lid, page) in missing]
     if memory:
         found += company_memory.memory_pages(cur, ids, memory, {(lid, page) for lid, page, _, _ in found})
+    if TEXT_RANK == "bm25":
+        found = bm25_text_rank(cur, found, attr)
     def score(lid, page, body, rk):
         cs = candidates(body, year, attr, spec)
         top = max(cs, key=lambda c: c[0]) if cs else None
@@ -655,11 +679,13 @@ def main():
     ap.add_argument("--budget", type=int, default=100)
     ap.add_argument("--reader", default="rules", choices=["rules", "model"])
     ap.add_argument("--memory", default="on", choices=["on", "off"], help="use the company's right answer for another year (company_memory.py)")
+    ap.add_argument("--text-rank", default="ts", choices=["ts", "bm25"], help="the text score of page ranking: ts_rank_cd or BM25 (page_ranker.py)")
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
     a = ap.parse_args()
     a.memory = a.memory == "on"
-    global SIBLINGS_ON
+    global SIBLINGS_ON, TEXT_RANK
     SIBLINGS_ON = a.siblings == "on"
+    TEXT_RANK = a.text_rank
     if a.reader == "model" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("extract_eval.md", "w").write("### Extraction: the model reader needs ANTHROPIC_API_KEY (a repository secret); nothing run.\n")
         return 0

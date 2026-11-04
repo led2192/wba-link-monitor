@@ -19,6 +19,11 @@ on:
         type: choice
         options: [rules, model]
         default: rules
+      text_rank:
+        description: "text score of the page ranking: ts (ts_rank_cd, today) or bm25"
+        type: choice
+        options: [ts, bm25]
+        default: ts
       model:
         description: "model for the model reader"
         default: "claude-haiku-5-5"
@@ -58,7 +63,7 @@ jobs:
             python extract_eval.py --limit 40 --reader model || true
             cat rules.md extract_eval.md > both.md && mv both.md extract_eval.md
           else
-            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }}"
+            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }} --text-rank ${{ inputs.text_rank || 'ts' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
             python extract_eval.py $ARGS
           fi

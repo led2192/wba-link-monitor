@@ -45,5 +45,17 @@ class Ranker(unittest.TestCase):
         self.assertEqual(P.Ranker().rank(Cur([]), [], ["board"], top=3), [])
 
 
+class NumericReader(unittest.TestCase):
+    def test_bm25_text_rank_rescales_the_pool(self):
+        import extract_eval as X
+        found = [("D1", 4, "Revenue grew and revenue rose", 0.9), ("D1", 7, "Total revenue 4,120 3,980", 0.1),
+                 ("D1", 8, "Board of directors", 0.0)]
+        out = X.bm25_text_rank(Cur([]), found, {"labels": ["total revenue"]})
+        self.assertEqual([p for _, p, _, _ in out], [4, 7, 8])                 # same pool, same order
+        self.assertEqual(max(r[3] for r in out), 1.0)
+        self.assertEqual(dict((p, r) for _, p, _, r in out)[8], 0.0)
+        self.assertGreater(dict((p, r) for _, p, _, r in out)[7], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
