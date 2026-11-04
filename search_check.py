@@ -70,7 +70,7 @@ def main():
           "| --- | --: | --: | --: | --: | --: | --: | --- |"]
     # companies: the summary's figure, then "exact N (t s)" when the summary was capped and the function exists
     bad = 0
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '120s'")
         exact_ok = has_function(cur, "search_company_count")

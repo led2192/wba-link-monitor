@@ -244,7 +244,7 @@ def main():
     stats = {c: collections.Counter() for c in codes}
     misses = collections.defaultdict(list)
     t0, cut = time.time(), False
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '30s'")
         for i, g in enumerate(todo, 1):

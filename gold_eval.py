@@ -265,7 +265,7 @@ def main():
     print(f">>> {len(rows):,} library rows of {len({g['wba'] for g in answers}):,} companies", flush=True)
     results, misses = [], collections.defaultdict(list)
     t0, cut = time.time(), False
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '60s'")
         for i, g in enumerate(answers, 1):

@@ -339,7 +339,7 @@ def main():
     c = collections.defaultdict(collections.Counter)
     t0, cut = time.time(), False
     import psycopg
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '60s'")
         for i, r in enumerate(sample, 1):

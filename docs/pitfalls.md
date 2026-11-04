@@ -206,3 +206,6 @@ report_library.origin was added after most documents were harvested, and those r
 
 ## Count many words in small passes (4 Nov 2026)
 One query with a count per word over the 1% page sample is fine for 60 words and times out for 550 (rank_eval.py lost a 100-minute run at its very end). `rank_eval.collection_stats` now counts 40 words a pass and skips a pass the database cancels. Anything that runs after a long read should not be able to fail the whole run.
+
+## The evidence database takes 15 clients at once (4 Nov 2026)
+The Supabase session pooler allows 15 connections. Propose values with 8 shards plus another with 4 held 12, and two evaluations started beside them failed on connect (EMAXCONNSESSION). Open the database with `evidence_db.connect()`, which waits for a place; and keep shards modest when other database jobs are queued.

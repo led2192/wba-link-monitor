@@ -409,7 +409,7 @@ def main():
     all_terms = {t for c in codes for q in cfg["attributes"][c]["queries"] for t in query_terms(q)}
     cases, skipped = [], collections.Counter()
     t0, cut = time.time(), False
-    with psycopg.connect(os.environ["SUPABASE_DB_URL"].strip(), connect_timeout=30) as conn:
+    with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '300s'")
         n_sample, dfs, avg_len = collection_stats(cur, all_terms)
