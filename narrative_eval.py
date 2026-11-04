@@ -51,19 +51,74 @@ def truth_of(value, null_reason, kind):
     return frozenset(o.strip() for o in v.split(",") if o.strip()) if v else None
 
 
-def gold_answers(token, codes):
-    formula = "AND({Data Reviewed}, OR(" + ",".join(f"FIND('-{c}-', {{Metadata ID}})" for c in codes) + "))"
-    rows = get_all(token, GOLD_BASE, "Metadata", ["Metadata ID", "Selected Value", "Null Value Reasoning", "Evidence", "Page Number"],
-                   formula)
-    out = []
+# The monthly Metadata 2025 bases (research provider data, 4 Nov 2026): same tables as ACT Core Climate. Their
+# answers were checked by the provider (RP Metadata Status = QC Complete) and only some by WBA (Data Reviewed).
+MONTHLY_BASES = {"Base One": "app6oIEJuBV9fkwux", "04 April": "appOh8lbdjRU08tip", "05 May": "appLyRVbDKcYETefX",
+                 "06 June": "appBpCZ7Eubjp5qnE", "07 July": "appmw5rspmqzXex8F", "08 August": "appISahYczxmATrPs",
+                 "09 September": "appwor3cfMbuxvl7N", "10 October": "appsCozkZy4WJKakY", "00 ACT Core ESGDS": "app22yRgus8TlNxBW"}
+TIERS = {"reviewed": "{Data Reviewed}",                              # checked by WBA: the validated answers
+         "provider": "{RP Metadata Status}='QC Complete'"}           # checked by the research provider only
+TYPES = {"Boolean": "boolean", "Multiple Select": "multiple select", "Single Select": "multiple select"}
+
+
+def gold_answers(token, codes, bases=(GOLD_BASE,), tier="reviewed"):
+    """The answers for these codes in these bases at this tier (reviewed by WBA, or QC'd by the provider)."""
+    where = TIERS[tier] if tier == "reviewed" else f"AND({TIERS[tier]}, NOT({{Data Reviewed}}))"
+    formula = f"AND({where}, OR(" + ",".join(f"FIND('-{c}-', {{Metadata ID}})" for c in codes) + "))"
+    rows = []
+    for b in bases:
+        rows += get_all(token, b, "Metadata", ["Metadata ID", "Selected Value", "Null Value Reasoning", "Evidence", "Page Number"],
+                        formula)
+    out, seen = [], set()
     for r in rows:
         f = r["fields"]
         wba, code, year = gold_id(f.get("Metadata ID"))
-        if code in codes:
+        if code in codes and f.get("Metadata ID") not in seen:
+            seen.add(f.get("Metadata ID"))
             nr = f.get("Null Value Reasoning")
             out.append({"id": f.get("Metadata ID"), "wba": wba, "attribute": code, "year": year,
                         "value": f.get("Selected Value") or "", "null": nr.get("name") if isinstance(nr, dict) else (nr or ""),
                         "evidence": f.get("Evidence") or "", "pages": f.get("Page Number") or ""})
+    return out
+
+
+def auto_attributes(token, bases, tier, n, have):
+    """Config entries for the n judgement attributes (yes/no, lists) with most answers at this tier in these
+    bases, from the bases' own Metadata Codes table: name and question from Description and Definition, the
+    options from Select Options, and the description itself as the search words (BM25 needs no hand-made
+    queries). Attributes already in gold_attributes.json keep their hand-written entry."""
+    import collections as C
+    where = TIERS[tier] if tier == "reviewed" else f"AND({TIERS[tier]}, NOT({{Data Reviewed}}))"
+    count = C.Counter()
+    for b in bases:
+        for r in get_all(token, b, "Metadata", ["Metadata ID", "GMC Type", "Null Value Reasoning"],
+                         f"AND({where}, OR(FIND('Boolean', {{GMC Type}}&''), FIND('Select', {{GMC Type}}&'')))"):
+            f = r["fields"]
+            nr = f.get("Null Value Reasoning")
+            nr = nr.get("name") if isinstance(nr, dict) else (nr or "")
+            _, code, _ = gold_id(f.get("Metadata ID"))
+            if code and nr not in LEFT_OUT:
+                count[code] += 1
+    codes = [c for c, _ in count.most_common() if c not in have][:max(n * 3, n)]
+    meta = {}
+    for r in get_all(token, bases[0], "Metadata Codes", ["Global Metadata Code (GMC)", "Description", "Definition", "Data Type", "Select Options"]):
+        f = r["fields"]
+        meta[(f.get("Global Metadata Code (GMC)") or "").strip()] = f
+    out = {}
+    for c in codes:
+        f = meta.get(c) or {}
+        dt = f.get("Data Type"); dt = dt.get("name") if isinstance(dt, dict) else dt
+        kind = TYPES.get(dt or "")
+        desc = (f.get("Description") or "").strip()
+        if not kind or not desc:
+            continue
+        opts = [o.strip() for o in re.split(r"[;,|]", f.get("Select Options") or "") if o.strip()]
+        if kind != "boolean" and not opts:
+            continue
+        question = (desc if desc.endswith("?") else f"{desc}?") + (f" {re.sub(r'<[^>]+>', ' ', f.get('Definition') or '').strip()[:600]}" if f.get("Definition") else "")
+        out[c] = {"name": desc[:120], "type": kind, "queries": [desc], "question": question, "options": opts, "answers": count[c]}
+        if len(out) >= n:
+            break
     return out
 
 
@@ -156,9 +211,9 @@ def score(stats, attr, truth, answer):
     return ok
 
 
-def report(codes, cfg, stats, wrong, usage, cost):
+def report(codes, cfg, stats, wrong, usage, cost, source="Validated at attribute level in ACT Core Climate."):
     md = ["### Narrative evaluation: the model answers judgement attributes from the company's pages", "",
-          "Validated at attribute level in ACT Core Climate. \"No Evidence\" counts as no (yes/no) or none (lists); "
+          source + " \"No Evidence\" counts as no (yes/no) or none (lists); "
           "non-English and insufficient evidence are left out.", "",
           "| Attribute | Answers | Right | No pages found | Analyst yes | Model yes | Yes found (recall) | Yes right (precision) |",
           "| --- | --: | --: | --: | --: | --: | --: | --: |"]
@@ -186,12 +241,18 @@ def main():
     ap.add_argument("--limit", type=int, default=15, help="answers per attribute (0 = all)")
     ap.add_argument("--attributes", default="")
     ap.add_argument("--max-usd", type=float, default=2.0)
+    ap.add_argument("--bases", default="act", help="act (ACT Core Climate, the default), monthly (the Metadata 2025 bases), or base ids")
+    ap.add_argument("--tier", default="reviewed", choices=list(TIERS), help="reviewed by WBA, or QC'd by the research provider only")
+    ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
     a = ap.parse_args()
+    bases = [GOLD_BASE] if a.bases == "act" else list(MONTHLY_BASES.values()) if a.bases == "monthly" else a.bases.split(",")
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
     cfg = {c: v for c, v in json.load(open(CONFIG, encoding="utf-8"))["attributes"].items() if v.get("question")}
-    codes = [c for c in cfg if not a.attributes or c in a.attributes.split(",")]
     token = os.environ.get("GOLD_TOKEN", "").strip()
+    if a.auto and token:
+        cfg.update(auto_attributes(token, bases, a.tier, a.auto, set(cfg)))
+    codes = [c for c in cfg if not a.attributes or c in a.attributes.split(",")]
     if not token or not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("narrative_eval.md", "w").write("### Narrative evaluation: GOLD_TOKEN or ANTHROPIC_API_KEY is not set; nothing run.\n")
         return 0
@@ -199,7 +260,8 @@ def main():
     from extract_eval import fy_end_month
     import psycopg
     run = qa.Run("narrative_eval.py")
-    answers = gold_answers(token, codes)
+    answers = gold_answers(token, codes, bases, a.tier)
+    codes = [c for c in codes if any(g["attribute"] == c for g in answers)]
     by = collections.defaultdict(list)
     for g in sorted(answers, key=lambda g: g["id"]):
         g["truth"] = truth_of(g["value"], g["null"], cfg[g["attribute"]]["type"])
@@ -249,7 +311,13 @@ def main():
                 wrong[g["attribute"]].append(f"{g['id']}: analyst {t(g['truth'])}, model {t(answer) if answer is not None else 'no reply'}"
                                              + (f" (p. {page}: \"{quote[:120]}\")" if quote else "")
                                              + (f"; analyst's evidence: \"{g['evidence'][:120]}\"" if g["evidence"] else ""))
-    md = report(codes, cfg, stats, wrong, usage, cost(usage))
+    source = ("Validated at attribute level in ACT Core Climate." if a.bases == "act" and a.tier == "reviewed" else
+              f"Answers from the {'monthly Metadata 2025 bases' if a.bases == 'monthly' else 'bases ' + a.bases}, "
+              + ("reviewed by WBA (Data Reviewed)." if a.tier == "reviewed" else
+                 "checked by the research provider only (QC Complete, not reviewed by WBA): a second-tier reference, "
+                 "where a miss may be the provider's.")
+              + (" Attributes chosen by number of answers, their question taken from Metadata Codes." if a.auto else ""))
+    md = report(codes, cfg, stats, wrong, usage, cost(usage), source)
     if stop:
         md += f"\nStopped at {stop}.\n"
     open("narrative_eval.md", "w").write(md)
@@ -259,7 +327,8 @@ def main():
         if s["answers"]:
             run.evaluation(f"narrative {c} {cfg[c]['name']}", s["answers"], s["right"] / s["answers"], version="model reader",
                            high_stakes=(s["yes and right"] / s["truth yes"]) if cfg[c]["type"] == "boolean" and s["truth yes"] else None,
-                           suite="ACT Core validated answers",
+                           suite=("ACT Core validated answers" if a.bases == "act" and a.tier == "reviewed"
+                                  else f"{a.bases} {'validated' if a.tier == 'reviewed' else 'provider-checked'} answers"),
                            notes="accuracy: the model's answer equals the analyst's (No Evidence = no). high_stakes_accuracy: "
                                  "share of the analyst's yes the model found (yes/no attributes).")
     run.finish("partial" if stop else "ok", rows_in=len(queue), rows_out=sum(s["right"] for s in stats.values()),

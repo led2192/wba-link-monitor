@@ -52,5 +52,32 @@ class Replies(unittest.TestCase):
         self.assertIn('<page document="Sustainability Report" number="7">', p)
 
 
+
+class ProviderTier(unittest.TestCase):
+    def test_tiers_and_auto_attributes(self):
+        from unittest import mock
+        import narrative_eval as N
+        calls = []
+        def fake_get_all(token, base, table, fields, formula=None):
+            calls.append((base, table, formula))
+            if table == "Metadata" and "GMC Type" in fields:
+                return [{"fields": {"Metadata ID": f"PT_0000{i}-GMC_00566.1-2024", "GMC Type": ["Boolean"]}} for i in range(5)] + \
+                       [{"fields": {"Metadata ID": "PT_00001-GMC_00863.1-2024", "GMC Type": ["Multiple Select"]}}]
+            if table == "Metadata Codes":
+                return [{"fields": {"Global Metadata Code (GMC)": "GMC_00566.1", "Description": "Does the company require FPIC",
+                                    "Data Type": "Boolean"}},
+                        {"fields": {"Global Metadata Code (GMC)": "GMC_00863.1", "Description": "Reporting coverage",
+                                    "Data Type": "Multiple Select", "Select Options": "Own operations; Value chain"}}]
+            return [{"fields": {"Metadata ID": "PT_00001-GMC_00566.1-2024", "Selected Value": "true"}},
+                    {"fields": {"Metadata ID": "PT_00001-GMC_00566.1-2024", "Selected Value": "true"}}]   # the same answer in two bases
+        with mock.patch.object(N, "get_all", side_effect=fake_get_all):
+            cfg = N.auto_attributes("t", ["appA"], "provider", 2, set())
+            got = N.gold_answers("t", ["GMC_00566.1"], ["appA", "appB"], "provider")
+        self.assertEqual(list(cfg), ["GMC_00566.1", "GMC_00863.1"])
+        self.assertEqual(cfg["GMC_00863.1"]["options"], ["Own operations", "Value chain"])
+        self.assertEqual(cfg["GMC_00566.1"]["type"], "boolean")
+        self.assertEqual(len(got), 1)                                     # deduplicated across bases
+        self.assertIn("QC Complete", calls[-1][2]); self.assertIn("NOT({Data Reviewed})", calls[-1][2])
+
 if __name__ == "__main__":
     unittest.main()
