@@ -59,6 +59,17 @@ class Rule(unittest.TestCase):
         # wordless links on an archive page do not inherit the parent's type
         self.assertIsNone(O.keep("Download", "Annual Report", "https://x.com/attach/2026/07/Up_admin_1.pdf", set(), may_inherit=False))
 
+    def test_documents_that_are_not_the_companys_own(self):
+        # first commit run, 5 Nov 2026
+        for pdf, parent in [("Supplier Code of Conduct Policy", "Company Policies"),
+                            ("UOB Sustainability Bond Allocation and Impact Report (2025)", "Sustainable Bonds"),
+                            ("See full PRI Assessment Report Summary Scorecard here", "Environmental and social risk management"),
+                            ("Annual Report 2025 Sagax EURO MTN AB", "Prospectus regarding bond loans"),
+                            ("Environmental and social impact assessment report (Spanish)", "Pacifico Mexinol Project")]:
+            self.assertIsNone(O.keep(pdf, parent, "https://x.com/doc-2025.pdf", {"Code of Conduct"}), pdf)
+        self.assertEqual(O.keep("2025 BN Sustainability Report", "Sustainability", "https://x.com/bn-2025-sustainability-report.pdf", set())[0],
+                         "Sustainability Report")
+
     def test_says_nothing(self):
         self.assertTrue(O.says_nothing("Download (PDF, 3 MB)"))
         self.assertTrue(O.says_nothing("Full report"))

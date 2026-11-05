@@ -80,6 +80,14 @@ def address_year(url):
     return 0
 
 
+# Documents named like a key report or policy that are not the company's own (first commit run, 5 Nov 2026,
+# 174 rows): supplier codes counted as the Code of Conduct, bond allocation reports and PRI scorecards as impact
+# reports, a bond-issuing subsidiary's annual report, environmental and social assessments of a lender's clients.
+NOT_OWN = re.compile(r"supplier|vendor|contractor|business partner|third[- ]part|\bbonds?\b|allocation|\bMTN\b|"
+                     r"prospectus|scorecard|\bPRI\b|impact assessment|\bESIA\b|\baudit\b|due diligence|"
+                     r"notice of (the )?(annual )?(general )?meeting", re.I)
+
+
 def keep(pdf_text, parent_text, pdf_url, lacking, may_inherit=True):
     """(type, label year) when a one-hop PDF is worth a library row, else None. Reports: sustainability or
     annual family, labelled RECENT or later. Policies: only one the company lacks, any year.
@@ -88,6 +96,8 @@ def keep(pdf_text, parent_text, pdf_url, lacking, may_inherit=True):
     the link that led to its page only on a small landing page (may_inherit). The year: the PDF's own text,
     then its address, then the link that led there (a 2025 report microsite also lists the 2023 and 2024
     reports: KIC_2023_en.pdf is 2023, whatever the parent link says)."""
+    if NOT_OWN.search(pdf_text or "") or NOT_OWN.search(parent_text or ""):
+        return None
     typ = text_type(pdf_text) if DOC_NOUN.search(pdf_text or "") else ""
     inherited = False
     if not typ and may_inherit and says_nothing(pdf_text) and DOC_NOUN.search(parent_text or ""):

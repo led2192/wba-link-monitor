@@ -230,3 +230,7 @@ classify_library's type tokens are built for addresses, where "annual" or "conso
 
 ## A worker pool fails as a whole on one bad site (5 Nov 2026)
 The first One hop run found 39 documents in 150 companies, then a site's header charset=utf-8,gbk raised LookupError inside a thread, ThreadPoolExecutor.map re-raised it, and the run ended before writing anything. Every per-company worker catches its own errors and counts them, and decoding falls back to UTF-8.
+
+## A report page lists other people's reports (5 Nov 2026)
+Banks and development lenders publish their clients' environmental and social assessments, bond allocation reports and supplier codes on the same pages as their own reports, all named like reports. The first One hop commit run took 28 such documents of 174. A link named like a report is a candidate, not a fact: one_hop.py leaves out supplier, vendor, bond, allocation, prospectus, assessment, audit and due diligence links.
+
