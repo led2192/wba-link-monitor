@@ -227,3 +227,6 @@ rank_eval.py stopped reading at its 100-minute budget, then spent 50 silent minu
 
 ## Address tokens are too loose for link text (5 Nov 2026)
 classify_library's type tokens are built for addresses, where "annual" or "consolidated" alone is a fair hint. On link text they type "HKMA Consolidated Annual Open Data Plan" as an Annual Report. one_hop.py takes a type from link text only when the text names a document (report, review, accounts, policy, code and their translations). The same dry run showed a 2025 report microsite listing KIC_2023_en.pdf and KIC_2024_en.pdf: a PDF's year comes from its own text and file name before the link that led to the page.
+
+## A worker pool fails as a whole on one bad site (5 Nov 2026)
+The first One hop run found 39 documents in 150 companies, then a site's header charset=utf-8,gbk raised LookupError inside a thread, ThreadPoolExecutor.map re-raised it, and the run ended before writing anything. Every per-company worker catches its own errors and counts them, and decoding falls back to UTF-8.

@@ -146,6 +146,17 @@ def candidates(html, base, held, per_page):
     return out
 
 
+def decode(data, encoding):
+    """Bytes to text with the page's declared encoding, falling back to UTF-8 when the declaration is not a
+    codec Python knows (5 Nov 2026: a site sent charset=utf-8,gbk and the One hop run crashed)."""
+    for enc in ((encoding or "").split(",")[0].strip() or "utf-8", "utf-8"):
+        try:
+            return data.decode(enc, "replace")
+        except LookupError:
+            continue
+    return data.decode("utf-8", "replace")
+
+
 def open_link(session, url, timeout=20):
     """('pdf', None) / ('html', text) / ('other', None) / ('err', None). Reads the first KB of a file and at
     most HTML_MAX characters of a page."""
@@ -168,7 +179,7 @@ def open_link(session, url, timeout=20):
             buf.append(chunk); size += len(chunk)
             if size >= HTML_MAX:
                 break
-        return "html", b"".join(buf).decode(r.encoding or "utf-8", "replace"), r.url
+        return "html", decode(b"".join(buf), r.encoding), r.url
     finally:
         r.close()
 
@@ -319,7 +330,10 @@ def main():
     rows, counters, lock = [], collections.Counter(), threading.Lock()
 
     def one(wba):
-        r, c = company_run(wba, pages[wba], held[wba], a.per_page, deadline)
+        try:
+            r, c = company_run(wba, pages[wba], held[wba], a.per_page, deadline)
+        except Exception as e:                 # one odd site never ends the run
+            r, c = [], collections.Counter({f"company failed ({type(e).__name__})": 1})
         with lock:
             rows.extend(r); counters.update(c)
             counters["companies done"] += 1
