@@ -33,6 +33,7 @@ from evidence_chunks import passages
 from value_eval import found_on, printed_forms, scales_for
 
 PACK, PER_PAGE = 15, 2
+PASSAGE_WORDS = 120
 CANDIDATE_PAGES = 60             # pages cut into passages per answer (any query word, BM25), plus the strict ones
 GRAM = 6
 
@@ -65,9 +66,30 @@ def candidate_pages(cur, ids, queries):
     return [(l, p, b) for (l, p), b in out.items()]
 
 
-def cut(pages):
-    """[(lid, page, n, text)] passages of the pages."""
-    return [(lid, page, n, t) for lid, page, body in pages for n, t in enumerate(passages(body))]
+def line_passages(body, target=PASSAGE_WORDS):
+    """Passages of whole lines, about `target` words each, line breaks kept: a table row stays one line with its
+    label and its figures (the sentence splitter of evidence_chunks joins a table into one run and breaks rows;
+    first sample, 5 Nov 2026: Scope 1 found in 1 pack of 10 against 7 of today's pages)."""
+    out, cur, n = [], [], 0
+    for ln in (body or "").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        cur.append(ln); n += len(ln.split())
+        if n >= target:
+            out.append("\n".join(cur)); cur, n = [], 0
+    if cur:
+        if out and n < target // 3:
+            out[-1] += "\n" + "\n".join(cur)
+        else:
+            out.append("\n".join(cur))
+    return out
+
+
+def cut(pages, kind="narrative"):
+    """[(lid, page, n, text)] passages of the pages: by sentences for narrative attributes, by lines for numbers."""
+    split = passages if kind == "narrative" else line_passages
+    return [(lid, page, n, t) for lid, page, body in pages for n, t in enumerate(split(body))]
 
 
 def pick(pas, scores, k=PACK, per_page=PER_PAGE):
@@ -155,7 +177,7 @@ def main():
                     today = [(lid, page, body) for _, lid, page, body, _ in pool if (lid, page) in chosen]
                     forms = printed_forms(g["value"], scales_for(attr.get("unit_family")))
                     test = lambda text, forms=forms: any(found_on(text, v) for v, _, _ in forms)
-                pas = cut(candidate_pages(cur, ids, g["queries"]))
+                pas = cut(candidate_pages(cur, ids, g["queries"]), g["kind"])
                 failed = 0
             except Exception as e:
                 failed += 1

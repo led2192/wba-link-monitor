@@ -27,6 +27,11 @@ class Pack(unittest.TestCase):
         self.assertGreater(len(pas), 1)
         self.assertTrue(all(p[0] == "D" and p[1] == 4 for p in pas))
 
+    def test_number_passages_keep_table_rows(self):
+        body = "Greenhouse gas emissions\n" + "\n".join(f"Scope {i} emissions tCO2e 12,30{i} 11,90{i}" for i in (1, 2, 3)) + "\n" + "Some prose " * 80
+        pas = P.cut([("D", 4, body)], "number")
+        self.assertTrue(any("Scope 1 emissions tCO2e 12,301 11,901" in p[3].splitlines() for p in pas))
+
     def test_report_totals(self):
         s = collections.Counter({"kind narrative": 1, "answers": 10, "today": 5, "pack": 7, "either": 8,
                                  "today words": 24000, "pack words": 18000, "today pages": 60, "pack pages": 120,
