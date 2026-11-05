@@ -234,8 +234,12 @@ def main():
     def one(wba):
         if len(finds) >= max_new:
             return
-        f, c = company_finds(wba, by[wba], held[wba], lacking_of(gaps.get(wba, ([], []))[0]),
-                             a.per_page, a.per_company, deadline)
+        try:
+            f, c = company_finds(wba, by[wba], held[wba], lacking_of(gaps.get(wba, ([], []))[0]),
+                                 a.per_page, a.per_company, deadline)
+        except Exception as e:                 # 5 Nov 2026: one site's charset ended the whole run, nothing written
+            print(f"  {wba}: {type(e).__name__}: {str(e)[:120]}", flush=True)
+            f, c = [], collections.Counter({f"company failed ({type(e).__name__})": 1})
         with lock:
             finds.extend(f[:max(0, max_new - len(finds))]); counters.update(c)
             counters["companies done"] += 1

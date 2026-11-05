@@ -75,6 +75,11 @@ class Capture(unittest.TestCase):
                          ["https://d1.cloudfront.net/uploads/2024/0099/AR-2022-full.pdf"])   # a CDN copy of a held file
         self.assertEqual(c["pages read"], 1)
 
+    def test_decode_survives_a_bad_charset(self):
+        self.assertEqual(A.decode("café".encode(), "utf-8,gbk"), "café")
+        self.assertEqual(A.decode("café".encode("latin-1"), "latin-1"), "café")
+        self.assertEqual(A.decode(b"abc", None), "abc")
+
     def test_file_key(self):
         self.assertEqual(A.file_key("https://x.com/a/AD_2024_ESP.pdf"), "ad_2024_esp.pdf")
         self.assertEqual(A.file_key("https://x.com/a/Annual%20Report%202024.pdf"), "annual report 2024.pdf")
