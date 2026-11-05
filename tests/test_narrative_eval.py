@@ -112,6 +112,12 @@ class ProviderTier(unittest.TestCase):
                 N.read_base("t", "appA", "Metadata", [])
 
 
+class PageSearch(unittest.TestCase):
+    def test_default_is_the_measured_search(self):
+        import narrative_eval as N
+        self.assertEqual(N.PAGE_SEARCH, "ts")
+
+
 class Fusion(unittest.TestCase):
     def test_a_page_both_rank_comes_first_and_the_loose_list_fills_in(self):
         import narrative_eval as N

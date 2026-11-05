@@ -152,7 +152,11 @@ def or_query(queries):
     return words_query(queries)
 
 
-def company_pages(cur, wba, year, queries, fy_month=None):
+PAGE_SEARCH = "ts"       # "ts" (strict, the measured default), "bm25" or "fused" (--pages). 5 Nov 2026: a new
+                         # search becomes the default only after it matches or beats this one on every attribute
+
+
+def company_pages(cur, wba, year, queries, fy_month=None, method=None):
     """[(library_id, doc_type, page, body)]: the best pages for the queries in the company's documents of the
     reporting year (the year after it when the fiscal year ends January to May) or the next."""
     from extract_eval import document_year
@@ -170,13 +174,17 @@ def company_pages(cur, wba, year, queries, fy_month=None):
     # let general sustainability pages crowd out the climate ones (GMC_01931.1 recall 65-73% to 13%). Fused,
     # a page both rank high comes first and BM25 fills in where the strict search finds nothing.
     from page_ranker import RANKER
+    method = method or PAGE_SEARCH
     q = or_query(queries)
     cur.execute("select library_id, page, body from public.pages, to_tsquery('simple', %s) q "
                 "where library_id = any(%s) and words @@ q order by ts_rank_cd(words, q, 32) desc limit %s",
                 (q, list(types), PAGES * 2))
     strict = [(lid, page, body or "") for lid, page, body in cur.fetchall()]
+    if method == "ts":
+        return [(lid, types.get(lid, ""), page, body) for lid, page, body in strict[:PAGES]]
     loose = [(lid, page, body) for lid, page, body, _ in RANKER.rank(cur, list(types), queries, PAGES * 2)]
-    return [(lid, types.get(lid, ""), page, body) for lid, page, body in fuse_pages([strict, loose], PAGES)]
+    chosen = loose[:PAGES] if method == "bm25" else fuse_pages([strict, loose], PAGES)
+    return [(lid, types.get(lid, ""), page, body) for lid, page, body in chosen]
 
 
 def fuse_pages(lists, top, k=60):
@@ -290,6 +298,8 @@ def main():
     ap.add_argument("--bases", default="act", help="act (ACT Core Climate, the default), monthly (the Metadata 2025 bases), or base ids")
     ap.add_argument("--tier", default="reviewed", choices=list(TIERS), help="reviewed by WBA, or QC'd by the research provider only")
     ap.add_argument("--budget", type=float, default=95, help="minutes; then it reports what it has read")
+    ap.add_argument("--pages", choices=["ts", "bm25", "fused"], default=PAGE_SEARCH,
+                    help="page search: ts (default), bm25 or fused; compare on the same answers before changing the default")
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
     a = ap.parse_args()
     bases = [GOLD_BASE] if a.bases == "act" else list(MONTHLY_BASES.values()) if a.bases == "monthly" else a.bases.split(",")
@@ -340,7 +350,7 @@ def main():
             attr, s = cfg[g["attribute"]], stats[g["attribute"]]
             try:
                 t1 = time.time()
-                pages = company_pages(cur, g["wba"], g["year"], attr["queries"], fy_end_month(cur, g["wba"]))
+                pages = company_pages(cur, g["wba"], g["year"], attr["queries"], fy_end_month(cur, g["wba"]), a.pages)
                 t_pages += time.time() - t1
             except Exception:
                 conn.rollback(); cur.execute("set statement_timeout = '60s'"); s["database did not answer"] += 1; continue
@@ -376,7 +386,8 @@ def main():
                  "where a miss may be the provider's.")
               + (" Attributes chosen by number of answers, their question taken from Metadata Codes." if a.auto else "")
               + ("" if not SKIPPED else " Skipped (refused or missing a field): "
-                 + "; ".join(sorted({f"{b} {t} ({why})" for b, t, why in SKIPPED})) + "."))
+                 + "; ".join(sorted({f"{b} {t} ({why})" for b, t, why in SKIPPED})) + ".")
+              + f" Page search: {a.pages}.")
     md = report(codes, cfg, stats, wrong, usage, cost(usage), source)
     if stop:
         md += f"\nStopped at {stop}.\n"

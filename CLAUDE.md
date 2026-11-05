@@ -12,6 +12,7 @@ Read `docs/README.md` first. It indexes everything else.
 - Offline tests with stubbed network and Airtable for every fix (`tests/`, run by the Tests workflow on every pull request). A bug found in a real site becomes a regression case.
 - Complete files, one branch per change, one pull request. Never merge: the owner merges.
 - Work from the committed code on `main`, never from memory of it.
+- No going back: a change to how a reader or ranker finds or reads pages ships as an option first, is run next to the current default on the same answers, and becomes the default only when no attribute gets worse by more than 3 points. A proxy experiment (rank_eval.py) is a reason to try, not to switch.
 
 ## Data rules
 - The Source Library bases (2024 `appsrc5xpZH12ezzP`, 2025 `appu5pLRjmq7PC4V3`) are read-only, always. They are read with a separate read-only token.
