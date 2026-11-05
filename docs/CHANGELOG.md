@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-05 Plausibility of proposed values (`plausibility.py`, nightly 07:47 UTC): flags proposals outside the validated answers' range, far from the company's own years or with an impossible revenue per employee, and suggests the rescaled value for a scale slip; new attribute_values fields `plausibility` and `suggested_value`; never changes value or status (#224)
 - 2026-11-05 Narrative reader back on the strict ts page search by default; bm25 and fused become options (`--pages`, workflow input pages) to compare on the same answers. CLAUDE.md gains the rule that a reader or ranker change becomes the default only when no attribute gets more than 3 points worse side by side (#223)
 - 2026-11-05 Narrative reader pages: reciprocal rank fusion of the strict ts_rank_cd search and BM25, after BM25 alone found pages for nearly every answer but dropped the climate attribute's recall to 13% (#222)
 - 2026-11-05 Decision recorded: the generic reader keeps ts_rank_cd; BM25 put the validated number on its ranked pages less often for every attribute in the full ts and bm25 runs (#221)

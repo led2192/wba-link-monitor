@@ -335,6 +335,8 @@ One row per company, benchmark attribute, year and method: a value proposed by a
 | `other_reports` | long text | robot | Model reader rows, since 1 Nov 2026: the same company, attribute and year as printed in other documents, one line each (document, page, value, difference from the value shown). Every version is in the evidence database table `value_versions`. Not written on rows a person decided. |
 | `restated` | checkbox | robot | Ticked when one of `other_reports` differs from the value shown by more than 0.5%. |
 | `validated_record` | link | robot | The validated answer in the analysts' editor (Editor Interface Full URL), with screenshots and notes; needs access to that base. |
+| `plausibility` | long text | robot | Written nightly by plausibility.py on proposed rows: why the value cannot be right, in plain words (far below every validated answer, 1,000 times the company's other years, an impossible revenue per employee); empty when nothing is wrong. Bounds come from the validated answers, not set by hand. |
+| `suggested_value` | number | robot | When `plausibility` sees a scale slip against the company's own other years: the value rescaled (e.g. 2.11 read in units where the page said trillions becomes 2,110,000,000,000). A suggestion to check, never applied. |
 | `reviewer_note` | long text | you | Why you accepted or rejected. Never overwritten. |
 | `corrected_value` | number | you | When both value and validated_value are wrong: the right figure, in full units (not thousands or millions), in the unit of the row. Leave blank otherwise. Never overwritten by a run. |
 | `reviewed_by` | last modified by | formula | Who last changed status or reviewer_note. |
