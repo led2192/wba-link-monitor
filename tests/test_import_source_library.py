@@ -1,3 +1,4 @@
+import unittest
 """Offline tests for import_source_library.py: which analyst documents are added and which are skipped, with
 no Airtable. 2 Nov 2026: every document type comes in, not only reports; policies are told apart by file."""
 import os, sys, unittest
@@ -89,7 +90,8 @@ class Guards(unittest.TestCase):
              mock.patch.object(I, "read_deleted", return_value=set()), \
              mock.patch.object(I, "plan", return_value=[(s, "add") for s in adds]), \
              mock.patch.object(I, "base_records", return_value=others), \
-             mock.patch.object(I, "get_all", side_effect=AssertionError("no write expected")), \
+             mock.patch.object(I, "get_all", return_value=[{"fields": {"wba_id": s["wba"], "company_name": "x"}} for s in adds]), \
+             mock.patch("monitor_core.airtable_request", side_effect=AssertionError("no write expected")), \
              mock.patch.object(sys, "argv", ["x", "--bases", "2026", "--commit", "--plan-out", out, *extra]):
             I.main()
 
@@ -107,6 +109,14 @@ class Guards(unittest.TestCase):
         with self.assertRaises(SystemExit) as e:
             self.run_main(2, 40 * 2 ** 30, others=149_999, extra=("--max-gb", "100"))
         self.assertIn("other tables", str(e.exception))
+
+
+class Universe(unittest.TestCase):
+    def test_a_company_outside_the_universe_is_not_added(self):
+        import import_source_library as I
+        items = [({"wba": "PT_00001"}, "add"), ({"wba": "PT_01415"}, "add"), ({"wba": "TA_02940"}, "add"), ({"wba": "PT_01415"}, "held")]
+        got = [v for _, v in I.outside_universe(items, {"PT_00001": "Acme"})]
+        self.assertEqual(got, ["add", "outside the universe", "outside the universe", "held"])
 
 
 if __name__ == "__main__":

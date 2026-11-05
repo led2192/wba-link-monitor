@@ -237,3 +237,6 @@ Banks and development lenders publish their clients' environmental and social as
 ## The repository's logs and PR comments are public (5 Nov 2026)
 narrative_eval.py printed up to 12 wrong answers per attribute, with the analyst's answer and evidence, into its report, which goes to the job log and to pull request comments. Both are public because the repository is. Analysts' answers are WBA assessments: examples go to Pipeline QA (`narrative_disagreements`), and reports posted publicly carry counts and shares only. The same check applies to any new report that quotes reference answers.
 
+## The Source Library covers more companies than the universe (5 Nov 2026)
+The 2024 and 2026 Source Library bases hold documents of companies outside the SDG2000 list in `companies`. import_source_library.py added them anyway (its company name lookup simply came back empty), so 126 rows had no company name, no fiscal year end (fiscal_year_wba blank) and no file link, and showed up in reviewers' views. Every importer checks the wba_id against `companies` before adding a row.
+

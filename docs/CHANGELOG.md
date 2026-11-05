@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-05 Source Library import skips companies that are not in `companies` (verdict "outside the universe" in the plan): 126 report_library rows of other benchmarks' companies (PT_01415, PT_01970, TA_02940 and others) had been imported since 21 Oct without a company name, fiscal year end or file link; they were discarded (Wrong company / misattributed) (#228)
 - 2026-11-05 Narrative evaluation: every wrong answer of a manual run goes to the new Pipeline QA table `narrative_disagreements` for a person to judge (verdict, note); the public report no longer lists examples with the analysts' answers (#227)
 - 2026-11-05 Narrative evaluation says where each wrong answer goes wrong (evidence not found, found but cut off, or shown and misread), and takes `--page-chars`, a model and its price as inputs, so finding, cutting and the model can be measured apart (#226)
 - 2026-11-05 One hop leaves out documents that are not the company's own (supplier codes, bond allocation reports, subsidiaries' bond prospectus reports, assessments of a lender's clients); the 28 such rows of the first run were discarded with a reason. Narrative reader comparison recorded: the strict search stays the default (#225)
