@@ -1,0 +1,46 @@
+name: Year windows
+
+# Which documents' years each attribute needs, learned from where the analysts' validated answers come from
+# (year_window_eval.py): the cited documents' year against the answer's, per attribute, next to today's
+# window (the year's documents and the next). Counts and shares only. Read-only. Manual; a pull request
+# touching it runs the offline tests only (the Tests workflow).
+on:
+  workflow_dispatch:
+    inputs:
+      save:
+        description: "write the learned windows (year_windows.json, kept with the result)"
+        type: boolean
+        default: true
+      min:
+        description: "cited documents an attribute needs for a learned window"
+        default: "20"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: python year_window_eval.py --min ${{ inputs.min }} ${{ inputs.save && '--save year_windows.json' || '' }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: year-windows
+          path: |
+            year_window_eval.md
+            year_windows.json
+          if-no-files-found: ignore
