@@ -156,6 +156,21 @@ class Stats(unittest.TestCase):
         self.assertEqual(len(dfs), 60)                       # the second chunk was cancelled
         self.assertEqual(Conn.rolled, 1)
 
+    def test_word_counts_stop_at_the_deadline(self):
+        import time
+        class Conn:
+            def rollback(self): pass
+        class Cur:
+            connection = Conn()
+            calls = 0
+            def execute(self, sql, args):
+                Cur.calls += 1
+                self.row = (1000, 300.0) + tuple(7 for _ in args)
+            def fetchone(self): return self.row
+        n, dfs, avg = R.collection_stats(Cur(), [f"w{i:03d}" for i in range(100)], chunk=40, deadline=time.time() - 1)
+        self.assertEqual(Cur.calls, 0)                       # past the deadline: nothing counted, nothing fails
+        self.assertEqual(dfs, {})
+
 
 if __name__ == "__main__":
     unittest.main()
