@@ -266,6 +266,7 @@ def main():
     ap.add_argument("--max-usd", type=float, default=2.0)
     ap.add_argument("--bases", default="act", help="act (ACT Core Climate, the default), monthly (the Metadata 2025 bases), or base ids")
     ap.add_argument("--tier", default="reviewed", choices=list(TIERS), help="reviewed by WBA, or QC'd by the research provider only")
+    ap.add_argument("--budget", type=float, default=95, help="minutes; then it reports what it has read")
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
     a = ap.parse_args()
     bases = [GOLD_BASE] if a.bases == "act" else list(MONTHLY_BASES.values()) if a.bases == "monthly" else a.bases.split(",")
@@ -298,15 +299,26 @@ def main():
     print(">>> " + "; ".join(f"{c}: {len(by[c])} answers" for c in codes), flush=True)
     stats = collections.defaultdict(collections.Counter); wrong = collections.defaultdict(list)
     usage = collections.Counter(); stop = ""
+    t0, t_pages = time.time(), 0.0
     with __import__("evidence_db").connect() as conn:
+        print(f">>> evidence database connected after {time.time() - t0:.0f} s", flush=True)
         cur = conn.cursor(); cur.execute("set statement_timeout = '60s'")
         queue = [g for i in range(max((len(v) for v in by.values()), default=0)) for c in codes if i < len(by[c]) for g in [by[c][i]]]
-        for g in queue:
+        for i, g in enumerate(queue, 1):
             if cost(usage) >= a.max_usd:
                 stop = "the cost limit"; break
+            # 4 Nov 2026: two runs (ACT limit 0, monthly provider) printed nothing for 120 minutes and were
+            # cancelled by the job timeout, so nothing was kept. A budget below the timeout, and a progress line.
+            if time.time() - t0 > a.budget * 60:
+                stop = f"the {a.budget:g}-minute budget ({i - 1:,} of {len(queue):,} answers read)"; break
+            if i % 25 == 0:
+                print(f"  {i:,}/{len(queue):,} answers, {(time.time() - t0) / 60:.0f} min, ${cost(usage):.2f}, "
+                      f"page search {t_pages / i:.1f} s an answer", flush=True)
             attr, s = cfg[g["attribute"]], stats[g["attribute"]]
             try:
+                t1 = time.time()
                 pages = company_pages(cur, g["wba"], g["year"], attr["queries"], fy_end_month(cur, g["wba"]))
+                t_pages += time.time() - t1
             except Exception:
                 conn.rollback(); cur.execute("set statement_timeout = '60s'"); s["database did not answer"] += 1; continue
             if not pages:
