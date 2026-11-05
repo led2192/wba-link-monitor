@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-05 Page choice experiment (`select_eval.py`, manual): six ways to choose the model reader's 8 pages (query expansion, learned document-type prior, learned ranker, embeddings, translated words, a model locate pass) measured against today's choice on the same validated answers; read-only (#229)
 - 2026-11-05 Source Library import skips companies that are not in `companies` (verdict "outside the universe" in the plan): 126 report_library rows of other benchmarks' companies (PT_01415, PT_01970, TA_02940 and others) had been imported since 21 Oct without a company name, fiscal year end or file link; they were discarded (Wrong company / misattributed) (#228)
 - 2026-11-05 Narrative evaluation: every wrong answer of a manual run goes to the new Pipeline QA table `narrative_disagreements` for a person to judge (verdict, note); the public report no longer lists examples with the analysts' answers (#227)
 - 2026-11-05 Narrative evaluation says where each wrong answer goes wrong (evidence not found, found but cut off, or shown and misread), and takes `--page-chars`, a model and its price as inputs, so finding, cutting and the model can be measured apart (#226)
