@@ -1,0 +1,56 @@
+name: Plausibility of proposed values
+
+# Flags proposed attribute values that cannot be right (plausibility.py): outside the range of the validated
+# answers, far from the company's own other years, or an impossible revenue per employee, with a rescaled
+# value when it looks like a scale slip. Bounds are learned from the validated answers each run. Writes only
+# plausibility and suggested_value on attribute_values; never value or status. Nightly after Propose values;
+# a pull request touching it runs a dry run and posts the measurement.
+on:
+  schedule:
+    - cron: "47 7 * * *"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "write plausibility and suggested_value (false = dry run)"
+        type: boolean
+        default: true
+  pull_request:
+    paths: [plausibility.py, .github/workflows/plausibility.yml]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Check
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.commit }}" = "true" ]; then python plausibility.py --commit
+          else python plausibility.py; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plausibility
+          path: |
+            plausibility.md
+            plausibility.csv
+          if-no-files-found: ignore
+      - name: Post the summary on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s plausibility.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file plausibility.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Plausibility: no result (see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
