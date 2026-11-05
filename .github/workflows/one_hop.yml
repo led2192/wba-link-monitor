@@ -1,0 +1,81 @@
+name: One hop
+
+# Follow report-named links one level down and harvest the key reports found there (one_hop.py): only
+# companies with a document gap or an overdue report, only the sustainability and annual report families
+# labelled 2023 or later and policies the company lacks, at most 300 new rows a night and 10 a company, and
+# never past 85% of the record limit (read from base_health). Nightly after the harvest; a pull request
+# touching it runs a dry run on 30 companies.
+on:
+  schedule:
+    - cron: "20 5 * * *"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "write the new rows (false = dry run)"
+        type: boolean
+        default: true
+      all:
+        description: "every company, not only those with a document gap"
+        type: boolean
+        default: false
+      max_new:
+        description: "new rows at most"
+        default: "300"
+      companies:
+        description: "companies at most, spread across the list (0 = all)"
+        default: "0"
+      budget:
+        description: "minutes"
+        default: "100"
+  pull_request:
+    paths: [one_hop.py, anchor_capture_eval.py, .github/workflows/one_hop.yml]
+
+concurrency:
+  group: one-hop-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: One hop
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python one_hop.py --companies 30 --budget 20
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            python one_hop.py --commit
+          else
+            ARGS="--max-new ${{ inputs.max_new }} --companies ${{ inputs.companies }} --budget ${{ inputs.budget }}"
+            [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+            [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"
+            python one_hop.py $ARGS
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: one-hop
+          path: |
+            one_hop.md
+            one_hop.csv
+          if-no-files-found: ignore
+      - name: Post the summary on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s one_hop.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file one_hop.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "One hop: no result (the run failed; see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
