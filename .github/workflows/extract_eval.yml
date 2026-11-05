@@ -27,8 +27,13 @@ on:
       model:
         description: "model for the model reader"
         default: "claude-haiku-5-5"
+      select:
+        description: "how the rank half of the model's 8 pages is chosen: base (today) or learned (page_select.py)"
+        type: choice
+        options: [base, learned]
+        default: base
   pull_request:
-    paths: [extract_eval.py, model_reader.py, attributes.json, .github/workflows/extract_eval.yml]
+    paths: [extract_eval.py, model_reader.py, page_select.py, attributes.json, .github/workflows/extract_eval.yml]
 
 concurrency:                      # a newer commit of the same pull request replaces the older run (1 Nov 2026: two pushes
                                   # 4 s apart ran two 2-hour scorings that slowed each other past the limit). Manual runs
@@ -49,6 +54,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - name: Install the embedding model's library (CPU), for the learned page choice
+        if: github.event_name == 'workflow_dispatch' && inputs.select == 'learned'
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install sentence-transformers
       - name: Evaluate
         env:
           GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
@@ -65,7 +75,7 @@ jobs:
             python extract_eval.py --limit 40 --reader model || true
             cat rules.md extract_eval.md > both.md && mv both.md extract_eval.md
           else
-            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }} --text-rank ${{ inputs.text_rank || 'ts' }}"
+            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }} --text-rank ${{ inputs.text_rank || 'ts' }} --select ${{ inputs.select || 'base' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
             python extract_eval.py $ARGS
           fi
