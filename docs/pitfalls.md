@@ -224,3 +224,6 @@ On 4 Nov three Propose values runs (shards), two narrative evaluations, two gene
 
 ## Every phase after a budgeted loop needs its own budget (5 Nov 2026)
 rank_eval.py stopped reading at its 100-minute budget, then spent 50 silent minutes counting expansion words and was cancelled by the 150-minute job timeout, so nothing was written (the second full run lost). A budget on the loop is not a budget on the run: give each later phase a deadline, print when each starts, and keep the job timeout above the sum.
+
+## Address tokens are too loose for link text (5 Nov 2026)
+classify_library's type tokens are built for addresses, where "annual" or "consolidated" alone is a fair hint. On link text they type "HKMA Consolidated Annual Open Data Plan" as an Annual Report. one_hop.py takes a type from link text only when the text names a document (report, review, accounts, policy, code and their translations). The same dry run showed a 2025 report microsite listing KIC_2023_en.pdf and KIC_2024_en.pdf: a PDF's year comes from its own text and file name before the link that led to the page.
