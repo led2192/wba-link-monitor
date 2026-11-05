@@ -290,6 +290,25 @@ def evidence_where(evidence, pages, shown):
     return WHERE[1]
 
 
+def write_disagreements(rows, run_id=None):
+    """Every wrong answer to Pipeline QA narrative_disagreements (private), upserted on run | Metadata ID.
+    Never to the log, an artifact or a PR comment: the repository is public and the answers are WBA
+    assessments (5 Nov 2026)."""
+    from monitor_core import airtable_request
+    token, base = os.environ.get("AIRTABLE_QA_TOKEN"), os.environ.get("AIRTABLE_QA_BASE", "appJQ2mRtjHjzLq9E")
+    if not token:
+        return 0
+    run_id = run_id or os.environ.get("GITHUB_RUN_ID") or time.strftime("%Y%m%d%H%M")
+    url = f"https://api.airtable.com/v0/{base}/narrative_disagreements"
+    H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    recs = [{"fields": {"key": f"{run_id}|{d['metadata_id']}", "run": str(run_id), **{k: (str(v) if k != "year" else (int(v) if str(v).isdigit() else None))
+                        for k, v in d.items()}}} for d in rows]
+    for i in range(0, len(recs), 10):
+        airtable_request("PATCH", url, H, payload={"performUpsert": {"fieldsToMergeOn": ["key"]}, "records": recs[i:i + 10]})
+        time.sleep(0.22)
+    return len(recs)
+
+
 def report(codes, cfg, stats, wrong, usage, cost, source="Validated at attribute level in ACT Core Climate."):
     md = ["### Narrative evaluation: the model answers judgement attributes from the company's pages", "",
           source + " \"No Evidence\" counts as no (yes/no) or none (lists); "
@@ -308,9 +327,8 @@ def report(codes, cfg, stats, wrong, usage, cost, source="Validated at attribute
                       f"{s['no pages']} | {s['answers'] - s['truth empty']} with an option | {s['answers'] - s['said empty']} | | |")
     md += ["", f"Model calls: {usage['calls']} ({usage['model_errors']} failed); unreadable replies after a retry: "
            f"{sum(stats[c]['no reply'] for c in codes)}; cost about ${cost:.2f}.", ""]
-    for c in codes:
-        if wrong[c]:
-            md += [f"Wrong, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]
+    # 5 Nov 2026: no examples here. The report is posted on pull requests and printed to the log of a public
+    # repository, and the analysts' answers are WBA assessments: examples go to Pipeline QA (--disagreements).
     return "\n".join(md) + "\n"
 
 
@@ -324,6 +342,8 @@ def main():
     ap.add_argument("--tier", default="reviewed", choices=list(TIERS), help="reviewed by WBA, or QC'd by the research provider only")
     ap.add_argument("--budget", type=float, default=95, help="minutes; then it reports what it has read")
     ap.add_argument("--page-chars", type=int, default=PAGE_CHARS, help="characters of each page shown to the model")
+    ap.add_argument("--disagreements", action="store_true",
+                    help="write narrative_disagreements.csv (every wrong answer, for a person to judge) and print it to the log")
     ap.add_argument("--pages", choices=["ts", "bm25", "fused"], default=PAGE_SEARCH,
                     help="page search: ts (default), bm25 or fused; compare on the same answers before changing the default")
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
@@ -360,6 +380,7 @@ def main():
     stats = collections.defaultdict(collections.Counter); wrong = collections.defaultdict(list)
     usage = collections.Counter(); stop = ""
     t0, t_pages = time.time(), 0.0
+    disagreements = []
     with __import__("evidence_db").connect() as conn:
         print(f">>> evidence database connected after {time.time() - t0:.0f} s", flush=True)
         cur = conn.cursor(); cur.execute("set statement_timeout = '60s'")
@@ -402,7 +423,17 @@ def main():
                 answer, page, quote = read_reply(reply, attr)
             ok = score(s, attr, g["truth"], answer)
             if not ok:
-                s["wrong: " + evidence_where(g.get("evidence"), pages, PAGE_CHARS)] += 1
+                where = evidence_where(g.get("evidence"), pages, PAGE_CHARS)
+                s["wrong: " + where] += 1
+                if a.disagreements:
+                    t = (lambda v: ("yes" if v else "no") if isinstance(v, bool) else (", ".join(sorted(v)) or "none"))
+                    lid = next((p[0] for p in pages if str(p[2]) == str(page)), pages[0][0] if pages else "")
+                    disagreements.append({"metadata_id": g["id"], "wba_id": g["wba"], "attribute": g["attribute"],
+                                          "attribute_name": attr["name"], "question": attr["question"], "year": g["year"],
+                                          "analyst": t(g["truth"]), "model": t(answer) if answer is not None else "no reply",
+                                          "where": where, "model_quote": quote or "", "model_page": page or "",
+                                          "library_id": lid, "analyst_evidence": (g.get("evidence") or "")[:600],
+                                          "analyst_pages": g.get("pages") or ""})
             if not ok and len(wrong[g["attribute"]]) < 12:
                 t = (lambda v: ("yes" if v else "no") if isinstance(v, bool) else (", ".join(sorted(v)) or "none"))
                 wrong[g["attribute"]].append(f"{g['id']}: analyst {t(g['truth'])}, model {t(answer) if answer is not None else 'no reply'}"
@@ -428,6 +459,9 @@ def main():
     if stop:
         md += f"\nStopped at {stop}.\n"
     open("narrative_eval.md", "w").write(md)
+    if a.disagreements and disagreements:
+        n = write_disagreements(disagreements)
+        print(f">>> {n:,} disagreements written to Pipeline QA narrative_disagreements", flush=True)
     print(md, flush=True)
     for c in codes:
         s = stats[c]
