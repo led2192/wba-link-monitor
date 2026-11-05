@@ -12,8 +12,8 @@ attribute_values (validated_value), so nobody sets a margin:
   range      the value (in US dollars for currencies, at today's ECB rates; as is for counts and tCO2e)
              against the validated answers of that attribute: below the 1st percentile divided by RANGE_SLACK,
              or above the 99th percentile times RANGE_SLACK;
-  history    the same company's other years for that attribute (validated answers first, else its other
-             proposals), same unit: more than HISTORY_RATIO times away from their median;
+  history    the same company's validated other years for that attribute, same unit: more than
+             HISTORY_RATIO times away from their median;
   scale      when history fails and the ratio to the company's own median is close to a power of ten a page
              can print in (10^3, 10^4, 10^5, 10^6, 10^7, 10^8, 10^9, 10^12), the value rescaled is suggested
              (never from the range alone: companies differ a thousand times in size);
@@ -35,7 +35,8 @@ import qa
 from anchor_eval import fetch
 
 RANGE_SLACK = 5.0          # outside [p1 / 5, p99 * 5] of the validated answers
-HISTORY_RATIO = 4.0        # more than 4x away from the company's own other years
+HISTORY_RATIO = 10.0       # more than 10x away from the company's own validated other years (first dry run, 5 Nov
+                           # 2026: 4x against other proposals flagged right values as often as wrong ones)
 MIN_LEARN = 30             # validated answers needed before an attribute (or a per-head pair) gets a range
 SCALE_POWERS = (3, 4, 5, 6, 7, 8, 9, 12)
 SCALE_TOLERANCE = 0.3      # |log10(ratio) - power| below this counts as a scale slip
@@ -148,6 +149,18 @@ def check(row, learned, history, per_head, rates):
     return reasons, suggested
 
 
+CHECKS = ("zero", "range", "history", "scale slip", "per head")
+
+
+def kinds_of(reasons):
+    """The checks behind a list of reasons, by their wording."""
+    out = set()
+    for r in reasons:
+        out.add("zero" if r.startswith("zero") else "range" if r.startswith("far ") else
+                "scale slip" if r.startswith("looks like a scale") else "per head" if r.startswith("revenue per") else "history")
+    return sorted(out)
+
+
 def fmt(x):
     if x is None:
         return ""
@@ -174,11 +187,8 @@ def learn(rows, rates):
             if key not in seen:
                 seen.add(key)
                 history[key[:3]].append((r["year"], r["validated"]))
-    for r in rows:                                             # proposals fill years without a validated value
-        key = (r["wba_id"], r["attribute"], kind(r["unit"]), r["year"])
-        if key not in seen and r["value"]:
-            seen.add(key)
-            history[key[:3]].append((r["year"], r["value"]))
+    # Only validated years make a company's history: the first dry run used its other proposals too, and a
+    # wrong proposal for 2022 then flagged a right one for 2024.
     learned = {a: b for a, v in by_attr.items() if (b := bounds(v))}
     pairs = collections.defaultdict(dict)
     vpairs = collections.defaultdict(dict)
@@ -246,6 +256,9 @@ def main():
             out.append({**{k: r[k] for k in ("value_id", "attribute", "year", "value", "unit", "method", "validated", "matches")},
                         "suggested_value": sug or "", "plausibility": "; ".join(reasons)})
         writes.append({"id": r["id"], "fields": {"plausibility": "; ".join(reasons) or None, "suggested_value": sug}})
+        if r["matches"] in ("match", "differs"):
+            for name in kinds_of(reasons):
+                c[f"check {name} {r['matches']}"] += 1
     fd, fm, cd, cm = c["flagged differs"], c["flagged match"], c["clear differs"], c["clear match"]
     md = ["### Plausibility of proposed values (bounds learned from the validated answers)", "",
           f"{c['proposed']:,} proposed values; {c['flagged']:,} flagged ({c['flagged'] / (c['proposed'] or 1):.0%}). "
@@ -256,7 +269,12 @@ def main():
           f"Precision (flagged rows that are wrong): {fd / ((fd + fm) or 1):.0%}. Recall (wrong rows that are flagged): "
           f"{fd / ((fd + cd) or 1):.0%}. Scale suggestions on wrong rows: {c['suggestion right']:,} of "
           f"{c['suggestions with a validated answer']:,} give the validated answer exactly.", "",
-          "Ranges learned (US dollars for currencies):", ""]
+          "Each check on its own (rows with a validated answer; a row can fail several):", "",
+          "| Check | Flags | Wrong among them | Precision |", "| --- | --: | --: | --: |"]
+    for name in CHECKS:
+        d, m = c[f"check {name} differs"], c[f"check {name} match"]
+        md.append(f"| {name} | {d + m:,} | {d:,} | {d / ((d + m) or 1):.0%} |")
+    md += ["", "Ranges learned (US dollars for currencies):", ""]
     md += [f"- {k}: {fmt(lo)} to {fmt(hi)}" for k, (lo, hi) in sorted(learned.items())]
     if per_head["bounds"]:
         md.append(f"- revenue per employee: {fmt(per_head['bounds'][0])} to {fmt(per_head['bounds'][1])} USD")
