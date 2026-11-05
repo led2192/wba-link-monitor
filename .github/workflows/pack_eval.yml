@@ -1,0 +1,60 @@
+name: Evidence pack experiment
+
+# Would a pack of short passages chosen without a model put the evidence in front of the reader more often
+# than today's pages (pack_eval.py)? Narrative attributes: the analyst's evidence text; number attributes: the
+# validated number. Same answers, no model calls. Read-only. Manual; a pull request touching it runs a sample.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "answers per attribute (0 = all)"
+        default: "120"
+      kinds:
+        description: "narrative,number"
+        default: "narrative,number"
+      pack:
+        description: "passages in the pack"
+        default: "15"
+      budget:
+        description: "minutes"
+        default: "80"
+  pull_request:
+    paths: [pack_eval.py, .github/workflows/pack_eval.yml]
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then python pack_eval.py --limit 10 --budget 15
+          else python pack_eval.py --limit ${{ inputs.limit }} --kinds ${{ inputs.kinds }} --pack ${{ inputs.pack }} --budget ${{ inputs.budget }}; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pack-eval
+          path: pack_eval.md
+          if-no-files-found: ignore
+      - name: Post the summary on the pull request
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          if [ -s pack_eval.md ]; then gh pr comment ${{ github.event.pull_request.number }} --body-file pack_eval.md
+          else gh pr comment ${{ github.event.pull_request.number }} --body "Evidence pack experiment: no result (see the job log)."; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
