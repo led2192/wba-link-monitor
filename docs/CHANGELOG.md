@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-05 Narrative reader pages: reciprocal rank fusion of the strict ts_rank_cd search and BM25, after BM25 alone found pages for nearly every answer but dropped the climate attribute's recall to 13% (#222)
 - 2026-11-05 Decision recorded: the generic reader keeps ts_rank_cd; BM25 put the validated number on its ranked pages less often for every attribute in the full ts and bm25 runs (#221)
 - 2026-11-05 One hop and the link text capture experiment survive a page with an unknown charset (`utf-8,gbk` ended the first One hop run with nothing written) and any other error of one company's site (#220)
 - 2026-11-05 One hop (`one_hop.py`, nightly 05:20 UTC): the rule from the link text capture experiment. Follows report-named links one level down for companies with a document gap or an overdue report and harvests only key reports labelled 2023 or later and policies the company lacks; at most 300 rows a night and 10 a company, and nothing past 85% of the record limit (#219)
