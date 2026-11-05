@@ -132,6 +132,34 @@ class Where(unittest.TestCase):
             self.assertAlmostEqual(M.cost({"input_tokens": 1_000_000, "output_tokens": 0}), 0.10)
 
 
+class Disagreements(unittest.TestCase):
+    def test_written_to_pipeline_qa_only(self):
+        import os, narrative_eval as N
+        from unittest import mock
+        sent = []
+        row = {"metadata_id": "PT_1-GMC_01932.1-2024", "wba_id": "PT_1", "attribute": "GMC_01932.1", "attribute_name": "x",
+               "question": "q", "year": "2024", "analyst": "none", "model": "Sustainability", "where": N.WHERE[3],
+               "model_quote": "The ELT implements", "model_page": 65, "library_id": "PT_1-abc", "analyst_evidence": "",
+               "analyst_pages": ""}
+        with mock.patch.dict(os.environ, {"AIRTABLE_QA_TOKEN": "t", "AIRTABLE_QA_BASE": "appQA"}), \
+             mock.patch("monitor_core.airtable_request", side_effect=lambda *a, **k: sent.append((a, k))):
+            self.assertEqual(N.write_disagreements([row], run_id="42"), 1)
+        (method, url, _), kw = sent[0]
+        self.assertIn("appQA/narrative_disagreements", url)
+        rec = kw["payload"]["records"][0]["fields"]
+        self.assertEqual((rec["key"], rec["year"], rec["model_page"]), ("42|PT_1-GMC_01932.1-2024", 2024, "65"))
+        with mock.patch.dict(os.environ, {"AIRTABLE_QA_TOKEN": ""}):
+            self.assertEqual(N.write_disagreements([row]), 0)
+
+    def test_the_public_report_has_no_examples(self):
+        import collections, narrative_eval as N
+        cfg = {"GMC_01930.1": {"name": "n", "type": "boolean"}}
+        stats = collections.defaultdict(collections.Counter); stats["GMC_01930.1"]["answers"] = 1
+        md = N.report(["GMC_01930.1"], cfg, stats, {"GMC_01930.1": ["PT_1: analyst yes, model no"]},
+                      {"input_tokens": 0, "output_tokens": 0, "calls": 0, "model_errors": 0}, 0.0)
+        self.assertNotIn("analyst yes", md if isinstance(md, str) else "\n".join(md))
+
+
 class PageSearch(unittest.TestCase):
     def test_default_is_the_measured_search(self):
         import narrative_eval as N

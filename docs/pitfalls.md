@@ -234,3 +234,6 @@ The first One hop run found 39 documents in 150 companies, then a site's header 
 ## A report page lists other people's reports (5 Nov 2026)
 Banks and development lenders publish their clients' environmental and social assessments, bond allocation reports and supplier codes on the same pages as their own reports, all named like reports. The first One hop commit run took 28 such documents of 174. A link named like a report is a candidate, not a fact: one_hop.py leaves out supplier, vendor, bond, allocation, prospectus, assessment, audit and due diligence links.
 
+## The repository's logs and PR comments are public (5 Nov 2026)
+narrative_eval.py printed up to 12 wrong answers per attribute, with the analyst's answer and evidence, into its report, which goes to the job log and to pull request comments. Both are public because the repository is. Analysts' answers are WBA assessments: examples go to Pipeline QA (`narrative_disagreements`), and reports posted publicly carry counts and shares only. The same check applies to any new report that quotes reference answers.
+
