@@ -125,7 +125,7 @@ def main():
         for g in answers:
             by[g["attribute"]].append(g)
         for c in codes:
-            todo += [dict(g, kind="number", queries=spec["attributes"][c]["queries"]) for g in (by[c][:a.limit] if a.limit else by[c])]
+            todo += [dict(g, kind="number", queries=spec["attributes"][c].get("queries") or spec["attributes"][c]["labels"]) for g in (by[c][:a.limit] if a.limit else by[c])]
     print(f">>> {len(todo):,} answers", flush=True)
     t0, cases, failed = time.time(), [], 0
     with __import__("evidence_db").connect() as conn:
