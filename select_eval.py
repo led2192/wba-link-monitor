@@ -366,6 +366,10 @@ def main():
             with open(a.save, "w", encoding="utf-8") as f:
                 json.dump(model, f, indent=1, sort_keys=True)
             print(f">>> trained page choice written to {a.save} ({len(model['attributes'])} attributes)", flush=True)
+            # Run artifacts cannot be fetched from every place the file is needed (6 Nov 2026), so the model is also
+            # printed, between markers, for a person or a session to copy into the repository. Weights, document
+            # types and words only: no company and no answer.
+            print(">>> SELECT_LEARNED_JSON_BEGIN\n" + json.dumps(model, sort_keys=True) + "\n>>> SELECT_LEARNED_JSON_END", flush=True)
     if "translate" in methods:
         for c in cases:
             r = results["translate"]
