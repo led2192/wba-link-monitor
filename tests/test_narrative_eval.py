@@ -112,6 +112,26 @@ class ProviderTier(unittest.TestCase):
                 N.read_base("t", "appA", "Metadata", [])
 
 
+class Where(unittest.TestCase):
+    def test_where_a_wrong_answer_goes_wrong(self):
+        import narrative_eval as N
+        ev = "The Board of Directors approves the climate transition plan and oversees climate risks each year"
+        page = ("x " * 1500) + ev                       # the evidence sits past the first 2,500 characters
+        self.assertEqual(N.evidence_where(ev, [], 2500), N.WHERE[0])
+        self.assertEqual(N.evidence_where(ev, [("L", "", 3, "nothing relevant here at all")], 2500), N.WHERE[1])
+        self.assertEqual(N.evidence_where(ev, [("L", "", 3, page)], 2500), N.WHERE[2])
+        self.assertEqual(N.evidence_where(ev, [("L", "", 3, ev)], 2500), N.WHERE[3])
+        self.assertEqual(N.evidence_where("No Evidence", [("L", "", 3, ev)], 2500), N.WHERE[4])
+
+    def test_blank_prices_and_model_fall_back(self):
+        import os, model_reader as M
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"READER_PRICE": "3/15"}):
+            self.assertAlmostEqual(M.cost({"input_tokens": 1_000_000, "output_tokens": 0}), 3.0)
+        with mock.patch.dict(os.environ, {"READER_PRICE": ""}):
+            self.assertAlmostEqual(M.cost({"input_tokens": 1_000_000, "output_tokens": 0}), 0.10)
+
+
 class PageSearch(unittest.TestCase):
     def test_default_is_the_measured_search(self):
         import narrative_eval as N

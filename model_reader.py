@@ -255,7 +255,7 @@ def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
     share the account's limits, 31 Oct 2026). system and max_tokens default to the reader's."""
     import requests
     sess = sess or requests
-    body = {"model": model or os.environ.get("READER_MODEL", DEFAULT_MODEL), "max_tokens": max_tokens or MAX_TOKENS,
+    body = {"model": model or (os.environ.get("READER_MODEL") or DEFAULT_MODEL), "max_tokens": max_tokens or MAX_TOKENS,
             "system": system or SYSTEM, "messages": messages}
     headers = {"x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(), "anthropic-version": "2023-06-01",
                "content-type": "application/json"}
@@ -350,6 +350,7 @@ def read_with_model(g, attr, pages, usage, sess=None, note=None):
 def cost(usage, model=None):
     """Dollars at the list price per million tokens (Haiku 5.5, prompts up to 100,000 tokens, 29 Oct 2026);
     READER_PRICE_IN / READER_PRICE_OUT override it for another model."""
-    pin = float(os.environ.get("READER_PRICE_IN", "0.10"))
-    pout = float(os.environ.get("READER_PRICE_OUT", "0.50"))
+    both = (os.environ.get("READER_PRICE") or "").split("/")     # "in/out", from a workflow's price input
+    pin = float(both[0]) if len(both) == 2 and both[0] else float(os.environ.get("READER_PRICE_IN") or "0.10")
+    pout = float(both[1]) if len(both) == 2 and both[1] else float(os.environ.get("READER_PRICE_OUT") or "0.50")
     return usage["input_tokens"] / 1e6 * pin + usage["output_tokens"] / 1e6 * pout

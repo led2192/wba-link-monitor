@@ -265,6 +265,31 @@ def score(stats, attr, truth, answer):
     return ok
 
 
+NO_EVIDENCE = re.compile(r"^\s*(no evidence|n/?a|none|-)?\s*$", re.I)
+WHERE = ("no pages found", "analyst's evidence not on the pages sent", "evidence on a page sent, but past the characters shown",
+         "evidence shown to the model", "no analyst evidence text")
+
+
+def evidence_where(evidence, pages, shown):
+    """Where a wrong answer goes wrong, from the analyst's evidence text (5 Nov 2026): not on the pages sent
+    (finding), on a page sent but past the first `shown` characters (cutting), or in what the model saw
+    (reading or judging). A match is any run of 6 consecutive evidence words on the page."""
+    if not pages:
+        return WHERE[0]
+    words = re.findall(r"[^\W_]+", (evidence or "").lower())
+    if NO_EVIDENCE.match(evidence or "") or len(words) < 6:
+        return WHERE[4]
+    grams = {" ".join(words[i:i + 6]) for i in range(len(words) - 5)}
+    def has(text):
+        t = " ".join(re.findall(r"[^\W_]+", (text or "").lower()))
+        return any(g in t for g in grams)
+    if any(has(body[:shown]) for _, _, _, body in pages):
+        return WHERE[3]
+    if any(has(body) for _, _, _, body in pages):
+        return WHERE[2]
+    return WHERE[1]
+
+
 def report(codes, cfg, stats, wrong, usage, cost, source="Validated at attribute level in ACT Core Climate."):
     md = ["### Narrative evaluation: the model answers judgement attributes from the company's pages", "",
           source + " \"No Evidence\" counts as no (yes/no) or none (lists); "
@@ -298,10 +323,12 @@ def main():
     ap.add_argument("--bases", default="act", help="act (ACT Core Climate, the default), monthly (the Metadata 2025 bases), or base ids")
     ap.add_argument("--tier", default="reviewed", choices=list(TIERS), help="reviewed by WBA, or QC'd by the research provider only")
     ap.add_argument("--budget", type=float, default=95, help="minutes; then it reports what it has read")
+    ap.add_argument("--page-chars", type=int, default=PAGE_CHARS, help="characters of each page shown to the model")
     ap.add_argument("--pages", choices=["ts", "bm25", "fused"], default=PAGE_SEARCH,
                     help="page search: ts (default), bm25 or fused; compare on the same answers before changing the default")
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
     a = ap.parse_args()
+    globals()["PAGE_CHARS"] = a.page_chars         # prompt() and the diagnosis read it
     bases = [GOLD_BASE] if a.bases == "act" else list(MONTHLY_BASES.values()) if a.bases == "monthly" else a.bases.split(",")
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
@@ -374,6 +401,8 @@ def main():
                     print(f"    unreadable reply for {g['id']}: {re.sub(r'\s+', ' ', raw or '(empty)')[:200]}", flush=True)
                 answer, page, quote = read_reply(reply, attr)
             ok = score(s, attr, g["truth"], answer)
+            if not ok:
+                s["wrong: " + evidence_where(g.get("evidence"), pages, PAGE_CHARS)] += 1
             if not ok and len(wrong[g["attribute"]]) < 12:
                 t = (lambda v: ("yes" if v else "no") if isinstance(v, bool) else (", ".join(sorted(v)) or "none"))
                 wrong[g["attribute"]].append(f"{g['id']}: analyst {t(g['truth'])}, model {t(answer) if answer is not None else 'no reply'}"
@@ -389,6 +418,13 @@ def main():
                  + "; ".join(sorted({f"{b} {t} ({why})" for b, t, why in SKIPPED})) + ".")
               + f" Page search: {a.pages}.")
     md = report(codes, cfg, stats, wrong, usage, cost(usage), source)
+    md += ("\nWhere the wrong answers go wrong (from the analyst's evidence text; " + f"{PAGE_CHARS:,} characters shown a page, "
+           + f"model {os.environ.get('READER_MODEL', 'the default Haiku')}):\n\n| Attribute | Wrong | " + " | ".join(w.capitalize() for w in WHERE)
+           + " |\n| --- | --: |" + " --: |" * len(WHERE) + "\n")
+    for c in codes:
+        s = stats[c]
+        n = sum(s["wrong: " + w] for w in WHERE)
+        md += f"| {c} | {n:,} | " + " | ".join(f"{s['wrong: ' + w]:,}" for w in WHERE) + " |\n"
     if stop:
         md += f"\nStopped at {stop}.\n"
     open("narrative_eval.md", "w").write(md)
