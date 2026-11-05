@@ -49,6 +49,16 @@ class Rule(unittest.TestCase):
         self.assertIsNone(O.keep("Code of Conduct", "Governance", "https://a.com/coc.pdf", set()))           # not lacking
         self.assertEqual(O.keep("Code of Conduct", "Governance", "https://a.com/coc.pdf", {"Code of Conduct"})[0], "Code of Conduct")
 
+    def test_dry_run_cases(self):
+        # 5 Nov 2026 dry run: a plan named "annual" is not an annual report
+        self.assertIsNone(O.keep("HKMA Consolidated Annual Open Data Plan 2026-28", "Other information",
+                                 "https://hkma.gov.hk/x/HKMA_Open_Data_Plan_2026_28.pdf", set()))
+        # an older report listed on a 2025 microsite keeps its own year
+        self.assertIsNone(O.keep("Download", "Annual Report 2025", "https://kic.kr/annual-report/2025/en/pdf/KIC_2022_en.pdf", set()))
+        self.assertEqual(O.keep("Download", "Annual Report 2025", "https://kic.kr/ar/pdf/KIC_2025_en.pdf", set()), ("Annual Report", 2025))
+        # wordless links on an archive page do not inherit the parent's type
+        self.assertIsNone(O.keep("Download", "Annual Report", "https://x.com/attach/2026/07/Up_admin_1.pdf", set(), may_inherit=False))
+
     def test_says_nothing(self):
         self.assertTrue(O.says_nothing("Download (PDF, 3 MB)"))
         self.assertTrue(O.says_nothing("Full report"))

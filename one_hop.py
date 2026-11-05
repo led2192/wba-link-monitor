@@ -37,7 +37,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 import qa
-from anchor_capture_eval import (KEY_TYPES, PAGE_TYPES, RECENT, Held, candidates, find_year, one_hop_pdfs,
+from anchor_capture_eval import (KEY_TYPES, PAGE_TYPES, RECENT, Held, candidates, one_hop_pdfs,
                                  open_link, spread)
 from anchor_eval import fetch, text_type, text_year
 from company_coverage import ANNUAL_FAMILY, SUST_FAMILY
@@ -63,15 +63,38 @@ def says_nothing(text):
     return not rest
 
 
-def keep(pdf_text, parent_text, pdf_url, lacking):
+DOC_NOUN = re.compile(r"report|review|accounts|statement|policy|policies|code|10-?k|20-?f|memoria|relat[oó]rio|"
+                      r"informe|reporte|rapport|bericht|verslag|報告|レポート|보고서", re.I)
+INHERIT_MAX = 3        # a landing page with more PDFs than this is an archive: a wordless link there names nothing
+
+
+def address_year(url):
+    """The year a PDF's address names: the file name's first, then the folders' (KIC_2022_en.pdf under
+    /annual-report/2025/ is 2022). 0 when none."""
+    from urllib.parse import unquote, urlsplit
+    path = unquote(urlsplit(url).path)
+    for part in (path.rsplit("/", 1)[-1], path):
+        ys = [int(y) for y in re.findall(r"(?<!\d)(20[0-3]\d)(?!\d)", part)]
+        if ys:
+            return max(ys)
+    return 0
+
+
+def keep(pdf_text, parent_text, pdf_url, lacking, may_inherit=True):
     """(type, label year) when a one-hop PDF is worth a library row, else None. Reports: sustainability or
-    annual family, labelled RECENT or later. Policies: only one the company lacks, any year."""
-    typ = text_type(pdf_text)
-    if not typ and says_nothing(pdf_text):
-        typ = text_type(parent_text)        # "Download", "Full report (PDF)": the link that led here names it
+    annual family, labelled RECENT or later. Policies: only one the company lacks, any year.
+    The type comes from link text that names a document ("Open Data Plan" names "annual" but no document:
+    5 Nov 2026 dry run, Hong Kong Monetary Authority). A PDF whose own text says nothing takes the type of
+    the link that led to its page only on a small landing page (may_inherit). The year: the PDF's own text,
+    then its address, then the link that led there (a 2025 report microsite also lists the 2023 and 2024
+    reports: KIC_2023_en.pdf is 2023, whatever the parent link says)."""
+    typ = text_type(pdf_text) if DOC_NOUN.search(pdf_text or "") else ""
+    inherited = False
+    if not typ and may_inherit and says_nothing(pdf_text) and DOC_NOUN.search(parent_text or ""):
+        typ, inherited = text_type(parent_text), True
     if typ not in KEY_TYPES:
         return None
-    year = find_year({"label_year": text_year(pdf_text) or text_year(parent_text), "found_pdf": pdf_url})
+    year = int(text_year(pdf_text) or 0) or address_year(pdf_url) or int(text_year(parent_text) or 0)
     if typ in POLICIES:
         return (typ, year) if typ in lacking else None
     return (typ, year) if year >= RECENT else None
@@ -115,11 +138,12 @@ def company_finds(wba, pages, held, lacking, per_page, per_company, deadline,
             c["named links opened"] += 1
             if got != "html":
                 continue
-            for pu, ptext, elsewhere in one_hop_pdfs(body, final2 or u, held):
+            on_page = one_hop_pdfs(body, final2 or u, held)
+            for pu, ptext, elsewhere in on_page:
                 if elsewhere:
                     c["held under another address"] += 1
                     continue
-                k = keep(ptext, text, pu, lacking)
+                k = keep(ptext, text, pu, lacking, may_inherit=len(on_page) <= INHERIT_MAX)
                 if not k:
                     c["not a key recent document"] += 1
                     continue
