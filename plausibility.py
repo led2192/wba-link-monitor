@@ -19,8 +19,8 @@ attribute_values (validated_value), so nobody sets a margin:
              (never from the range alone: companies differ a thousand times in size);
   per head   revenue per employee (same company and year, US dollars) against the validated pairs, with the
              same percentile rule.
-A flag never changes value or status: it writes `plausibility` (the reasons, plain words) and
-`suggested_value` (the rescaled value, when there is one) for a person to look at.
+A flag never changes value or status: it writes `plausibility` (the reasons, plain words) for a person to
+look at. No rescaled number is written: on the second dry run none of 7 equalled the validated answer.
 
 Measured before anything is written: of the flagged rows that have a validated answer, how many differ
 from it (the flag's precision), and of the rows that differ, how many are flagged (its recall).
@@ -134,7 +134,7 @@ def check(row, learned, history, per_head, rates):
         if p:
             suggested = v / 10 ** p
             reasons.append(f"looks like a scale slip of 10^{abs(p)} ({'too big' if p > 0 else 'too small'}): "
-                           f"{fmt(suggested)} {unit} would fit")
+                           f"check the page's unit line")
     if code in (REVENUE, EMPLOYEES) and per_head.get("bounds"):
         pair = per_head["pairs"].get((row["wba_id"], row["year"]))
         if pair:
@@ -210,7 +210,8 @@ def learn(rows, rates):
 def load(H, base):
     out = []
     for rec in fetch(H, base, "attribute_values", ["value_id", "wba_id", "attribute", "attribute_name", "year", "value",
-                                                   "unit", "method", "status", "validated_value", "matches_validated"]):
+                                                   "unit", "method", "status", "validated_value", "matches_validated",
+                                                   "plausibility"]):
         f = rec["fields"]
         st = f.get("status")
         st = st.get("name") if isinstance(st, dict) else st
@@ -221,13 +222,14 @@ def load(H, base):
         out.append({"id": rec["id"], "value_id": f.get("value_id", ""), "wba_id": f.get("wba_id", ""),
                     "attribute": f.get("attribute", ""), "attribute_name": f.get("attribute_name", ""),
                     "year": f.get("year"), "value": f.get("value"), "unit": f.get("unit", ""), "method": meth or "",
-                    "status": st or "", "validated": f.get("validated_value"), "matches": m or ""})
+                    "status": st or "", "validated": f.get("validated_value"), "matches": m or "",
+                    "plausibility": f.get("plausibility") or ""})
     return out
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--commit", action="store_true", help="write plausibility and suggested_value")
+    ap.add_argument("--commit", action="store_true", help="write plausibility")
     a = ap.parse_args()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
@@ -255,7 +257,11 @@ def main():
         if flagged:
             out.append({**{k: r[k] for k in ("value_id", "attribute", "year", "value", "unit", "method", "validated", "matches")},
                         "suggested_value": sug or "", "plausibility": "; ".join(reasons)})
-        writes.append({"id": r["id"], "fields": {"plausibility": "; ".join(reasons) or None, "suggested_value": sug}})
+        # suggested_value is not written: on the second dry run (5 Nov 2026) none of 7 rescaled values equalled
+        # the validated answer, so a number would mislead; the reason names the slip instead
+        new = "; ".join(reasons)
+        if new != r.get("plausibility", ""):                    # only rows whose flag changed are written
+            writes.append({"id": r["id"], "fields": {"plausibility": new or None}})
         if r["matches"] in ("match", "differs"):
             for name in kinds_of(reasons):
                 c[f"check {name} {r['matches']}"] += 1
@@ -285,11 +291,11 @@ def main():
         from urllib.parse import quote
         url = f"https://api.airtable.com/v0/{base}/{quote('attribute_values')}"
         for i in range(0, len(writes), 10):
-            airtable_request("PATCH", url, {**H, "Content-Type": "application/json"}, json={"records": writes[i:i + 10]})
+            airtable_request("PATCH", url, {**H, "Content-Type": "application/json"}, payload={"records": writes[i:i + 10]})
             time.sleep(0.22)
-        md += ["", f"Written: plausibility and suggested_value on {len(writes):,} proposed rows (cleared where nothing is wrong)."]
+        md += ["", f"Written: plausibility changed on {len(writes):,} proposed rows (set or cleared)."]
     else:
-        md += ["", "Dry run: nothing written (--commit writes plausibility and suggested_value)."]
+        md += ["", "Dry run: nothing written (--commit writes plausibility)."]
     with open("plausibility.csv", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=["value_id", "attribute", "year", "value", "unit", "method", "validated",
                                            "matches", "suggested_value", "plausibility"])
