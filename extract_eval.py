@@ -38,6 +38,7 @@ MAX_DOCS, MAX_PAGES = 12, 25         # documents of the year searched; pages kep
 PER_DOC = 10                         # at most this many of the kept pages from one document
 POOL = 400                           # label-matching pages scored before ranking
 MODEL_PAGES = 8                      # pages given to the model reader: half by the rule candidates, half by rank
+DB_FAILS_IN_A_ROW = 10                # answers failing on the database one after another: an outage, so the run stops
 MORE_TERMS_TIMEOUT = "4s"            # the second query (an attribute's more_terms) may take this long, else it is skipped
 MORE_POOL = 30                       # pages it may add (bodies are read for these only)
 INDEX_WEIGHT = 1.5                   # page score added to a page the report's own content index cites (content_index.py)
@@ -718,7 +719,8 @@ def main():
     miss_ranks = collections.defaultdict(list)
     miss_phrases = {c: collections.Counter() for c in codes}
     wrong = collections.defaultdict(list)
-    t0, cut = time.time(), False
+    t0, cut, db_stop = time.time(), False, ""
+    failed_in_a_row, first_errors = 0, []
     with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '30s'")
@@ -734,8 +736,24 @@ def main():
             except Exception as e:
                 if type(e).__name__ == "ModelRefused":           # the API said no: stop and say why
                     raise
-                conn.rollback(); cur.execute("set statement_timeout = '30s'")
-                s["database did not answer"] += 1; continue
+                if len(first_errors) < 3:
+                    first_errors.append(f"{type(e).__name__}: {str(e).splitlines()[0][:160] if str(e) else ''}")
+                    print(f"  database error on {g['id']}: {first_errors[-1]}", flush=True)
+                s["database did not answer"] += 1
+                failed_in_a_row += 1
+                # 4 Nov 2026: with the evidence database overloaded by a night of parallel runs, two full runs
+                # spent 100 minutes on 23 answers that all failed, then reported "ok". Ten failures in a row is
+                # an outage, not bad luck: stop, say so, and keep nothing.
+                if failed_in_a_row >= DB_FAILS_IN_A_ROW:
+                    db_stop = f"the evidence database did not answer {failed_in_a_row} times in a row ({first_errors[0]})"
+                    break
+                try:
+                    conn.rollback(); cur.execute("set statement_timeout = '30s'")
+                except Exception:
+                    db_stop = f"the evidence database connection was lost ({first_errors[0]})"
+                    break
+                continue
+            failed_in_a_row = 0
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
@@ -774,7 +792,7 @@ def main():
     title = "model reader (" + os.environ.get("READER_MODEL", "claude-haiku-5-5") + ")" if a.reader == "model" else "generic reader (no model)"
     md = [f"### The {title} against the validated answers" + ("" if a.commit else " (dry run, sample)"), "",
           f"{sum(s['answers'] for s in stats.values()):,} answers with a value" + (f" ({limit} per attribute)" if limit else "")
-          + ("; stopped at the time budget" if cut else "") + ". Shares of those answers; the reader never sees the answer.", "",
+          + ("; stopped at the time budget" if cut else "") + (f"; STOPPED: {db_stop}" if db_stop else "") + ". Shares of those answers; the reader never sees the answer.", "",
           "| Attribute | Answers | Document for the year | Number in those documents | Number on the ranked pages | Number on the model's pages | Proposal | Right | Right among proposals | Right digits, wrong scale |",
           "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: |"]
     for c in codes:
@@ -870,15 +888,18 @@ def main():
     print("\n".join(md), flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
-        if n > 0:
+        if n > 0 and not db_stop:                 # a run cut by an outage is not a score
             run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader",
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
                                       "number on the ranked pages": round(s["in_pages"] / n, 4)},
                            notes="accuracy: the proposal matches the validated answer. high_stakes_accuracy: the validated "
                                  "number is on the ranked pages (finding, before reading).")
-    run.finish("ok", rows_in=len(todo), rows_out=sum(s["right"] for s in stats.values()), counters={c: dict(stats[c]) for c in codes})
-    return 0
+    if db_stop:
+        run.failure("RUN_FAILED", "database_unavailable", key=f"{run.workflow}|database", stage="reading", message=db_stop[:500])
+    run.finish("failed" if db_stop else "ok", rows_in=len(todo), rows_out=sum(s["right"] for s in stats.values()),
+               counters={c: dict(stats[c]) for c in codes})
+    return 1 if db_stop else 0
 
 
 if __name__ == "__main__":
