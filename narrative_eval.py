@@ -164,10 +164,33 @@ def company_pages(cur, wba, year, queries, fy_month=None):
     if not docs:
         return []
     types = {d[0]: d[1] for d in docs}
-    # BM25 over any of the query words (page_ranker.py, 4 Nov 2026), instead of ts_rank_cd over pages holding
-    # all the words of one wording: a third of the answers had no page at all that way
+    # Two rankings fused (reciprocal rank fusion, 5 Nov 2026). ts_rank_cd over pages holding every word of one
+    # wording finds the specific page ("climate" and "board" together) but found no page at all for a third of
+    # the answers; BM25 over any of the words (page_ranker.py, 4 Nov) found pages for nearly all, but alone it
+    # let general sustainability pages crowd out the climate ones (GMC_01931.1 recall 65-73% to 13%). Fused,
+    # a page both rank high comes first and BM25 fills in where the strict search finds nothing.
     from page_ranker import RANKER
-    return [(lid, types.get(lid, ""), page, body) for lid, page, body, _ in RANKER.rank(cur, list(types), queries, PAGES)]
+    q = or_query(queries)
+    cur.execute("select library_id, page, body from public.pages, to_tsquery('simple', %s) q "
+                "where library_id = any(%s) and words @@ q order by ts_rank_cd(words, q, 32) desc limit %s",
+                (q, list(types), PAGES * 2))
+    strict = [(lid, page, body or "") for lid, page, body in cur.fetchall()]
+    loose = [(lid, page, body) for lid, page, body, _ in RANKER.rank(cur, list(types), queries, PAGES * 2)]
+    return [(lid, types.get(lid, ""), page, body) for lid, page, body in fuse_pages([strict, loose], PAGES)]
+
+
+def fuse_pages(lists, top, k=60):
+    """Reciprocal rank fusion of ranked [(library_id, page, body)] lists: score 1/(k + rank) summed over the
+    lists a page is in; the top `top`, best first, ties kept in the order first seen."""
+    score, body, order = {}, {}, []
+    for lst in lists:
+        for r, (lid, page, text) in enumerate(lst, 1):
+            key = (lid, page)
+            if key not in score:
+                score[key] = 0.0; body[key] = text; order.append(key)
+            score[key] += 1.0 / (k + r)
+    best = sorted(order, key=lambda x: -score[x])[:top]
+    return [(lid, page, body[(lid, page)]) for lid, page in best]
 
 
 def prompt(attr, pages, company):

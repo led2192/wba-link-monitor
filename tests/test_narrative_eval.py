@@ -112,5 +112,16 @@ class ProviderTier(unittest.TestCase):
                 N.read_base("t", "appA", "Metadata", [])
 
 
+class Fusion(unittest.TestCase):
+    def test_a_page_both_rank_comes_first_and_the_loose_list_fills_in(self):
+        import narrative_eval as N
+        strict = [("A", 7, "climate board"), ("A", 3, "x")]
+        loose = [("A", 1, "sustainability"), ("A", 7, "climate board"), ("A", 9, "y")]
+        got = N.fuse_pages([strict, loose], 3)
+        self.assertEqual([p for _, p, _ in got][0], 7)
+        self.assertEqual(len(got), 3)
+        self.assertEqual(N.fuse_pages([[], loose], 2), loose[:2])     # strict found nothing: BM25 alone
+
+
 if __name__ == "__main__":
     unittest.main()
