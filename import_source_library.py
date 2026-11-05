@@ -193,6 +193,14 @@ def read_deleted():
     return out
 
 
+def outside_universe(items, names):
+    """A document of a company that is not in `companies` (the universe) is not added: the Source Library also
+    holds other benchmarks' companies (5 Nov 2026: 126 rows were imported without a company name, fiscal
+    year end or file link, e.g. PT_01415, TA_02940). Its verdict becomes 'outside the universe', so the plan
+    lists it and nothing is fabricated."""
+    return [(s, "outside the universe" if v == "add" and s["wba"] not in names else v) for s, v in items]
+
+
 def plan(sources, held, deleted, order, purged=frozenset()):
     """[(source, verdict)] verdict in add / skip:<reason> / review:<reason>."""
     rank = {tag: i for i, tag in enumerate(order)}           # earlier in --bases = preferred
@@ -319,7 +327,9 @@ def main():
         sources += got
     held, n = read_library(token, base)
     print(f">>> Disclosure Library: {n} rows read.", flush=True)
-    items = plan(sources, held, read_deleted(), order, read_purged())
+    names = {r["fields"].get("wba_id"): r["fields"].get("company_name", "")
+             for r in get_all(token, base, "companies", ["wba_id", "company_name"])}
+    items = outside_universe(plan(sources, held, read_deleted(), order, read_purged()), names)
     adds = [s for s, v in items if v == "add"]
     if a.limit:
         adds = adds[:a.limit]
@@ -357,8 +367,6 @@ def main():
         sys.exit(f"Refusing: report_library would hold {n + len(adds):,} rows, over {MAX_REPORT_ROWS:,} (the base holds "
                  "500,000 in all). Use --limit, or free room first (purge_discarded.py).")
     from monitor_core import airtable_request
-    names = {r["fields"].get("wba_id"): r["fields"].get("company_name", "")
-             for r in get_all(token, base, "companies", ["wba_id", "company_name"])}
     url = f"{API}/{base}/report_library"
     assert base not in SL_BASES and "report_library" in url    # the one write: Disclosure Library only
     H = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
