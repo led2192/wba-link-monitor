@@ -41,5 +41,45 @@ class Pack(unittest.TestCase):
         self.assertIn("| GMC_01930.1 | narrative | 10 | 50% | 70% | 80% | 2,400 / 1,800 | 6 / 12 | 2 / 3 |", md)
 
 
+
+class Read(unittest.TestCase):
+    ATTR = {"type": "boolean", "question": "Does the board oversee climate?", "name": "Board oversight"}
+    PAS = [("D1", 4, 0, "The board oversees climate risk."), ("D2", 9, 0, "Our climate policy was adopted in 2023."),
+           ("D1", 5, 0, "Unrelated text.")]
+
+    def test_the_prompt_numbers_passages_with_document_and_page(self):
+        t = P.pack_prompt(self.ATTR, self.PAS, [1, 0], {"D1": ("Annual Report", 2024), "D2": ("Policy", 2023)}, 3)
+        self.assertIn('<passage number="1" document="Policy, 2023" page="9">', t)
+        self.assertIn('<passage number="2" document="Annual Report, 2024" page="4">', t)
+        self.assertIn("one to 3 quotes", t)
+        self.assertNotIn("Unrelated", t)
+        one = P.pack_prompt(self.ATTR, self.PAS, [0], {}, 1)
+        self.assertIn("at most 25 words", one)
+
+    def test_quotes_map_back_to_their_passages(self):
+        reply = {"answer": "yes", "quotes": [{"passage": 2, "quote": "The board oversees climate risk."},
+                                             {"passage": 1, "quote": "Our climate policy was adopted"},
+                                             {"passage": 9, "quote": "made up"}, {"passage": 1, "quote": ""}]}
+        got = P.reply_quotes(reply, [1, 0], self.PAS)
+        self.assertEqual(got[0][:2], ("D1", 4))
+        self.assertEqual(got[1][:2], ("D2", 9))
+        self.assertEqual(got[2][:2], (None, None))          # a passage number not sent
+        self.assertEqual(len(got), 3)                        # the empty quote is dropped
+        single = P.reply_quotes({"answer": "no", "passage": 1, "quote": "x y"}, [2], self.PAS)
+        self.assertEqual(single, [("D1", 5, "x y")])
+
+    def test_read_one_with_a_stub_model(self):
+        c = {"g": {"wba": "PT_00001"}, "pas": self.PAS, "chosen": [0], "docs": {}, "today4": []}
+        calls = []
+        def call(messages, usage, system=None, max_tokens=None):
+            calls.append(messages[0]["content"])
+            return '{"answer": "yes", "quotes": [{"passage": 1, "quote": "The board oversees climate risk."}], "why": "stated"}'
+        ans, quotes = P.read_one(c, "pack3", self.ATTR, collections.Counter(), call, P.__dict__.get("parse_reply") or __import__("model_reader").parse_reply)
+        self.assertTrue(ans)
+        self.assertEqual(quotes[0][:2], ("D1", 4))
+        ans, quotes = P.read_one(c, "today", self.ATTR, collections.Counter(), call, __import__("model_reader").parse_reply)
+        self.assertFalse(ans)                                # no pages today: "no", and no call
+        self.assertEqual(len(calls), 1)
+
 if __name__ == "__main__":
     unittest.main()

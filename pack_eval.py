@@ -21,6 +21,13 @@ Plus the words shown, and how many pages and documents each covers. Counts and s
 
 Read-only. Env: SUPABASE_DB_URL, GOLD_TOKEN; AIRTABLE_QA_TOKEN for the run record.
 Options: --limit N answers per attribute, --kinds narrative,number, --pack, --per-page, --budget minutes.
+
+--read (narrative only, ANTHROPIC_API_KEY, billed; 6 Nov 2026): the model then answers each question three ways
+on the same answers, every answer the analysts settled (yes and no alternating, as narrative_eval): today's
+pages with one quote (narrative_eval as it is), the pack with one quote, and the pack with one to three quotes
+of up to 60 words from different passages (the owner's review: quotes too short, evidence spread over several
+documents). Scored as narrative_eval (the analyst's answer), with the share of right yes answers whose quotes
+hold the analyst's evidence. --variants, --max-usd.
 """
 import argparse, collections, json, os, re, sys, time, traceback
 
@@ -116,6 +123,150 @@ def score_passages(pas, words, extra, idfs, avg):
     return out
 
 
+# ----- the model reading the pack (--read) -----
+
+VARIANTS = ("today", "pack1", "pack3")      # today's pages and one quote; the pack and one quote; the pack and up to 3 longer quotes
+PACK_SYSTEM = ("You read passages of a company's own reports and answer one question about what the company discloses. "
+               "Answer only from the passages given. Reply with one JSON object only: no code fence, no text around it.")
+QUOTE_WORDS = {1: 25, 3: 60}
+
+
+def pack_prompt(attr, pas, chosen, docs, quotes):
+    """The question, the pack's passages numbered (document type, year and page each), and the reply shape:
+    one quote of 25 words as today, or one to three quotes of up to 60 words from different passages."""
+    lines = [f"Question: {attr['question']}"]
+    if attr["type"] == "boolean":
+        lines.append('Answer "yes" only when a passage states it; "no" when the passages do not.')
+        ans = '"yes" or "no"'
+    else:
+        lines.append("Options: " + "; ".join(attr["options"]) + ". Pick every option the passages show, none if they show none.")
+        ans = "[the options shown]"
+    if quotes == 1:
+        shape = '{"answer": ' + ans + ', "passage": the passage number or null, "quote": "at most 25 words copied from the passage", "why": "ten words"}'
+    else:
+        lines.append(f"Back the answer with one to {quotes} quotes copied exactly, each up to {QUOTE_WORDS[quotes]} words, from different "
+                     "passages (and different documents when the evidence is spread over them); together they should show the answer.")
+        shape = ('{"answer": ' + ans + ', "quotes": [{"passage": the passage number, "quote": "up to '
+                 + str(QUOTE_WORDS[quotes]) + ' words copied from it"}], "why": "ten words"}')
+    lines += ["Passages:", ""]
+    for n, j in enumerate(chosen, 1):
+        lid, page, _, text = pas[j]
+        dtype, year = docs.get(lid, ("", 0))
+        lines += [f"<passage number=\"{n}\" document=\"{dtype or 'report'}{', ' + str(year) if year else ''}\" page=\"{page}\">", text, "</passage>", ""]
+    lines.append("Reply: " + shape)
+    return "\n".join(lines)
+
+
+def reply_quotes(reply, chosen, pas):
+    """[(library_id, page, quote)] from a reply: its "quotes" list, or its single "passage"/"page" and "quote"."""
+    if not isinstance(reply, dict):
+        return []
+    items = reply.get("quotes") if isinstance(reply.get("quotes"), list) else [{"passage": reply.get("passage"), "quote": reply.get("quote")}]
+    out = []
+    for q in items:
+        if not isinstance(q, dict) or not str(q.get("quote") or "").strip():
+            continue
+        try:
+            j = chosen[int(q.get("passage")) - 1]
+            lid, page = pas[j][0], pas[j][1]
+        except (TypeError, ValueError, IndexError):
+            lid, page = None, None
+        out.append((lid, page, str(q["quote"])[:600]))
+    return out
+
+
+def read_one(c, variant, attr, usage, call, parse_reply):
+    """(answer, quotes) of one variant for one answer."""
+    if variant == "today":
+        if not c["today4"]:
+            return (False if attr["type"] == "boolean" else frozenset()), []
+        content, system = NE.prompt(attr, c["today4"], c["g"]["wba"]), NE.SYSTEM
+    else:
+        if not c["chosen"]:
+            return (False if attr["type"] == "boolean" else frozenset()), []
+        content, system = pack_prompt(attr, c["pas"], c["chosen"], c["docs"], int(variant[-1])), PACK_SYSTEM
+    reply = None
+    for _ in range(2):
+        raw = call([{"role": "user", "content": content}], usage, system=system, max_tokens=900)
+        reply = parse_reply(raw)
+        if not (isinstance(reply, dict) and "answer" in reply):
+            reply = NE.salvage(raw)
+        if reply:
+            break
+    answer, page, quote = NE.read_reply(reply, attr)
+    if variant == "today":
+        lid = next((p[0] for p in c["today4"] if str(p[2]) == str(page)), None)
+        return answer, ([(lid, page, quote)] if quote else [])
+    return answer, reply_quotes(reply, c["chosen"], c["pas"])
+
+
+def read_all(cases, a):
+    """Every variant on the same answers; the report section."""
+    from model_reader import call, parse_reply, cost
+    cfg = {k: v for k, v in json.load(open(NE.CONFIG, encoding="utf-8"))["attributes"].items() if v.get("question")}
+    variants = [v for v in a.variants.split(",") if v in VARIANTS]
+    st = {v: collections.defaultdict(collections.Counter) for v in variants}
+    usage, stop = collections.Counter(), ""
+    for i, c in enumerate(cases, 1):
+        if cost(usage) >= a.max_usd:
+            stop = f"the ${a.max_usd:g} cost limit after {i - 1:,} answers"; break
+        if i % 50 == 0:
+            print(f"  read {i:,}/{len(cases):,}, ${cost(usage):.2f}", flush=True)
+        g = c["g"]; attr = cfg[g["attribute"]]
+        evg = grams(g.get("evidence") or "")
+        got = {}
+        for v in variants:
+            answer, quotes = read_one(c, v, attr, usage, call, parse_reply)
+            s = st[v][g["attribute"]]
+            ok = NE.score(s, attr, g["truth"], answer)
+            got[v] = ok
+            if ok and g["truth"] and quotes:
+                s["right with a quote"] += 1
+                s["quote words"] += sum(len(q.split()) for *_, q in quotes)
+                s["quotes"] += len(quotes)
+                s["quotes from two or more documents"] += len({l for l, _, _ in quotes if l}) >= 2
+                if evg:
+                    s["right yes with analyst evidence"] += 1
+                    s["quote holds analyst evidence"] += any(holds(q, evg) for *_, q in quotes)
+        for v in variants[1:]:
+            st[v][g["attribute"]]["right where today wrong"] += got[v] and not got.get("today", True)
+            st[v][g["attribute"]]["wrong where today right"] += got.get("today", False) and not got[v]
+    pct = lambda x, n: f"{x / n:.0%}" if n else "-"
+    codes = sorted({c["g"]["attribute"] for c in cases})
+    md = ["", "### The model reading today's pages and the pack, on the same answers", "",
+          f"{os.environ.get('READER_MODEL', 'claude-haiku-5-5')}; validated answers of ACT Core Climate, yes and no alternating. "
+          "today: today's pages and one quote of 25 words; pack1: the pack and one quote; pack3: the pack and one to three quotes of "
+          "up to 60 words from different passages. Right: the model's answer equals the analyst's. Quote holds the evidence: among "
+          "right yes answers with analyst evidence, a quote shares 6 consecutive words with it.", "",
+          "| Attribute | Answers | " + " | ".join(f"Right {v}" for v in variants) + " | " + " | ".join(f"Yes found {v}" for v in variants)
+          + " | " + " | ".join(f"Quote holds the evidence {v}" for v in variants) + " | " + " | ".join(f"Words quoted {v}" for v in variants) + " |",
+          "| --- | --: |" + " --: |" * (4 * len(variants))]
+    tot = {v: collections.Counter() for v in variants}
+    for code in codes + ["All"]:
+        ss = {v: (tot[v] if code == "All" else st[v][code]) for v in variants}
+        if code != "All":
+            for v in variants:
+                tot[v].update(st[v][code])
+        n = ss[variants[0]]["answers"]
+        md.append(f"| {code} | {n:,} | " + " | ".join(pct(ss[v]["right"], ss[v]["answers"]) for v in variants) + " | "
+                  + " | ".join(pct(ss[v]["yes and right"], ss[v]["truth yes"]) for v in variants) + " | "
+                  + " | ".join(pct(ss[v]["quote holds analyst evidence"], ss[v]["right yes with analyst evidence"]) for v in variants) + " | "
+                  + " | ".join((f"{ss[v]['quote words'] / ss[v]['right with a quote']:.0f}" if ss[v]["right with a quote"] else "-") for v in variants) + " |")
+    if "today" in variants:
+        md += ["", "Against today (the rule: no attribute more than 3 points worse):", ""]
+        for v in variants[1:]:
+            diffs = {code: 100 * (st[v][code]["right"] / max(st[v][code]["answers"], 1) - st["today"][code]["right"] / max(st["today"][code]["answers"], 1))
+                     for code in codes}
+            worst = min(diffs.values()) if diffs else 0
+            all_d = 100 * (tot[v]["right"] / max(tot[v]["answers"], 1) - tot["today"]["right"] / max(tot["today"]["answers"], 1))
+            md.append(f"- {v}: {all_d:+.1f} points overall, worst attribute {worst:+.1f}, right where today was wrong "
+                      f"{tot[v]['right where today wrong']:,}, wrong where today was right {tot[v]['wrong where today right']:,}, "
+                      f"quotes from two or more documents {tot[v]['quotes from two or more documents']:,}: "
+                      + ("qualifies" if worst >= -3 else "does not qualify"))
+    md += ["", f"Model calls: {usage.get('calls', 0) or '?'}; cost about ${cost(usage):.2f}." + (f" Stopped at {stop}." if stop else "")]
+    return md
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=120, help="answers per attribute (0 = all)")
@@ -123,17 +274,32 @@ def main():
     ap.add_argument("--pack", type=int, default=PACK)
     ap.add_argument("--per-page", type=int, default=PER_PAGE)
     ap.add_argument("--budget", type=float, default=80)
+    ap.add_argument("--read", action="store_true", help="narrative only: also have the model read today's pages and the pack, on the same answers")
+    ap.add_argument("--variants", default=",".join(VARIANTS), help="with --read: " + ", ".join(VARIANTS))
+    ap.add_argument("--max-usd", type=float, default=3.0, help="with --read: cost limit of the model calls")
     a = ap.parse_args()
+    if a.read:
+        a.kinds = "narrative"
     run = qa.Run("pack_eval.py")
     token = os.environ["GOLD_TOKEN"].strip()
     kinds = a.kinds.split(",")
     todo = []
     if "narrative" in kinds:
         cfg = {c: v for c, v in json.load(open(NE.CONFIG, encoding="utf-8"))["attributes"].items() if v.get("question")}
-        gold = [g for g in NE.gold_answers(token, list(cfg)) if (g.get("evidence") or "").strip()]
+        gold = NE.gold_answers(token, list(cfg))
+        if a.read:      # every answer the analysts settled, yes and no alternating as in narrative_eval
+            for g in gold:
+                g["truth"] = NE.truth_of(g["value"], g["null"], cfg[g["attribute"]]["type"])
+            gold = [g for g in sorted(gold, key=lambda g: g["id"]) if g["truth"] is not None]
+        else:
+            gold = [g for g in gold if (g.get("evidence") or "").strip()]
         by = collections.defaultdict(list)
         for g in gold:
             by[g["attribute"]].append(g)
+        if a.read:
+            for c in list(by):
+                pos = [g for g in by[c] if g["truth"]]; neg = [g for g in by[c] if not g["truth"]]
+                by[c] = [g for pair in zip(pos, neg) for g in pair] + pos[len(neg):] + neg[len(pos):]
         for c in cfg:
             todo += [dict(g, kind="narrative", queries=cfg[c]["queries"]) for g in (by[c][:a.limit] if a.limit else by[c])]
     spec = json.load(open(E.SPEC, encoding="utf-8"))
@@ -163,8 +329,10 @@ def main():
                 if not docs:
                     continue
                 ids = [d[0] for d in docs]
+                today4 = None
                 if g["kind"] == "narrative":
-                    today = [(lid, page, body[:NE.PAGE_CHARS]) for lid, _, page, body in NE.company_pages(cur, g["wba"], g["year"], g["queries"], fy, "ts")]
+                    today4 = NE.company_pages(cur, g["wba"], g["year"], g["queries"], fy, "ts")
+                    today = [(lid, page, body[:NE.PAGE_CHARS]) for lid, _, page, body in today4]
                     evg = grams(g["evidence"])
                     test = lambda text: holds(text, evg)
                 else:
@@ -188,7 +356,8 @@ def main():
             cases.append({"g": g, "fold": R.fold_of(g["wba"]), "today_hit": any(test(b) for _, _, b in today),
                           "today_words": sum(len(b.split()) for _, _, b in today),
                           "today_pages": len({(l, p) for l, p, _ in today}), "today_docs": len({l for l, _, _ in today}),
-                          "pas": pas, "target": {j for j, x in enumerate(pas) if test(x[3])}})
+                          "pas": pas, "target": {j for j, x in enumerate(pas) if test(x[3])},
+                          "today4": today4, "docs": {d[0]: (d[1], d[2]) for d in docs}})
     print(f">>> {len(cases):,} answers with documents, {(time.time() - t0) / 60:.0f} min", flush=True)
 
     texts = [x[3] for c in cases for x in c["pas"]]
@@ -209,6 +378,9 @@ def main():
             exp_cache[key] = R.expansion(others, g["attribute"], set(words))
         sc = score_passages(c["pas"], words, exp_cache[key], idfs, avg)
         chosen = pick(c["pas"], sc, a.pack, a.per_page)
+        c["chosen"] = chosen
+        if g["kind"] == "narrative" and not (g.get("evidence") or "").strip():
+            continue                     # (--read) an answer with no evidence text cannot be found or missed
         s = stats[g["attribute"]]
         s["kind " + g["kind"]] = 1
         s["answers"] += 1
@@ -220,6 +392,8 @@ def main():
         s["today pages"] += c["today_pages"]; s["pack pages"] += len({c["pas"][j][:2] for j in chosen})
         s["today docs"] += c["today_docs"]; s["pack docs"] += len({c["pas"][j][0] for j in chosen})
     md = report(stats, a)
+    if a.read:
+        md += read_all(cases, a)
     open("pack_eval.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
     run.finish("ok", rows_in=len(todo), rows_out=len(cases), counters={k: dict(v) for k, v in stats.items()})
