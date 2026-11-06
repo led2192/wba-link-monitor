@@ -240,3 +240,6 @@ narrative_eval.py printed up to 12 wrong answers per attribute, with the analyst
 ## The Source Library covers more companies than the universe (5 Nov 2026)
 The 2024 and 2026 Source Library bases hold documents of companies outside the SDG2000 list in `companies`. import_source_library.py added them anyway (its company name lookup simply came back empty), so 126 rows had no company name, no fiscal year end (fiscal_year_wba blank) and no file link, and showed up in reviewers' views. Every importer checks the wba_id against `companies` before adding a row.
 
+
+## The analysts' cited sources rarely match our library by address (6 Nov 2026)
+Of 104,525 sources cited by validated answers in the three gold bases, 2% matched one of our 248,193 documents by full address (scheme, www., fragment and trailing slash ignored). Any measurement that joins analyst citations to our documents must say how many it joined, and should also match by file name within the company. Even on the matched ones, our year labels put 7 to 8% of Revenue and Employees citations at the year before: label noise of that size is the floor against which a "standing" attribute has to be judged, not zero.

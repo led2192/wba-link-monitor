@@ -53,6 +53,16 @@ def norm_url(u):
     return (host + path + (("?" + s.query) if s.query else "")).lower()
 
 
+def file_key(u):
+    """The file name of a PDF address, lower case, when it is distinctive enough to match on its own within one
+    company: 'https://x.com/a/AR_2024_EN.pdf?v=2' -> 'ar_2024_en.pdf'. '' otherwise. 6 Nov 2026: matching the
+    full address found 2% of the analysts' cited sources in our library; the same file is often served from
+    another folder or host (a CDN, a localised site)."""
+    path = urlsplit((u or "").strip() if "://" in (u or "") else "http://" + (u or "").strip()).path
+    name = path.rstrip("/").rsplit("/", 1)[-1].lower()
+    return name if name.endswith(".pdf") and len(name) >= 10 else ""
+
+
 def first_year(v):
     m = YEAR.search(str(v or ""))
     return int(m.group(0)) if m else None
@@ -88,7 +98,7 @@ def tally(answers, sources, docs_by_company, doc_year):
     (the analysts' Source Year, for sources not in our library). answers: [{wba, attribute, year, source_ids}];
     sources: {record id: {url, year}}; docs_by_company: {wba: {norm url: our year}}; doc_year(wba, year)."""
     out = collections.defaultdict(lambda: {"c": collections.Counter(), "off": collections.Counter(),
-                                           "src": collections.Counter()})
+                                           "src": collections.Counter(), "sy": collections.Counter()})
     for g in answers:
         t = out[g["attribute"]]
         t["c"]["answers"] += 1
@@ -101,15 +111,21 @@ def tally(answers, sources, docs_by_company, doc_year):
             t["c"]["cited"] += 1
             u = norm_url(sources[i]["url"])
             y = mine.get(u) if u else None
+            if not y:
+                k = file_key(sources[i]["url"])
+                y = mine.get("file:" + k) if k else None
+                t["c"]["matched by file name"] += bool(y)
+            sy = first_year(sources[i]["year"])
+            if sy:
+                t["c"]["with a source year"] += 1
+                t["sy"][sy - g["year"]] += 1
             if y:
                 t["c"]["matched"] += 1
                 off = y - want
                 t["off"][off] += 1
                 t["c"]["in_today"] += TODAY[0] <= off <= TODAY[1]
-            else:
-                sy = first_year(sources[i]["year"])
-                if sy:
-                    t["src"][sy - g["year"]] += 1
+            elif sy:
+                t["src"][sy - g["year"]] += 1
     return out
 
 
@@ -117,14 +133,25 @@ def pct(a, b):
     return f"{100 * a / b:.0f}%" if b else "-"
 
 
+def sy_cell(sy):
+    """The analysts' own Source Year minus the reporting year, for every cited source with one (in our library
+    or not): a second view that does not depend on our year labels."""
+    n = sum(sy.values())
+    if not n:
+        return "-"
+    part = lambda f: pct(sum(v for o, v in sy.items() if f(o)), n)
+    return f"{part(lambda o: o <= -1)} / {part(lambda o: o == 0)} / {part(lambda o: o == 1)} / {part(lambda o: o >= 2)}"
+
+
 def report(tallies, names, min_cited):
     md = ["### Which documents' years each attribute needs (learned from the analysts' citations)", "",
           "Validated answers with a cited source. Offset: the cited document's year in our library minus the answer's "
           "document year (the year after the reporting year when the fiscal year ends January to May). Today both readers "
           f"read offsets 0 and +1. Learned window: the narrowest run of offsets around 0 holding {COVER:.0%} of the cited "
-          "documents found in our library. Counts and shares only.", "",
-          "| Attribute | Answers | Two or more sources | Cited in our library | Inside today's window | -3 or less | -2 | -1 | 0 | +1 | +2 or more | Learned window | Kind |",
-          "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --- | --- |"]
+          "documents found in our library. Source Year: the analysts' own year of each cited source minus the reporting year, "
+          "for every source with one. Counts and shares only.", "",
+          "| Attribute | Answers | Two or more sources | Cited in our library | Inside today's window | -3 or less | -2 | -1 | 0 | +1 | +2 or more | Learned window | Kind | Source Year -1 or less / 0 / +1 / +2 or more |",
+          "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --- | --- | --- |"]
     few, out = [], {}
     order = sorted(tallies, key=lambda c: -tallies[c]["c"]["matched"])
     for code in order:
@@ -143,7 +170,7 @@ def report(tallies, names, min_cited):
                   f"{pct(c['in_today'], m)} | {cell(lambda o: o <= -3)} | {cell(lambda o: o == -2)} | {cell(lambda o: o == -1)} | "
                   f"{cell(lambda o: o == 0)} | {cell(lambda o: o == 1)} | {cell(lambda o: o >= 2)} | "
                   f"{('%+d to %+d' % tuple(window)) if window else 'none within -3 to +2'}"
-                  f"{(' (' + pct(share, 1) + ')') if share else ''} | {k} |")
+                  f"{(' (' + pct(share, 1) + ')') if share else ''} | {k} | {sy_cell(t['sy'])} |")
     tot = collections.Counter()
     for t in tallies.values():
         tot.update(t["c"])
@@ -208,6 +235,9 @@ def main():
                         (companies[i:i + 200],))
             for wba, url, year in cur.fetchall():
                 docs_by_company[wba].setdefault(norm_url(url), year)
+                k = file_key(url)
+                if k:
+                    docs_by_company[wba].setdefault("file:" + k, year)
         print(f">>> {sum(len(v) for v in docs_by_company.values()):,} documents of {len(docs_by_company):,} companies", flush=True)
         for n, w in enumerate(companies, 1):
             if time.time() - t0 > a.budget * 60:
