@@ -20,6 +20,11 @@ switched on (CLAUDE.md, no going back):
              attribute and language by the model), fused into the pool for documents not in English;
   locate     a first model pass: the model sees short extracts of up to LOCATE_POOL candidate pages and picks
              the 8 most likely to print the figure (the "locate pass" of another team: 96% of answer pages sent).
+  horizon    (6 Nov 2026, from the owner's research on search engines: Google's re-ranking "twiddlers") a page
+             where the future outweighs the year asked (target words and years three or more years after the
+             year, against mentions of the year and the year before) is moved HORIZON_PUSH places down, so a
+             page of targets ("only a 2025-2030 target is printed") gives way to a page of actuals. No model,
+             nothing learned.
 "Learned from the other companies" is by company fold (rank_eval.fold_of), so a company is never scored with
 what its own cited pages taught.
 
@@ -39,7 +44,7 @@ import rank_eval as R
 import page_select as S
 from value_eval import found_on, printed_forms, scales_for
 
-METHODS = ("base", "expand", "doctype", "learned", "embed", "translate", "locate")
+METHODS = ("base", "expand", "doctype", "learned", "embed", "translate", "locate", "horizon")
 N = E.MODEL_PAGES
 BODY_KEEP = 6000                 # characters of each pool page kept in memory
 LOCATE_POOL = 20                 # candidate pages the locate pass sees
@@ -66,6 +71,26 @@ def choose(pool, rank_order=None, extra=None):
     seen = set(rank_order)
     seq = [scored[i] for i in rank_order] + [x for j, x in enumerate(scored) if j not in seen]
     return [(lid, page) for _, _, lid, page, _ in E.pages_for_model(seq, N)]
+
+
+HORIZON_PUSH = 20
+TARGET_WORDS = re.compile(r"\b(targets?|goals?|aims?|ambitions?|commit(?:s|ted|ment|ments)?|pledges?|aspirations?|net[- ]zero|roadmap|"
+                          r"by 20[3-5]\d|until 20[3-5]\d|reduce by|reduction of \d)\b", re.I)
+YEARS = re.compile(r"\b(20\d\d)\b")
+
+
+def future_heavy(body, year):
+    """True when a page speaks more of the future than of the year asked: target words plus years three or more
+    after `year`, against mentions of `year` and the year before (the actuals columns)."""
+    ys = [int(y) for y in YEARS.findall(body or "")]
+    now = sum(1 for y in ys if year - 1 <= y <= year)
+    fut = sum(1 for y in ys if y >= year + 3) + len(TARGET_WORDS.findall(body or ""))
+    return fut > now
+
+
+def horizon_order(pool, year, push=HORIZON_PUSH):
+    """Today's order with every future-heavy page moved `push` places down."""
+    return sorted(range(len(pool)), key=lambda i: i + (push if future_heavy(pool[i][3], year) else 0))
 
 
 def rrf(*orders, k=R.RRF_K):
@@ -332,6 +357,11 @@ def main():
             orders["doctype"] = rrf(base_order, by_score([lift.get(c["types"].get(p[1], ""), 1.0) for p in c["pool"]]))
         if "embed" in methods and sims:
             orders["embed"] = rrf(base_order, by_score(sims))
+        if "horizon" in methods:
+            orders["horizon"] = horizon_order(c["pool"], c["year"])
+            r = results["horizon"]
+            r["future-heavy pages"] += sum(future_heavy(p[3], c["year"]) for p in c["pool"])
+            r["pool pages"] += n_pool
         for m in methods:
             r = results[m]
             if m == "learned" or m == "locate" or m == "translate":
@@ -448,6 +478,9 @@ def report(cases, results, codes, spec, usage, usd):
                   + ("qualifies" if worst >= -RULE_POINTS / 100 else "does not qualify"))
     if results.get("translate", {}).get("foreign answers"):
         md.append(f"\nTranslate changed the pool for {results['translate']['foreign answers']:,} answers (documents not in English).")
+    h = results.get("horizon", {})
+    if h.get("pool pages"):
+        md.append(f"\nHorizon: {h['future-heavy pages']:,} of {h['pool pages']:,} pool pages ({h['future-heavy pages'] / h['pool pages']:.0%}) speak more of the future than of the year asked.")
     return md
 
 
