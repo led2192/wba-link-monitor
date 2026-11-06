@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-06 Decisions recorded: the learned page choice stays an option (model reader, same queue: capex 5 points worse, number on the model's pages for 204 against 203 answers); today's year window holds 95% or more of the analysts' citations for nearly every attribute, so no backward window is built (#PR)
+- 2026-11-06 Decisions recorded: the learned page choice stays an option (model reader, same queue: capex 5 points worse, number on the model's pages for 204 against 203 answers); today's year window holds 95% or more of the analysts' citations for nearly every attribute, so no backward window is built (#236)
 - 2026-11-05 Learned page choice as an option of the model reader (`extract_eval --select learned`, `page_select.py`; default stays base): reorders only the rank half of the 8 pages with the ranker `select_eval.py --save` trains (select_learned.json); on 402 validated answers it put the number on the 8 pages for 65% against 63%, no attribute worse. To be switched on only after a model-reading run next to base (#231)
 - 2026-11-06 Year windows: cited sources also matched by PDF file name within the company (the full address matched 2% of 104,525 cited sources), and a column with the analysts' own Source Year minus the reporting year for every cited source (#235)
 - 2026-11-06 Evidence pack workflow: job limit 200 minutes, for the model-reading runs (#234)
