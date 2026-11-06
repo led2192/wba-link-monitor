@@ -123,6 +123,28 @@ def score_passages(pas, words, extra, idfs, avg):
     return out
 
 
+# ----- the learned words of the pack (--save) -----
+
+def save_terms(cases, idfs, avg):
+    """What evidence_pack.py needs to build a narrative pack: per attribute the expansion words learned from the
+    analysts' evidence of the other company folds (one part per fold, for scoring validated answers) and of all
+    folds (for answers nobody has validated), and the idf of every query and expansion word."""
+    out, words_all = {}, set()
+    for code in sorted({c["g"]["attribute"] for c in cases if c["g"]["kind"] == "narrative"}):
+        mine = [c for c in cases if c["g"]["attribute"] == code]
+        words = set(R.query_terms(" ".join(mine[0]["g"]["queries"])))
+        words_all |= words
+        parts = {}
+        for f in list(range(R.FOLDS)) + [None]:
+            others = [{"attribute": code, "marks": x["marks"]} for x in mine if x["fold"] != f and x["target"]]
+            terms = list(R.expansion(others, code, words)) if others else []
+            words_all |= set(terms)
+            parts["all" if f is None else str(f)] = {"terms": terms, "answers": len(others)}
+        out[code] = parts
+    return {"made_by": "pack_eval.py --save", "made": time.strftime("%Y-%m-%d"), "pack": PACK, "per_page": PER_PAGE,
+            "avg": round(avg, 3), "idf": {t: round(idfs.get(t, 0.0), 6) for t in sorted(words_all)}, "attributes": out}
+
+
 # ----- the model reading the pack (--read) -----
 
 VARIANTS = ("today", "pack1", "pack3")      # today's pages and one quote; the pack and one quote; the pack and up to 3 longer quotes
@@ -277,6 +299,7 @@ def main():
     ap.add_argument("--read", action="store_true", help="narrative only: also have the model read today's pages and the pack, on the same answers")
     ap.add_argument("--variants", default=",".join(VARIANTS), help="with --read: " + ", ".join(VARIANTS))
     ap.add_argument("--max-usd", type=float, default=3.0, help="with --read: cost limit of the model calls")
+    ap.add_argument("--save", default="", help="narrative: write the pack's learned words for evidence_pack.py (narrative_eval --evidence pack3)")
     a = ap.parse_args()
     if a.read:
         a.kinds = "narrative"
@@ -366,6 +389,13 @@ def main():
     avg = sum(len(set(R.tokens(x))) for x in texts) / (len(texts) or 1)
     for c in cases:
         c["marks"] = R.marking_terms({j: x[3] for j, x in enumerate(c["pas"])}, c["target"]) if c["target"] else {}
+    if a.save:
+        model = save_terms(cases, idfs, avg)
+        with open(a.save, "w", encoding="utf-8") as f:
+            json.dump(model, f, indent=1, sort_keys=True)
+        # Run artifacts cannot be fetched from every place the file is needed (6 Nov 2026): also printed between
+        # markers. Words and weights only, no company and no answer.
+        print(">>> PACK_TERMS_JSON_BEGIN\n" + json.dumps(model, sort_keys=True) + "\n>>> PACK_TERMS_JSON_END", flush=True)
     stats = collections.defaultdict(collections.Counter)
     exp_cache = {}
     for c in cases:
