@@ -876,7 +876,8 @@ def main():
             st = table_text.STATS
             md += [f"Pages re-read with {PAGE_TEXT}: {st.get('pages parsed', 0):,} parsed ({st.get('tables', 0):,} tables, "
                    f"{st.get('seconds', 0) / max(st.get('pages parsed', 0), 1):.1f} s a page); kept the database text for "
-                   + ", ".join(f"{v:,} {k}" for k, v in sorted(st.items()) if k not in ("pages parsed", "tables", "seconds")) + ".", ""]
+                   + ", ".join(f"{v:,} {k}" for k, v in sorted(st.items()) if k not in ("pages parsed", "tables", "seconds")) + "."
+                   + "".join(f" First {p} error: {e}" for p, e in table_text.ERRORS.items()), ""]
         md += ["Other years read in the same call (the other year columns of the same figure; one call per answer since 31 Oct 2026). "
                "\"Right\" compares them with the validated answer of the same company and attribute for that year, where there is one:", "",
                "| Attribute | Calls with a figure | Other years returned | Per call | With a validated answer | Right |",

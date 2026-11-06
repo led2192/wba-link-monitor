@@ -25,6 +25,7 @@ CACHE = os.path.join(tempfile.gettempdir(), "table_text_pdfs")
 MAX_BYTES = 150 * 1024 * 1024
 _docling = None
 STATS = {}
+ERRORS = {}
 
 
 def _count(k):
@@ -94,8 +95,12 @@ def page_text(lid, page, parser):
     t0 = time.time()
     try:
         md = PARSERS[parser](path, int(page))
-    except Exception:
-        _count("parse failed"); return None
+    except Exception as e:
+        _count("parse failed")
+        if parser not in ERRORS:      # the first error of each parser, for the report (6 Nov 2026: Docling failed on
+            ERRORS[parser] = f"{type(e).__name__}: {str(e)[:160]}"   # every page of its first run and nothing said why)
+        print(f">>> table_text {parser}: {type(e).__name__}: {str(e)[:300]}", flush=True) if STATS["parse failed"] <= 3 else None
+        return None
     STATS["seconds"] = STATS.get("seconds", 0.0) + time.time() - t0
     if not md or len(md.strip()) < 40:
         _count("empty page"); return None
