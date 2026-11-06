@@ -72,5 +72,19 @@ class Tally(unittest.TestCase):
         self.assertEqual(windows["GMC_2"]["window"], [-1, 0])
 
 
+
+class FileNames(unittest.TestCase):
+    def test_the_same_file_in_another_folder_matches_by_name(self):
+        self.assertEqual(Y.file_key("https://cdn.co.com/x/AR_2024_EN.pdf?v=2"), "ar_2024_en.pdf")
+        self.assertEqual(Y.file_key("https://co.com/report.pdf"), "report.pdf")
+        self.assertEqual(Y.file_key("https://co.com/a.pdf"), "")            # too short to be distinctive
+        self.assertEqual(Y.file_key("https://co.com/investors/"), "")       # not a file
+        sources = {"r1": {"url": "https://cdn.co.com/x/AR_2024_EN.pdf", "year": "2024"}}
+        docs = {"PT_00003": {Y.norm_url("https://co.com/files/ar_2024_en.pdf"): 2024, "file:ar_2024_en.pdf": 2024}}
+        t = Y.tally([{"wba": "PT_00003", "attribute": "GMC_3", "year": 2024, "source_ids": ["r1"]}], sources, docs, lambda w, y: y)["GMC_3"]
+        self.assertEqual(t["c"]["matched"], 1)
+        self.assertEqual(t["c"]["matched by file name"], 1)
+        self.assertEqual(dict(t["sy"]), {0: 1})
+
 if __name__ == "__main__":
     unittest.main()
