@@ -8,7 +8,7 @@ on:
 jobs:
   evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120         # reading report_library (305,000 rows) takes about 45 minutes
     permissions:
       contents: read
     steps:
