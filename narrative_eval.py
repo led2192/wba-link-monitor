@@ -63,6 +63,7 @@ TIERS = {"reviewed": "{Data Reviewed}",                              # checked b
 TYPES = {"Boolean": "boolean", "Multiple Select": "multiple select", "Single Select": "multiple select"}
 
 
+PACK_TERMS = None                       # evidence_pack.load() with --evidence pack3
 SKIPPED = []                            # (base, table, reason) for every base that refused a read: in the report
 
 
@@ -347,7 +348,15 @@ def main():
     ap.add_argument("--pages", choices=["ts", "bm25", "fused"], default=PAGE_SEARCH,
                     help="page search: ts (default), bm25 or fused; compare on the same answers before changing the default")
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
+    ap.add_argument("--evidence", choices=["pages", "pack3"], default="pages",
+                    help="what the model reads: today's pages and one quote (default), or the evidence pack and one to three quotes (evidence_pack.py)")
     a = ap.parse_args()
+    if a.evidence == "pack3":
+        import evidence_pack
+        globals()["PACK_TERMS"] = evidence_pack.load()
+        if not PACK_TERMS:
+            open("narrative_eval.md", "w").write(f"### Narrative evaluation: --evidence pack3 needs {os.path.basename(evidence_pack.TERMS_FILE)} (pack_eval.py --save); nothing run.\n")
+            return 1
     globals()["PAGE_CHARS"] = a.page_chars         # prompt() and the diagnosis read it
     bases = [GOLD_BASE] if a.bases == "act" else list(MONTHLY_BASES.values()) if a.bases == "monthly" else a.bases.split(",")
     if a.commit:
@@ -398,7 +407,14 @@ def main():
             attr, s = cfg[g["attribute"]], stats[g["attribute"]]
             try:
                 t1 = time.time()
-                pages = company_pages(cur, g["wba"], g["year"], attr["queries"], fy_end_month(cur, g["wba"]), a.pages)
+                if a.evidence == "pack3":
+                    import evidence_pack, rank_eval
+                    pas, chosen, pdocs = evidence_pack.build(cur, g["wba"], g["year"], fy_end_month(cur, g["wba"]), g["attribute"],
+                                                             attr["queries"], PACK_TERMS, rank_eval.fold_of(g["wba"]))
+                    # the pack's passages as pages for the rest of the loop (evidence_where, disagreements)
+                    pages = [(pas[j][0], (pdocs.get(pas[j][0]) or ("", 0))[0], pas[j][1], pas[j][3]) for j in chosen]
+                else:
+                    pages = company_pages(cur, g["wba"], g["year"], attr["queries"], fy_end_month(cur, g["wba"]), a.pages)
                 t_pages += time.time() - t1
             except Exception:
                 conn.rollback(); cur.execute("set statement_timeout = '60s'"); s["database did not answer"] += 1; continue
@@ -406,8 +422,13 @@ def main():
                 s["no pages"] += 1; answer = (False if attr["type"] == "boolean" else frozenset()); page, quote = None, ""
             else:
                 try:
+                    if a.evidence == "pack3":
+                        import pack_eval
+                        content, system, max_tok = pack_eval.pack_prompt(attr, pas, chosen, pdocs, 3), pack_eval.PACK_SYSTEM, 900
+                    else:
+                        content, system, max_tok = prompt(attr, pages, g["wba"]), SYSTEM, 800
                     for attempt in range(2):          # one retry: an empty or unreadable reply is usually an overload
-                        raw = call([{"role": "user", "content": prompt(attr, pages, g["wba"])}], usage, system=SYSTEM, max_tokens=800)
+                        raw = call([{"role": "user", "content": content}], usage, system=system, max_tokens=max_tok)
                         reply = parse_reply(raw)
                         if not (isinstance(reply, dict) and "answer" in reply):
                             reply = salvage(raw)
@@ -421,13 +442,21 @@ def main():
                 if not reply and len(wrong[g["attribute"]]) < 3:
                     print(f"    unreadable reply for {g['id']}: {re.sub(r'\s+', ' ', raw or '(empty)')[:200]}", flush=True)
                 answer, page, quote = read_reply(reply, attr)
+                if a.evidence == "pack3":
+                    qs = pack_eval.reply_quotes(reply, chosen, pas)
+                    if qs:
+                        page = "; ".join(str(p) for _, p, _ in qs if p is not None) or None
+                        quote = " … ".join(q for *_, q in qs)
+                        s["quotes"] += len(qs)
+                        s["quotes from two or more documents"] += len({l for l, _, _ in qs if l}) >= 2
             ok = score(s, attr, g["truth"], answer)
             if not ok:
-                where = evidence_where(g.get("evidence"), pages, PAGE_CHARS)
+                where = evidence_where(g.get("evidence"), pages, PAGE_CHARS if a.evidence == "pages" else 10 ** 6)
                 s["wrong: " + where] += 1
                 if a.disagreements:
                     t = (lambda v: ("yes" if v else "no") if isinstance(v, bool) else (", ".join(sorted(v)) or "none"))
-                    lid = next((p[0] for p in pages if str(p[2]) == str(page)), pages[0][0] if pages else "")
+                    first = str(page or "").split(";")[0].strip()
+                    lid = next((p[0] for p in pages if str(p[2]) == first), pages[0][0] if pages else "")
                     disagreements.append({"metadata_id": g["id"], "wba_id": g["wba"], "attribute": g["attribute"],
                                           "attribute_name": attr["name"], "question": attr["question"], "year": g["year"],
                                           "analyst": t(g["truth"]), "model": t(answer) if answer is not None else "no reply",
@@ -447,7 +476,8 @@ def main():
               + (" Attributes chosen by number of answers, their question taken from Metadata Codes." if a.auto else "")
               + ("" if not SKIPPED else " Skipped (refused or missing a field): "
                  + "; ".join(sorted({f"{b} {t} ({why})" for b, t, why in SKIPPED})) + ".")
-              + f" Page search: {a.pages}.")
+              + (f" Page search: {a.pages}." if a.evidence == "pages" else
+                 " Evidence: the pack (evidence_pack.py, 15 passages, one to three quotes of up to 60 words)."))
     md = report(codes, cfg, stats, wrong, usage, cost(usage), source)
     md += ("\nWhere the wrong answers go wrong (from the analyst's evidence text; " + f"{PAGE_CHARS:,} characters shown a page, "
            + f"model {os.environ.get('READER_MODEL', 'the default Haiku')}):\n\n| Attribute | Wrong | " + " | ".join(w.capitalize() for w in WHERE)

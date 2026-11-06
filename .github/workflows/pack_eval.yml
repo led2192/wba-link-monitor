@@ -25,6 +25,10 @@ on:
       max_usd:
         description: "cost limit of the model calls (with read)"
         default: "3"
+      save:
+        description: "narrative: write the pack's learned words (pack_terms.json, also printed to the log) for narrative_eval --evidence pack3"
+        type: boolean
+        default: false
   pull_request:
     paths: [pack_eval.py, .github/workflows/pack_eval.yml]
 
@@ -53,7 +57,7 @@ jobs:
           READER_MODEL: claude-haiku-5-5
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then python pack_eval.py --limit 10 --budget 15
-          else python pack_eval.py --limit ${{ inputs.limit }} --kinds ${{ inputs.kinds }} --pack ${{ inputs.pack }} --budget ${{ inputs.budget }} ${{ inputs.read && format('--read --max-usd {0}', inputs.max_usd) || '' }}; fi
+          else python pack_eval.py --limit ${{ inputs.limit }} --kinds ${{ inputs.kinds }} --pack ${{ inputs.pack }} --budget ${{ inputs.budget }} ${{ inputs.read && format('--read --max-usd {0}', inputs.max_usd) || '' }} ${{ inputs.save && '--save pack_terms.json' || '' }}; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
