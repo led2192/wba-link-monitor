@@ -1,0 +1,46 @@
+name: Decision mining
+
+# Which figure the analysts choose, learned from their validated answers (decision_mining.py): what they
+# record (percentage or amount), the words of the line they chose against the lines they passed over on the
+# same page, and, when the figure is not printed, whether it is a simple derivation of printed figures (with
+# a chance check). Counts, shares and single words only. Read-only. Manual.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "answers per attribute (0 = all validated answers with a value)"
+        default: "150"
+      attributes:
+        description: "GMC codes, comma-separated (blank = all number attributes)"
+        default: ""
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          ARGS="--limit ${{ inputs.limit }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
+          python decision_mining.py $ARGS
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: decision-mining
+          path: decision_mining.md
+          if-no-files-found: ignore
