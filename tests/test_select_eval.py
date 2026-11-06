@@ -74,5 +74,19 @@ class Report(unittest.TestCase):
         self.assertIn("expand: +15.0 points overall, worst attribute -10.0: does not qualify", md)
 
 
+
+class Horizon(unittest.TestCase):
+    def test_a_page_of_targets_is_future_heavy(self):
+        targets = "Our targets: reduce Scope 1 by 50% by 2030 and reach net zero by 2050. Ambition 2035."
+        actuals = "Scope 1 emissions 2024: 1,234 tCO2e (2023: 1,300). Scope 2 2024: 560."
+        self.assertTrue(S.future_heavy(targets, 2024))
+        self.assertFalse(S.future_heavy(actuals, 2024))
+
+    def test_future_heavy_pages_move_down(self):
+        pool = [(1, "D", 1, "target by 2030 net zero goal"), (1, "D", 2, "2024 revenue 2023"), (1, "D", 3, "2024 data")]
+        o = S.horizon_order(pool, 2024, push=2)          # keys 2, 1, 2
+        self.assertEqual(o, [1, 0, 2])
+        self.assertEqual(S.horizon_order(pool, 2024, push=20), [1, 2, 0])
+
 if __name__ == "__main__":
     unittest.main()
