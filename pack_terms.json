@@ -1,0 +1,327 @@
+{
+ "attributes": {
+  "GMC_01930.1": {
+   "0": {
+    "answers": 95,
+    "terms": [
+     "risk",
+     "related",
+     "matters",
+     "risks",
+     "including",
+     "strategic",
+     "operations",
+     "issues",
+     "business",
+     "compliance"
+    ]
+   },
+   "1": {
+    "answers": 102,
+    "terms": [
+     "matters",
+     "related",
+     "risk",
+     "including",
+     "risks",
+     "operations",
+     "issues",
+     "esg",
+     "reports",
+     "performance"
+    ]
+   },
+   "2": {
+    "answers": 90,
+    "terms": [
+     "risks",
+     "related",
+     "including",
+     "risk",
+     "matters",
+     "operations",
+     "initiatives",
+     "opportunities",
+     "climate",
+     "progress"
+    ]
+   },
+   "3": {
+    "answers": 104,
+    "terms": [
+     "related",
+     "risks",
+     "risk",
+     "including",
+     "matters",
+     "issues",
+     "operations",
+     "business",
+     "strategic",
+     "strategies"
+    ]
+   },
+   "4": {
+    "answers": 93,
+    "terms": [
+     "risks",
+     "including",
+     "matters",
+     "related",
+     "risk",
+     "strategic",
+     "operations",
+     "business",
+     "esg",
+     "executive"
+    ]
+   },
+   "all": {
+    "answers": 121,
+    "terms": [
+     "related",
+     "risks",
+     "risk",
+     "matters",
+     "including",
+     "operations",
+     "issues",
+     "business",
+     "strategic",
+     "esg"
+    ]
+   }
+  },
+  "GMC_01931.1": {
+   "0": {
+    "answers": 74,
+    "terms": [
+     "risks",
+     "related",
+     "matters",
+     "opportunities",
+     "risk",
+     "including",
+     "sustainability",
+     "change",
+     "issues",
+     "directors"
+    ]
+   },
+   "1": {
+    "answers": 81,
+    "terms": [
+     "risks",
+     "related",
+     "matters",
+     "environmental",
+     "opportunities",
+     "change",
+     "sustainability",
+     "including",
+     "issues",
+     "reporting"
+    ]
+   },
+   "2": {
+    "answers": 72,
+    "terms": [
+     "risks",
+     "related",
+     "opportunities",
+     "sustainability",
+     "initiatives",
+     "environmental",
+     "risk",
+     "issues",
+     "including",
+     "matters"
+    ]
+   },
+   "3": {
+    "answers": 79,
+    "terms": [
+     "risks",
+     "related",
+     "opportunities",
+     "matters",
+     "issues",
+     "including",
+     "environmental",
+     "strategies",
+     "change",
+     "sustainability"
+    ]
+   },
+   "4": {
+    "answers": 70,
+    "terms": [
+     "risks",
+     "opportunities",
+     "related",
+     "sustainability",
+     "change",
+     "matters",
+     "including",
+     "initiatives",
+     "risk",
+     "environmental"
+    ]
+   },
+   "all": {
+    "answers": 94,
+    "terms": [
+     "risks",
+     "related",
+     "opportunities",
+     "matters",
+     "sustainability",
+     "including",
+     "environmental",
+     "change",
+     "risk",
+     "issues"
+    ]
+   }
+  },
+  "GMC_01932.1": {
+   "0": {
+    "answers": 98,
+    "terms": [
+     "governance",
+     "board",
+     "risks",
+     "directors",
+     "strategy",
+     "matters",
+     "including",
+     "related",
+     "risk",
+     "issues"
+    ]
+   },
+   "1": {
+    "answers": 105,
+    "terms": [
+     "governance",
+     "board",
+     "risks",
+     "including",
+     "directors",
+     "related",
+     "matters",
+     "strategy",
+     "corporate",
+     "risk"
+    ]
+   },
+   "2": {
+    "answers": 92,
+    "terms": [
+     "governance",
+     "risks",
+     "board",
+     "including",
+     "strategy",
+     "related",
+     "directors",
+     "risk",
+     "climate",
+     "matters"
+    ]
+   },
+   "3": {
+    "answers": 107,
+    "terms": [
+     "governance",
+     "board",
+     "risks",
+     "including",
+     "strategy",
+     "related",
+     "directors",
+     "risk",
+     "corporate",
+     "matters"
+    ]
+   },
+   "4": {
+    "answers": 94,
+    "terms": [
+     "governance",
+     "board",
+     "risks",
+     "including",
+     "directors",
+     "related",
+     "matters",
+     "strategy",
+     "corporate",
+     "risk"
+    ]
+   },
+   "all": {
+    "answers": 124,
+    "terms": [
+     "governance",
+     "board",
+     "risks",
+     "including",
+     "strategy",
+     "directors",
+     "related",
+     "matters",
+     "risk",
+     "corporate"
+    ]
+   }
+  }
+ },
+ "avg": 83.366,
+ "idf": {
+  "approves": 4.598098,
+  "board": 0.880739,
+  "business": 1.213766,
+  "change": 2.5347,
+  "chief": 2.792328,
+  "climate": 2.219533,
+  "committee": 1.080622,
+  "compliance": 1.993091,
+  "corporate": 1.428887,
+  "directors": 1.281824,
+  "environmental": 2.033678,
+  "esg": 2.293107,
+  "executive": 1.756178,
+  "governance": 1.208925,
+  "implementation": 2.909306,
+  "including": 1.476949,
+  "initiatives": 2.603636,
+  "issues": 2.463838,
+  "management": 0.980136,
+  "matters": 2.374461,
+  "officer": 2.524783,
+  "operations": 2.059975,
+  "opportunities": 2.490411,
+  "oversight": 2.419241,
+  "performance": 1.791468,
+  "plan": 2.888668,
+  "progress": 2.90956,
+  "related": 1.743496,
+  "reporting": 2.076977,
+  "reports": 2.66545,
+  "responsible": 1.911004,
+  "risk": 1.580076,
+  "risks": 1.901399,
+  "strategic": 2.489241,
+  "strategies": 3.000568,
+  "strategy": 1.789558,
+  "sustainability": 1.314056,
+  "tcfd": 4.116037,
+  "team": 2.756336,
+  "transition": 3.570791
+ },
+ "made": "2026-11-06",
+ "made_by": "pack_eval.py --save",
+ "pack": 15,
+ "per_page": 2
+}
