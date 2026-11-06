@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-06 Evidence pack workflow: job limit 200 minutes, for the model-reading runs (#234)
 - 2026-11-06 Evidence pack experiment `--read` (narrative): the model answers on the same validated answers from today's pages with one quote, from the pack with one quote, and from the pack with one to three quotes of up to 60 words from different passages; scored against the analysts, with the share of quotes that hold the analyst's evidence. The first pack run (6 Nov) put the evidence in front of the reader for 84% of narrative answers against 70% today; numbers stay on pages (57% against 70%) (#233)
 - 2026-11-06 Year windows experiment (`year_window_eval.py`, manual): per attribute, where the documents the analysts cited sit against today's window (the year's documents and the next), and the narrowest window holding 95% of them, so period attributes (revenue) and standing ones (a policy from the year before) can get their own window later; read-only (#232)
 - 2026-11-05 Evidence pack experiment (`pack_eval.py`, manual): short passages chosen without a model across all the year's documents, against today's pages, on the same validated answers (narrative: the analyst's evidence; numbers: the validated number); read-only (#230)
