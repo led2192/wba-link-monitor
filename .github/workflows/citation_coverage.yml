@@ -1,0 +1,35 @@
+name: Citation coverage
+
+# How many of the sources the analysts cited we hold (citation_coverage.py): in report_library and with
+# text in the evidence database, per gold base, kind of source and year. Counts and shares only. Read-only. Manual.
+on:
+  workflow_dispatch:
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: python citation_coverage.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: citation-coverage
+          path: |
+            citation_coverage.md
+          if-no-files-found: ignore
