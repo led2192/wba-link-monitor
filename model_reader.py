@@ -81,6 +81,49 @@ def fiscal_note(g):
             + ". For every figure give \"period_end\": the month the column's period ends, as YYYY-MM.")
 
 
+RULES = None    # decision_rules.json (decision_mining.py --save) when extract_eval --guidance learned; None = today
+
+
+def rules_note(code):
+    """The learned choice rules of an attribute as one instruction, or ''."""
+    r = ((RULES or {}).get("attributes") or {}).get(code or "")
+    if not r:
+        return ""
+    parts = []
+    if r.get("follow"):
+        parts.append("the line it is printed on usually says " + ", ".join(f'"{w}"' for w, *_ in r["follow"][:8]))
+    if r.get("avoid"):
+        parts.append("never take a figure from a line that says " + ", ".join(f'"{w}"' for w, *_ in r["avoid"][:8]))
+    if r.get("take_largest"):
+        parts.append(f"when several lines of the page qualify, take the largest figure (the analysts did in {r['largest']} of {r['competing']} such pages)")
+    return ("Learned from the analysts' validated answers: " + "; ".join(parts) + ".") if parts else ""
+
+
+def line_of(body, printed):
+    """The lines of a page that print a number, by its printed digits."""
+    from label_mining import number_spans
+    d = 0 if float(printed).is_integer() else min(2, len(repr(float(printed)).split(".")[1]))
+    return [ln for ln in (body or "").split("\n") if number_spans(ln, float(printed), d)]
+
+
+def rule_ok(code, entry, pages):
+    """False when the figure's line says an avoided word and none of the followed ones (learned rules)."""
+    r = ((RULES or {}).get("attributes") or {}).get(code or "")
+    if not r or not r.get("avoid"):
+        return True
+    body = next((b for lid, p, b in pages if lid == entry.get("library_id") and str(p) == str(entry.get("page"))), None)
+    lines = line_of(body, entry.get("printed")) if body is not None and entry.get("printed") is not None else []
+    if not lines:
+        return True
+    avoid = {w for w, *_ in r["avoid"]}; follow = {w for w, *_ in r.get("follow") or []}
+    from label_mining import words
+    for ln in lines:
+        ws = set(words(ln))
+        if not (ws & avoid) or (ws & follow):
+            return True                  # one clean printing is enough
+    return False
+
+
 def prompt(g, attr, pages):
     """The user message: what to find, then the pages, each tagged P1, P2, ..."""
     labels = ", ".join(attr.get("labels", [])[:12])
@@ -98,6 +141,7 @@ def prompt(g, attr, pages):
              f"Scope: {attr['scope']}." if attr.get("scope") else "",
              "Take the figure for that year, for the whole company or group, not a segment, a region or a target.",
              g.get("hint") or "",
+             rules_note(g.get("attribute")),
              (f"The figure wanted is the {attr['variant']['wanted']} one. Say in \"basis\" what the page calls the figure: "
               f"\"{attr['variant']['wanted']}\", \"{attr['variant']['other']}\", or \"not stated\" when the page gives one Scope 2 "
               f"figure without saying which. Never give a figure the page calls {attr['variant']['other']}.") if attr.get("variant") else "",
@@ -325,6 +369,10 @@ def read_years(g, attr, pages, usage, sess=None, note=None):
         elif entries == [] or (entries is None and not reply.get("page")):
             note["why"] = str(reply.get("why") or "")[:120]
     got = check_all(reply, pages, to_number, numbers_on, usage, g.get("fy_month"))
+    if RULES:
+        kept = [e for e in got if rule_ok(g.get("attribute"), e, pages)]
+        usage["dropped by the learned rules"] += len(got) - len(kept)
+        got = kept
     for e in got:
         if e["year"] is None:           # the old single-object shape, or a missing year: the year asked
             e["year"] = g["year"]
