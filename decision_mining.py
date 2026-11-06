@@ -106,11 +106,37 @@ def derivations(v, nums_by_line, percent):
     return found
 
 
+LARGEST_SHARE, LARGEST_MIN = 0.6, 20     # "they took the largest" is a rule only this often, on this many pages
+
+
+def word_rules(chosen, passed):
+    """(followed, avoided): [(word, chosen, passed)] of the words with MIN_SUPPORT answers and three times more
+    often on one side, most supported first."""
+    rows = [(w, chosen[w], passed[w]) for w in set(chosen) | set(passed) if chosen[w] + passed[w] >= MIN_SUPPORT]
+    follow = sorted([r for r in rows if (r[1] + 1) / (r[2] + 1) >= 3], key=lambda r: -r[1])[:10]
+    avoid = sorted([r for r in rows if (r[1] + 1) / (r[2] + 1) <= 1 / 3], key=lambda r: -r[2])[:10]
+    return follow, avoid
+
+
+def save_rules(codes, st, chosen_w, passed_w):
+    """What extract_eval --guidance learned (model_reader.RULES) needs: per attribute the words followed and
+    avoided, and the largest rule when it holds."""
+    out = {}
+    for c in codes:
+        follow, avoid = word_rules(chosen_w[c], passed_w[c])
+        n = st[c]["with competing lines"]
+        big = st[c]["the largest of the competitors"]
+        out[c] = {"follow": follow, "avoid": avoid, "competing": n, "largest": big,
+                  "take_largest": bool(n >= LARGEST_MIN and big / n >= LARGEST_SHARE)}
+    return {"made_by": "decision_mining.py --save", "made": time.strftime("%Y-%m-%d"), "attributes": out}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=150)
     ap.add_argument("--attributes", default="")
     ap.add_argument("--budget", type=int, default=100)
+    ap.add_argument("--save", default="", help="write the learned choice rules (decision_rules.json) for extract_eval --guidance learned")
     a = ap.parse_args()
     token = os.environ.get("GOLD_TOKEN", "").strip()
     if not token:
@@ -235,14 +261,8 @@ def main():
         md.append(f"Where printed: the figure's column on its line: first {cols[1] / p:.0%}, second {cols[2] / p:.0%}, third {cols[3] / p:.0%}, "
                   f"later {cols[4] / p:.0%}. With competing lines on the page: {s['with competing lines']:,}; "
                   f"of those the chosen figure is the largest {s['the largest of the competitors']:,} and the smallest {s['the smallest of the competitors']:,}.")
-        rows = []
-        for w in set(chosen_w[c]) | set(passed_w[c]):
-            k1, k2 = chosen_w[c][w], passed_w[c][w]
-            if k1 + k2 < MIN_SUPPORT:
-                continue
-            rows.append((w, k1, k2, (k1 + 1) / (k2 + 1)))
-        follow = sorted([r for r in rows if r[3] >= 3], key=lambda r: -r[1])[:12]
-        avoid = sorted([r for r in rows if r[3] <= 1 / 3], key=lambda r: -r[2])[:12]
+        follow, avoid = word_rules(chosen_w[c], passed_w[c])
+        follow = [r + (0,) for r in follow]; avoid = [r + (0,) for r in avoid]
         if follow or avoid:
             md += ["", "| Words on the chosen line (followed) | Chosen | Passed over | | Words on passed-over lines (avoided) | Chosen | Passed over |",
                    "| --- | --: | --: | --- | --- | --: | --: |"]
@@ -259,6 +279,12 @@ def main():
         md.append("")
     open("decision_mining.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
+    if a.save:
+        rules = save_rules(codes, st, chosen_w, passed_w)
+        with open(a.save, "w", encoding="utf-8") as f:
+            json.dump(rules, f, indent=1, sort_keys=True)
+        # artifacts cannot always be fetched (6 Nov 2026): also printed. Single words and counts only.
+        print(">>> DECISION_RULES_JSON_BEGIN\n" + json.dumps(rules, sort_keys=True) + "\n>>> DECISION_RULES_JSON_END", flush=True)
     run.finish("ok", rows_in=len(todo), rows_out=sum(s["printed"] for s in st.values()), counters={c: dict(st[c]) for c in codes})
     return 0
 

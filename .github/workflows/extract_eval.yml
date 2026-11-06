@@ -27,6 +27,14 @@ on:
       model:
         description: "model for the model reader"
         default: "claude-haiku-5-5"
+      guidance:
+        description: "today, or learned: the analysts' choice rules (decision_rules.json) in the prompt and as a check"
+        type: choice
+        options: [today, learned]
+        default: today
+      budget:
+        description: "minutes for reading answers (the job stops at 180)"
+        default: "100"
       page_text:
         description: "the text the model reads: db (today), or each page re-read from the PDF with its tables: pymupdf or docling"
         type: choice
@@ -38,7 +46,7 @@ on:
         options: [base, learned]
         default: base
   pull_request:
-    paths: [extract_eval.py, model_reader.py, page_select.py, table_text.py, attributes.json, .github/workflows/extract_eval.yml]
+    paths: [extract_eval.py, model_reader.py, decision_rules.json, page_select.py, table_text.py, attributes.json, .github/workflows/extract_eval.yml]
 
 concurrency:                      # a newer commit of the same pull request replaces the older run (1 Nov 2026: two pushes
                                   # 4 s apart ran two 2-hour scorings that slowed each other past the limit). Manual runs
@@ -84,7 +92,7 @@ jobs:
             python extract_eval.py --limit 40 --reader model || true
             cat rules.md extract_eval.md > both.md && mv both.md extract_eval.md
           else
-            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }} --text-rank ${{ inputs.text_rank || 'ts' }} --select ${{ inputs.select || 'base' }} --page-text ${{ inputs.page_text || 'db' }}"
+            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }} --text-rank ${{ inputs.text_rank || 'ts' }} --select ${{ inputs.select || 'base' }} --page-text ${{ inputs.page_text || 'db' }} --guidance ${{ inputs.guidance || 'today' }} --budget ${{ inputs.budget || '100' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
             python extract_eval.py $ARGS
           fi

@@ -13,6 +13,10 @@ on:
       attributes:
         description: "GMC codes, comma-separated (blank = all number attributes)"
         default: ""
+      save:
+        description: "write the learned choice rules (decision_rules.json, also printed to the log) for extract_eval --guidance learned"
+        type: boolean
+        default: false
 
 jobs:
   evaluate:
@@ -35,12 +39,14 @@ jobs:
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
         run: |
-          ARGS="--limit ${{ inputs.limit }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
+          ARGS="--limit ${{ inputs.limit }} ${{ inputs.save && '--save decision_rules.json' || '' }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
           python decision_mining.py $ARGS
       - name: Keep the result
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: decision-mining
-          path: decision_mining.md
+          path: |
+            decision_mining.md
+            decision_rules.json
           if-no-files-found: ignore
