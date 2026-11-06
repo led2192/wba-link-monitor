@@ -31,7 +31,7 @@ on:
 jobs:
   evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 200          # with read: about 60 minutes of page search and 1,000 model calls (6 Nov 2026)
     permissions:
       contents: read
       pull-requests: write
