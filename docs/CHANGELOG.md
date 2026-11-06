@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-06 Decisions recorded: the learned choice rules as a check only (market-based Scope 2 9 points worse) and Docling tables (below today on five of six attributes, 7.6 s a page) were measured and not adopted (#PR)
+- 2026-11-06 Decisions recorded: the learned choice rules as a check only (market-based Scope 2 9 points worse) and Docling tables (below today on five of six attributes, 7.6 s a page) were measured and not adopted (#249)
 - 2026-11-06 `--guidance check`: the learned choice rules only drop a figure printed on an avoided line, with today's prompt. The rules in the prompt (`learned`, runs 42232831358 and 42232836705, same 390 answers) made the reader decline market-based Scope 2 (proposals 68% to 52%, right 58% to 42%) and do not qualify (#248)
 - 2026-11-06 Generic reader workflow: Docling needs torchvision with torch (its layout model failed to load on every page: "Could not import module AutoImageProcessor") (#247)
 - 2026-11-06 table_text.py reports the first parse error of each parser (the first Docling run failed on all 1,643 pages without saying why) (#246)
