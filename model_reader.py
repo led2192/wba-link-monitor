@@ -81,13 +81,14 @@ def fiscal_note(g):
             + ". For every figure give \"period_end\": the month the column's period ends, as YYYY-MM.")
 
 
+RULES_IN_PROMPT = True   # False with extract_eval --guidance check: the rules only drop figures, the prompt is today's
 RULES = None    # decision_rules.json (decision_mining.py --save) when extract_eval --guidance learned; None = today
 
 
 def rules_note(code):
     """The learned choice rules of an attribute as one instruction, or ''."""
     r = ((RULES or {}).get("attributes") or {}).get(code or "")
-    if not r:
+    if not r or not RULES_IN_PROMPT:
         return ""
     parts = []
     if r.get("follow"):

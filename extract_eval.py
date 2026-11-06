@@ -716,7 +716,7 @@ def main():
     ap.add_argument("--memory", default="on", choices=["on", "off"], help="use the company's right answer for another year (company_memory.py)")
     ap.add_argument("--text-rank", default="ts", choices=["ts", "bm25"], help="the text score of page ranking: ts_rank_cd or BM25 (page_ranker.py)")
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
-    ap.add_argument("--guidance", default="today", choices=["today", "learned"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES)")
+    ap.add_argument("--guidance", default="today", choices=["today", "learned", "check"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt")
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
     ap.add_argument("--select", default="base", choices=["base", "learned"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py)")
     a = ap.parse_args()
@@ -727,8 +727,9 @@ def main():
     global SELECT, SELECT_MODEL, EMBEDDER, PAGE_TEXT
     SELECT = a.select
     PAGE_TEXT = a.page_text
-    if a.guidance == "learned":
+    if a.guidance in ("learned", "check"):
         import model_reader
+        model_reader.RULES_IN_PROMPT = a.guidance == "learned"
         p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "decision_rules.json")
         if not os.path.exists(p):
             open("extract_eval.md", "w").write("### Extraction: --guidance learned needs decision_rules.json (decision_mining.py --save); nothing run.\n")
@@ -849,7 +850,7 @@ def main():
     if PAGE_TEXT != "db":
         title += f", pages re-read with their tables by {PAGE_TEXT}"
     if a.guidance != "today":
-        title += ", with the choice rules learned from the analysts"
+        title += ", with the choice rules learned from the analysts" + (" (as a check only)" if a.guidance == "check" else "")
     md = [f"### The {title} against the validated answers" + ("" if a.commit else " (dry run, sample)"), "",
           f"{sum(s['answers'] for s in stats.values()):,} answers with a value" + (f" ({limit} per attribute)" if limit else "")
           + ("; stopped at the time budget" if cut else "") + (f"; STOPPED: {db_stop}" if db_stop else "") + ". Shares of those answers; the reader never sees the answer.", "",
