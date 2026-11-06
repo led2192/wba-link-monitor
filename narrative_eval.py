@@ -348,8 +348,8 @@ def main():
     ap.add_argument("--pages", choices=["ts", "bm25", "fused"], default=PAGE_SEARCH,
                     help="page search: ts (default), bm25 or fused; compare on the same answers before changing the default")
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
-    ap.add_argument("--evidence", choices=["pages", "pack3"], default="pages",
-                    help="what the model reads: today's pages and one quote (default), or the evidence pack and one to three quotes (evidence_pack.py)")
+    ap.add_argument("--evidence", choices=["pages", "pack3"], default="pack3",
+                    help="what the model reads: the evidence pack and one to three quotes (evidence_pack.py, the default since 6 Nov 2026), or the pages and one quote")
     a = ap.parse_args()
     if a.evidence == "pack3":
         import evidence_pack
