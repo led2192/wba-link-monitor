@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-06 Generic reader workflow: Docling needs torchvision with torch (its layout model failed to load on every page: "Could not import module AutoImageProcessor") (#PR)
 - 2026-11-06 table_text.py reports the first parse error of each parser (the first Docling run failed on all 1,643 pages without saying why) (#246)
 - 2026-11-06 Model reader option `--guidance learned` (workflow input guidance; also a budget input): the choice rules `decision_mining.py --save` learns from the validated answers (decision_rules.json: words of the chosen lines, words of the lines passed over, take the largest when the analysts did on 60% of 20 or more pages) go into the prompt, and a figure printed only on a line with an avoided word and none of the followed ones is dropped. Default today (#244)
 - 2026-11-06 Fix: the nightly base health report failed on 5 and 6 Nov 2026 (no base_health row) because its spend reader took the full stop of "cost about $0.29." as part of the number; the pattern now reads digits only (#245)
