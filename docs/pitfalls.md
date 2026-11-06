@@ -243,3 +243,6 @@ The 2024 and 2026 Source Library bases hold documents of companies outside the S
 
 ## The analysts' cited sources rarely match our library by address (6 Nov 2026)
 Of 104,525 sources cited by validated answers in the three gold bases, 2% matched one of our 248,193 documents by full address (scheme, www., fragment and trailing slash ignored). Any measurement that joins analyst citations to our documents must say how many it joined, and should also match by file name within the company. The reason (citation_coverage.py, 6 Nov 2026): 96% of the cited sources are web addresses, not PDFs; of the 3,885 cited PDFs, report_library holds 76% and 61% have text. Even on the matched ones, our year labels put 7 to 8% of Revenue and Employees citations at the year before: label noise of that size is the floor against which a "standing" attribute has to be judged, not zero.
+
+## A number pattern must not swallow the sentence's full stop (6 Nov 2026)
+`base_health.py` reads model spend from job logs with a pattern. `[\d.]+` took "0.29." from "cost about $0.29." (a narrative report line), `float()` raised, and the nightly report wrote no row on 5 and 6 Nov. Nothing else noticed: one_hop.py reads its record limit from base_health and kept using the 4 Nov row. Read amounts as `\d+(?:\.\d+)?`, and a report that feeds other jobs should not fail on one unreadable log.

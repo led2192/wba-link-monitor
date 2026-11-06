@@ -50,5 +50,12 @@ class Spend(unittest.TestCase):
         self.assertAlmostEqual(got["by"]["Propose values"], 1.23)
 
 
+
+class SentenceEnd(unittest.TestCase):
+    def test_a_full_stop_after_the_amount_is_not_part_of_it(self):
+        # 5 and 6 Nov 2026: "cost about $0.29." raised ValueError and stopped the nightly report
+        self.assertAlmostEqual(B.spend_in_log("Model calls: 404; cost about $0.29. Stopped."), 0.29)
+        self.assertAlmostEqual(B.spend_in_log("cost about $3.13 (Sonnet)"), 3.13)
+
 if __name__ == "__main__":
     unittest.main()
