@@ -76,6 +76,13 @@ class Rules(unittest.TestCase):
         self.M.RULES = None
         self.assertEqual(self.M.rules_note("GMC_00048.1"), "")
 
+    def test_check_only_leaves_the_prompt_alone(self):
+        self.M.RULES_IN_PROMPT = False
+        try:
+            self.assertEqual(self.M.rules_note("GMC_00048.1"), "")
+        finally:
+            self.M.RULES_IN_PROMPT = True
+
     def test_a_figure_on_an_avoided_line_is_dropped(self):
         ok = lambda code, printed: self.M.rule_ok(code, {"library_id": "D1", "page": 7, "printed": printed}, self.PAGES)
         self.assertTrue(ok("GMC_00002.1", 12300.0))
