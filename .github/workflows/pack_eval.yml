@@ -18,6 +18,13 @@ on:
       budget:
         description: "minutes"
         default: "80"
+      read:
+        description: "narrative only: the model reads today's pages, the pack with one quote and the pack with up to 3 quotes (billed)"
+        type: boolean
+        default: false
+      max_usd:
+        description: "cost limit of the model calls (with read)"
+        default: "3"
   pull_request:
     paths: [pack_eval.py, .github/workflows/pack_eval.yml]
 
@@ -42,9 +49,11 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          READER_MODEL: claude-haiku-5-5
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then python pack_eval.py --limit 10 --budget 15
-          else python pack_eval.py --limit ${{ inputs.limit }} --kinds ${{ inputs.kinds }} --pack ${{ inputs.pack }} --budget ${{ inputs.budget }}; fi
+          else python pack_eval.py --limit ${{ inputs.limit }} --kinds ${{ inputs.kinds }} --pack ${{ inputs.pack }} --budget ${{ inputs.budget }} ${{ inputs.read && format('--read --max-usd {0}', inputs.max_usd) || '' }}; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
