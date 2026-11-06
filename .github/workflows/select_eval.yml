@@ -20,8 +20,12 @@ on:
       budget:
         description: "minutes for reading the answers' pages"
         default: "70"
+      save:
+        description: "write the trained page choice (select_learned.json, kept with the result) for extract_eval --select learned"
+        type: boolean
+        default: false
   pull_request:
-    paths: [select_eval.py, .github/workflows/select_eval.yml]
+    paths: [select_eval.py, page_select.py, .github/workflows/select_eval.yml]
 
 jobs:
   evaluate:
@@ -55,13 +59,15 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             python select_eval.py --limit 8 --methods base,expand,doctype,learned --budget 15
           else
-            python select_eval.py --limit ${{ inputs.limit }} --methods ${{ inputs.methods }} --locate-usd ${{ inputs.locate_usd }} --budget ${{ inputs.budget }}
+            python select_eval.py --limit ${{ inputs.limit }} --methods ${{ inputs.methods }} --locate-usd ${{ inputs.locate_usd }} --budget ${{ inputs.budget }} ${{ inputs.save && '--save select_learned.json' || '' }}
           fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: select-eval
-          path: select_eval.md
+          path: |
+            select_eval.md
+            select_learned.json
           if-no-files-found: ignore
       - name: Post the summary on the pull request
         if: github.event_name == 'pull_request' && always()

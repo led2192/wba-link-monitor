@@ -284,6 +284,25 @@ def keep_pages(rows, n=MAX_PAGES, per_doc=PER_DOC):
     return out
 
 
+SELECT = "base"          # how the rank half of the model's pages is chosen: "base" (today) or "learned" (--select)
+SELECT_MODEL = None      # page_select.load() when SELECT is "learned"
+EMBEDDER = None          # page_select.Embedder() when SELECT is "learned"
+
+
+def model_pages(scored, code=None, attr=None, pages=None, docs=None, fold=None):
+    """The MODEL_PAGES pages the model reads: pages_for_model on today's order, or with --select learned on
+    the order page_select.py learned from the analysts' cited pages (the candidate half is the same either
+    way; only the rank half changes). fold: the company fold of a validated answer (its own fold left out
+    of the training), None for an answer nobody has validated."""
+    if SELECT == "learned" and SELECT_MODEL and pages:
+        import page_select
+        o = page_select.order(SELECT_MODEL, code, attr, pages, {d[0]: d[1] for d in docs or []}, fold, EMBEDDER)
+        if o:
+            seen = set(o)
+            scored = [scored[i] for i in o] + [x for j, x in enumerate(scored) if j not in seen]
+    return pages_for_model(scored, MODEL_PAGES)
+
+
 def pages_for_model(scored, n):
     """Up to n of the ranked pages for the model: first the pages with the best rule candidates (half of n,
     those that have a candidate), then the best-ranked pages not yet taken. scored: [(score, candidate or
@@ -585,7 +604,8 @@ def read_values(cur, wba, year, attr, spec, usage, known=None):
     pages = keep_pages(ranked_pages(cur, [d[0] for d in docs], weight, year, attr, spec, memory=memory,
                                     siblings=sibling_pages(cur, wba, year, attr, spec)))
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
-    best = pages_for_model(scored, MODEL_PAGES)
+    code = next((c for c, v in spec["attributes"].items() if v is attr), None)
+    best = model_pages(scored, code, attr, pages, docs)
     if not best:
         return []
     got = read_years({"wba": wba, "year": year, "hint": hint(memory), "fy_month": fy_end_month(cur, wba)}, attr,
@@ -646,10 +666,11 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         r["miss"] = retrieval_miss(holding, rows, forms)
     # each kept page's best rule candidate, used by the rule reader and to pick the model's pages
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
-    r["model_pages_have_number"] = any(found_on(b, v) for *_, b in pages_for_model(scored, MODEL_PAGES) for v, _, _ in forms)
+    import rank_eval
+    best_pages = model_pages(scored, g["attribute"], attr, pages, docs, rank_eval.fold_of(g["wba"]))
+    r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
     if reader == "model":
         from model_reader import read_years
-        best_pages = pages_for_model(scored, MODEL_PAGES)
         note = {}
         all_got = read_years(dict(g, hint=hint(memory), fy_month=fy_end_month(cur, g["wba"])), attr,
                              [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
@@ -682,11 +703,21 @@ def main():
     ap.add_argument("--memory", default="on", choices=["on", "off"], help="use the company's right answer for another year (company_memory.py)")
     ap.add_argument("--text-rank", default="ts", choices=["ts", "bm25"], help="the text score of page ranking: ts_rank_cd or BM25 (page_ranker.py)")
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
+    ap.add_argument("--select", default="base", choices=["base", "learned"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py)")
     a = ap.parse_args()
     a.memory = a.memory == "on"
     global SIBLINGS_ON, TEXT_RANK
     SIBLINGS_ON = a.siblings == "on"
     TEXT_RANK = a.text_rank
+    global SELECT, SELECT_MODEL, EMBEDDER
+    SELECT = a.select
+    if SELECT == "learned":
+        import page_select
+        SELECT_MODEL = page_select.load()
+        if not SELECT_MODEL:
+            open("extract_eval.md", "w").write(f"### Extraction: --select learned needs {os.path.basename(page_select.MODEL_FILE)} (select_eval.py --save); nothing run.\n")
+            return 1
+        EMBEDDER = page_select.Embedder()   # part of what was measured: no silent fallback
     if a.reader == "model" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("extract_eval.md", "w").write("### Extraction: the model reader needs ANTHROPIC_API_KEY (a repository secret); nothing run.\n")
         return 0
@@ -790,6 +821,8 @@ def main():
                                              f"after \"{lab}\" ({lid} p.{page})")
 
     title = "model reader (" + os.environ.get("READER_MODEL", "claude-haiku-5-5") + ")" if a.reader == "model" else "generic reader (no model)"
+    if SELECT != "base":
+        title += f", pages chosen by {SELECT}"
     md = [f"### The {title} against the validated answers" + ("" if a.commit else " (dry run, sample)"), "",
           f"{sum(s['answers'] for s in stats.values()):,} answers with a value" + (f" ({limit} per attribute)" if limit else "")
           + ("; stopped at the time budget" if cut else "") + (f"; STOPPED: {db_stop}" if db_stop else "") + ". Shares of those answers; the reader never sees the answer.", "",

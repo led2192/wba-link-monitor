@@ -28,13 +28,15 @@ today's. A method qualifies when no attribute is more than 3 points worse than b
 in the report (it is posted on a public repository); no reference answers.
 
 Read-only. Env: SUPABASE_DB_URL, GOLD_TOKEN, ANTHROPIC_API_KEY (translate, locate); AIRTABLE_QA_TOKEN.
-Options: --limit N per attribute, --methods, --budget minutes, --locate-usd, --attributes.
+Options: --limit N per attribute, --methods, --budget minutes, --locate-usd, --attributes, --save FILE (with
+learned: write the trained page choice for page_select.py, extract_eval --select learned).
 """
 import argparse, collections, json, math, os, random, re, sys, time, traceback
 
 import qa
 import extract_eval as E
 import rank_eval as R
+import page_select as S
 from value_eval import found_on, printed_forms, scales_for
 
 METHODS = ("base", "expand", "doctype", "learned", "embed", "translate", "locate")
@@ -43,7 +45,7 @@ BODY_KEEP = 6000                 # characters of each pool page kept in memory
 LOCATE_POOL = 20                 # candidate pages the locate pass sees
 LOCATE_CHARS = 450               # characters of extract per candidate page in the locate pass
 EXTRA_LIMIT = 15                 # pages the translated words may add to the pool
-EMBED_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+EMBED_MODEL = S.EMBED_MODEL
 RULE_POINTS = 3                  # a method qualifies when no attribute is more than this many points worse
 NUMBER = re.compile(r"\d[\d.,]{2,}")
 
@@ -102,37 +104,16 @@ def type_lift(cases, attr, fold):
 
 
 def expansion_scores(case, terms, idfs, avg_len):
-    if not terms:
-        return [0.0] * len(case["pool"])
-    w = {t: R.EXPAND_WEIGHT for t in terms}
-    out = []
-    for _, _, _, body, _ in case["pool"]:
-        tf = collections.Counter(R.tokens(body))
-        out.append(R.bm25_weighted(tf, len(tf), avg_len, w, idfs))
-    return out
+    return S.expansion_scores(case["pool"], terms, idfs, avg_len)
 
 
 def features(case, i, lift, exp, emb):
-    s, lid, page, body, top = case["pool"][i]
-    lifts = math.log(lift.get(case["types"].get(lid, ""), 1.0))
-    nums = len(NUMBER.findall(body[:BODY_KEEP]))
-    mx = max(exp) or 1.0
-    return [1.0 / (1 + i), 1.0 if top else 0.0, max(min((top[0] if top else 0) / 10.0, 1.0), -1.0), lifts,
-            exp[i] / mx, emb[i] if emb else 0.0, min(nums / 60.0, 1.0), min(page / 300.0, 1.0)]
+    return S.features(case["pool"], case["types"], i, lift, exp, emb)
 
 
 # ----- meaning and language -----
 
-class Embedder:
-    def __init__(self):
-        from sentence_transformers import SentenceTransformer
-        self.m = SentenceTransformer(EMBED_MODEL)
-
-    def sims(self, query, texts):
-        import numpy as np
-        q = self.m.encode([query], normalize_embeddings=True)
-        t = self.m.encode([x[:1500] for x in texts], normalize_embeddings=True, batch_size=32)
-        return list((t @ q.T).ravel().astype(float))
+Embedder = S.Embedder
 
 
 def translations(attrs, langs, usage):
@@ -183,6 +164,37 @@ def locate(case, attr, usage):
     return list(dict.fromkeys(got))
 
 
+# ----- the trained model (--save) -----
+
+def save_model(cases, codes, rows_by_fold, idfs, avg_len):
+    """What page_select.py needs to score pages: per attribute, the weights, type prior and expansion words
+    trained without each fold and on all folds, and the idf of every expansion word. Counts and weights only."""
+    out, words = {}, set()
+    for code in codes:
+        mine = [c for c in cases if c["attribute"] == code]
+        if not mine:
+            continue
+        attr_cfg = {}
+        qwords = R.query_terms(" ".join(SPEC_ATTRS.get(code, {}).get("queries", [])))
+        for f in list(range(R.FOLDS)) + [None]:
+            rows = [x for (at, ff), rs in rows_by_fold.items() if at == code and ff != f for x in rs]
+            if not rows:
+                continue
+            terms = expansion_terms(cases, code, f, qwords)
+            words |= set(terms)
+            attr_cfg["all" if f is None else str(f)] = {
+                "w": [round(x, 6) for x in R.train(rows, epochs=80)],
+                "lift": {t: round(v, 6) for t, v in type_lift(cases, code, f).items()},
+                "terms": terms, "rows": len(rows)}
+        out[code] = attr_cfg
+    return {"made_by": "select_eval.py --save", "made": time.strftime("%Y-%m-%d"), "answers": len(cases),
+            "features": S.FEATURE_NAMES, "avg_len": round(avg_len, 3),
+            "idf": {t: round(idfs.get(t, 0.0), 6) for t in sorted(words)}, "attributes": out}
+
+
+SPEC_ATTRS = {}
+
+
 # ----- the experiment -----
 
 def gather(cur, g, attr, spec, known, trans):
@@ -231,12 +243,14 @@ def main():
     ap.add_argument("--methods", default=",".join(METHODS))
     ap.add_argument("--budget", type=float, default=70, help="minutes for reading the answers' pages")
     ap.add_argument("--locate-usd", type=float, default=2.0, help="cost limit of the locate and translate calls")
+    ap.add_argument("--save", default="", help="with learned: write the trained page choice here (page_select.py reads it)")
     a = ap.parse_args()
     methods = [m for m in a.methods.split(",") if m in METHODS]
     if "base" not in methods:
         methods = ["base"] + methods
     run = qa.Run("select_eval.py")
     spec = json.load(open(E.SPEC, encoding="utf-8"))
+    SPEC_ATTRS.update(spec["attributes"])
     gold_cfg = json.load(open(os.path.join(os.path.dirname(E.SPEC), "gold_attributes.json"), encoding="utf-8"))
     codes = [c for c, v in spec["attributes"].items() if v["type"] == "number" and (not a.attributes or c in a.attributes.split(","))]
     from value_eval import gold_values
@@ -347,6 +361,15 @@ def main():
             r["answers"] += 1; r[f"answers {c['attribute']}"] += 1
             ok = hit(c, choose(c["pool"], order_))
             r["hit"] += ok; r[f"hit {c['attribute']}"] += ok
+        if a.save:
+            model = save_model(cases, codes, rows_by_fold, idfs, avg_len)
+            with open(a.save, "w", encoding="utf-8") as f:
+                json.dump(model, f, indent=1, sort_keys=True)
+            print(f">>> trained page choice written to {a.save} ({len(model['attributes'])} attributes)", flush=True)
+            # Run artifacts cannot be fetched from every place the file is needed (6 Nov 2026), so the model is also
+            # printed, between markers, for a person or a session to copy into the repository. Weights, document
+            # types and words only: no company and no answer.
+            print(">>> SELECT_LEARNED_JSON_BEGIN\n" + json.dumps(model, sort_keys=True) + "\n>>> SELECT_LEARNED_JSON_END", flush=True)
     if "translate" in methods:
         for c in cases:
             r = results["translate"]
