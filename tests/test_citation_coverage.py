@@ -42,5 +42,26 @@ class Classify(unittest.TestCase):
         self.assertNotIn("co.com", text)
 
 
+
+class WebPages(unittest.TestCase):
+    def test_where_web_citations_point(self):
+        hosts = {"PT_00001": {"co.com"}}
+        self.assertEqual(C.where_from("PT_00001", "https://www.co.com/esg", hosts), "the company's own site")
+        self.assertEqual(C.where_from("PT_00001", "https://www.cdp.net/en/responses/1", hosts), "CDP")
+        self.assertEqual(C.where_from("PT_00001", "https://x.sharepoint.com/a", hosts), "SharePoint or OneDrive")
+        self.assertEqual(C.where_from("PT_00001", "https://news.example.org/a", hosts), "another site")
+        self.assertEqual(C.shape_of("https://co.com"), "home page")
+        self.assertEqual(C.shape_of("https://co.com/esg/policies"), "page")
+        self.assertEqual(C.shape_of("https://co.com/get?id=3"), "page with parameters")
+        self.assertEqual(C.shape_of("https://co.com/data.xlsx"), ".xlsx")
+
+    def test_a_monitored_page_not_captured(self):
+        lib = C.library_index([])
+        lib["monitored"].add(("PT_00001", C.norm_url("https://co.com/sustainability")))
+        self.assertEqual(C.classify("PT_00001", "https://co.com/sustainability/", lib), ("a monitored page, not captured", None))
+        t = C.tally([{"base": "B", "wba": "PT_00001", "year": 2024, "url": "https://co.com/sustainability"}], lib, set(), {"PT_00001": {"co.com"}})
+        self.assertEqual(t["web page on the company's own site"]["cited"], 1)
+        self.assertNotIn("co.com", "\n".join(C.report(t)))
+
 if __name__ == "__main__":
     unittest.main()

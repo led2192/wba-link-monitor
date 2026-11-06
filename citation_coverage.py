@@ -15,7 +15,9 @@ base, per kind of source and per reporting year:
 
 Counts and shares only (the report is public): no company, no address. Read-only: gold bases (GOLD_TOKEN),
 report_library (AIRTABLE_TOKEN, AIRTABLE_BASE), evidence database (SUPABASE_DB_URL).
-Options: --bases (default the gold bases of gold_attributes.json).
+For the web pages (6 Nov 2026: 96% of the cited sources) it also counts where they point (the company's own
+site, a shared service such as CDP or SharePoint, another site) and their shape (home page, page, page with
+parameters, another file type). Options: --bases (default the gold bases of gold_attributes.json).
 """
 import argparse, collections, json, os, sys, traceback
 
@@ -33,6 +35,45 @@ def kind_of(url):
     return "PDF" if ".pdf" in u.split("?")[0] or "/pdf" in u else "web page"
 
 
+SHARED_HOSTS = {"cdp.net": "CDP", "sharepoint.com": "SharePoint or OneDrive", "1drv.ms": "SharePoint or OneDrive",
+                "drive.google.com": "Google Drive", "docs.google.com": "Google Drive", "airtable.com": "Airtable",
+                "airtableusercontent.com": "Airtable", "sec.gov": "SEC", "annualreports.com": "annualreports.com",
+                "responsibilityreports.com": "responsibilityreports.com", "web.archive.org": "Internet Archive",
+                "dropbox.com": "Dropbox", "box.com": "Box"}
+
+
+def host_of(url):
+    n = norm_url(url)
+    return n.split("/", 1)[0] if n else ""
+
+
+def where_from(wba, url, company_hosts):
+    """What kind of address a cited source is: a known shared service, the company's own site (a host one of
+    its report_library documents lives on), or another site. Counts only: no host is printed."""
+    h = host_of(url)
+    if not h:
+        return "no address"
+    for dom, name in SHARED_HOSTS.items():
+        if h == dom or h.endswith("." + dom):
+            return name
+    if h in company_hosts.get(wba, ()):
+        return "the company's own site"
+    return "another site"
+
+
+def shape_of(url):
+    """The address's shape: a file other than PDF, a page with parameters, or a plain page."""
+    p = norm_url(url).split("?")[0]
+    last = p.rsplit("/", 1)[-1]
+    if "." in last and last.rsplit(".", 1)[-1] in {"xlsx", "xls", "csv", "docx", "doc", "pptx", "htm", "html", "aspx", "php", "jsp"}:
+        return "." + last.rsplit(".", 1)[-1]
+    if "?" in norm_url(url):
+        return "page with parameters"
+    if p.count("/") == 0:
+        return "home page"
+    return "page"
+
+
 def classify(wba, url, lib):
     """Where a cited source is held. lib: {"addr": {(wba, norm): lid}, "file": {(wba, file): lid},
     "any": {norm: lid}}. Returns (status, library_id or None)."""
@@ -46,15 +87,18 @@ def classify(wba, url, lib):
         return "same company, same file name", lib["file"][(wba, k)]
     if n in lib["any"]:
         return "same address, another company", lib["any"][n]
+    if (wba, n) in lib.get("monitored", ()):
+        return "a monitored page, not captured", None
     return "not held", None
 
 
-STATUSES = ["same company, same address", "same company, same file name", "same address, another company", "not held", "no address"]
+STATUSES = ["same company, same address", "same company, same file name", "same address, another company",
+            "a monitored page, not captured", "not held", "no address"]
 
 
 def library_index(rows):
     """rows: [(library_id, wba_id, document_url)] -> the three lookups of classify."""
-    lib = {"addr": {}, "file": {}, "any": {}}
+    lib = {"addr": {}, "file": {}, "any": {}, "monitored": set()}
     for lid, wba, url in rows:
         n = norm_url(url)
         if not n:
@@ -67,12 +111,16 @@ def library_index(rows):
     return lib
 
 
-def tally(cites, lib, with_text):
-    """cites: [{base, wba, year, url}] -> {group: Counter}, groups by base, kind and year."""
+def tally(cites, lib, with_text, company_hosts=None):
+    """cites: [{base, wba, year, url}] -> {group: Counter}, groups by base, kind, year, and for web pages where
+    the address points and its shape."""
     out = collections.defaultdict(collections.Counter)
     for c in cites:
         st, lid = classify(c["wba"], c["url"], lib)
-        groups = ["All", "base " + c["base"], "kind " + kind_of(c["url"]), f"year {c['year']}"]
+        k = kind_of(c["url"])
+        groups = ["All", "base " + c["base"], "kind " + k, f"year {c['year']}"]
+        if k == "web page":
+            groups += ["web page on " + where_from(c["wba"], c["url"], company_hosts or {}), "web page shape " + shape_of(c["url"])]
         for g in groups:
             t = out[g]
             t["cited"] += 1
@@ -91,6 +139,8 @@ def report(t):
           "| Group | Cited | Held | " + " | ".join(STATUSES) + " | With text |",
           "| --- | --: | --: |" + " --: |" * len(STATUSES) + " --: |"]
     order = (["All"] + sorted(g for g in t if g.startswith("base ")) + sorted(g for g in t if g.startswith("kind "))
+             + sorted((g for g in t if g.startswith("web page on ")), key=lambda g: -t[g]["cited"])
+             + sorted((g for g in t if g.startswith("web page shape ")), key=lambda g: -t[g]["cited"])
              + sorted((g for g in t if g.startswith("year ")), key=lambda g: g))
     for g in order:
         c = t[g]
@@ -129,7 +179,27 @@ def main():
         print(f">>> {names.get(b, b)}: {len(rows):,} answers, {len(src):,} sources", flush=True)
     lib_rows = read_base(os.environ["AIRTABLE_TOKEN"].strip(), os.environ["AIRTABLE_BASE"].strip(), "report_library",
                          ["library_id", "wba_id", "document_url"], "NOT({discard})")
+    try:      # captured web pages are held too
+        web_rows = read_base(os.environ["AIRTABLE_TOKEN"].strip(), os.environ["AIRTABLE_BASE"].strip(), "webpage_library",
+                             ["library_id", "wba_id", "document_url"])
+        print(f">>> webpage_library: {len(web_rows):,} captures", flush=True)
+        lib_rows = lib_rows + web_rows
+    except Exception as e:
+        print(f">>> webpage_library not read ({str(e)[:80]})", flush=True)
     lib = library_index([(r["fields"].get("library_id"), r["fields"].get("wba_id"), r["fields"].get("document_url")) for r in lib_rows])
+    company_hosts = collections.defaultdict(set)
+    for r in lib_rows:
+        h = host_of(r["fields"].get("document_url"))
+        if h:
+            company_hosts[r["fields"].get("wba_id")].add(h)
+    try:      # the monitored pages are the company's own site too
+        for r in read_base(os.environ["AIRTABLE_TOKEN"].strip(), os.environ["AIRTABLE_BASE"].strip(), "monitored_links", ["wba_id", "url"]):
+            h = host_of(r["fields"].get("url"))
+            if h:
+                company_hosts[r["fields"].get("wba_id")].add(h)
+                lib["monitored"].add((r["fields"].get("wba_id"), norm_url(r["fields"].get("url"))))
+    except Exception as e:
+        print(f">>> monitored_links not read ({str(e)[:80]}): own site from report_library only", flush=True)
     print(f">>> report_library: {len(lib_rows):,} rows kept", flush=True)
     with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
@@ -137,7 +207,7 @@ def main():
         cur.execute("select library_id from public.documents where coalesce(pages, 0) > 0")
         with_text = {x for (x,) in cur.fetchall()}
     print(f">>> evidence database: {len(with_text):,} documents with text", flush=True)
-    md = report(tally(cites, lib, with_text))
+    md = report(tally(cites, lib, with_text, company_hosts))
     open("citation_coverage.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
     run.finish("ok", rows_in=len(cites))
