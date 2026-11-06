@@ -284,6 +284,19 @@ def keep_pages(rows, n=MAX_PAGES, per_doc=PER_DOC):
     return out
 
 
+PAGE_TEXT = "db"         # the text the model reads: the database's plain text, or a page re-read with its tables (--page-text)
+
+
+def read_text(lid, page, body):
+    """The text of a model page: the database text, or with --page-text pymupdf|docling the page re-read from
+    the PDF with its tables as tables (table_text.py), the database text when that fails."""
+    if PAGE_TEXT == "db":
+        return body
+    import table_text
+    md = table_text.page_text(lid, page, PAGE_TEXT)
+    return md if md else body
+
+
 SELECT = "base"          # how the rank half of the model's pages is chosen: "base" (today) or "learned" (--select)
 SELECT_MODEL = None      # page_select.load() when SELECT is "learned"
 EMBEDDER = None          # page_select.Embedder() when SELECT is "learned"
@@ -673,7 +686,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         from model_reader import read_years
         note = {}
         all_got = read_years(dict(g, hint=hint(memory), fy_month=fy_end_month(cur, g["wba"])), attr,
-                             [(lid, page, body) for _, _, lid, page, body in best_pages], usage, note=note)
+                             [(lid, page, read_text(lid, page, body)) for _, _, lid, page, body in best_pages], usage, note=note)
         got = next((e for e in all_got if e["year"] == g["year"]), None)
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
         r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
@@ -703,14 +716,16 @@ def main():
     ap.add_argument("--memory", default="on", choices=["on", "off"], help="use the company's right answer for another year (company_memory.py)")
     ap.add_argument("--text-rank", default="ts", choices=["ts", "bm25"], help="the text score of page ranking: ts_rank_cd or BM25 (page_ranker.py)")
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
+    ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
     ap.add_argument("--select", default="base", choices=["base", "learned"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py)")
     a = ap.parse_args()
     a.memory = a.memory == "on"
     global SIBLINGS_ON, TEXT_RANK
     SIBLINGS_ON = a.siblings == "on"
     TEXT_RANK = a.text_rank
-    global SELECT, SELECT_MODEL, EMBEDDER
+    global SELECT, SELECT_MODEL, EMBEDDER, PAGE_TEXT
     SELECT = a.select
+    PAGE_TEXT = a.page_text
     if SELECT == "learned":
         import page_select
         SELECT_MODEL = page_select.load()
@@ -823,6 +838,8 @@ def main():
     title = "model reader (" + os.environ.get("READER_MODEL", "claude-haiku-5-5") + ")" if a.reader == "model" else "generic reader (no model)"
     if SELECT != "base":
         title += f", pages chosen by {SELECT}"
+    if PAGE_TEXT != "db":
+        title += f", pages re-read with their tables by {PAGE_TEXT}"
     md = [f"### The {title} against the validated answers" + ("" if a.commit else " (dry run, sample)"), "",
           f"{sum(s['answers'] for s in stats.values()):,} answers with a value" + (f" ({limit} per attribute)" if limit else "")
           + ("; stopped at the time budget" if cut else "") + (f"; STOPPED: {db_stop}" if db_stop else "") + ". Shares of those answers; the reader never sees the answer.", "",
@@ -843,6 +860,12 @@ def main():
                f"Replies cut at the token limit: {usage['cut_at_token_limit']:,}. "
                f"The model's pages hold the validated number for {sum(s['model_pages'] for s in stats.values()):,} answers; "
                f"it gave no figure for {sum(s['declined with the number on its pages'] for s in stats.values()):,} of them.", ""]
+        if PAGE_TEXT != "db":
+            import table_text
+            st = table_text.STATS
+            md += [f"Pages re-read with {PAGE_TEXT}: {st.get('pages parsed', 0):,} parsed ({st.get('tables', 0):,} tables, "
+                   f"{st.get('seconds', 0) / max(st.get('pages parsed', 0), 1):.1f} s a page); kept the database text for "
+                   + ", ".join(f"{v:,} {k}" for k, v in sorted(st.items()) if k not in ("pages parsed", "tables", "seconds")) + ".", ""]
         md += ["Other years read in the same call (the other year columns of the same figure; one call per answer since 31 Oct 2026). "
                "\"Right\" compares them with the validated answer of the same company and attribute for that year, where there is one:", "",
                "| Attribute | Calls with a figure | Other years returned | Per call | With a validated answer | Right |",
