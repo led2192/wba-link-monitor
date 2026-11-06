@@ -205,13 +205,21 @@ def failed_jobs(now):
 
 SPEND_WORKFLOWS = ("propose_values.yml", "extract_eval.yml", "web_search.yml", "narrative_eval.yml")   # the jobs that call the model
 SPEND_WEEK_USD = float(os.environ.get("SPEND_WEEK_USD") or 15)   # Check when the last 7 days pass this
-SPEND_PATTERNS = (re.compile(r"cost in USD \(estimate\) \| ([\d.]+) \|"),   # Propose values, web search tables
-                  re.compile(r"cost about \$([\d.]+)"))                         # Generic reader report
+# a number, never its sentence's full stop: "cost about $0.29." stopped the nightly report on 5 and 6 Nov 2026
+SPEND_PATTERNS = (re.compile(r"cost in USD \(estimate\) \| (\d+(?:\.\d+)?) \|"),   # Propose values, web search tables
+                  re.compile(r"cost about \$(\d+(?:\.\d+)?)"))                         # Generic reader, narrative and pack reports
 
 
 def spend_in_log(text):
     """USD the model calls of one job cost, from the estimates its log prints."""
-    return sum(float(m.group(1)) for pat in SPEND_PATTERNS for m in pat.finditer(text))
+    total = 0.0
+    for pat in SPEND_PATTERNS:
+        for m in pat.finditer(text):
+            try:
+                total += float(m.group(1))
+            except ValueError:             # an unreadable amount never stops the nightly report
+                continue
+    return total
 
 
 def model_spend(now, get=None):
