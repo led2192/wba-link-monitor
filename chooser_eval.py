@@ -46,9 +46,42 @@ def row_words(text, pos):
     return {w for w in WORD.findall(seg) if w not in STOP}
 
 
-def all_candidates(text, year, attr, spec, page_rank, doc_type, doc_offset):
+UP = re.compile(r"\b(?:increas\w*|grew|grow\w*|rose|rise|rising|up\b|higher|improv\w*|gain\w*)")
+DOWN = re.compile(r"\b(?:decreas\w*|declin\w*|fell|fall\w*|drop\w*|down\b|lower|reduc\w*)")
+
+
+def memory_features(v, row_vals, known, year, near_text):
+    """Signals from the company's validated figures for other years (the owner's idea, 7 Nov 2026): a figure
+    of the right size for this company, a row that also prints a known year's figure (a table of years), and
+    a figure whose change from last year agrees with the words around it ("increased", "fell")."""
+    f = {}
+    if not known or v <= 0:
+        return f
+    f["memory: known"] = 1.0
+    y0 = min(known, key=lambda y: abs(y - year))
+    r = abs(math.log10(v / known[y0])) if known[y0] > 0 else 9
+    f["memory: same size (within 25%)"] = 1.0 if r < 0.1 else 0.0
+    f["memory: within 2 times"] = 1.0 if 0.1 <= r < 0.3 else 0.0
+    f["memory: within 10 times"] = 1.0 if 0.3 <= r < 1 else 0.0
+    f["memory: 10 times off or more"] = 1.0 if r >= 1 else 0.0
+    if any(any(E.right(x, k) for k in known.values()) for x in row_vals if x != v):
+        f["memory: the row prints a known year's figure"] = 1.0
+    if any(E.right(v, k) for k in known.values()):
+        f["memory: equals a known year's figure"] = 1.0
+    prev = known.get(year - 1)
+    if prev and prev > 0:
+        up, down = bool(UP.search(near_text)), bool(DOWN.search(near_text))
+        if up != down:
+            agrees = (v > prev) == up
+            f["memory: change agrees with the words"] = 1.0 if agrees else 0.0
+            f["memory: change contradicts the words"] = 0.0 if agrees else 1.0
+    return f
+
+
+def all_candidates(text, year, attr, spec, page_rank, doc_type, doc_offset, known=None):
     """[(features: {name: value}, value, rule_score)] for every figure of every labelled row of a page.
-    rule_score is extract_eval.candidates's hand score for the column it would take (else -inf)."""
+    rule_score is extract_eval.candidates's hand score for the column it would take (else -inf). known:
+    {year: value} of the company's validated figures for other years of this attribute."""
     family = attr.get("unit_family", "currency")
     labels = attr.get("labels", [])
     col_year = E.year_header(text, year)
@@ -81,6 +114,7 @@ def all_candidates(text, year, attr, spec, page_rank, doc_type, doc_offset):
                  f"document={doc_type or 'unknown'}": 1.0, f"document year={doc_offset:+d}": 1.0}
             for w in words:
                 f["word=" + w] = 1.0
+            f.update(memory_features(v * scale, [x * scale for x in vals], known, year, low[max(0, pos - 150):pos + 150]))
             out.append((f, v * scale, rules.get((round(v * scale, 6), lab), -math.inf)))
     return out
 
@@ -128,10 +162,11 @@ def softmax_by_case(s, cand_case, k):
 MIN_SUPPORT = 5                # a feature seen in fewer answers is left out (no company-specific words)
 
 
-def fit(cases, l2=0.01, steps=300, lr=0.5):
-    """Conditional logit weights fitted on cases with at least one right candidate (Adam, L2)."""
+def fit(cases, l2=0.01, steps=300, lr=0.5, keep=None):
+    """Conditional logit weights fitted on cases with at least one right candidate (Adam, L2). keep: a test
+    on feature names (None = all)."""
     cases = [c for c in cases if any(p for *_, p in c["cands"])]
-    support = collections.Counter(k for c in cases for k in {k for f, *_ in c["cands"] for k in f})
+    support = collections.Counter(k for c in cases for k in {k for f, *_ in c["cands"] for k in f} if keep is None or keep(k))
     vocab = Vocab()
     vocab.ix = {k: i for i, k in enumerate(sorted(k for k, n in support.items() if n >= MIN_SUPPORT))}
     cand_case, feat, val, owner, y, starts = pack(cases, vocab, False)
@@ -158,7 +193,7 @@ def choose(w, vocab, case):
     return bi
 
 
-def gather(cur, g, attr, spec):
+def gather(cur, g, attr, spec, known=None):
     """The candidates of one answer on its kept pages, each with whether it equals the analyst's value."""
     docs, weight = E.year_documents(cur, g["wba"], g["year"], attr)
     if not docs:
@@ -170,7 +205,7 @@ def gather(cur, g, attr, spec):
     cands = []
     for rank, (_, lid, page, body, _top) in enumerate(pages):
         dt, dy = meta.get(lid, ("", want))
-        for f, v, rule in all_candidates(body, g["year"], attr, spec, rank, dt, (dy or want) - want):
+        for f, v, rule in all_candidates(body, g["year"], attr, spec, rank, dt, (dy or want) - want, known):
             cands.append((f, v, rule, E.right(v, g["value"])))
     return cands
 
@@ -194,6 +229,7 @@ def main():
     run = qa.Run("chooser_eval.py")
     answers = [g for base in gold_cfg["bases"].values() for g in gold_values(token, base, codes)
                if g["value"] and not g["unit"].lower().startswith(("%", "percent"))]
+    gold_index = {(g["wba"], g["attribute"], g["year"]): g["value"] for g in answers}
     by = collections.defaultdict(list)
     for g in answers:
         by[g["attribute"]].append(g)
@@ -211,7 +247,8 @@ def main():
             if i % 100 == 0:
                 print(f"  {i:,}/{len(todo):,} in {(time.time() - t0) / 60:.0f} min", flush=True)
             try:
-                cands = gather(cur, g, spec["attributes"][g["attribute"]], spec)
+                known = {y: v for (w, c, y), v in gold_index.items() if w == g["wba"] and c == g["attribute"] and y != g["year"]}
+                cands = gather(cur, g, spec["attributes"][g["attribute"]], spec, known)
                 fails = 0
             except Exception as e:
                 conn.rollback(); cur.execute("set statement_timeout = '30s'")
@@ -226,9 +263,11 @@ def main():
           f"{sum(len(v) for v in cases.values()):,} validated answers" + ("; stopped at the time budget" if cut else "")
           + ". Candidates: every figure printed after one of the attribute's labels on the 25 kept pages (up to six columns a row). "
             "Rules: the hand-weighted choice of extract_eval.candidates on the same candidates. Learned: a conditional logit fitted on "
-            "the other four company folds. Ceiling: a candidate equals the analyst's value. No model; counts and shares only.", "",
-          "| Attribute | Answers | With candidates | Ceiling | Rules | Learned | Candidates per answer |",
-          "| --- | --: | --: | --: | --: | --: | --: |"]
+            "the other four company folds. With the company's other years: the same plus the size of the figure against the company's "
+            "validated figures for other years, a row that prints one of them, and a change from last year that agrees or not with the "
+            "words around it. Ceiling: a candidate equals the analyst's value. No model; counts and shares only.", "",
+          "| Attribute | Answers | With candidates | Ceiling | Rules | Learned | Learned with the company's other years | Answers with another validated year | Candidates per answer |",
+          "| --- | --: | --: | --: | --: | --: | --: | --: | --: |"]
     weights_md = []
     for code in codes:
         cs = cases.get(code, [])
@@ -240,19 +279,23 @@ def main():
         for c in cs:
             pick = max(range(len(c["cands"])), key=lambda i: c["cands"][i][2], default=None) if c["cands"] else None
             rules_right += bool(pick is not None and c["cands"][pick][2] > -math.inf and c["cands"][pick][3])
-        learned_right = 0
+        learned_right, memory_right, with_memory = 0, 0, sum(1 for c in cs if any("memory: known" in f for f, *_ in c["cands"]))
+        no_memory = lambda k: not k.startswith("memory:")
         for f in range(R.FOLDS):
             train = [c for c in cs if c["fold"] != f]
             test = [c for c in cs if c["fold"] == f]
             if not test or not train:
                 continue
-            w, vocab = fit(train, a.l2, a.steps)
+            w, vocab = fit(train, a.l2, a.steps, keep=no_memory)
+            wm, vm = fit(train, a.l2, a.steps)
             for c in test:
                 i = choose(w, vocab, c)
                 learned_right += bool(i is not None and c["cands"][i][3])
+                i = choose(wm, vm, c)
+                memory_right += bool(i is not None and c["cands"][i][3])
         per = sum(len(c["cands"]) for c in cs) / max(withc, 1)
         name = spec["attributes"][code].get("name", "")
-        md.append(f"| {code} {name} | {n:,} | {withc / n:.0%} | {ceil / n:.0%} | {rules_right / n:.0%} | **{learned_right / n:.0%}** | {per:.0f} |")
+        md.append(f"| {code} {name} | {n:,} | {withc / n:.0%} | {ceil / n:.0%} | {rules_right / n:.0%} | **{learned_right / n:.0%}** | **{memory_right / n:.0%}** | {with_memory / n:.0%} | {per:.0f} |")
         w, vocab = fit(cs, a.l2, a.steps)
         inv = {i: k for k, i in vocab.ix.items()}
         top = sorted(range(len(w)), key=lambda i: -w[i])[:8]
