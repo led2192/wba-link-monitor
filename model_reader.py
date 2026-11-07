@@ -252,7 +252,13 @@ def period_year(period_end):
     return from_end_month(y, mo), mo
 
 
-def check(reply, pages, to_number, numbers_on, fy_month=None, why=None):
+PERIOD_CHECK = "all"   # "currency-only" (extract_eval --period-check currency-only): the check that drops an entry whose
+                       # period ends in another month than the company's financial year applies to money only, since
+                       # emissions and headcounts are often reported by calendar year or at a date (7 Nov 2026: 5 of
+                       # 22 declined answers whose pages printed the figure, all emissions or employees)
+
+
+def check(reply, pages, to_number, numbers_on, fy_month=None, why=None, period_check=True):
     """{'value', 'printed', 'scale', 'library_id', 'page', 'unit', 'year', 'column'} when the entry names a page
     that prints the number, else None (nothing usable) or False (a number the page does not print).
     to_number and numbers_on are the rule reader's own parsers. The year must be a reporting year the column
@@ -284,7 +290,7 @@ def check(reply, pages, to_number, numbers_on, fy_month=None, why=None):
     column = str(reply.get("column") or "").strip()[:60]
     cy = column_year(column)
     py, pm = period_year(reply.get("period_end"))
-    if pm and fy_month and abs(pm - int(fy_month)) > 1 and abs(pm - int(fy_month)) < 11:
+    if period_check and pm and fy_month and abs(pm - int(fy_month)) > 1 and abs(pm - int(fy_month)) < 11:
         return drop("period ends in another month than the company's year")   # a misread column
     if py is not None and (not cy or py in (cy, cy - 1)):
         year = py                       # the period end says which reporting year the column is
@@ -298,14 +304,14 @@ def check(reply, pages, to_number, numbers_on, fy_month=None, why=None):
             "basis": str(reply.get("basis") or "").strip().lower()[:20]}
 
 
-def check_all(reply, pages, to_number, numbers_on, usage, fy_month=None, why=None):
+def check_all(reply, pages, to_number, numbers_on, usage, fy_month=None, why=None, period_check=True):
     """Every usable entry of a reply, one per year (the first wins), in the reply's order. Accepts the old
     single-object shape too."""
     entries = reply.get("values") if isinstance(reply, dict) and isinstance(reply.get("values"), list) else \
         ([reply] if isinstance(reply, dict) and reply.get("page") else [])
     out, seen = [], set()
     for e in entries:
-        got = check(e if isinstance(e, dict) else None, pages, to_number, numbers_on, fy_month, why)
+        got = check(e if isinstance(e, dict) else None, pages, to_number, numbers_on, fy_month, why, period_check)
         if got is False:
             usage["quote_not_on_page"] += 1
             if why is not None:
@@ -402,7 +408,8 @@ def read_years(g, attr, pages, usage, sess=None, note=None):
         elif entries == [] or (entries is None and not reply.get("page")):
             note["why"] = str(reply.get("why") or "")[:120]
     dropped = note.setdefault("dropped", []) if note is not None else None
-    got = check_all(reply, pages, to_number, numbers_on, usage, g.get("fy_month"), dropped)
+    got = check_all(reply, pages, to_number, numbers_on, usage, g.get("fy_month"), dropped,
+                    PERIOD_CHECK == "all" or attr.get("unit_family") == "currency")
     if RULES:
         kept = [e for e in got if rule_ok(g.get("attribute"), e, pages)]
         usage["dropped by the learned rules"] += len(got) - len(kept)
