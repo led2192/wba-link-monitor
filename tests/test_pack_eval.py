@@ -81,5 +81,20 @@ class Read(unittest.TestCase):
         self.assertFalse(ans)                                # no pages today: "no", and no call
         self.assertEqual(len(calls), 1)
 
+
+class Submodular(unittest.TestCase):
+    def test_a_note_beats_a_near_duplicate(self):
+        pas = [("D1", 1, 0, "The board oversees climate risks through its audit committee each quarter."),
+               ("D2", 4, 0, "The board oversees climate risks through its audit committee every quarter."),
+               ("D3", 9, 0, "Emissions are calculated in accordance with the GHG Protocol; the boundary is operational control.")]
+        scores = [10.0, 9.9, 7.0]
+        self.assertEqual(P.pick(pas, scores, 2, 2), [0, 1])
+        self.assertEqual(P.pick_submodular(pas, scores, 2, 2), [0, 2])
+
+    def test_roles(self):
+        self.assertEqual(P.role_of("Scope 1 1,234 1,300 Scope 2 4,567 4,800"), "table")
+        self.assertEqual(P.role_of("Our methodology follows the GHG Protocol"), "note")
+        self.assertEqual(P.role_of("We are proud of our people"), "context")
+
 if __name__ == "__main__":
     unittest.main()
