@@ -78,7 +78,58 @@ def memory_features(v, row_vals, known, year, near_text):
     return f
 
 
-def all_candidates(text, year, attr, spec, page_rank, doc_type, doc_offset, known=None):
+# ----- "fancy hits": where and how a word is printed (7 Nov 2026, after Google's hit lists) -----
+# pypdf text, which the evidence database holds, has no type sizes or weights. PyMuPDF reads them from the
+# PDF (about 0.3 s a page): a span in type at least HEADING times the page's body size is a heading, a span
+# with the bold flag is bold, a span in the top TOP of the page is near the top.
+HEADING, TOP, BOLD = 1.2, 0.15, 16
+DIGITS = re.compile(r"\d[\d,.' \u00a0\u202f]*\d|\d")
+
+
+def page_style(path, page):
+    """{"heading", "bold", "top": lower-case text; "bold_figures", "large_figures": digit strings} of one page
+    of a PDF, or None."""
+    try:
+        import pymupdf
+        doc = pymupdf.open(path)
+        p = doc[int(page) - 1]
+        h = p.rect.height or 1
+        spans = [(s["text"], s["size"], s["flags"], s["bbox"][1] / h) for b in p.get_text("dict")["blocks"]
+                 for l in b.get("lines", []) for s in l.get("spans", []) if s.get("text", "").strip()]
+        doc.close()
+    except Exception:
+        return None
+    if not spans:
+        return None
+    sizes = sorted((sz, len(t)) for t, sz, _, _ in spans)
+    half, acc, body = sum(n for _, n in sizes) / 2, 0, sizes[0][0]
+    for sz, n in sizes:                       # the size of the median character: the body text
+        acc += n
+        if acc >= half:
+            body = sz; break
+    big = lambda sz: sz >= HEADING * body
+    digits = lambda t: {re.sub(r"\D", "", m) for m in DIGITS.findall(t) if len(re.sub(r"\D", "", m)) >= 2}
+    return {"heading": " ".join(t.lower() for t, sz, _, _ in spans if big(sz)),
+            "bold": " ".join(t.lower() for t, _, fl, _ in spans if fl & BOLD),
+            "top": " ".join(t.lower() for t, _, _, y in spans if y < TOP),
+            "bold_figures": set().union(*[digits(t) for t, _, fl, _ in spans if fl & BOLD]),
+            "large_figures": set().union(*[digits(t) for t, sz, _, _ in spans if big(sz)])}
+
+
+def fancy_features(style, label, token):
+    if not style:
+        return {}
+    lab = label.lower()
+    d = re.sub(r"\D", "", token)
+    return {"fancy: page read": 1.0,
+            "fancy: label in a heading": 1.0 if lab in style["heading"] else 0.0,
+            "fancy: label in bold": 1.0 if lab in style["bold"] else 0.0,
+            "fancy: label near the top": 1.0 if lab in style["top"] else 0.0,
+            "fancy: figure in bold": 1.0 if d and d in style["bold_figures"] else 0.0,
+            "fancy: figure in large type": 1.0 if d and d in style["large_figures"] else 0.0}
+
+
+def all_candidates(text, year, attr, spec, page_rank, doc_type, doc_offset, known=None, style=None):
     """[(features: {name: value}, value, rule_score)] for every figure of every labelled row of a page.
     rule_score is extract_eval.candidates's hand score for the column it would take (else -inf). known:
     {year: value} of the company's validated figures for other years of this attribute."""
@@ -115,6 +166,7 @@ def all_candidates(text, year, attr, spec, page_rank, doc_type, doc_offset, know
             for w in words:
                 f["word=" + w] = 1.0
             f.update(memory_features(v * scale, [x * scale for x in vals], known, year, low[max(0, pos - 150):pos + 150]))
+            f.update(fancy_features(style, lab, tok))
             out.append((f, v * scale, rules.get((round(v * scale, 6), lab), -math.inf)))
     return out
 
@@ -193,8 +245,10 @@ def choose(w, vocab, case):
     return bi
 
 
-def gather(cur, g, attr, spec, known=None):
-    """The candidates of one answer on its kept pages, each with whether it equals the analyst's value."""
+def gather(cur, g, attr, spec, known=None, fancy=False):
+    """The candidates of one answer on its kept pages, each with whether it equals the analyst's value. With
+    fancy, each page is also read from its PDF for type sizes and weights (the PDFs are deleted after the
+    answer: the runner's disk would not hold them all)."""
     docs, weight = E.year_documents(cur, g["wba"], g["year"], attr)
     if not docs:
         return None
@@ -202,12 +256,28 @@ def gather(cur, g, attr, spec, known=None):
     meta = {d[0]: (d[1], d[2]) for d in docs}
     rows = E.ranked_pages(cur, [d[0] for d in docs], weight, g["year"], attr, spec, {}, None, None)
     pages = E.keep_pages(rows)
-    cands = []
+    cands, paths = [], {}
     for rank, (_, lid, page, body, _top) in enumerate(pages):
         dt, dy = meta.get(lid, ("", want))
-        for f, v, rule in all_candidates(body, g["year"], attr, spec, rank, dt, (dy or want) - want, known):
+        style = None
+        if fancy:
+            import table_text
+            if lid not in paths:
+                paths[lid] = table_text.pdf_path(lid)
+            style = page_style(paths[lid], page) if paths[lid] else None
+            FANCY_STATS["pages"] += 1; FANCY_STATS["read"] += bool(style)
+        for f, v, rule in all_candidates(body, g["year"], attr, spec, rank, dt, (dy or want) - want, known, style):
             cands.append((f, v, rule, E.right(v, g["value"])))
+    for p in paths.values():
+        if p:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
     return cands
+
+
+FANCY_STATS = collections.Counter()
 
 
 def main():
@@ -216,6 +286,7 @@ def main():
     ap.add_argument("--attributes", default="")
     ap.add_argument("--budget", type=int, default=200)
     ap.add_argument("--l2", type=float, default=0.01)
+    ap.add_argument("--fancy", action="store_true", help="also read each kept page from its PDF for type sizes and weights (slow: a download per document)")
     ap.add_argument("--steps", type=int, default=300)
     a = ap.parse_args()
     token = os.environ.get("GOLD_TOKEN", "").strip()
@@ -248,7 +319,7 @@ def main():
                 print(f"  {i:,}/{len(todo):,} in {(time.time() - t0) / 60:.0f} min", flush=True)
             try:
                 known = {y: v for (w, c, y), v in gold_index.items() if w == g["wba"] and c == g["attribute"] and y != g["year"]}
-                cands = gather(cur, g, spec["attributes"][g["attribute"]], spec, known)
+                cands = gather(cur, g, spec["attributes"][g["attribute"]], spec, known, a.fancy)
                 fails = 0
             except Exception as e:
                 conn.rollback(); cur.execute("set statement_timeout = '30s'")
@@ -266,8 +337,8 @@ def main():
             "the other four company folds. With the company's other years: the same plus the size of the figure against the company's "
             "validated figures for other years, a row that prints one of them, and a change from last year that agrees or not with the "
             "words around it. Ceiling: a candidate equals the analyst's value. No model; counts and shares only.", "",
-          "| Attribute | Answers | With candidates | Ceiling | Rules | Learned | Learned with the company's other years | Answers with another validated year | Candidates per answer |",
-          "| --- | --: | --: | --: | --: | --: | --: | --: | --: |"]
+          "| Attribute | Answers | With candidates | Ceiling | Rules | Learned | + the company's other years | + type size and weight | Answers with another validated year | Candidates per answer |",
+          "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: |"]
     weights_md = []
     for code in codes:
         cs = cases.get(code, [])
@@ -279,29 +350,38 @@ def main():
         for c in cs:
             pick = max(range(len(c["cands"])), key=lambda i: c["cands"][i][2], default=None) if c["cands"] else None
             rules_right += bool(pick is not None and c["cands"][pick][2] > -math.inf and c["cands"][pick][3])
-        learned_right, memory_right, with_memory = 0, 0, sum(1 for c in cs if any("memory: known" in f for f, *_ in c["cands"]))
-        no_memory = lambda k: not k.startswith("memory:")
+        learned_right, memory_right, fancy_right = 0, 0, 0
+        with_memory = sum(1 for c in cs if any("memory: known" in f for f, *_ in c["cands"]))
+        no_memory = lambda k: not k.startswith(("memory:", "fancy:"))
+        no_fancy = lambda k: not k.startswith("fancy:")
         for f in range(R.FOLDS):
             train = [c for c in cs if c["fold"] != f]
             test = [c for c in cs if c["fold"] == f]
             if not test or not train:
                 continue
             w, vocab = fit(train, a.l2, a.steps, keep=no_memory)
-            wm, vm = fit(train, a.l2, a.steps)
+            wm, vm = fit(train, a.l2, a.steps, keep=no_fancy)
+            wf, vf = fit(train, a.l2, a.steps) if a.fancy else (None, None)
             for c in test:
                 i = choose(w, vocab, c)
                 learned_right += bool(i is not None and c["cands"][i][3])
                 i = choose(wm, vm, c)
                 memory_right += bool(i is not None and c["cands"][i][3])
+                if a.fancy:
+                    i = choose(wf, vf, c)
+                    fancy_right += bool(i is not None and c["cands"][i][3])
         per = sum(len(c["cands"]) for c in cs) / max(withc, 1)
         name = spec["attributes"][code].get("name", "")
-        md.append(f"| {code} {name} | {n:,} | {withc / n:.0%} | {ceil / n:.0%} | {rules_right / n:.0%} | **{learned_right / n:.0%}** | **{memory_right / n:.0%}** | {with_memory / n:.0%} | {per:.0f} |")
+        md.append(f"| {code} {name} | {n:,} | {withc / n:.0%} | {ceil / n:.0%} | {rules_right / n:.0%} | **{learned_right / n:.0%}** | **{memory_right / n:.0%}** | {f"**{fancy_right / n:.0%}**" if a.fancy else "-"} | {with_memory / n:.0%} | {per:.0f} |")
         w, vocab = fit(cs, a.l2, a.steps)
         inv = {i: k for k, i in vocab.ix.items()}
         top = sorted(range(len(w)), key=lambda i: -w[i])[:8]
         bottom = sorted(range(len(w)), key=lambda i: w[i])[:8]
         weights_md.append(f"- {code}: up " + ", ".join(f"{inv[i]} ({w[i]:+.1f})" for i in top)
                           + "; down " + ", ".join(f"{inv[i]} ({w[i]:+.1f})" for i in bottom) + ".")
+    if a.fancy:
+        md += ["", f"Type size and weight: {FANCY_STATS['read']:,} of {FANCY_STATS['pages']:,} kept pages read from their PDF "
+               "(heading: type 1.2 times the page's body size or more; bold: the font's bold flag; top: the top 15% of the page)."]
     md += ["", "Strongest weights of the model fitted on all answers (a weight is a log-odds: +0.7 doubles the odds):", ""] + weights_md
     open("chooser_eval.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)

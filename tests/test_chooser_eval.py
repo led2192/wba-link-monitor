@@ -81,5 +81,28 @@ class Memory(unittest.TestCase):
         self.assertEqual(h["memory: change contradicts the words"], 1.0)
         self.assertEqual(C.memory_features(1.0, [1.0], {}, 2024, ""), {})
 
+
+class Fancy(unittest.TestCase):
+    @unittest.skipUnless(__import__("importlib").util.find_spec("pymupdf"), "pymupdf not installed")
+    def test_headings_bold_and_figures_from_a_pdf(self):
+        import pymupdf, tempfile
+        doc = pymupdf.open(); p = doc.new_page()
+        p.insert_text((72, 60), "Scope 2 emissions", fontsize=20, fontname="hebo")
+        p.insert_text((72, 300), "Scope 2 location-based 12,300 11,900", fontsize=10)
+        p.insert_text((72, 320), "Total 45,600", fontsize=10, fontname="hebo")
+        for k in range(10):
+            p.insert_text((72, 400 + 12 * k), "ordinary body text line with words", fontsize=10)
+        path = os.path.join(tempfile.mkdtemp(), "s.pdf"); doc.save(path)
+        st = C.page_style(path, 1)
+        self.assertIn("scope 2 emissions", st["heading"])
+        self.assertIn("scope 2 emissions", st["top"])
+        self.assertIn("45600", st["bold_figures"])
+        f = C.fancy_features(st, "Scope 2", "12,300")
+        self.assertEqual(f["fancy: label in a heading"], 1.0)
+        self.assertEqual(f["fancy: figure in bold"], 0.0)
+        self.assertEqual(C.fancy_features(st, "Total", "45,600")["fancy: figure in bold"], 1.0)
+        self.assertEqual(C.fancy_features(None, "x", "1"), {})
+        self.assertIsNone(C.page_style("/no/such.pdf", 1))
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,10 @@ on:
       budget:
         description: "minutes for gathering the candidates"
         default: "200"
+      fancy:
+        description: "also read each kept page from its PDF for type sizes and weights (slow; use a smaller limit)"
+        type: boolean
+        default: false
 
 jobs:
   evaluate:
@@ -28,6 +32,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - if: inputs.fancy
+        run: pip install pymupdf
       - name: Evaluate
         env:
           GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
@@ -37,7 +43,7 @@ jobs:
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
         run: |
-          ARGS="--limit ${{ inputs.limit }} --budget ${{ inputs.budget }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
+          ARGS="--limit ${{ inputs.limit }} --budget ${{ inputs.budget }} ${{ inputs.fancy && '--fancy' || '' }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
           python chooser_eval.py $ARGS
       - name: Keep the result
         if: always()
