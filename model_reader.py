@@ -355,17 +355,20 @@ def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
     return ""
 
 
-UNSTATED_BASIS = "default-only"   # "keep" (extract_eval --unstated-basis keep): a Scope 2 figure whose basis the page
-                                  # does not state is kept for the market-based attribute too (7 Nov 2026: 6 of the
-                                  # 22 answers the model reader declined although its pages printed the analyst's
-                                  # figure were market-based answers dropped for "basis not stated")
+UNSTATED_BASIS = "keep"   # a Scope 2 figure whose basis the page does not state is kept for the market-based
+                          # attribute too, with its basis_note (default since 7 Nov 2026, owner's decision: on 181
+                          # market answers 57% to 69% right, +11.6 points, interval +5.5 to +18.2, McNemar p 0.001;
+                          # right among proposals 85% and 83%). "default-only" (--unstated-basis default-only) is
+                          # the earlier rule: such a figure goes to location-based only (30 Oct 2026).
 
 
 def variant_filter(attr, entries, usage=None, why=None):
     """The entries an attribute with a "variant" (Scope 2 location- or market-based) may keep: the ones the
-    page calls by the wanted basis; the ones with no basis stated only when the variant is the default
-    (location-based), marked basis_note; never the other basis. A report that gives one Scope 2 figure
-    without naming a basis therefore yields one row, not two (a reviewer rejected the duplicate, 30 Oct 2026)."""
+    page calls by the wanted basis; the ones with no basis stated, marked basis_note (for the non-default
+    variant, market-based, only while UNSTATED_BASIS is "keep", the default since 7 Nov 2026); never the other
+    basis. A report that gives one Scope 2 figure without naming a basis therefore yields a row under each
+    basis, each saying the page names none (30 Oct 2026 it yielded one, after a reviewer rejected the
+    duplicate; the analysts' own market-based answers showed otherwise, 7 Nov 2026)."""
     v = attr.get("variant")
     if not v:
         return entries
