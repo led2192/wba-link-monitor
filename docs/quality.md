@@ -135,3 +135,11 @@ A gain is only real if the way it is measured cannot produce it. Every experimen
 - Position bias. `extract_eval --order reversed` gives the model the same pages in the opposite order; compared with a normal run by `compare_runs.py`, more change than the run-to-run noise means the reader depends on where a page sits.
 - Pictures. `visual_eval.py` checks how many figures missing from the text are printed in pictures, with a control that measures the visual reader on figures that are in the text.
 - What our answers cannot test yet: the validated answers hold only disclosed figures, so a reader that always answers is never punished for answering where the company disclosed nothing. Not-disclosed answers (the analyst's "not found" with a reason) are the next set to add before any option that makes the reader answer more often is adopted.
+
+Still to build for the measure (agreed 7 Nov 2026, in this order):
+1. Not-disclosed cases in the test set: answers where the analyst found the figure not disclosed, about 20% to 25% of the set, where the right reply is no figure. Scored as right abstentions and wrong answers.
+2. Evidence-anchored answers: for each validated answer, the document, page and printed words it came from (the Source Library citations give part of it), so a miss can be placed at a page and not only at a document.
+3. Agreement between analysts on a sample (Cohen's kappa or Krippendorff's alpha per attribute). Below 0.80 the attribute's definition is the problem, not the reader.
+4. A test set stratified by how documents fail: borderless tables, headers nested on several levels, tables split across two pages, merged cells, footnotes that change a figure's boundary, scans and tables saved as images.
+5. Per-gate measures: table cells read in the right row and column (Gate 1, column shifts), page recall at 1, 3, 5 and 10 and the reciprocal rank (Gate 2), table, unit and footnote together in what the model reads (Gate 3).
+6. Checks that need no answers, on unvalidated documents: accounting constraints (parts that should add up to a total, Scope 1 plus 2 against a stated total, off by more than 1%) and the same figure read the same at another scale.
