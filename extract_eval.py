@@ -204,6 +204,12 @@ def propose(text, year, attr, spec):
     return best[1:]
 
 
+def short_hash(x):
+    """A stable 12-character key: the same answer gets the same key in every run, and the key says nothing."""
+    import hashlib
+    return hashlib.sha1(str(x).encode()).hexdigest()[:12]
+
+
 def right(v, gold):
     return bool(v) and bool(gold) and abs(v - gold) / gold <= MATCH
 
@@ -297,6 +303,7 @@ def read_text(lid, page, body):
     return md if md else body
 
 
+PAGE_ORDER = "today"     # "reversed" (--order): the model reads the same pages in the opposite order
 SELECT = "base"          # how the rank half of the model's pages is chosen: "base" (today) or "learned" (--select)
 SELECT_MODEL = None      # page_select.load() when SELECT is "learned"
 EMBEDDER = None          # page_select.Embedder() when SELECT is "learned"
@@ -638,6 +645,16 @@ def read_value(cur, wba, year, attr, spec, usage, known=None):
     return mine
 
 
+def oracle_pages(holding, rows, best_pages, n=MODEL_PAGES):
+    """The reader's ceiling: the pages that print the analyst's figure first, in their ranked order (pages the
+    ranking never reached last), then the model's usual pages, MODEL_PAGES in all. Never an option: it uses the
+    answer to choose the pages."""
+    pos = {(x[1], x[2]): i for i, x in enumerate(rows)}
+    lead = [(0.0, None, lid, page, body) for lid, page, body in sorted(holding, key=lambda h: pos.get((h[0], h[1]), 10 ** 6))][:n]
+    have = {(x[2], x[3]) for x in lead}
+    return lead + [x for x in best_pages if (x[2], x[3]) not in have][:n - len(lead)]
+
+
 def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     """Stage results for one answer. reader "rules": the best-scored labelled row on the ranked pages;
     "model": a language model reads MODEL_PAGES pages: the ones whose rule candidates scored best, then the
@@ -681,6 +698,10 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
     import rank_eval
     best_pages = model_pages(scored, g["attribute"], attr, pages, docs, rank_eval.fold_of(g["wba"]))
+    if SELECT == "oracle" and holding:       # stage diagnostic, not an option (7 Nov 2026)
+        best_pages = oracle_pages(holding, rows, best_pages)
+    if PAGE_ORDER == "reversed":              # metamorphic check: the same pages in the opposite order
+        best_pages = list(reversed(best_pages))
     r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
     if reader == "model":
         from model_reader import read_years
@@ -719,7 +740,8 @@ def main():
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
     ap.add_argument("--guidance", default="today", choices=["today", "learned", "check", "md"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt; md: WBA's own assessment guidance per attribute (Pipeline QA attribute_guidance) in the prompt")
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
-    ap.add_argument("--select", default="base", choices=["base", "learned"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py)")
+    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
+    ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
     a = ap.parse_args()
     a.memory = a.memory == "on"
     global SIBLINGS_ON, TEXT_RANK
@@ -727,6 +749,8 @@ def main():
     TEXT_RANK = a.text_rank
     global SELECT, SELECT_MODEL, EMBEDDER, PAGE_TEXT
     SELECT = a.select
+    global PAGE_ORDER
+    PAGE_ORDER = a.order
     PAGE_TEXT = a.page_text
     if a.guidance == "md":
         import model_reader
@@ -787,6 +811,7 @@ def main():
     wrong = collections.defaultdict(list)
     t0, cut, db_stop = time.time(), False, ""
     failed_in_a_row, first_errors = 0, []
+    outcomes = []                                  # per answer, for paired comparisons between runs (compare_runs.py)
     with __import__("evidence_db").connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '30s'")
@@ -820,6 +845,9 @@ def main():
                     break
                 continue
             failed_in_a_row = 0
+            outcomes.append([short_hash(g["id"]), short_hash(g["wba"]), g["attribute"], int(bool(r["right"])),
+                             int(bool(r["in_docs"])), int(bool(r["in_pages"])), int(bool(r["proposal"]))])
+            s["right in_docs"] += bool(r["right"] and r["in_docs"])
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
@@ -858,8 +886,12 @@ def main():
                                              f"after \"{lab}\" ({lid} p.{page})")
 
     title = "model reader (" + os.environ.get("READER_MODEL", "claude-haiku-5-5") + ")" if a.reader == "model" else "generic reader (no model)"
-    if SELECT != "base":
+    if SELECT == "oracle":
+        title += ", ORACLE pages (the pages printing the analyst's figure first: the reader's ceiling, not an option)"
+    elif SELECT != "base":
         title += f", pages chosen by {SELECT}"
+    if PAGE_ORDER != "today":
+        title += f", pages in {PAGE_ORDER} order"
     if PAGE_TEXT != "db":
         title += f", pages re-read with their tables by {PAGE_TEXT}"
     if a.guidance != "today":
@@ -868,13 +900,13 @@ def main():
     md = [f"### The {title} against the validated answers" + ("" if a.commit else " (dry run, sample)"), "",
           f"{sum(s['answers'] for s in stats.values()):,} answers with a value" + (f" ({limit} per attribute)" if limit else "")
           + ("; stopped at the time budget" if cut else "") + (f"; STOPPED: {db_stop}" if db_stop else "") + ". Shares of those answers; the reader never sees the answer.", "",
-          "| Attribute | Answers | Document for the year | Number in those documents | Number on the ranked pages | Number on the model's pages | Proposal | Right | Right among proposals | Right digits, wrong scale |",
-          "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: |"]
+          "| Attribute | Answers | Document for the year | Number in those documents | Number on the ranked pages | Number on the model's pages | Proposal | Right | Right among proposals | Right where the number is in the documents | Right digits, wrong scale |",
+          "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |"]
     for c in codes:
         s = stats[c]; n = s["answers"] or 1
         pct = lambda k: f"{s[k] / n:.0%}"
         md.append(f"| {c} {spec['attributes'][c]['name']} | {s['answers']:,} | {pct('docs')} | {pct('in_docs')} | {pct('in_pages')} | {pct('model_pages')} | "
-                  f"{pct('proposal')} | **{pct('right')}** | {s['right'] / (s['proposal'] or 1):.0%} | {pct('scale_miss')} |")
+                  f"{pct('proposal')} | **{pct('right')}** | {s['right'] / (s['proposal'] or 1):.0%} | {s['right in_docs'] / (s['in_docs'] or 1):.0%} | {pct('scale_miss')} |")
     md.append("")
     if a.reader == "model":
         from model_reader import cost
@@ -974,10 +1006,15 @@ def main():
             md += [f"Wrong proposals, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]
     open("extract_eval.md", "w").write("\n".join(md) + "\n")
     print("\n".join(md), flush=True)
+    # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
+    # right or wrong only: no value, no company id, no analyst answer.
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT,
+                                                    "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader",
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT))
+                                                                              if v not in ("base", "today", "db")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
                                       "number on the ranked pages": round(s["in_pages"] / n, 4)},

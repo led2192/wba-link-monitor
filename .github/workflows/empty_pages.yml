@@ -1,0 +1,34 @@
+name: Empty pages
+
+# How many pages inside documents that have text came out with no text (empty_pages.py): a silent parser
+# failure that hides a page from ranking and reading. A random sample of documents. Counts only. Read-only. Manual.
+on:
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: "documents sampled"
+        default: "1500"
+
+jobs:
+  count:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Count
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python empty_pages.py --sample ${{ inputs.sample }}
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: empty-pages
+          path: empty_pages.md
+          if-no-files-found: ignore

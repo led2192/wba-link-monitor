@@ -1,0 +1,55 @@
+name: Visual check
+
+# Are the figures the text extraction loses printed in pictures? (visual_eval.py) For validated answers whose figure
+# is not in the text of the year's documents, the best-ranked pages are rendered as images and read by the model;
+# a control set whose figure is in the text measures the visual reader itself. Counts and shares only. Read-only.
+# Billed (ANTHROPIC_API_KEY), capped by max_usd. Manual.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "answers scanned per attribute"
+        default: "200"
+      pages:
+        description: "pages shown as images per answer"
+        default: "4"
+      control:
+        description: "answers whose figure is in the text, read the same way (the visual reader's own recall)"
+        default: "30"
+      max_usd:
+        description: "stop when the model cost reaches this"
+        default: "3"
+      budget:
+        description: "minutes"
+        default: "150"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pymupdf
+      - name: Evaluate
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          READER_MODEL: claude-haiku-5-5
+        run: python visual_eval.py --limit ${{ inputs.limit }} --pages ${{ inputs.pages }} --control ${{ inputs.control }} --max-usd ${{ inputs.max_usd }} --budget ${{ inputs.budget }}
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-eval
+          path: visual_eval.md
+          if-no-files-found: ignore

@@ -289,5 +289,23 @@ class AgainstPostgres(unittest.TestCase):
             c.execute("delete from public.pages where library_id like 'xmore%'"); c.execute("delete from public.documents where library_id like 'xmore%'")
 
 
+
+class Oracle(unittest.TestCase):
+    def test_pages_printing_the_figure_come_first_in_ranked_order(self):
+        rows = [(9, "d1", 3, "a", None), (8, "d1", 7, "b", None), (7, "d2", 1, "c", None)]
+        holding = [("d2", 1, "c"), ("d9", 4, "z"), ("d1", 7, "b")]        # d9 p4 was never ranked: it goes last
+        best = [(1, None, "d1", 3, "a"), (1, None, "d1", 7, "b"), (1, None, "d3", 2, "e")]
+        got = X.oracle_pages(holding, rows, best, n=4)
+        self.assertEqual([(x[2], x[3]) for x in got], [("d1", 7), ("d2", 1), ("d9", 4), ("d1", 3)])
+
+    def test_never_more_than_the_model_pages(self):
+        holding = [("d", i, "x") for i in range(20)]
+        self.assertEqual(len(X.oracle_pages(holding, [], [], n=8)), 8)
+
+    def test_keys_are_stable_and_say_nothing(self):
+        self.assertEqual(X.short_hash("PT_00001|2024|GMC"), X.short_hash("PT_00001|2024|GMC"))
+        self.assertEqual(len(X.short_hash("x")), 12)
+        self.assertNotIn("PT", X.short_hash("PT_00001"))
+
 if __name__ == "__main__":
     unittest.main()
