@@ -174,3 +174,30 @@ class Stats(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FIC(unittest.TestCase):
+    """BM25-FIC (7 Nov 2026): zone weights from how rare the query words are in each zone, no training."""
+
+    def test_rare_in_tables_weighs_tables_more(self):
+        import collections
+        z = lambda table=(), heading=(), prose=(): {"table": collections.Counter(table), "heading": collections.Counter(heading),
+                                                    "prose": collections.Counter(prose)}
+        # "revenue" in running text on every page, in a table row on one page only
+        pages = [z(table=["revenue", "1"], prose=["revenue", "grew"])] + [z(table=["2024"], prose=["revenue", "x"]) for _ in range(9)]
+        w = R.fic_weights(pages, ["revenue"])
+        self.assertEqual(w["prose"], 1.0)
+        self.assertGreater(w["table"], 1.5)
+        self.assertEqual(w["heading"], 1.0)          # no page has a heading: neutral
+
+    def test_no_query_word_in_the_document(self):
+        import collections
+        pages = [{"table": collections.Counter(["a"]), "heading": collections.Counter(), "prose": collections.Counter(["b"])}]
+        self.assertEqual(R.fic_weights(pages, ["revenue"]), {"table": 1.0, "heading": 1.0, "prose": 1.0})
+
+    def test_scores_rank_the_table_page_first(self):
+        pages = {1: "Our revenue grew strongly this year as customers came back.",
+                 2: "Revenue 12,345 11,002\nOperating profit 1,234 1,100",
+                 3: "Revenue is recognised when control passes to the customer."}
+        s = R.fic_scores(pages, ["revenue"], {"revenue": 1.0}, 10)
+        self.assertEqual(max(s, key=s.get), 2)
