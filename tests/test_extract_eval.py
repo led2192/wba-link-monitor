@@ -309,3 +309,49 @@ class Oracle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BM25Pool(unittest.TestCase):
+    """--bm25-pool (7 Nov 2026): pages found by BM25 over any label word join the pool; never replaces it."""
+
+    class Cur:
+        def __init__(self, rows):
+            self.rows, self.last = rows, None
+            import contextlib
+            self.connection = type("C", (), {"transaction": lambda _s: contextlib.nullcontext()})()
+
+        def execute(self, sql, args=None):
+            self.last = sql
+
+        def fetchone(self):
+            return ("30s",)
+
+        def fetchall(self):
+            return self.rows
+
+    def setUp(self):
+        from page_ranker import RANKER
+        self.R, self.saved = RANKER, RANKER._ensure
+        RANKER._ensure = lambda cur, terms: None
+        RANKER.avg_len, RANKER.idfs = 50, {"employees": 2.0, "headcount": 3.0, "total": 0.5, "number": 0.5}
+
+    def tearDown(self):
+        self.R._ensure = self.saved
+
+    def test_adds_new_pages_best_first_scaled_to_the_pool(self):
+        cur = self.Cur([("d", 1, "employees employees headcount 12,000"), ("d", 2, "nothing relevant here"),
+                        ("d", 3, "employees 900"), ("d", 4, "already in the pool employees")])
+        attr = {"labels": ["total number of employees"], "more_terms": ["headcount"]}
+        got = X.bm25_pool_pages(cur, ["d"], attr, {("d", 4)}, 2, 0.4)
+        self.assertEqual([(l, p) for l, p, _, _ in got], [("d", 1), ("d", 3)])
+        self.assertAlmostEqual(got[0][3], 0.4)          # the best gets the pool's best ts rank
+        self.assertLess(got[1][3], 0.4)
+
+    def test_off_and_failures_add_nothing(self):
+        attr = {"labels": ["employees"]}
+        self.assertEqual(X.bm25_pool_pages(self.Cur([]), ["d"], attr, set(), 0, 0.4), [])
+
+        class Broken(self.Cur):
+            def fetchall(self):
+                raise RuntimeError("timeout")
+        self.assertEqual(X.bm25_pool_pages(Broken([]), ["d"], attr, set(), 5, 0.4), [])

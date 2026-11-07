@@ -482,6 +482,8 @@ def sibling_pages(cur, wba, year, attr, spec):
     return out
 
 
+BM25_POOL = 0             # --bm25-pool N: also the N best pages of the documents by BM25 over any label word (7 Nov 2026)
+BM25_CANDIDATES = 300     # pages holding any label word that BM25 scores (their bodies are read)
 TEXT_RANK = "ts"          # the text score in page_score: "ts" (ts_rank_cd) or "bm25" (--text-rank, 4 Nov 2026)
 
 
@@ -532,6 +534,12 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, sib
         found += [(lid, page, body, 0.0) for lid, page, body in cur.fetchall() if (lid, page) in missing]
     if memory:
         found += company_memory.memory_pages(cur, ids, memory, {(lid, page) for lid, page, _, _ in found})
+    if BM25_POOL:
+        added = bm25_pool_pages(cur, ids, attr, {(lid, page) for lid, page, _, _ in found}, BM25_POOL,
+                                max((rk for *_, rk in found), default=0.1))
+        if info is not None:
+            info["bm25_added"] = {(lid, page) for lid, page, _, _ in added}
+        found += added
     if TEXT_RANK == "bm25":
         found = bm25_text_rank(cur, found, attr)
     def score(lid, page, body, rk):
@@ -564,6 +572,49 @@ def words_query(terms):
         if ws:
             parts.append("(" + " & ".join(ws) + ")")
     return " | ".join(parts) or "zzzz"
+
+
+def bm25_pool_pages(cur, ids, attr, have, k, top_rank):
+    """[(library_id, page, body, rank)] of the k best pages of the documents by BM25 over the attribute's label
+    words (any of them, not every word of a label), that the label query did not find. The ranking experiment
+    (rank_eval.py, 7 Nov 2026, 2,206 cited pages) puts the cited page in the top 3 for 63% of answers with
+    BM25 against 44% with ts_rank_cd, and the oracle run says finding pages costs most for capex, employees
+    and revenue; replacing the text score with BM25 inside the label pool lost pages (5 Nov 2026), so this
+    only ADDS pages. Their rank is BM25 scaled to the pool's best ts rank. Own timeout and savepoint, as
+    more_terms_pages."""
+    import collections
+    import rank_eval as R
+    from page_ranker import RANKER
+    terms = list(dict.fromkeys(t for l in attr.get("labels", []) + attr.get("more_terms", []) for t in R.query_terms(l)))
+    if not terms or k <= 0:
+        return []
+    q = " | ".join(terms)
+    cur.execute("show statement_timeout")
+    before = cur.fetchone()[0]
+    try:
+        with cur.connection.transaction():
+            cur.execute(f"set local statement_timeout = '{MORE_TERMS_TIMEOUT}'")
+            cur.execute("with p as materialized (select library_id, page, words from public.pages where library_id = any(%s)), "
+                        "m as (select library_id, page, ts_rank_cd(words, to_tsquery('simple', %s), 32) as rk from p "
+                        "      where words @@ to_tsquery('simple', %s) order by rk desc limit %s) "
+                        "select m.library_id, m.page, b.body from m join public.pages b using (library_id, page)",
+                        (ids, q, q, BM25_CANDIDATES))
+            rows = [r for r in cur.fetchall() if (r[0], r[1]) not in have]
+        RANKER._ensure(cur, terms)
+    except Exception:
+        return []
+    finally:
+        try:
+            cur.execute(f"set statement_timeout = '{before}'")
+        except Exception:
+            pass
+    scored = []
+    for lid, page, body in rows:
+        tf = collections.Counter(R.tokens(body or ""))
+        scored.append((R.bm25(tf, len(tf), RANKER.avg_len, terms, RANKER.idfs), lid, page, body))
+    scored.sort(key=lambda x: -x[0])
+    best = scored[0][0] if scored and scored[0][0] > 0 else 1.0
+    return [(lid, page, body, (top_rank or 0.1) * sc / best) for sc, lid, page, body in scored[:k] if sc > 0]
 
 
 def more_terms_pages(cur, ids, attr, have, info=None):
@@ -743,6 +794,7 @@ def main():
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
     ap.add_argument("--select", default="base", choices=["base", "learned", "oracle"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
+    ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
     ap.add_argument("--unstated-basis", default="default-only", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under location-based only (today) or under market-based too")
     ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
     a = ap.parse_args()
@@ -757,6 +809,8 @@ def main():
     import model_reader
     model_reader.UNSTATED_BASIS = a.unstated_basis
     model_reader.PERIOD_CHECK = a.period_check
+    global BM25_POOL
+    BM25_POOL = a.bm25_pool
     PAGE_TEXT = a.page_text
     if a.guidance == "md":
         import model_reader
@@ -1022,13 +1076,13 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check))
-                                                                              if v not in ("base", "today", "db", "default-only", "all")),
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool))
+                                                                              if v not in ("base", "today", "db", "default-only", "all", 0)),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
                                       "number on the ranked pages": round(s["in_pages"] / n, 4)},
