@@ -742,6 +742,7 @@ def main():
     ap.add_argument("--guidance", default="today", choices=["today", "learned", "check", "md"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt; md: WBA's own assessment guidance per attribute (Pipeline QA attribute_guidance) in the prompt")
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
     ap.add_argument("--select", default="base", choices=["base", "learned", "oracle"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
+    ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--unstated-basis", default="default-only", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under location-based only (today) or under market-based too")
     ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
     a = ap.parse_args()
@@ -755,6 +756,7 @@ def main():
     PAGE_ORDER = a.order
     import model_reader
     model_reader.UNSTATED_BASIS = a.unstated_basis
+    model_reader.PERIOD_CHECK = a.period_check
     PAGE_TEXT = a.page_text
     if a.guidance == "md":
         import model_reader
@@ -1020,13 +1022,13 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis))
-                                                                              if v not in ("base", "today", "db", "default-only")),
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check))
+                                                                              if v not in ("base", "today", "db", "default-only", "all")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
                                       "number on the ranked pages": round(s["in_pages"] / n, 4)},

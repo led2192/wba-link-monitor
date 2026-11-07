@@ -279,3 +279,18 @@ class UnstatedBasis(unittest.TestCase):
         kept = M.variant_filter(attr, [{"basis": ""}, {"basis": "location"}])
         self.assertEqual(len(kept), 1)
         self.assertIn("basis_note", kept[0])                 # still says the page names no basis
+
+
+class PeriodCheck(unittest.TestCase):
+    def test_a_calendar_year_figure_of_a_march_company(self):
+        from extract_eval import to_number
+        from value_eval import numbers_on
+        import collections
+        import model_reader as M
+        pages = [("d1", 3, "Scope 1 emissions 1,234 tCO2e (January to December 2024)")]
+        reply = {"values": [{"page": "P1", "printed": "1,234", "year": 2024, "period_end": "2024-12"}]}
+        why = []
+        self.assertEqual(M.check_all(reply, pages, to_number, numbers_on, collections.Counter(), 3, why), [])
+        self.assertEqual(why, ["period ends in another month than the company's year"])
+        kept = M.check_all(reply, pages, to_number, numbers_on, collections.Counter(), 3, None, False)
+        self.assertEqual([e["value"] for e in kept], [1234])
