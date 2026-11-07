@@ -67,5 +67,19 @@ class Learning(unittest.TestCase):
         self.assertIsNone(C.choose(w, vocab, {"cands": []}))
 
 
+
+class Memory(unittest.TestCase):
+    def test_size_row_and_direction(self):
+        f = C.memory_features(300e6, [300e6, 280e6], {2023: 280e6}, 2024, "revenue increased to 300 million")
+        self.assertEqual(f["memory: same size (within 25%)"], 1.0)
+        self.assertEqual(f["memory: the row prints a known year's figure"], 1.0)
+        self.assertEqual(f["memory: change agrees with the words"], 1.0)
+        g = C.memory_features(275e9, [275e9], {2023: 280e6}, 2024, "revenue increased")
+        self.assertEqual(g["memory: 10 times off or more"], 1.0)
+        self.assertEqual(g["memory: change agrees with the words"], 1.0)     # bigger, as the words say, but 1,000 times off
+        h = C.memory_features(250e6, [250e6], {2023: 280e6}, 2024, "revenue increased by 7%")
+        self.assertEqual(h["memory: change contradicts the words"], 1.0)
+        self.assertEqual(C.memory_features(1.0, [1.0], {}, 2024, ""), {})
+
 if __name__ == "__main__":
     unittest.main()
