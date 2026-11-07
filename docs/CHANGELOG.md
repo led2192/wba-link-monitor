@@ -4,6 +4,7 @@ Newest first. One line per change, with the pull request. Every pull request add
 
 ## November 2026
 - 2026-11-07 Why the reader gives no figure: the model reader's checks record why they drop each entry (number not on the page named, year not allowed by the column, period ending in another month, basis not stated or the other basis), and extract_eval reports, for answers with no figure although the pages print the validated number, how many were dropped for each reason (#261)
+- 2026-11-07 Decision recorded: Docling on the oracle pages, no gain (+0.8 points, chance); `compare_runs.md`, `empty_pages.md` and `visual_eval.md` are run outputs, kept out of the repository (#263)
 - 2026-11-07 rank_eval.py: BM25-FIC (zone weights from the information content of the query words in each zone, per document, no training; plan item b) as a twelfth ranking, and paired comparisons of the top 3 by company between rankings (#262)
 - 2026-11-07 Decisions recorded: the oracle run places the reader's losses (finding pages about 7 points, mostly capex, employees and revenue; reading and choosing the larger part, worst for market-based Scope 2 and low-carbon capex); empty pages are 2.1% of middle pages (#260)
 - 2026-11-07 Decisions recorded: the learned figure choice beats the hand-weighted rules but stays far below the model reader; the company's other years help revenue (+5 points); type size and weight, conformal acceptance, joint Scope 2 choice and the submodular pack bring no gain and are not adopted (#259)
