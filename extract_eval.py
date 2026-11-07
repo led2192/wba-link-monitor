@@ -755,7 +755,8 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         best_pages = list(reversed(best_pages))
     r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
     if reader == "model":
-        from model_reader import read_years
+        import model_reader
+        read_years = model_reader.read_candidates if model_reader.SELECTOR == "candidates" else model_reader.read_years
         note = {}
         all_got = read_years(dict(g, hint=hint(memory), fy_month=fy_end_month(cur, g["wba"])), attr,
                              [(lid, page, read_text(lid, page, body)) for _, _, lid, page, body in best_pages], usage, note=note)
@@ -763,6 +764,10 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
         r["dropped"] = list(note.get("dropped") or [])      # why the checks dropped entries (7 Nov 2026)
         r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
+        if "candidates" in note:                            # --selector candidates (8 Nov 2026)
+            r["cands"] = len(note["candidates"])
+            r["cand_right"] = next((i for i, v in enumerate(note["candidates"]) if right(v, g["value"])), None)
+            r["choice"] = note.get("choice")
         r["right_other_year"] = next((e["year"] - g["year"] for e in all_got if e is not got and right(e["value"], g["value"])), None)
         if got:
             r["proposal"] = True
@@ -796,6 +801,7 @@ def main():
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
+    ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
     a = ap.parse_args()
     a.memory = a.memory == "on"
@@ -809,6 +815,7 @@ def main():
     import model_reader
     model_reader.UNSTATED_BASIS = a.unstated_basis
     model_reader.PERIOD_CHECK = a.period_check
+    model_reader.SELECTOR = a.selector
     global BM25_POOL
     BM25_POOL = a.bm25_pool
     PAGE_TEXT = a.page_text
@@ -909,6 +916,13 @@ def main():
             outcomes.append([short_hash(g["id"]), short_hash(g["wba"]), g["attribute"], int(bool(r["right"])),
                              int(bool(r["in_docs"])), int(bool(r["in_pages"])), int(bool(r["proposal"]))])
             s["right in_docs"] += bool(r["right"] and r["in_docs"])
+            if "cands" in r:
+                s["sel answers"] += 1
+                s["sel a right candidate"] += r["cand_right"] is not None
+                s["sel right candidate first"] += r["cand_right"] == 0
+                s["sel rescued"] += bool(r["right"] and r.get("choice"))          # chose candidate 2 or 3, and right
+                s["sel chose a wrong one over a right one"] += bool(r["cand_right"] is not None and not r["right"] and r.get("choice") is not None)
+                s["sel chose none over a right one"] += bool(r["cand_right"] is not None and r.get("choice") is None)
             for k in ("docs", "in_docs", "in_pages", "proposal", "right", "scale_miss"):
                 s[k] += bool(r[k])
             s["model_pages"] += bool(r.get("model_pages_have_number"))
@@ -1002,6 +1016,20 @@ def main():
             md.append(f"| {c} {spec['attributes'][c]['name']} | {s['proposal']:,} | {s['other years']:,} | {s['other years'] / (s['proposal'] or 1):.1f} | "
                       f"{s['other years validated']:,} | {s['other years right']:,} ({s['other years right'] / (s['other years validated'] or 1):.0%}) |")
         md.append("")
+        if any(stats[c]["sel answers"] for c in codes):
+            md += ["Extractor and selector (--selector candidates): how often one of the up to 3 candidates is the validated "
+                   "figure (the extractor's recall), how often it came first, how often the selector picked candidate 2 or 3 and "
+                   "was right (rescued), and how often a right candidate was there but the selector chose another or none.", "",
+                   "| Attribute | Answers | A right candidate | Right one first | Right | Rescued | Chose another over the right one | Chose none over the right one |",
+                   "| --- | --: | --: | --: | --: | --: | --: | --: |"]
+            for c in codes:
+                s = stats[c]
+                n = s["sel answers"]
+                if n:
+                    md.append(f"| {c} {spec['attributes'][c]['name']} | {n:,} | {s['sel a right candidate'] / n:.0%} | {s['sel right candidate first'] / n:.0%} | "
+                              f"{s['right'] / (s['answers'] or 1):.0%} | {s['sel rescued']:,} | {s['sel chose a wrong one over a right one']:,} | "
+                              f"{s['sel chose none over a right one']:,} |")
+            md.append("")
         if declined:
             md += ["No figure although its pages print the validated number (first 20, with the model's reason):", ""] + [f"- {d}" for d in declined] + [""]
         if drop_reasons:
@@ -1076,13 +1104,13 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool))
-                                                                              if v not in ("base", "today", "db", "keep", "all", 0)),
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector))
+                                                                              if v not in ("base", "today", "db", "keep", "all", 0, "off")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
                                       "number on the ranked pages": round(s["in_pages"] / n, 4)},

@@ -426,10 +426,126 @@ def read_years(g, attr, pages, usage, sess=None, note=None):
     return got
 
 
+SELECTOR = "off"   # "candidates" (extract_eval --selector candidates, 8 Nov 2026): a generous extractor proposes up to
+                   # CANDIDATES figures for the year asked, with row, column and footnote, and a second call picks one
+                   # of them against the attribute's definition and notes (or none). The attribute's conditions help
+                   # choose between printed figures instead of making the extractor decline (7 Nov 2026: rules in the
+                   # prompt cost market 16 points, rules as a filter 9).
+CANDIDATES = 3
+SELECT_SYSTEM = ("You choose which of several figures found in a company's report is the one an attribute asks for. "
+                 "Answer with one JSON object and nothing else.")
+
+
+def candidates_prompt(g, attr, pages):
+    """The extractor: the attribute's name, definition and labels (no conditions), the pages, and a request for up
+    to CANDIDATES different figures for the year asked, best first, each with its row, column and footnote."""
+    labels = ", ".join(attr.get("labels", [])[:12])
+    y = g["year"]
+    lines = [f"Find: {attr['name']}.",
+             f"Definition: {attr.get('definition', '').strip()}" if attr.get("definition") else "",
+             f"Labels it may appear under: {labels}." if labels else "",
+             f"Reporting year: {y}. A fiscal year ending between January and May of {y + 1} is also reporting year {y}.",
+             fiscal_note(g),
+             g.get("hint") or "",
+             (f"Say in \"basis\" what the page calls each figure: \"{attr['variant']['wanted']}\", \"{attr['variant']['other']}\" "
+              "or \"not stated\".") if attr.get("variant") else "",
+             f"List up to {CANDIDATES} DIFFERENT figures the pages print for reporting year {y} that could be this attribute, "
+             "most likely first: for example a total and a part of it, two bases, two tables that disagree, or the same "
+             "line in two units. Give a figure even when you are unsure it fits; another step decides. Copy each number "
+             "exactly as printed. Never compute.", "", "Pages:"]
+    for i, (_, _, body) in enumerate(pages, 1):
+        lines += [f"<page id=\"P{i}\">", (body or "")[:PAGE_CHARS], "</page>"]
+    lines += adjacent_notes(pages)
+    lines += ["", "Reply with JSON: {\"candidates\": [{\"page\": \"P1\", \"printed\": \"12,345.6\", \"scale\": one of "
+              + ", ".join(f'"{s}"' for s in SCALES) + ", \"unit\": \"EUR\" or \"tCO2e\" etc., "
+              f"\"year\": {y}, \"column\": the column heading as printed, \"period_end\": YYYY-MM when the page says it, "
+              "\"row\": the row or line label as printed, \"note\": the footnote or nearby words that qualify the figure, ten "
+              "words or fewer" + (", \"basis\": as above" if attr.get("variant") else "") + "}, ...]}. "
+              "If the pages print no such figure for that year, reply {\"candidates\": [], \"why\": \"...\"}."]
+    return "\n".join(l for l in lines if l is not None)
+
+
+def select_prompt(g, attr, cands):
+    """The selector: the attribute's definition, notes and conditions, and the checked candidates side by side."""
+    lines = [f"Attribute: {attr['name']}.",
+             f"Definition: {attr.get('definition', '').strip()}" if attr.get("definition") else "",
+             f"Notes: {attr['reading_notes'].strip()}" if attr.get("reading_notes") else "",
+             f"Reporting year: {g['year']}. Whole company or group, not a segment, a region or a target.",
+             (f"The attribute wants the {attr['variant']['wanted']} figure; a figure whose basis the report does not state "
+              f"counts too, one it calls {attr['variant']['other']} does not.") if attr.get("variant") else "",
+             rules_note(g.get("attribute")), md_note(g.get("attribute")),
+             "", "Figures found in the report:"]
+    for i, c in enumerate(cands, 1):
+        lines.append(f"{i}. {c.get('printed_text') or c['printed']} ({c.get('scale_word') or 'units'}, {c.get('unit') or '?'}); "
+                     f"row: {c.get('row') or '?'}; column: {c.get('column') or '?'}; note: {c.get('note') or '-'}"
+                     + (f"; basis: {c.get('basis') or 'not stated'}" if attr.get("variant") else "")
+                     + (f"; line on the page: {c['line'][:200]}" if c.get("line") else ""))
+    lines += ["", "Compare them: which one is the attribute for the reporting year? A total and its part, or two bases, "
+              "are told apart by the definition. Answer null only when none of them is this attribute. "
+              "Reply with JSON: {\"choice\": the number of the figure or null, \"why\": ten words or fewer}"]
+    return "\n".join(l for l in lines if l is not None)
+
+
+def read_candidates(g, attr, pages, usage, sess=None, note=None):
+    """SELECTOR "candidates": the extractor's checked candidates for the year asked, then the selector's choice.
+    [] or [the chosen entry]. note receives "candidates" (their values, in the extractor's order) and "choice"
+    (the index chosen, None)."""
+    if not pages:
+        return []
+    from extract_eval import to_number
+    from value_eval import numbers_on
+    reply = parse_reply(call([{"role": "user", "content": candidates_prompt(g, attr, pages)}], usage, sess))
+    raw = reply.get("candidates") if isinstance(reply, dict) and isinstance(reply.get("candidates"), list) else []
+    dropped = note.setdefault("dropped", []) if note is not None else None
+    cands = []
+    for e in raw[:CANDIDATES]:
+        if not isinstance(e, dict):
+            continue
+        e = dict(e, year=g["year"]) if e.get("year") in (None, "") else e
+        got = check(e, pages, to_number, numbers_on, g.get("fy_month"), dropped,
+                    PERIOD_CHECK == "all" or attr.get("unit_family") == "currency")
+        if got is False:
+            usage["quote_not_on_page"] += 1
+            if dropped is not None:
+                dropped.append("number not on the page named")
+            continue
+        if not got or got["year"] != g["year"] or any(abs(got["value"] - c["value"]) < 1e-9 for c in cands):
+            continue
+        body = next((b for l, p, b in pages if (l, p) == (got["library_id"], got["page"])), "")
+        got.update(row=str(e.get("row") or "")[:80], note=str(e.get("note") or "")[:120], printed_text=str(e.get("printed") or ""),
+                   scale_word=str(e.get("scale") or "units"), line=(line_of(body, got["printed"]) or [""])[0].strip())
+        cands.append(got)
+    usage["candidates"] += len(cands)
+    if note is not None:
+        note["candidates"] = [c["value"] for c in cands]
+        note["choice"] = None
+        if not cands:
+            note["why"] = str((reply or {}).get("why") or "(no candidate)")[:120]
+    if not cands:
+        return []
+    rep = parse_reply(call([{"role": "user", "content": select_prompt(g, attr, cands)}], usage, sess,
+                           system=SELECT_SYSTEM, max_tokens=200))
+    try:
+        k = int((rep or {}).get("choice")) - 1
+    except (TypeError, ValueError):
+        k = -1
+    if not 0 <= k < len(cands):
+        usage["selector chose none"] += 1
+        if note is not None:
+            note["why"] = "(selector: " + str((rep or {}).get("why") or "none")[:100] + ")"
+        return []
+    if note is not None:
+        note["choice"] = k
+    chosen = cands[k]
+    for key in ("row", "note", "printed_text", "scale_word", "line"):
+        chosen.pop(key, None)
+    return variant_filter(attr, [chosen], usage, dropped)
+
+
 def read_with_model(g, attr, pages, usage, sess=None, note=None):
     """The model's proposal for the year asked, checked against the pages, or None; the figures for the other
     years the pages print come with it under "others"."""
-    got = read_years(g, attr, pages, usage, sess, note)
+    got = (read_candidates if SELECTOR == "candidates" else read_years)(g, attr, pages, usage, sess, note)
     mine = next((e for e in got if e["year"] == g["year"]), None)
     if mine is None:
         if got and note is not None and not note.get("why"):
