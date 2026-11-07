@@ -29,7 +29,7 @@ of up to 60 words from different passages (the owner's review: quotes too short,
 documents). Scored as narrative_eval (the analyst's answer), with the share of right yes answers whose quotes
 hold the analyst's evidence. --variants, --max-usd.
 """
-import argparse, collections, json, os, re, sys, time, traceback
+import argparse, math, collections, json, os, re, sys, time, traceback
 
 import qa
 import extract_eval as E
@@ -110,6 +110,47 @@ def pick(pas, scores, k=PACK, per_page=PER_PAGE):
         out.append(i); per[key] += 1
         if len(out) >= k:
             break
+    return out
+
+
+# ----- submodular choice of the pack (7 Nov 2026) -----
+# The pack takes the best-scored passages, at most PER_PAGE from a page; near-duplicates (the same sentence in the
+# letter, the summary and the chapter) can fill it and push out the methodological note. The submodular choice
+# maximises relevance + SUB_LAMBDA * sum over roles of sqrt(passages of that role) - SUB_BETA * overlap with the
+# passages already taken, greedily: the square root makes a second table passage worth less than a first note,
+# and greedy selection of a monotone submodular function is within (1 - 1/e) of the best.
+SUB_LAMBDA, SUB_BETA = 0.3, 0.5
+NOTE = re.compile(r"\b(?:note|methodolog\w*|boundar\w*|scope of|calculat\w*|defin\w*|in accordance|according to|basis of|approach|consolidat\w*|policy|polic\w*|govern\w*|oversight|responsib\w*)\b", re.I)
+FIGURES = re.compile(r"\d[\d,.]{2,}")
+
+
+def role_of(text):
+    """table (four figures or more), note (method, definition, policy or governance wording) or context."""
+    if len(FIGURES.findall(text)) >= 4:
+        return "table"
+    return "note" if NOTE.search(text) else "context"
+
+
+def pick_submodular(pas, scores, k=PACK, per_page=PER_PAGE, lam=SUB_LAMBDA, beta=SUB_BETA):
+    """Greedy maximisation of relevance + role coverage - redundancy (see above). Same page cap as pick."""
+    top = max(scores, default=0) or 1.0
+    rel = [s / top for s in scores]
+    words = [set(R.tokens(p[3])) for p in pas]
+    roles = [role_of(p[3]) for p in pas]
+    jac = lambda i, j: len(words[i] & words[j]) / (len(words[i] | words[j]) or 1)
+    out, per, cov = [], collections.Counter(), collections.Counter()
+    pool = [i for i in range(len(pas)) if scores[i] > 0]
+    while len(out) < k:
+        best, bi = -math.inf, None
+        for i in pool:
+            if i in out or per[(pas[i][0], pas[i][1])] >= per_page:
+                continue
+            gain = rel[i] + lam * (math.sqrt(cov[roles[i]] + 1) - math.sqrt(cov[roles[i]])) - beta * sum(jac(i, j) for j in out)
+            if gain > best:
+                best, bi = gain, i
+        if bi is None:
+            break
+        out.append(bi); per[(pas[bi][0], pas[bi][1])] += 1; cov[roles[bi]] += 1
     return out
 
 
@@ -417,11 +458,26 @@ def main():
         s["candidate passages hold it"] += bool(c["target"])
         s["today"] += c["today_hit"]
         s["pack"] += any(j in c["target"] for j in chosen)
+        if g["kind"] == "narrative":
+            sub = pick_submodular(c["pas"], sc, a.pack, a.per_page)
+            s["submodular"] += any(j in c["target"] for j in sub)
+            s["submodular docs"] += len({c["pas"][j][0] for j in sub})
+            s["submodular roles"] += len({role_of(c["pas"][j][3]) for j in sub})
+            s["pack roles"] += len({role_of(c["pas"][j][3]) for j in chosen})
         s["either"] += c["today_hit"] or any(j in c["target"] for j in chosen)
         s["today words"] += c["today_words"]; s["pack words"] += sum(len(c["pas"][j][3].split()) for j in chosen)
         s["today pages"] += c["today_pages"]; s["pack pages"] += len({c["pas"][j][:2] for j in chosen})
         s["today docs"] += c["today_docs"]; s["pack docs"] += len({c["pas"][j][0] for j in chosen})
     md = report(stats, a)
+    sub = [(c, st) for c, st in stats.items() if st.get("submodular") is not None and st["answers"] and "kind narrative" in st]
+    if sub:
+        md += ["", "#### The pack chosen submodularly (relevance + coverage of table, note and context passages - overlap), same answers", "",
+               "| Attribute | Answers | Evidence in the pack | Evidence in the submodular pack | Documents, pack / submodular | Roles, pack / submodular |",
+               "| --- | --: | --: | --: | --: | --: |"]
+        for c, st in sub:
+            n = st["answers"]
+            md.append(f"| {c} | {n:,} | {st['pack'] / n:.0%} | {st['submodular'] / n:.0%} | {st['pack docs'] / n:.1f} / {st['submodular docs'] / n:.1f} | "
+                      f"{st['pack roles'] / n:.1f} / {st['submodular roles'] / n:.1f} |")
     if a.read:
         md += read_all(cases, a)
     open("pack_eval.md", "w").write("\n".join(md) + "\n")
