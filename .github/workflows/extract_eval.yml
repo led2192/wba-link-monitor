@@ -45,11 +45,9 @@ on:
         type: choice
         options: [base, learned, oracle]
         default: base
-      order:
-        description: "order of the model's pages: today, or reversed (a check of position bias)"
-        type: choice
-        options: [today, reversed]
-        default: today
+      options:
+        description: "more extract_eval options, e.g. --order reversed (position bias) or --unstated-basis keep (Scope 2 with no basis stated filed under market too)"
+        default: ""
   pull_request:
     paths: [extract_eval.py, model_reader.py, decision_rules.json, page_select.py, table_text.py, attributes.json, .github/workflows/extract_eval.yml]
 
@@ -97,7 +95,7 @@ jobs:
             python extract_eval.py --limit 40 --reader model || true
             cat rules.md extract_eval.md > both.md && mv both.md extract_eval.md
           else
-            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }} --text-rank ${{ inputs.text_rank || 'ts' }} --select ${{ inputs.select || 'base' }} --order ${{ inputs.order || 'today' }} --page-text ${{ inputs.page_text || 'db' }} --guidance ${{ inputs.guidance || 'today' }} --budget ${{ inputs.budget || '100' }}"
+            ARGS="--commit --limit ${{ inputs.limit }} --reader ${{ inputs.reader }} --text-rank ${{ inputs.text_rank || 'ts' }} --select ${{ inputs.select || 'base' }} ${{ inputs.options }} --page-text ${{ inputs.page_text || 'db' }} --guidance ${{ inputs.guidance || 'today' }} --budget ${{ inputs.budget || '100' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
             python extract_eval.py $ARGS
           fi

@@ -40,7 +40,7 @@ def fetch(run_id, repo):
 
 
 def describe(o):
-    return ", ".join(f"{k} {o.get(k)}" for k in ("reader", "select", "order", "guidance", "page_text") if o.get(k) is not None)
+    return ", ".join(f"{k} {o.get(k)}" for k in ("reader", "select", "order", "guidance", "page_text", "unstated_basis") if o.get(k) is not None)
 
 
 def report(a, b, name_a="A", name_b="B"):

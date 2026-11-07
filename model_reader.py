@@ -349,6 +349,12 @@ def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
     return ""
 
 
+UNSTATED_BASIS = "default-only"   # "keep" (extract_eval --unstated-basis keep): a Scope 2 figure whose basis the page
+                                  # does not state is kept for the market-based attribute too (7 Nov 2026: 6 of the
+                                  # 22 answers the model reader declined although its pages printed the analyst's
+                                  # figure were market-based answers dropped for "basis not stated")
+
+
 def variant_filter(attr, entries, usage=None, why=None):
     """The entries an attribute with a "variant" (Scope 2 location- or market-based) may keep: the ones the
     page calls by the wanted basis; the ones with no basis stated only when the variant is the default
@@ -367,7 +373,7 @@ def variant_filter(attr, entries, usage=None, why=None):
                 why.append(f"basis {b or '?'}, not {v['wanted']}")
             continue
         if v["wanted"] not in b:                          # not stated, or something else
-            if not v.get("default"):
+            if not v.get("default") and UNSTATED_BASIS != "keep":
                 if usage is not None:
                     usage["dropped_basis_not_stated"] += 1
                 if why is not None:
