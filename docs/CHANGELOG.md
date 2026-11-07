@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-07 Decision recorded: WBA's assessment guidance in the model reader's prompt measured on the same 390 answers and not adopted (Scope 2 market 38% against 51%, low-carbon capex 17% against 25%) (#PRNUM)
 - 2026-11-07 Evidence pack experiment: the narrative pack also chosen submodularly (relevance + coverage of table, note and context passages with a square root, minus word overlap with the passages taken; greedy), reported next to today's pack on the same answers (#256)
 - 2026-11-07 supabase_check.py also reports whether search extensions are available (pg_search from ParadeDB, BM25 with Block-Max WAND; rum; pgroonga; pg_bigm), without requiring or installing any (#255)
 - 2026-11-07 Learned figure choice: conformal prediction (sets with a guaranteed coverage at 2%, 5% and 10%, how many answers have a single value, and selective acceptance), Scope 2 location and market chosen together, and two checks on the measure itself: a control trained on shuffled answers (must stay near chance) and ties counted as wrong (#254)
