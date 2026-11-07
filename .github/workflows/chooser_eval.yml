@@ -1,0 +1,48 @@
+name: Choosing the figure (learned)
+
+# Choosing the figure with a probability model (chooser_eval.py): every figure after one of the attribute's labels on the
+# kept pages is a candidate; a conditional logit learned from the validated answers (by company fold) chooses,
+# next to the rule reader's hand weights. No model. Counts, shares and weights only. Read-only. Manual.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "answers per attribute (0 = all validated answers with a value)"
+        default: "150"
+      attributes:
+        description: "GMC codes, comma-separated (blank = all number attributes)"
+        default: ""
+      budget:
+        description: "minutes for gathering the candidates"
+        default: "200"
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+        run: |
+          ARGS="--limit ${{ inputs.limit }} --budget ${{ inputs.budget }}"; [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
+          python chooser_eval.py $ARGS
+      - name: Keep the result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chooser-eval
+          path: chooser_eval.md
+          if-no-files-found: ignore

@@ -5,3 +5,4 @@ pypdf
 langdetect
 cryptography
 psycopg[binary]
+numpy
