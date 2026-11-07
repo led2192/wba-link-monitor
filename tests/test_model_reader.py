@@ -235,3 +235,32 @@ class AgainstPostgres(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhyDropped(unittest.TestCase):
+    """7 Nov 2026: the reader 'gave no figure' for 71 of 308 answers whose pages printed the analyst's figure,
+    mostly with no reason. The checks now say why they dropped each entry."""
+
+    def test_number_not_on_page_and_missing_page(self):
+        from extract_eval import to_number
+        from value_eval import numbers_on
+        import collections
+        import model_reader as M
+        why, usage = [], collections.Counter()
+        pages = [("d1", 3, "Scope 2 market-based 1,234 tCO2e 2024")]
+        reply = {"values": [{"page": "P1", "printed": "9,999", "year": 2024}, {"page": "P7", "printed": "1,234", "year": 2024}]}
+        self.assertEqual(M.check_all(reply, pages, to_number, numbers_on, usage, None, why), [])
+        self.assertEqual(why, ["number not on the page named", "no page or no number"])
+
+    def test_basis_reasons(self):
+        import model_reader as M
+        attr = {"variant": {"wanted": "market", "other": "location", "default": False}}
+        why = []
+        kept = M.variant_filter(attr, [{"basis": "location"}, {"basis": ""}, {"basis": "market"}], None, why)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(why, ["basis location, not market", "basis not stated"])
+
+    def test_silent_without_a_list(self):
+        import model_reader as M
+        attr = {"variant": {"wanted": "market", "other": "location", "default": False}}
+        self.assertEqual(M.variant_filter(attr, [{"basis": ""}]), [])

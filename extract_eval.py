@@ -710,6 +710,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
                              [(lid, page, read_text(lid, page, body)) for _, _, lid, page, body in best_pages], usage, note=note)
         got = next((e for e in all_got if e["year"] == g["year"]), None)
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
+        r["dropped"] = list(note.get("dropped") or [])      # why the checks dropped entries (7 Nov 2026)
         r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
         r["right_other_year"] = next((e["year"] - g["year"] for e in all_got if e is not got and right(e["value"], g["value"])), None)
         if got:
@@ -806,6 +807,7 @@ def main():
 
     stats = {c: collections.Counter() for c in codes}
     declined = []
+    drop_reasons = collections.defaultdict(collections.Counter)   # answers declined although the pages print the figure, by why
     miss_ranks = collections.defaultdict(list)
     miss_phrases = {c: collections.Counter() for c in codes}
     wrong = collections.defaultdict(list)
@@ -878,6 +880,8 @@ def main():
                     miss_phrases[g["attribute"]].update(r["miss"]["phrases"])
             if r.get("model_pages_have_number") and not r["proposal"]:
                 s["declined with the number on its pages"] += 1
+                for d in sorted(set(r.get("dropped") or [])) or ["the model gave no figure for the year"]:
+                    drop_reasons[g["attribute"]][d] += 1
                 if len(declined) < 20:
                     declined.append(f"{g['id']}: \"{r.get('declined_why') or 'no reason given'}\"")
             if r["proposal"] and not r["right"] and len(wrong[g["attribute"]]) < 12:
@@ -941,6 +945,11 @@ def main():
         md.append("")
         if declined:
             md += ["No figure although its pages print the validated number (first 20, with the model's reason):", ""] + [f"- {d}" for d in declined] + [""]
+        if drop_reasons:
+            md += ["Why: answers with no figure although the pages print the validated number, by the reason our checks dropped "
+                   "the model's entries (an answer can have several; \"the model gave no figure for the year\" when nothing was dropped):", "",
+                   "| Attribute | Reason | Answers |", "| --- | --- | --: |"]
+            md += [f"| {c} | {why} | {n} |" for c in codes for why, n in drop_reasons.get(c, collections.Counter()).most_common()] + [""]
     md += ["Pages that print the validated number but were not kept (answers where the number is in the documents and not on the 25 ranked pages):", "",
            "| Attribute | Missed | No label on the page | Label on the next or previous page | Ranked too low | Their best rank (median) | Words printed before the number where no label matched |",
            "| --- | --: | --: | --: | --: | --: | --- |"]

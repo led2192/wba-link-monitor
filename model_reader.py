@@ -252,7 +252,7 @@ def period_year(period_end):
     return from_end_month(y, mo), mo
 
 
-def check(reply, pages, to_number, numbers_on, fy_month=None):
+def check(reply, pages, to_number, numbers_on, fy_month=None, why=None):
     """{'value', 'printed', 'scale', 'library_id', 'page', 'unit', 'year', 'column'} when the entry names a page
     that prints the number, else None (nothing usable) or False (a number the page does not print).
     to_number and numbers_on are the rule reader's own parsers. The year must be a reporting year the column
@@ -260,16 +260,20 @@ def check(reply, pages, to_number, numbers_on, fy_month=None):
     entry gives the period's end month, the reporting year is taken from it (2 Nov 2026: the model called the
     year ended March 31, 2024 reporting year 2024; it is 2023), and when the company's year end is known
     (fy_month) a period ending in another month is a misread column and the entry is dropped."""
-    if not reply or not reply.get("page") or not reply.get("printed"):
+    def drop(reason):                   # why an entry was not kept (7 Nov 2026: the model "gave no figure" for 71 of 308
+        if why is not None:             # answers whose pages print the analyst's figure; most said nothing)
+            why.append(reason)
         return None
+    if not reply or not reply.get("page") or not reply.get("printed"):
+        return drop("no page or no number")
     m = re.fullmatch(r"P(\d+)", str(reply["page"]).strip())
     if not m or not 1 <= int(m.group(1)) <= len(pages):
-        return None
+        return drop("no page or no number")
     lid, page, body = pages[int(m.group(1)) - 1]
     try:
         printed = printed_number(reply["printed"], body, to_number)
     except (TypeError, ValueError):
-        return None
+        return drop("number not readable")
     if not any(abs(v - printed) < 1e-9 for v in numbers_on(body or "")):
         return False                    # named a number the page does not print
     scale = SCALES.get(str(reply.get("scale") or "units").strip().lower(), 1)
@@ -281,29 +285,31 @@ def check(reply, pages, to_number, numbers_on, fy_month=None):
     cy = column_year(column)
     py, pm = period_year(reply.get("period_end"))
     if pm and fy_month and abs(pm - int(fy_month)) > 1 and abs(pm - int(fy_month)) < 11:
-        return None                     # a period ending in another month than the company's year end: a misread column
+        return drop("period ends in another month than the company's year")   # a misread column
     if py is not None and (not cy or py in (cy, cy - 1)):
         year = py                       # the period end says which reporting year the column is
     if year is not None and (not FIRST_YEAR <= year <= LAST_YEAR + 1 or (cy and year not in (cy, cy - 1))):
-        return None                     # a year the heading does not allow: the model mixed its columns
+        return drop("year not allowed by the column heading")   # the model mixed its columns
     if year is not None and cy and fy_month and int(fy_month) > 6 and year != cy:
-        return None                     # a July-to-December year end: a column of 2025 is 2025, never 2024 (2 Nov 2026:
+        return drop("year differs from the column (July-December year end)")   # a column of 2025 is 2025, never 2024 (2 Nov 2026:
                                         # CVS Health's 2025 verification opinion, "January 1 to December 31, 2025", read as 2024)
     return {"value": printed * scale, "printed": printed, "scale": scale, "library_id": lid, "page": page,
             "unit": reply.get("unit") or "", "column": column, "year": year,
             "basis": str(reply.get("basis") or "").strip().lower()[:20]}
 
 
-def check_all(reply, pages, to_number, numbers_on, usage, fy_month=None):
+def check_all(reply, pages, to_number, numbers_on, usage, fy_month=None, why=None):
     """Every usable entry of a reply, one per year (the first wins), in the reply's order. Accepts the old
     single-object shape too."""
     entries = reply.get("values") if isinstance(reply, dict) and isinstance(reply.get("values"), list) else \
         ([reply] if isinstance(reply, dict) and reply.get("page") else [])
     out, seen = [], set()
     for e in entries:
-        got = check(e if isinstance(e, dict) else None, pages, to_number, numbers_on, fy_month)
+        got = check(e if isinstance(e, dict) else None, pages, to_number, numbers_on, fy_month, why)
         if got is False:
             usage["quote_not_on_page"] += 1
+            if why is not None:
+                why.append("number not on the page named")
             continue
         if not got or got["year"] in seen:
             continue
@@ -343,7 +349,7 @@ def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
     return ""
 
 
-def variant_filter(attr, entries, usage=None):
+def variant_filter(attr, entries, usage=None, why=None):
     """The entries an attribute with a "variant" (Scope 2 location- or market-based) may keep: the ones the
     page calls by the wanted basis; the ones with no basis stated only when the variant is the default
     (location-based), marked basis_note; never the other basis. A report that gives one Scope 2 figure
@@ -357,11 +363,15 @@ def variant_filter(attr, entries, usage=None):
         if v["other"] in b:
             if usage is not None:
                 usage["dropped_other_basis"] += 1
+            if why is not None:
+                why.append(f"basis {b or '?'}, not {v['wanted']}")
             continue
         if v["wanted"] not in b:                          # not stated, or something else
             if not v.get("default"):
                 if usage is not None:
                     usage["dropped_basis_not_stated"] += 1
+                if why is not None:
+                    why.append("basis not stated")
                 continue
             e["basis_note"] = (f"The report gives one Scope 2 figure without saying location- or market-based; "
                                f"it is filed under {v['wanted']}.")
@@ -385,7 +395,8 @@ def read_years(g, attr, pages, usage, sess=None, note=None):
             note["why"] = "(no JSON in the reply)" if text else "(empty reply)"
         elif entries == [] or (entries is None and not reply.get("page")):
             note["why"] = str(reply.get("why") or "")[:120]
-    got = check_all(reply, pages, to_number, numbers_on, usage, g.get("fy_month"))
+    dropped = note.setdefault("dropped", []) if note is not None else None
+    got = check_all(reply, pages, to_number, numbers_on, usage, g.get("fy_month"), dropped)
     if RULES:
         kept = [e for e in got if rule_ok(g.get("attribute"), e, pages)]
         usage["dropped by the learned rules"] += len(got) - len(kept)
@@ -394,7 +405,7 @@ def read_years(g, attr, pages, usage, sess=None, note=None):
         if e["year"] is None:           # the old single-object shape, or a missing year: the year asked
             e["year"] = g["year"]
     got.sort(key=lambda e: e["year"] != g["year"])
-    got = variant_filter(attr, got, usage)
+    got = variant_filter(attr, got, usage, dropped)
     usage["years_returned"] += len(got)
     return got
 
