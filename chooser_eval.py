@@ -214,6 +214,21 @@ def softmax_by_case(s, cand_case, k):
 MIN_SUPPORT = 5                # a feature seen in fewer answers is left out (no company-specific words)
 
 
+def shuffled(cases, seed=7):
+    """The control: each training answer's right flag moved to a random candidate of the same answer. A model
+    fitted on it must score near chance on the real answers; if it does not, a feature carries the answer
+    itself (a leak) and the measure is wrong."""
+    import random
+    rnd = random.Random(seed)
+    out = []
+    for c in cases:
+        if not c["cands"]:
+            continue
+        k = rnd.randrange(len(c["cands"]))
+        out.append(dict(c, cands=[(f, v, r, i == k) for i, (f, v, r, _p) in enumerate(c["cands"])]))
+    return out
+
+
 def fit(cases, l2=0.01, steps=300, lr=0.5, keep=None):
     """Conditional logit weights fitted on cases with at least one right candidate (Adam, L2). keep: a test
     on feature names (None = all)."""
@@ -237,12 +252,117 @@ def choose(w, vocab, case):
     """Index of the most probable candidate of a case, or None."""
     if not case["cands"]:
         return None
-    best, bi = -math.inf, None
-    for i, (f, *_rest) in enumerate(case["cands"]):
-        s = sum(w[j] * v for j, v in vocab.ids(f, False))
+    best, bi = (-math.inf, False), None
+    for i, (f, _v, _r, pos) in enumerate(case["cands"]):
+        s = (sum(w[j] * v for j, v in vocab.ids(f, False)), not pos)     # on a tie, the wrong candidate wins
         if s > best:
             best, bi = s, i
     return bi
+
+
+def value_probs(w, vocab, case):
+    """{value key: (probability, right)}: the softmax over the case's candidates, summed over candidates that
+    print the same value (the same figure on several pages is one answer)."""
+    if not case["cands"]:
+        return {}
+    sc = [sum(w[j] * v for j, v in vocab.ids(f, False)) for f, *_ in case["cands"]]
+    m = max(sc)
+    e = [math.exp(x - m) for x in sc]
+    z = sum(e)
+    out = {}
+    for (f, val, rule, pos), p in zip(case["cands"], e):
+        k = vkey(val)
+        q, r = out.get(k, (0.0, False))
+        out[k] = (q + p / z, r or bool(pos))
+    return out
+
+
+def vkey(v):
+    """A value rounded to 4 significant digits: the key that merges the same figure printed twice."""
+    return float(f"{v:.4g}") if v else 0.0
+
+
+# ----- conformal prediction (7 Nov 2026) -----
+# Split conformal prediction over the learned probabilities: the nonconformity of an answer is 1 - p(the
+# analyst's value). With q the ceil((n+1)(1-alpha))/n quantile of the scores of the other folds, the set
+# {values: 1 - p <= q} holds the analyst's value with probability at least 1 - alpha, for answers whose value
+# is among the candidates (finite-sample, distribution-free). A set of one value can be written without a
+# person; a larger set is a question for a person or a targeted model call. Selective acceptance: the
+# smallest probability threshold whose accepted answers in the other folds are right at least 1 - alpha.
+
+def top_of(vp):
+    """(probability, right) of the most probable value; on a tie the wrong one is taken, so a tie never flatters
+    the measure."""
+    return max(vp.values(), key=lambda x: (x[0], not x[1]))
+
+
+def conformal_q(scores, alpha):
+    if not scores:
+        return None
+    n = len(scores)
+    k = min(n, math.ceil((n + 1) * (1 - alpha)))
+    return sorted(scores)[k - 1]
+
+
+def selective_threshold(pairs, alpha, min_n=20):
+    """pairs: [(top probability, right)]. The lowest threshold t whose answers with p >= t are right at least
+    1 - alpha of the time (at least min_n of them), or None."""
+    best = None
+    for t in sorted({round(p, 3) for p, _ in pairs}, reverse=True):
+        acc = [r for p, r in pairs if p >= t]
+        if len(acc) >= min_n and sum(acc) / len(acc) >= 1 - alpha:
+            best = t
+    return best
+
+
+def conformal_report(code, cs, alphas=(0.02, 0.05, 0.10)):
+    """Report lines for one attribute from the out-of-fold value probabilities in c["vp"]."""
+    out = []
+    for alpha in alphas:
+        covered = singles = singles_right = sizes = n = 0
+        acc_n = acc_right = 0
+        for f in range(R.FOLDS):
+            calib = [c for c in cs if c["fold"] != f and c.get("vp")]
+            test = [c for c in cs if c["fold"] == f and c.get("vp") is not None]
+            scores = [1 - max((p for p, r in c["vp"].values() if r), default=0.0) for c in calib if any(r for _, r in c["vp"].values())]
+            q = conformal_q(scores, alpha)
+            t = selective_threshold([top_of(c["vp"]) for c in calib if c["vp"]], alpha)
+            for c in test:
+                n += 1
+                if not c["vp"] or q is None:
+                    continue
+                cset = [(p, r) for p, r in c["vp"].values() if 1 - p <= q]
+                sizes += len(cset)
+                covered += any(r for _, r in cset)
+                if len(cset) == 1:
+                    singles += 1; singles_right += cset[0][1]
+                top_p, top_r = top_of(c["vp"])
+                if t is not None and top_p >= t:
+                    acc_n += 1; acc_right += top_r
+        if n:
+            out.append(f"| {code} | {alpha:.0%} | {covered / n:.0%} | {sizes / n:.1f} | {singles / n:.0%} | "
+                       f"{(singles_right / singles) if singles else 0:.0%} | {acc_n / n:.0%} | {(acc_right / acc_n) if acc_n else 0:.0%} |")
+    return out
+
+
+# ----- joint choice of Scope 2 location and market (7 Nov 2026) -----
+PAIR = ("GMC_00002.1", "GMC_00003.1")
+
+
+def joint_choice(vl, vm):
+    """(location value, market value) maximising log p_l + log p_m with two different values; each a key of the
+    value_probs dicts. None when either side has no candidate."""
+    if not vl or not vm:
+        return None
+    best, pick = -math.inf, None
+    for a, (pa, _) in vl.items():
+        for b, (pb, _) in vm.items():
+            if a == b:
+                continue
+            s = math.log(pa + 1e-12) + math.log(pb + 1e-12)
+            if s > best:
+                best, pick = s, (a, b)
+    return pick
 
 
 def gather(cur, g, attr, spec, known=None, fancy=False):
@@ -328,7 +448,7 @@ def main():
                     print(f">>> stopped: the database failed {fails} times in a row ({type(e).__name__})", flush=True)
                     break
                 continue
-            cases[g["attribute"]].append({"wba": g["wba"], "fold": R.fold_of(g["wba"]), "cands": cands or []})
+            cases[g["attribute"]].append({"wba": g["wba"], "year": g["year"], "fold": R.fold_of(g["wba"]), "cands": cands or []})
 
     md = ["### Choosing the figure with a probability model learned from the analysts' answers", "",
           f"{sum(len(v) for v in cases.values()):,} validated answers" + ("; stopped at the time budget" if cut else "")
@@ -336,9 +456,11 @@ def main():
             "Rules: the hand-weighted choice of extract_eval.candidates on the same candidates. Learned: a conditional logit fitted on "
             "the other four company folds. With the company's other years: the same plus the size of the figure against the company's "
             "validated figures for other years, a row that prints one of them, and a change from last year that agrees or not with the "
-            "words around it. Ceiling: a candidate equals the analyst's value. No model; counts and shares only.", "",
-          "| Attribute | Answers | With candidates | Ceiling | Rules | Learned | + the company's other years | + type size and weight | Answers with another validated year | Candidates per answer |",
-          "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: |"]
+            "words around it. Ceiling: a candidate equals the analyst's value. Control: the same model trained on answers whose right "
+            "candidate was moved at random; it must stay near chance, or a feature leaks the answer. Ties count as wrong. "
+            "No language model, so a rerun gives the same numbers. Counts and shares only.", "",
+          "| Attribute | Answers | With candidates | Ceiling | Rules | Learned | + the company's other years | + type size and weight | Answers with another validated year | Candidates per answer | Control: trained on shuffled answers | Chance |",
+          "| --- | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: | --: |"]
     weights_md = []
     for code in codes:
         cs = cases.get(code, [])
@@ -350,7 +472,7 @@ def main():
         for c in cs:
             pick = max(range(len(c["cands"])), key=lambda i: c["cands"][i][2], default=None) if c["cands"] else None
             rules_right += bool(pick is not None and c["cands"][pick][2] > -math.inf and c["cands"][pick][3])
-        learned_right, memory_right, fancy_right = 0, 0, 0
+        learned_right, memory_right, fancy_right, control_right, chance = 0, 0, 0, 0, 0.0
         with_memory = sum(1 for c in cs if any("memory: known" in f for f, *_ in c["cands"]))
         no_memory = lambda k: not k.startswith(("memory:", "fancy:"))
         no_fancy = lambda k: not k.startswith("fancy:")
@@ -361,24 +483,55 @@ def main():
                 continue
             w, vocab = fit(train, a.l2, a.steps, keep=no_memory)
             wm, vm = fit(train, a.l2, a.steps, keep=no_fancy)
+            wc, vc = fit(shuffled(train), a.l2, a.steps, keep=no_fancy)
             wf, vf = fit(train, a.l2, a.steps) if a.fancy else (None, None)
             for c in test:
                 i = choose(w, vocab, c)
                 learned_right += bool(i is not None and c["cands"][i][3])
                 i = choose(wm, vm, c)
                 memory_right += bool(i is not None and c["cands"][i][3])
+                i = choose(wc, vc, c)
+                control_right += bool(i is not None and c["cands"][i][3])
+                chance += (sum(1 for *_, p in c["cands"] if p) / len(c["cands"])) if c["cands"] else 0.0
                 if a.fancy:
                     i = choose(wf, vf, c)
                     fancy_right += bool(i is not None and c["cands"][i][3])
+                c["vp"] = value_probs(wf, vf, c) if a.fancy else value_probs(wm, vm, c)   # the fullest model, out of fold
         per = sum(len(c["cands"]) for c in cs) / max(withc, 1)
         name = spec["attributes"][code].get("name", "")
-        md.append(f"| {code} {name} | {n:,} | {withc / n:.0%} | {ceil / n:.0%} | {rules_right / n:.0%} | **{learned_right / n:.0%}** | **{memory_right / n:.0%}** | {f"**{fancy_right / n:.0%}**" if a.fancy else "-"} | {with_memory / n:.0%} | {per:.0f} |")
+        md.append(f"| {code} {name} | {n:,} | {withc / n:.0%} | {ceil / n:.0%} | {rules_right / n:.0%} | **{learned_right / n:.0%}** | **{memory_right / n:.0%}** | {f"**{fancy_right / n:.0%}**" if a.fancy else "-"} | {with_memory / n:.0%} | {per:.0f} | {control_right / n:.0%} | {chance / n:.0%} |")
         w, vocab = fit(cs, a.l2, a.steps)
         inv = {i: k for k, i in vocab.ix.items()}
         top = sorted(range(len(w)), key=lambda i: -w[i])[:8]
         bottom = sorted(range(len(w)), key=lambda i: w[i])[:8]
         weights_md.append(f"- {code}: up " + ", ".join(f"{inv[i]} ({w[i]:+.1f})" for i in top)
                           + "; down " + ", ".join(f"{inv[i]} ({w[i]:+.1f})" for i in bottom) + ".")
+    conf = [l for code in codes for l in conformal_report(code, cases.get(code, []))]
+    if conf:
+        md += ["", "#### How many answers could be written without a person (conformal prediction on the fullest learned model)", "",
+               "Out-of-fold probabilities, the same figure on several pages merged. Set: the values whose nonconformity (1 - p) is within the "
+               "conformal quantile of the other folds, so the set holds the analyst's value at least 1 - alpha of the time when the value is "
+               "among the candidates. Coverage is over all answers (an answer whose value is not among the candidates is never covered). "
+               "Accepted: answers whose top probability passes the threshold that kept the other folds' accepted answers right 1 - alpha of the time.", "",
+               "| Attribute | alpha | Coverage | Set size | One value | One value right | Accepted | Accepted right |",
+               "| --- | --: | --: | --: | --: | --: | --: | --: |"] + conf
+    loc, mkt = ({(c["wba"], c["year"]): c for c in cases.get(k, []) if c.get("vp") is not None} for k in PAIR)
+    both = [k for k in loc if k in mkt]
+    if both:
+        ind = jnt = 0
+        for k in both:
+            vl, vm = loc[k]["vp"], mkt[k]["vp"]
+            il = max(vl.items(), key=lambda x: (x[1][0], not x[1][1]))[0] if vl else None
+            im = max(vm.items(), key=lambda x: (x[1][0], not x[1][1]))[0] if vm else None
+            ind += bool(il is not None and vl[il][1]) + bool(im is not None and vm[im][1])
+            pick = joint_choice(vl, vm)
+            if pick:
+                jnt += bool(vl[pick[0]][1]) + bool(vm[pick[1]][1])
+            else:
+                jnt += bool(il is not None and vl[il][1]) + bool(im is not None and vm[im][1])
+        md += ["", f"Scope 2 location and market chosen together ({len(both)} company years with both answers): right "
+               f"{ind / (2 * len(both)):.0%} chosen apart, {jnt / (2 * len(both)):.0%} chosen together (the most probable pair of two "
+               "different values)."]
     if a.fancy:
         md += ["", f"Type size and weight: {FANCY_STATS['read']:,} of {FANCY_STATS['pages']:,} kept pages read from their PDF "
                "(heading: type 1.2 times the page's body size or more; bold: the font's bold flag; top: the top 15% of the page)."]
