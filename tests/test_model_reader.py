@@ -264,3 +264,18 @@ class WhyDropped(unittest.TestCase):
         import model_reader as M
         attr = {"variant": {"wanted": "market", "other": "location", "default": False}}
         self.assertEqual(M.variant_filter(attr, [{"basis": ""}]), [])
+
+
+class UnstatedBasis(unittest.TestCase):
+    def tearDown(self):
+        import model_reader as M
+        M.UNSTATED_BASIS = "default-only"
+
+    def test_market_keeps_an_unstated_figure_only_when_asked(self):
+        import model_reader as M
+        attr = {"variant": {"wanted": "market", "other": "location", "default": False}}
+        self.assertEqual(M.variant_filter(attr, [{"basis": ""}]), [])
+        M.UNSTATED_BASIS = "keep"
+        kept = M.variant_filter(attr, [{"basis": ""}, {"basis": "location"}])
+        self.assertEqual(len(kept), 1)
+        self.assertIn("basis_note", kept[0])                 # still says the page names no basis

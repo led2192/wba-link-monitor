@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-07 `extract_eval --unstated-basis keep`: a Scope 2 figure whose basis the page does not state is also kept for the market-based attribute (an option to measure: 6 of 22 answers declined with the figure on the pages were market answers dropped for "basis not stated"); the Generic reader workflow's `order` input becomes `options`, free extract_eval options (#264)
 - 2026-11-07 Why the reader gives no figure: the model reader's checks record why they drop each entry (number not on the page named, year not allowed by the column, period ending in another month, basis not stated or the other basis), and extract_eval reports, for answers with no figure although the pages print the validated number, how many were dropped for each reason (#261)
 - 2026-11-07 Decision recorded: Docling on the oracle pages, no gain (+0.8 points, chance); `compare_runs.md`, `empty_pages.md` and `visual_eval.md` are run outputs, kept out of the repository (#263)
 - 2026-11-07 rank_eval.py: BM25-FIC (zone weights from the information content of the query words in each zone, per document, no training; plan item b) as a twelfth ranking, and paired comparisons of the top 3 by company between rankings (#262)
