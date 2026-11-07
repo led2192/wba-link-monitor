@@ -471,7 +471,8 @@ def main():
         rules_right = 0
         for c in cs:
             pick = max(range(len(c["cands"])), key=lambda i: c["cands"][i][2], default=None) if c["cands"] else None
-            rules_right += bool(pick is not None and c["cands"][pick][2] > -math.inf and c["cands"][pick][3])
+            c["ok"] = {"rules": bool(pick is not None and c["cands"][pick][2] > -math.inf and c["cands"][pick][3])}
+            rules_right += c["ok"]["rules"]
         learned_right, memory_right, fancy_right, control_right, chance = 0, 0, 0, 0, 0.0
         with_memory = sum(1 for c in cs if any("memory: known" in f for f, *_ in c["cands"]))
         no_memory = lambda k: not k.startswith(("memory:", "fancy:"))
@@ -487,15 +488,19 @@ def main():
             wf, vf = fit(train, a.l2, a.steps) if a.fancy else (None, None)
             for c in test:
                 i = choose(w, vocab, c)
-                learned_right += bool(i is not None and c["cands"][i][3])
+                c["ok"]["learned"] = bool(i is not None and c["cands"][i][3])
+                learned_right += c["ok"]["learned"]
                 i = choose(wm, vm, c)
-                memory_right += bool(i is not None and c["cands"][i][3])
+                c["ok"]["memory"] = bool(i is not None and c["cands"][i][3])
+                memory_right += c["ok"]["memory"]
                 i = choose(wc, vc, c)
-                control_right += bool(i is not None and c["cands"][i][3])
+                c["ok"]["control"] = bool(i is not None and c["cands"][i][3])
+                control_right += c["ok"]["control"]
                 chance += (sum(1 for *_, p in c["cands"] if p) / len(c["cands"])) if c["cands"] else 0.0
                 if a.fancy:
                     i = choose(wf, vf, c)
-                    fancy_right += bool(i is not None and c["cands"][i][3])
+                    c["ok"]["fancy"] = bool(i is not None and c["cands"][i][3])
+                    fancy_right += c["ok"]["fancy"]
                 c["vp"] = value_probs(wf, vf, c) if a.fancy else value_probs(wm, vm, c)   # the fullest model, out of fold
         per = sum(len(c["cands"]) for c in cs) / max(withc, 1)
         name = spec["attributes"][code].get("name", "")
@@ -506,6 +511,21 @@ def main():
         bottom = sorted(range(len(w)), key=lambda i: w[i])[:8]
         weights_md.append(f"- {code}: up " + ", ".join(f"{inv[i]} ({w[i]:+.1f})" for i in top)
                           + "; down " + ", ".join(f"{inv[i]} ({w[i]:+.1f})" for i in bottom) + ".")
+    import paired_stats as P
+    pairs = [("rules", "learned", "Learned against Rules"), ("learned", "memory", "+ other years against Learned"),
+             ("rules", "control", "Shuffled-label control against Rules")]
+    if a.fancy:
+        pairs.insert(2, ("memory", "fancy", "+ type size and weight against + other years"))
+    prows = []
+    for code in codes:
+        cs = [c for c in cases.get(code, []) if "learned" in c.get("ok", {})]
+        for x, y, label in pairs:
+            if cs and all(x in c["ok"] and y in c["ok"] for c in cs):
+                prows.append(P.row(f"{code}: {label}", [(c["wba"], c["ok"][x], c["ok"][y]) for c in cs]))
+    if prows:
+        md += ["", "#### Paired comparisons on the same answers (paired_stats.py)", "",
+               "Fixed and broken: answers the second option gets right and the first wrong, and the reverse. The interval resamples "
+               "companies, not answers. \"Not distinguishable from chance\" means this sample cannot tell the two apart.", ""] + P.HEADER + prows
     conf = [l for code in codes for l in conformal_report(code, cases.get(code, []))]
     if conf:
         md += ["", "#### How many answers could be written without a person (conformal prediction on the fullest learned model)", "",
@@ -519,19 +539,19 @@ def main():
     both = [k for k in loc if k in mkt]
     if both:
         ind = jnt = 0
+        jrows = []
         for k in both:
             vl, vm = loc[k]["vp"], mkt[k]["vp"]
             il = max(vl.items(), key=lambda x: (x[1][0], not x[1][1]))[0] if vl else None
             im = max(vm.items(), key=lambda x: (x[1][0], not x[1][1]))[0] if vm else None
-            ind += bool(il is not None and vl[il][1]) + bool(im is not None and vm[im][1])
+            apart = (bool(il is not None and vl[il][1]), bool(im is not None and vm[im][1]))
             pick = joint_choice(vl, vm)
-            if pick:
-                jnt += bool(vl[pick[0]][1]) + bool(vm[pick[1]][1])
-            else:
-                jnt += bool(il is not None and vl[il][1]) + bool(im is not None and vm[im][1])
+            together = (bool(vl[pick[0]][1]), bool(vm[pick[1]][1])) if pick else apart
+            ind += sum(apart); jnt += sum(together)
+            jrows += [(k[0], apart[0], together[0]), (k[0], apart[1], together[1])]
         md += ["", f"Scope 2 location and market chosen together ({len(both)} company years with both answers): right "
                f"{ind / (2 * len(both)):.0%} chosen apart, {jnt / (2 * len(both)):.0%} chosen together (the most probable pair of two "
-               "different values)."]
+               "different values).", ""] + P.HEADER + [P.row("Scope 2: together against apart", jrows)]
     if a.fancy:
         md += ["", f"Type size and weight: {FANCY_STATS['read']:,} of {FANCY_STATS['pages']:,} kept pages read from their PDF "
                "(heading: type 1.2 times the page's body size or more; bold: the font's bold flag; top: the top 15% of the page)."]
