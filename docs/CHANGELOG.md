@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-07 Model reader option `--guidance md`: WBA's own assessment guidance and prompt per attribute (copied for revenue, Scope 1, Scope 2 location and market, and low-carbon capex into the private Pipeline QA table attribute_guidance, read at run time, never logged) in the prompt. The report now also counts answers wrong for the year asked whose figure for another year the model read equals the analyst's (the guidance says capex is collected for the year after the reporting year) (#PR)
 - 2026-11-06 Decisions recorded: the learned choice rules as a check only (market-based Scope 2 9 points worse) and Docling tables (below today on five of six attributes, 7.6 s a page) were measured and not adopted (#249)
 - 2026-11-06 `--guidance check`: the learned choice rules only drop a figure printed on an avoided line, with today's prompt. The rules in the prompt (`learned`, runs 42232831358 and 42232836705, same 390 answers) made the reader decline market-based Scope 2 (proposals 68% to 52%, right 58% to 42%) and do not qualify (#248)
 - 2026-11-06 Generic reader workflow: Docling needs torchvision with torch (its layout model failed to load on every page: "Could not import module AutoImageProcessor") (#247)

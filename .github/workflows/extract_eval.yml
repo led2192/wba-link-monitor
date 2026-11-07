@@ -30,7 +30,7 @@ on:
       guidance:
         description: "today, or learned: the analysts' choice rules (decision_rules.json) in the prompt and as a check"
         type: choice
-        options: [today, learned, check]
+        options: [today, learned, check, md]
         default: today
       budget:
         description: "minutes for reading answers (the job stops at 180)"

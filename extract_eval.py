@@ -690,6 +690,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         got = next((e for e in all_got if e["year"] == g["year"]), None)
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
         r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
+        r["right_other_year"] = next((e["year"] - g["year"] for e in all_got if e is not got and right(e["value"], g["value"])), None)
         if got:
             r["proposal"] = True
             r["right"] = right(got["value"], g["value"])
@@ -716,7 +717,7 @@ def main():
     ap.add_argument("--memory", default="on", choices=["on", "off"], help="use the company's right answer for another year (company_memory.py)")
     ap.add_argument("--text-rank", default="ts", choices=["ts", "bm25"], help="the text score of page ranking: ts_rank_cd or BM25 (page_ranker.py)")
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
-    ap.add_argument("--guidance", default="today", choices=["today", "learned", "check"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt")
+    ap.add_argument("--guidance", default="today", choices=["today", "learned", "check", "md"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt; md: WBA's own assessment guidance per attribute (Pipeline QA attribute_guidance) in the prompt")
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
     ap.add_argument("--select", default="base", choices=["base", "learned"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py)")
     a = ap.parse_args()
@@ -727,6 +728,16 @@ def main():
     global SELECT, SELECT_MODEL, EMBEDDER, PAGE_TEXT
     SELECT = a.select
     PAGE_TEXT = a.page_text
+    if a.guidance == "md":
+        import model_reader
+        from narrative_eval import read_base
+        rows = read_base(os.environ.get("AIRTABLE_QA_TOKEN", "").strip(), os.environ.get("AIRTABLE_QA_BASE", "appJQ2mRtjHjzLq9E").strip(),
+                         "attribute_guidance", ["gmc", "guidance", "md_prompt"])
+        model_reader.MD_GUIDANCE = {r["fields"].get("gmc"): r["fields"] for r in rows if r["fields"].get("gmc")}
+        print(f">>> WBA guidance read for {len(model_reader.MD_GUIDANCE)} attributes", flush=True)
+        if not model_reader.MD_GUIDANCE:
+            open("extract_eval.md", "w").write("### Extraction: --guidance md found no rows in Pipeline QA attribute_guidance; nothing run.\n")
+            return 1
     if a.guidance in ("learned", "check"):
         import model_reader
         model_reader.RULES_IN_PROMPT = a.guidance == "learned"
@@ -815,6 +826,8 @@ def main():
             s["index cited"] += bool(r.get("index_cited")); s["index hit"] += bool(r.get("index_hit"))
             s["sibling answers"] += bool(r.get("sibling_pages")); s["sibling hit"] += bool(r.get("sibling_hit")); s["sibling kept"] += bool(r.get("sibling_kept"))
             s["neighbour pages"] += r.get("neighbour_pages", 0); s["neighbour hit"] += bool(r.get("neighbour_hit")); s["neighbour kept"] += bool(r.get("neighbour_kept"))
+            if not r["right"] and r.get("right_other_year") is not None:
+                s[f"right for the year {r['right_other_year']:+d}"] += 1
             if r.get("fy_shift"):
                 s["fy shift"] += 1; s["fy shift right"] += bool(r["right"]); s["fy shift proposal"] += bool(r["proposal"])
             if r.get("memory"):
@@ -850,7 +863,8 @@ def main():
     if PAGE_TEXT != "db":
         title += f", pages re-read with their tables by {PAGE_TEXT}"
     if a.guidance != "today":
-        title += ", with the choice rules learned from the analysts" + (" (as a check only)" if a.guidance == "check" else "")
+        title += (", with WBA's assessment guidance" if a.guidance == "md" else
+                  ", with the choice rules learned from the analysts" + (" (as a check only)" if a.guidance == "check" else ""))
     md = [f"### The {title} against the validated answers" + ("" if a.commit else " (dry run, sample)"), "",
           f"{sum(s['answers'] for s in stats.values()):,} answers with a value" + (f" ({limit} per attribute)" if limit else "")
           + ("; stopped at the time budget" if cut else "") + (f"; STOPPED: {db_stop}" if db_stop else "") + ". Shares of those answers; the reader never sees the answer.", "",
@@ -872,6 +886,11 @@ def main():
                f"The model's pages hold the validated number for {sum(s['model_pages'] for s in stats.values()):,} answers; "
                f"it gave no figure for {sum(s['declined with the number on its pages'] for s in stats.values()):,} of them."
                + (f" Figures dropped by the learned rules (on a line with an avoided word): {usage['dropped by the learned rules']:,}." if a.guidance != "today" else ""), ""]
+        other = {c: {k: v for k, v in st.items() if k.startswith("right for the year ")} for c, st in stats.items()}
+        if any(other.values()):
+            md += ["Wrong for the year asked but the model's figure for another year it read equals the analyst's: "
+                   + "; ".join(f"{c} " + ", ".join(f"{k[len('right for the year '):]}: {v}" for k, v in sorted(o.items()))
+                               for c, o in other.items() if o) + ".", ""]
         if PAGE_TEXT != "db":
             import table_text
             st = table_text.STATS

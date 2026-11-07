@@ -118,3 +118,6 @@ Labels so far: 8,247 Source Library labels (7,383 sure), 69 corrections, 15 dail
 
 ## Snapshot: first picture, 22 Oct 2026
 Dry run over 36,525 pages, 275,969 documents and 2,000 companies: 36,233 distinct open failures. TYPE_DISAGREE 12,163 (29,298 high-stakes disagreements in total, 17,135 of them on pre-2023 documents, counted only), TYPE_MISSING 4,705 (30,605 untyped non-English rows in total), PAGE_UNREACHABLE 4,105, CO_GAP 3,821, DOC_FETCH_FAIL 3,706, PAGE_EMPTY 3,093, DOC_UNREADABLE 1,496, PAGE_GONE 1,351, DOC_DUPLICATE 1,090, PAGE_BLOCKED 299 domains, DOC_WRONG_ROW 225, PAGE_UNHARVESTED 179. 266,726 rows awaited a robot_* snapshot.
+
+## attribute_guidance (7 Nov 2026)
+Table `attribute_guidance` (tblzKjcxDZfgw6qNl) in Pipeline QA holds WBA's own assessment guidance per attribute: gmc, md_id, question, guidance, md_prompt, units, year_rule, source. The first five rows (revenue, Scope 1, Scope 2 location and market, low-carbon capex) were copied on 7 Nov 2026 from the MD Guidance table of the LLM Assessment - ACT Test base, without its links to internal channels. `extract_eval --guidance md` reads it at run time. It is methodology, so it lives here and never in the repository, its logs or its artifacts.
