@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-07 Four more number attributes in the evaluation, chosen from the gold inventory (validated answers for about 1,760 companies each): total capital expenditure (GMC_00063.1), Scope 3 emissions (GMC_00005.1), Scope 1 + 2 emissions (GMC_00124.1), total R&D spending (GMC_00047.1). Marked "measuring": propose_values.py proposes them only when named (#270)
 - 2026-11-07 `gold_inventory.py` and its workflow (Gold inventory): which attributes have validated answers in the gold bases and of what kind, to take the experiments beyond the 11 pilot attributes (#269)
 - 2026-11-07 Scope 2 with no basis stated now goes under market-based too, by default (owner's decision after +11.6 points on 181 market answers); the earlier rule stays as `--unstated-basis default-only`. Applies to the model reader in extract_eval and propose_values (#268)
 - 2026-11-07 Decisions recorded: run-to-run noise, reversed page order, the visual check, BM25-FIC, the BM25 pool, the period check on money only, and the unstated Scope 2 basis for market (+11.6 points on 181 answers, waiting for the owner's decision) (#267)

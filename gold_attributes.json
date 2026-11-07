@@ -129,6 +129,42 @@
         "Climate mitigation",
         "Transition Plan"
       ]
+    },
+    "GMC_00063.1": {
+      "name": "Capital expenditure (total)",
+      "type": "number",
+      "queries": [
+        "capital expenditure",
+        "capex",
+        "purchase of property, plant and equipment"
+      ]
+    },
+    "GMC_00005.1": {
+      "name": "Scope 3 emissions",
+      "type": "number",
+      "queries": [
+        "scope 3 emissions",
+        "total scope 3",
+        "other indirect emissions"
+      ]
+    },
+    "GMC_00124.1": {
+      "name": "Scope 1 + Scope 2 emissions",
+      "type": "number",
+      "queries": [
+        "scope 1 and 2 emissions",
+        "scope 1+2",
+        "scopes 1 and 2"
+      ]
+    },
+    "GMC_00047.1": {
+      "name": "R&D spending (total)",
+      "type": "number",
+      "queries": [
+        "research and development",
+        "r&d expenses",
+        "r&d spending"
+      ]
     }
   },
   "_about_narrative": "Entries with a question are read by narrative_eval.py: the model answers the question on the company's best pages for the queries, scored against the analysts' validated answers (No Evidence = no)."

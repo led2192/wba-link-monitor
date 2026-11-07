@@ -1,5 +1,5 @@
 {
-  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes). The \"index\" of an attribute (GRI and ESRS disclosure codes, and the words its index rows use) lets the retrieval read the report's own content index for the page the figure is on (content_index.py, 31 Oct 2026). A \"variant\" (Scope 2) names the basis the attribute wants (location-based or market-based) and whether a figure the report gives without naming a basis is filed under it (default): one such figure goes under location-based only, never under both (31 Oct 2026). reading_notes: what the model reader is told about what counts and what to prefer, when the definition alone is not enough (31 Oct 2026). more_terms: wording searched in a second, separate query with its own short time limit, and counted as labels on the page; kept out of `labels` because a long phrase list timed out the main search (31 Oct 2026).",
+  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes). The \"index\" of an attribute (GRI and ESRS disclosure codes, and the words its index rows use) lets the retrieval read the report's own content index for the page the figure is on (content_index.py, 31 Oct 2026). A \"variant\" (Scope 2) names the basis the attribute wants (location-based or market-based) and whether a figure the report gives without naming a basis is filed under it (default): one such figure goes under location-based only, never under both (31 Oct 2026). status \"measuring\": added to the evaluation, proposed by propose_values.py only when named (7 Nov 2026). reading_notes: what the model reader is told about what counts and what to prefer, when the definition alone is not enough (31 Oct 2026). more_terms: wording searched in a second, separate query with its own short time limit, and counted as labels on the page; kept out of `labels` because a long phrase list timed out the main search (31 Oct 2026).",
   "unit_families": {
     "currency": {
       "scales": {
@@ -506,6 +506,221 @@
         "ifrs-full:NumberOfEmployees"
       ],
       "reading_notes": "When the report gives several figures (end of year, average, FTE, headcount, permanent only, by region), take the highest figure for the whole group, and prefer a printed total that includes contractors and temporary employees when there is one ('total workforce including contractors'). Give a number the page prints, never a sum you make. A figure for one country or one business is not the group's total."
+    },
+    "GMC_00063.1": {
+      "name": "Capital expenditure (total)",
+      "definition": "Total capital expenditure (CapEx) for the reporting year, in the company's currency.",
+      "status": "measuring",
+      "memory": true,
+      "reading_notes": "The company's total capital expenditure for the year: purchases of property, plant and equipment and intangible assets, as in the cash flow statement or the segment note, or the denominator of the EU Taxonomy CapEx KPI. Not a single segment, not a multi-year plan or guidance, not the taxonomy-aligned part.",
+      "type": "number",
+      "unit_family": "currency",
+      "labels": [
+        "capital expenditure",
+        "capital expenditures",
+        "capex",
+        "total capex",
+        "total capital expenditure",
+        "purchase of property, plant and equipment",
+        "purchases of property, plant and equipment",
+        "acquisition of property, plant and equipment",
+        "additions to property, plant and equipment",
+        "investments in property, plant and equipment",
+        "capital investment",
+        "investimentos",
+        "inversiones de capital",
+        "investissements"
+      ],
+      "exclude": [
+        "aligned",
+        "eligible",
+        "guidance",
+        "outlook",
+        "target",
+        "plan ",
+        "budget"
+      ],
+      "index": {
+        "codes": [],
+        "terms": [
+          "capital expenditure",
+          "cash flow",
+          "investing activities",
+          "taxonomy"
+        ]
+      },
+      "doc_types": [
+        "Annual Report",
+        "Integrated Report",
+        "Statutory Documents",
+        "Interim Reports",
+        "Sustainability Report"
+      ],
+      "period": "fiscal_year",
+      "scope": "group",
+      "siblings": [
+        "GMC_00064.1",
+        "GMC_00048.1"
+      ]
+    },
+    "GMC_00005.1": {
+      "name": "Scope 3 emissions",
+      "definition": "Total scope 3 emissions in tCO2(e) for the reporting year.",
+      "status": "measuring",
+      "reading_notes": "Total scope 3 (value chain, indirect) emissions for the whole company in tCO2e: the sum over the categories the company reports. Not one category, not scope 1, 2 or 3 together.",
+      "type": "number",
+      "unit_family": "tco2e",
+      "labels": [
+        "total scope 3 emissions",
+        "scope 3 emissions",
+        "scope 3 ghg emissions",
+        "scope 3",
+        "other indirect emissions",
+        "other indirect ghg emissions",
+        "value chain emissions",
+        "scope-3",
+        "范围三",
+        "スコープ3"
+      ],
+      "exclude": [
+        "intensity",
+        "per ",
+        "target",
+        "reduction",
+        "% ",
+        "category 1 ",
+        "scope 1, 2 and 3",
+        "scopes 1, 2 and 3",
+        "scope 1+2+3"
+      ],
+      "index": {
+        "codes": [
+          "305-3",
+          "E1-6"
+        ],
+        "terms": [
+          "scope 3",
+          "other indirect",
+          "value chain emissions"
+        ]
+      },
+      "doc_types": [
+        "Sustainability Report",
+        "ESG Report",
+        "CDP Report",
+        "Climate Report",
+        "Integrated Report",
+        "Annual Report"
+      ],
+      "period": "fiscal_year",
+      "scope": "group",
+      "siblings": [
+        "GMC_00001.1",
+        "GMC_00002.1"
+      ]
+    },
+    "GMC_00124.1": {
+      "name": "Scope 1 + Scope 2 emissions",
+      "definition": "Total scope 1 and scope 2 emissions together in tCO2(e) for the reporting year.",
+      "status": "measuring",
+      "reading_notes": "Scope 1 and scope 2 emissions added together, for the whole company, in tCO2e, as the report prints the total. Not scope 1 alone, not including scope 3.",
+      "type": "number",
+      "unit_family": "tco2e",
+      "labels": [
+        "scope 1 and 2 emissions",
+        "scope 1 and 2",
+        "scope 1+2",
+        "scope 1 + 2",
+        "scopes 1 and 2",
+        "scope 1 & 2",
+        "total scope 1 and 2",
+        "scope 1 and scope 2",
+        "combined scope 1 and 2",
+        "operational emissions"
+      ],
+      "exclude": [
+        "intensity",
+        "per ",
+        "target",
+        "reduction",
+        "% ",
+        "scope 3",
+        "scope 1, 2 and 3"
+      ],
+      "index": {
+        "codes": [
+          "305-1",
+          "305-2",
+          "E1-6"
+        ],
+        "terms": [
+          "scope 1 and 2",
+          "scope 1+2",
+          "scopes 1 and 2"
+        ]
+      },
+      "doc_types": [
+        "Sustainability Report",
+        "ESG Report",
+        "CDP Report",
+        "Climate Report",
+        "Integrated Report",
+        "Annual Report"
+      ],
+      "period": "fiscal_year",
+      "scope": "group",
+      "siblings": [
+        "GMC_00001.1",
+        "GMC_00002.1"
+      ]
+    },
+    "GMC_00047.1": {
+      "name": "R&D spending (total)",
+      "definition": "Total research and development spending for the reporting year, in the company's currency.",
+      "status": "measuring",
+      "memory": true,
+      "reading_notes": "The company's total research and development expense or spending for the year, as in the income statement or the notes. Not R&D as a percentage of revenue, not a single programme, not capitalised development costs alone when a total is printed.",
+      "type": "number",
+      "unit_family": "currency",
+      "labels": [
+        "research and development",
+        "research and development expenses",
+        "research and development costs",
+        "r&d expenses",
+        "r&d expenditure",
+        "r&d spending",
+        "r&d costs",
+        "r&d",
+        "research & development",
+        "i+d",
+        "recherche et développement",
+        "pesquisa e desenvolvimento"
+      ],
+      "exclude": [
+        "% of",
+        "as a percentage",
+        "intensity",
+        "ratio",
+        "tax credit"
+      ],
+      "index": {
+        "codes": [],
+        "terms": [
+          "research and development",
+          "r&d"
+        ]
+      },
+      "doc_types": [
+        "Annual Report",
+        "Integrated Report",
+        "Statutory Documents",
+        "Interim Reports"
+      ],
+      "period": "fiscal_year",
+      "scope": "group",
+      "siblings": [
+        "GMC_00048.1"
+      ]
     }
   },
   "_about_siblings": "siblings: attributes whose figure is printed on the same page or next to it (2 Nov 2026, 331 company-years: Scope 1 and Scope 2 on the same page 89 to 93% of the time, revenue and low-carbon capex 46%, within two pages 70%). The sibling's best page is found first and the attribute's pages there and next to it score higher (extract_eval.sibling_pages)."

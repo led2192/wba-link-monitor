@@ -340,3 +340,16 @@ class FiscalMonths(unittest.TestCase):
         self.assertEqual(P.parse_months("3,6"), {3, 6})
         self.assertEqual(P.parse_months(""), set())
         self.assertEqual(P.parse_months("0-14"), set(range(1, 13)))
+
+
+class MeasuringAttributes(unittest.TestCase):
+    """7 Nov 2026: attributes added to the evaluation are proposed only when named."""
+
+    def test_measuring_attributes_wait_until_named(self):
+        import json, os
+        import propose_values as PV
+        spec = json.load(open(os.path.join(os.path.dirname(__file__), "..", "attributes.json")))["attributes"]
+        codes = PV.default_codes(spec)
+        self.assertIn("GMC_00048.1", codes)
+        self.assertNotIn("GMC_00063.1", codes)
+        self.assertEqual(PV.default_codes(spec, "GMC_00063.1"), ["GMC_00063.1"])
