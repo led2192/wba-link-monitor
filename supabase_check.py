@@ -21,6 +21,9 @@ from urllib.parse import urlsplit, unquote
 import requests
 
 NEEDED_EXTENSIONS = ("vector", "pg_trgm", "btree_gin")
+# Reported, never required: full-text engines that would make BM25 page search faster (7 Nov 2026: ParadeDB's
+# pg_search is BM25 with Block-Max WAND inside Postgres; rum keeps positions in the index for ranked search).
+OPTIONAL_EXTENSIONS = ("pg_search", "rum", "pgroonga", "pg_bigm")
 
 
 def check_db_url(url):
@@ -109,7 +112,7 @@ def db_facts(url):
             cur.execute(f"SHOW {name}")
             out[name] = cur.fetchone()[0]
         cur.execute("SELECT name, installed_version FROM pg_available_extensions WHERE name = ANY(%s)",
-                    (list(NEEDED_EXTENSIONS),))
+                    (list(NEEDED_EXTENSIONS + OPTIONAL_EXTENSIONS),))
         out["extensions"] = {n: v for n, v in cur.fetchall()}
         cur.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")
         out["public_tables"] = cur.fetchone()[0]
@@ -157,6 +160,9 @@ def main():
                 else:
                     v = f["extensions"][ext]
                     ok.append(f"Extension {ext} " + (f"installed ({v})" if v else "available (installed by the schema PR)"))
+            info.append("Search extensions (optional): " + ", ".join(
+                f"{ext} " + (("installed " + f["extensions"][ext]) if f["extensions"][ext] else "available") if ext in f["extensions"] else f"{ext} not available"
+                for ext in OPTIONAL_EXTENSIONS))
         except Exception as e:
             msg = str(e).replace(db.strip(), "<SUPABASE_DB_URL>")
             if "password authentication failed" in msg:

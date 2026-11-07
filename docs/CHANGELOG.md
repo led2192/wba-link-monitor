@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-07 supabase_check.py also reports whether search extensions are available (pg_search from ParadeDB, BM25 with Block-Max WAND; rum; pgroonga; pg_bigm), without requiring or installing any (#PR)
 - 2026-11-07 Learned figure choice: conformal prediction (sets with a guaranteed coverage at 2%, 5% and 10%, how many answers have a single value, and selective acceptance), Scope 2 location and market chosen together, and two checks on the measure itself: a control trained on shuffled answers (must stay near chance) and ties counted as wrong (#254)
 - 2026-11-07 Learned figure choice: type size and weight as signals (`--fancy`, workflow input fancy; after Google's "fancy hits"): each kept page is read from its PDF with PyMuPDF, and a candidate gets whether its label is in a heading (type 1.2 times the body size or more), in bold or near the top of the page, and whether its figure is in bold or large type. The report adds the choice with these signals (#253)
 - 2026-11-07 Learned figure choice: signals from the company's own validated figures for other years (the owner's idea): the candidate's size against them, a row that prints one of them, and a change from last year that agrees or not with the words around it (increased, fell). The report shows the learned choice without and with these signals (#252)
