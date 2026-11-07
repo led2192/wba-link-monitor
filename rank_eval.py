@@ -5,7 +5,7 @@ rank_eval.py: would a better page ranking find the page the analyst cited more o
 An offline experiment (proposals 1 and 2 of the information retrieval review, 4 Nov 2026). It takes the
 same validated answers as gold_eval.py (a quote, a source, the cited document in the library, its text in
 the evidence database, and the quote found in that text, so the cited page is known in our numbering) and
-ranks every page of the cited document eleven ways:
+ranks every page of the cited document twelve ways:
   ts best-of     today's ts_rank_cd, best rank over the attribute's alternative queries (what gold_eval.py
                  reports; generous, as it picks the luckiest query after the fact);
   ts single      ts_rank_cd of one query holding all the alternatives (one list, as a reader would get);
@@ -15,12 +15,14 @@ ranks every page of the cited document eleven ways:
   bm25 fused     several queries put high comes first): one list, with no hindsight about which query fits;
   zones single,  BM25F: a query word in a table row or a heading counts more than in running text (weights in
   zones fused    ZONE_WEIGHTS, by attribute kind), as one query and fused over the alternatives;
+  zones fic      BM25F with zone weights from information content (BM25-FIC, 7 Nov 2026): a zone weighs more
+                 when the query words are rare in it across the document, no training;
   expanded       BM25 with words added to the query that mark the cited page in other companies' reports
   single, fused  (learned per attribute on the other folds' cited pages, weight 0.3), as one query and fused;
   learned        a logistic regression over page features (both scores, word coverage, phrase hits, labels at a
                  line start, number density, the year, position in the document), trained on the cited pages
                  of the other companies (five folds split by company, so no company scores its own pages).
-It reports top 1, top 3, top 10 and mean reciprocal rank per attribute and method. No model calls, no
+It reports top 1, top 3, top 10 and mean reciprocal rank per attribute and method, and paired comparisons of the top 3 (paired_stats.py, by company). No model calls, no
 writes to the library or the evidence database. Changes nothing in production: if a method wins, a later
 pull request moves it into the readers.
 
@@ -40,7 +42,7 @@ NEGATIVES = 20                  # training pages per answer that are not cited: 
 EPOCHS, RATE, L2 = 200, 0.5, 1e-3
 RRF_K = 60                      # reciprocal rank fusion constant, the usual default
 METHODS = ["ts best-of", "ts single", "ts fused", "bm25 single", "bm25 best-of", "bm25 fused", "zones single",
-           "zones fused", "expanded single", "expanded fused", "learned"]
+           "zones fused", "zones fic", "expanded single", "expanded fused", "learned"]
 # Query expansion (proposal 4): words that mark the cited page within its document, learned per attribute from
 # the other companies' cited pages (same folds as the learned ranker), added to the query at a lower weight.
 EXPAND_TERMS, EXPAND_WEIGHT, EXPAND_SUPPORT = 10, 0.3, 3
@@ -162,6 +164,31 @@ def zone_scores(pages, attr, queries, idfs, avg_len):
         for i, q in enumerate(queries):
             per[i][p] = bm25f(ztf, length, avg_len, query_terms(q), idfs, w)
     return single, per
+
+
+def fic_weights(ztfs, terms, zones=("table", "heading", "prose")):
+    """BM25-FIC zone weights for one document, with no training (7 Nov 2026, plan item b): a zone counts more
+    when the query words are rare in it across the document's pages, i.e. when meeting a query word there says
+    more. Information content of word t in zone z: -log((pages whose zone z holds t + 0.5) / (pages with a zone
+    z + 1)); the zone's weight is its mean over the query words the document holds anywhere, scaled so that
+    running text weighs 1. A zone no page has keeps weight 1."""
+    n = {z: sum(1 for tf in ztfs if tf[z]) for z in zones}
+    present = [t for t in terms if any(tf[z].get(t) for tf in ztfs for z in zones)]
+    ic = {}
+    for z in zones:
+        if not n[z] or not present:
+            ic[z] = None; continue
+        ic[z] = sum(-math.log((sum(1 for tf in ztfs if tf[z].get(t)) + 0.5) / (n[z] + 1)) for t in present) / len(present)
+    base = ic.get("prose") or next((v for v in ic.values() if v), None)
+    return {z: (ic[z] / base if ic[z] and base else 1.0) for z in zones}
+
+
+def fic_scores(pages, queries, idfs, avg_len):
+    """{page: BM25F of all the query words, with this document's FIC zone weights}."""
+    terms = list(dict.fromkeys(t for q in queries for t in query_terms(q)))
+    ztfs = {p: zone_tf(body) for p, body in pages.items()}
+    w = fic_weights(list(ztfs.values()), terms)
+    return {p: bm25f(ztfs[p], len(set(tokens(body))), avg_len, terms, idfs, w) for p, body in pages.items()}
 
 
 def marking_terms(pages, target):
@@ -457,7 +484,8 @@ def main():
                               "bm25 best-of": best_of(per_bm, target),
                               "bm25 fused": G.rank_of(target, order(fuse(per_bm))),
                               "zones single": G.rank_of(target, order(zs)),
-                              "zones fused": G.rank_of(target, order(fuse(per_zs)))}})
+                              "zones fused": G.rank_of(target, order(fuse(per_zs))),
+                              "zones fic": G.rank_of(target, order(fic_scores(pages, queries, idfs, avg_len)))}})
         # query expansion, per fold so no company's own cited page shapes its query
         expanded_by = {}
         for f in range(FOLDS):
@@ -517,6 +545,16 @@ def main():
         name = "All attributes" if c == "all" else f"{c} {cfg['attributes'][c]['name']}"
         cells = [f"{m['top 1']:.0%} / {m['top 3']:.0%} / {m['top 10']:.0%}, {m['mrr']:.2f}" for m in (table[c][k] for k in METHODS)]
         md.append(f"| {name} | {n:,} | " + " | ".join(cells) + " |")
+    import paired_stats as P                       # paired, by company: is a method's top 3 really better (7 Nov 2026)
+    top3 = lambda r: r is not None and r <= 3
+    pairs = [("zones fic", "zones single"), ("zones fic", "bm25 single"), ("zones single", "bm25 single"),
+             ("bm25 single", "ts single"), ("learned", "bm25 single")]
+    md += ["", "#### Paired comparisons of the top 3, on the same answers (B against A)", ""] + P.HEADER
+    for b_m, a_m in pairs:
+        for c in codes + ["all"]:
+            cs = [x for x in cases if (c == "all" or x["attribute"] == c) and a_m in x["ranks"] and b_m in x["ranks"]]
+            if cs:
+                md.append(P.row(f"{'All' if c == 'all' else c}: {b_m} against {a_m}", [(x["wba"], top3(x["ranks"][a_m]), top3(x["ranks"][b_m])) for x in cs]))
     md += ["", "Words added to each attribute's query (learned from all usable answers' cited pages; each run "
            "scores a company with words learned from the other companies only):", ""]
     md += [f"- {c} {cfg['attributes'][c]['name']}: {', '.join(everyone.get(c, [])) or 'none'}" for c in codes if everyone.get(c)]
