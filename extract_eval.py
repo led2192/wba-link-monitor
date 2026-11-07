@@ -802,6 +802,7 @@ def main():
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
+    ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
     ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
     a = ap.parse_args()
     a.memory = a.memory == "on"
@@ -864,6 +865,10 @@ def main():
     answers = [g for base in gold_cfg["bases"].values() for g in gold_values(token, base, codes)
                if g["value"] and not g["unit"].lower().startswith(("%", "percent"))]
     gold_index = {(g["wba"], g["attribute"], g["year"]): g["value"] for g in answers}
+    if a.keys:                                   # only these answers, e.g. another pilot's company-attribute-years
+        want = {tuple(k.split("|")) for k in a.keys.split(",") if k.count("|") == 2}
+        answers = [g for g in answers if (g["wba"], g["attribute"], str(g["year"])) in want]
+        print(f">>> --keys: {len(want):,} asked, {len(answers):,} with a validated answer", flush=True)
     by = collections.defaultdict(list)
     for g in answers:
         by[g["attribute"]].append(g)
