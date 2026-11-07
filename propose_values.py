@@ -340,7 +340,9 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         c["model reader: no ANTHROPIC_API_KEY"] += 1
         return []
-    codes = [x for x in (a.attributes.split(",") if a.attributes else [k for k, v in spec.items() if v.get("type") == "number"]) if x in spec]
+    # an attribute marked "status": "measuring" in attributes.json (added 7 Nov 2026, not yet measured on the
+    # validated answers) is proposed only when named in --attributes
+    codes = default_codes(spec, a.attributes)
     years = parse_years(a.model_years)
     wanted = [x.strip() for x in a.companies.split(",") if x.strip()]
     companies = wanted or [r["fields"]["wba_id"] for r in comps if r["fields"].get("wba_id")]
@@ -530,6 +532,12 @@ def other_reports(chosen, versions, docs):
         label = docs.get(e["library_id"], {}).get("label") or e["library_id"]
         lines.append(f"{label}, page {e.get('page')}: {e['value']:,.6g}" + (" (same)" if abs(diff) <= 0.005 else f" ({diff:+.1%})"))
     return {"other_reports": "\n".join(lines) or None, "restated": restated}
+
+
+def default_codes(spec, named=""):
+    """The attributes to propose: the ones named, else every number attribute not marked "measuring"."""
+    return [x for x in (named.split(",") if named else
+                        [k for k, v in spec.items() if v.get("type") == "number" and v.get("status") != "measuring"]) if x in spec]
 
 
 def main():
