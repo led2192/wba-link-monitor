@@ -307,3 +307,54 @@ class PeriodCheck(unittest.TestCase):
         self.assertEqual(why, ["period ends in another month than the company's year"])
         kept = M.check_all(reply, pages, to_number, numbers_on, collections.Counter(), 3, None, False)
         self.assertEqual([e["value"] for e in kept], [1234])
+
+
+class ExtractorSelector(unittest.TestCase):
+    """--selector candidates (8 Nov 2026): up to 3 checked candidates, then a second call chooses one."""
+
+    def setUp(self):
+        import model_reader as M
+        self.M, self.saved = M, M.call
+        self.replies = []
+
+        def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
+            self.prompts.append((system, messages[0]["content"]))
+            return self.replies.pop(0)
+        self.prompts = []
+        M.call = call
+
+    def tearDown(self):
+        self.M.call = self.saved
+
+    pages = [("d1", 7, "Capital expenditure\nTotal capex 1,200 980\nof which taxonomy-aligned capex 300 210\nFY2024 FY2023")]
+    attr = {"name": "Low-carbon capex", "definition": "Capex for climate solutions.", "reading_notes": "Prefer the taxonomy-aligned amount.",
+            "labels": ["aligned capex"], "unit_family": "currency"}
+    g = {"year": 2024, "attribute": "GMC_00064.1"}
+
+    def test_the_selector_rescues_the_second_candidate(self):
+        import collections
+        self.replies = ['{"candidates": [{"page": "P1", "printed": "1,200", "scale": "millions", "year": 2024, "column": "FY2024", "row": "Total capex"},'
+                        ' {"page": "P1", "printed": "300", "scale": "millions", "year": 2024, "column": "FY2024", "row": "of which taxonomy-aligned capex"},'
+                        ' {"page": "P1", "printed": "9,999", "scale": "millions", "year": 2024, "column": "FY2024", "row": "made up"}]}',
+                        '{"choice": 2, "why": "the aligned part"}']
+        note = {}
+        got = self.M.read_candidates(self.g, self.attr, self.pages, collections.Counter(), note=note)
+        self.assertEqual([e["value"] for e in got], [300e6])
+        self.assertEqual(note["candidates"], [1200e6, 300e6])     # the made-up number is not on the page: dropped
+        self.assertEqual(note["choice"], 1)
+        extractor, selector = self.prompts
+        self.assertNotIn("Prefer the taxonomy-aligned", extractor[1])   # conditions go to the selector only
+        self.assertIn("Prefer the taxonomy-aligned", selector[1])
+        self.assertIn("2. 300", selector[1])
+
+    def test_none_chosen_and_no_candidates(self):
+        import collections
+        self.replies = ['{"candidates": [{"page": "P1", "printed": "1,200", "scale": "millions", "year": 2024, "column": "FY2024"}]}',
+                        '{"choice": null, "why": "total, not aligned"}']
+        note = {}
+        self.assertEqual(self.M.read_candidates(self.g, self.attr, self.pages, collections.Counter(), note=note), [])
+        self.assertIsNone(note["choice"]); self.assertIn("selector", note["why"])
+        self.replies = ['{"candidates": [], "why": "not printed"}']
+        note = {}
+        self.assertEqual(self.M.read_candidates(self.g, self.attr, self.pages, collections.Counter(), note=note), [])
+        self.assertEqual(len(self.prompts), 3)                      # no selector call without candidates
