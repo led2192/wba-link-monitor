@@ -178,7 +178,7 @@ class ModelReader(unittest.TestCase):
         self.assertEqual([e["year"] for e in got["others"]], [2023, 2022])
         self.assertIsNone(M.parse_reply('{"values": [{"page": "P1", "printed": "1'))
 
-    def test_one_scope_2_figure_goes_under_one_attribute(self):
+    def test_one_scope_2_figure_without_basis_goes_under_both_attributes(self):
         # 30 Oct 2026: "Scope 2 GHG emissions: 646,000" with no basis was proposed as location- and market-based; the
         # reviewer rejected the duplicate
         loc, mkt = SPEC["attributes"]["GMC_00002.1"], SPEC["attributes"]["GMC_00003.1"]
@@ -187,8 +187,15 @@ class ModelReader(unittest.TestCase):
         reply = '{"values": [{"page": "P1", "printed": "646,000", "scale": "units", "unit": "tCO2e", "year": 2024, "column": "2024", "basis": "not stated"}]}'
         got = M.read_with_model(g, loc, page, X.collections.Counter(), Sess((200, reply)))
         self.assertEqual(got["value"], 646000.0); self.assertIn("filed under location-based", got["basis_note"])
+        # 7 Nov 2026 (owner's decision): the analysts' market-based answers are often such a figure, so by default
+        # it goes under market-based too, saying the page names no basis; the earlier rule stays as an option
+        got = M.read_with_model(g, mkt, page, X.collections.Counter(), Sess((200, reply)))
+        self.assertEqual(got["value"], 646000.0); self.assertIn("filed under market-based", got["basis_note"])
+        self.addCleanup(setattr, M, "UNSTATED_BASIS", M.UNSTATED_BASIS)
+        M.UNSTATED_BASIS = "default-only"
         u = X.collections.Counter()
         self.assertIsNone(M.read_with_model(g, mkt, page, u, Sess((200, reply)))); self.assertEqual(u["dropped_basis_not_stated"], 1)
+        M.UNSTATED_BASIS = "keep"
         reply = reply.replace("not stated", "market-based")
         self.assertIsNone(M.read_with_model(g, loc, page, X.collections.Counter(), Sess((200, reply))))     # the other basis
         self.assertEqual(M.read_with_model(g, mkt, page, X.collections.Counter(), Sess((200, reply)))["value"], 646000.0)
@@ -254,6 +261,8 @@ class WhyDropped(unittest.TestCase):
 
     def test_basis_reasons(self):
         import model_reader as M
+        self.addCleanup(setattr, M, "UNSTATED_BASIS", M.UNSTATED_BASIS)
+        M.UNSTATED_BASIS = "default-only"
         attr = {"variant": {"wanted": "market", "other": "location", "default": False}}
         why = []
         kept = M.variant_filter(attr, [{"basis": "location"}, {"basis": ""}, {"basis": "market"}], None, why)
@@ -262,6 +271,8 @@ class WhyDropped(unittest.TestCase):
 
     def test_silent_without_a_list(self):
         import model_reader as M
+        self.addCleanup(setattr, M, "UNSTATED_BASIS", M.UNSTATED_BASIS)
+        M.UNSTATED_BASIS = "default-only"
         attr = {"variant": {"wanted": "market", "other": "location", "default": False}}
         self.assertEqual(M.variant_filter(attr, [{"basis": ""}]), [])
 
@@ -269,11 +280,13 @@ class WhyDropped(unittest.TestCase):
 class UnstatedBasis(unittest.TestCase):
     def tearDown(self):
         import model_reader as M
-        M.UNSTATED_BASIS = "default-only"
+        M.UNSTATED_BASIS = "keep"
 
-    def test_market_keeps_an_unstated_figure_only_when_asked(self):
+    def test_market_keeps_an_unstated_figure_by_default(self):
         import model_reader as M
+        self.assertEqual(M.UNSTATED_BASIS, "keep")              # the owner's decision, 7 Nov 2026
         attr = {"variant": {"wanted": "market", "other": "location", "default": False}}
+        M.UNSTATED_BASIS = "default-only"
         self.assertEqual(M.variant_filter(attr, [{"basis": ""}]), [])
         M.UNSTATED_BASIS = "keep"
         kept = M.variant_filter(attr, [{"basis": ""}, {"basis": "location"}])

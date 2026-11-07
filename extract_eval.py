@@ -795,7 +795,7 @@ def main():
     ap.add_argument("--select", default="base", choices=["base", "learned", "oracle"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
-    ap.add_argument("--unstated-basis", default="default-only", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under location-based only (today) or under market-based too")
+    ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
     a = ap.parse_args()
     a.memory = a.memory == "on"
@@ -1082,7 +1082,7 @@ def main():
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
             run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool))
-                                                                              if v not in ("base", "today", "db", "default-only", "all", 0)),
+                                                                              if v not in ("base", "today", "db", "keep", "all", 0)),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
                                       "number on the ranked pages": round(s["in_pages"] / n, 4)},
