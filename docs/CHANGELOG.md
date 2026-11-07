@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-07 `gold_inventory.py` and its workflow (Gold inventory): which attributes have validated answers in the gold bases and of what kind, to take the experiments beyond the 11 pilot attributes (#269)
 - 2026-11-07 Scope 2 with no basis stated now goes under market-based too, by default (owner's decision after +11.6 points on 181 market answers); the earlier rule stays as `--unstated-basis default-only`. Applies to the model reader in extract_eval and propose_values (#268)
 - 2026-11-07 Decisions recorded: run-to-run noise, reversed page order, the visual check, BM25-FIC, the BM25 pool, the period check on money only, and the unstated Scope 2 basis for market (+11.6 points on 181 answers, waiting for the owner's decision) (#267)
 - 2026-11-07 `extract_eval --bm25-pool N`: the N best pages of the year's documents by BM25 over any label word join the generic reader's ranking pool (they are added, the label pool is kept), an option to measure where the oracle run says finding pages costs most (capex, employees, revenue) (#266)
