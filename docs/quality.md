@@ -121,3 +121,12 @@ Dry run over 36,525 pages, 275,969 documents and 2,000 companies: 36,233 distinc
 
 ## attribute_guidance (7 Nov 2026)
 Table `attribute_guidance` (tblzKjcxDZfgw6qNl) in Pipeline QA holds WBA's own assessment guidance per attribute: gmc, md_id, question, guidance, md_prompt, units, year_rule, source. The first five rows (revenue, Scope 1, Scope 2 location and market, low-carbon capex) were copied on 7 Nov 2026 from the MD Guidance table of the LLM Assessment - ACT Test base, without its links to internal channels. `extract_eval --guidance md` reads it at run time. It is methodology, so it lives here and never in the repository, its logs or its artifacts.
+
+## Checks on the measure itself (7 Nov 2026)
+A gain is only real if the way it is measured cannot produce it. Every experiment of the readers keeps to these:
+- Same answers in both arms. Two reader runs cut by a time budget at different points do not compare; give the budget to read the whole queue, or compare only the answers both read.
+- No answer in its own training. Anything learned from the validated answers (page choice, pack words, choice weights) is fitted on four company folds (rank_eval.fold_of) and scored on the fifth. Words seen in fewer than 5 answers are left out, so no company's own words carry over.
+- A control that must fail. `chooser_eval.py` also trains on answers whose right candidate was moved at random; that model must score near chance on the real answers. If it does not, a feature leaks the answer.
+- Ties never flatter. Where two candidates have the same score, the wrong one is counted.
+- The noise floor. A language-model reader varies by about 3 points per attribute between two runs of the same 65 answers; the rule of 3 points is measured against that, and a model run is repeated when a result is close. Measures without a model (chooser_eval, select_eval, pack_eval without --read) give the same numbers on a rerun.
+- Conformal sets in `chooser_eval.py` are cross-conformal: the scores of the other folds calibrate the threshold, and those scores come from models that saw the test fold in training, so the stated coverage is close to, not exactly, the guarantee of split conformal prediction. A production calibration uses a held-out set.

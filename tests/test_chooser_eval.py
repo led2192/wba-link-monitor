@@ -104,5 +104,43 @@ class Fancy(unittest.TestCase):
         self.assertEqual(C.fancy_features(None, "x", "1"), {})
         self.assertIsNone(C.page_style("/no/such.pdf", 1))
 
+
+class Conformal(unittest.TestCase):
+    def test_quantile_and_selective_threshold(self):
+        self.assertEqual(C.conformal_q([0.1, 0.2, 0.3, 0.4], 0.5), 0.3)
+        self.assertIsNone(C.conformal_q([], 0.1))
+        pairs = [(0.9, True)] * 30 + [(0.5, False)] * 10 + [(0.5, True)] * 10
+        self.assertEqual(C.selective_threshold(pairs, 0.05), 0.9)
+        self.assertIsNone(C.selective_threshold([(0.9, False)] * 30, 0.05))
+
+    def test_value_probs_merge_the_same_figure(self):
+        w = C.np.array([1.0]); vocab = C.Vocab(); vocab.ix = {"bias": 0}
+        case = {"cands": [({"bias": 1.0}, 100.0, 0, True), ({"bias": 1.0}, 100.0, 0, True), ({"bias": 1.0}, 200.0, 0, False)]}
+        vp = C.value_probs(w, vocab, case)
+        self.assertAlmostEqual(vp[100.0][0], 2 / 3)
+        self.assertTrue(vp[100.0][1]); self.assertFalse(vp[200.0][1])
+
+    def test_joint_choice_never_takes_the_same_figure_twice(self):
+        vl = {12300.0: (0.6, True), 8100.0: (0.4, False)}
+        vm = {12300.0: (0.55, False), 8100.0: (0.45, True)}
+        self.assertEqual(C.joint_choice(vl, vm), (12300.0, 8100.0))
+        self.assertIsNone(C.joint_choice({}, vm))
+
+
+class Measurement(unittest.TestCase):
+    """The measure itself: a shuffled control stays near chance, and ties never flatter."""
+    def test_the_shuffled_control_is_near_chance(self):
+        L = Learning()
+        train, test = L.synthetic(300, 5), L.synthetic(200, 6)
+        w, vocab = C.fit(C.shuffled(train), l2=0.001, steps=200)
+        right = sum(c["cands"][C.choose(w, vocab, c)][3] for c in test)
+        self.assertLess(right / len(test), 0.45)              # chance is 25%; the real model is above 80%
+
+    def test_ties_count_as_wrong(self):
+        w = C.np.array([0.0]); vocab = C.Vocab(); vocab.ix = {"bias": 0}
+        case = {"cands": [({"bias": 1.0}, 1.0, 0, True), ({"bias": 1.0}, 2.0, 0, False)]}
+        self.assertFalse(case["cands"][C.choose(w, vocab, case)][3])
+        self.assertEqual(C.top_of({1.0: (0.5, True), 2.0: (0.5, False)}), (0.5, False))
+
 if __name__ == "__main__":
     unittest.main()
