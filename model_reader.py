@@ -85,6 +85,21 @@ RULES_IN_PROMPT = True   # False with extract_eval --guidance check: the rules o
 RULES = None    # decision_rules.json (decision_mining.py --save) when extract_eval --guidance learned; None = today
 
 
+MD_GUIDANCE = {}   # gmc -> WBA's own assessment guidance (Pipeline QA attribute_guidance), with extract_eval --guidance md
+
+
+def md_note(code):
+    """WBA's assessment guidance and prompt for the attribute, as one block of the prompt, or ''. The text
+    is WBA methodology: it is read at run time from the private Pipeline QA base and never logged."""
+    m = MD_GUIDANCE.get(code or "")
+    if not m:
+        return ""
+    return ("WBA's assessment guidance for this attribute (follow it to choose the figure):\n"
+            + "\n\n".join(x for x in (m.get("guidance"), m.get("md_prompt")) if x)
+            + "\n(Whatever the guidance says about output, units or conversion: reply only in the format asked below, "
+              "with the figure as printed and its scale.)")
+
+
 def rules_note(code):
     """The learned choice rules of an attribute as one instruction, or ''."""
     r = ((RULES or {}).get("attributes") or {}).get(code or "")
@@ -143,6 +158,7 @@ def prompt(g, attr, pages):
              "Take the figure for that year, for the whole company or group, not a segment, a region or a target.",
              g.get("hint") or "",
              rules_note(g.get("attribute")),
+             md_note(g.get("attribute")),
              (f"The figure wanted is the {attr['variant']['wanted']} one. Say in \"basis\" what the page calls the figure: "
               f"\"{attr['variant']['wanted']}\", \"{attr['variant']['other']}\", or \"not stated\" when the page gives one Scope 2 "
               f"figure without saying which. Never give a figure the page calls {attr['variant']['other']}.") if attr.get("variant") else "",

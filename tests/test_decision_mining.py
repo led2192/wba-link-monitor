@@ -76,6 +76,16 @@ class Rules(unittest.TestCase):
         self.M.RULES = None
         self.assertEqual(self.M.rules_note("GMC_00048.1"), "")
 
+    def test_wba_guidance_note(self):
+        self.M.MD_GUIDANCE = {"GMC_00064.1": {"guidance": "Take only taxonomy-aligned CapEx.", "md_prompt": "What is the low-carbon CapEx?"}}
+        try:
+            n = self.M.md_note("GMC_00064.1")
+            self.assertIn("Take only taxonomy-aligned CapEx.", n)
+            self.assertIn("reply only in the format asked below", n)
+            self.assertEqual(self.M.md_note("GMC_00001.1"), "")
+        finally:
+            self.M.MD_GUIDANCE = {}
+
     def test_check_only_leaves_the_prompt_alone(self):
         self.M.RULES_IN_PROMPT = False
         try:
