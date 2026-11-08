@@ -804,6 +804,7 @@ def main():
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
+    ap.add_argument("--auto-spec", action="store_true", help="read the chosen (development) attributes with the spec heldout.py builds from Metadata Codes, not the hand-written one: how much the hand-written specs add, and where the builder is improved")
     ap.add_argument("--heldout", type=int, default=0, help="read N held-out number attributes instead (heldout.py: never tuned on, spec built from Metadata Codes at run time)")
     ap.add_argument("--model-pages", type=int, default=8, help="how many of the ranked pages the model reads (8 today): half by the rule candidates, half by rank; more pages cost more tokens per answer")
     ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
@@ -886,6 +887,15 @@ def main():
     else:
         answers = [g for base in gold_cfg["bases"].values() for g in gold_values(token, base, codes)
                    if g["value"] and not g["unit"].lower().startswith(("%", "percent"))]
+        if a.auto_spec:                          # development attributes read with the held-out spec builder
+            import heldout
+            meta = heldout.metadata_codes(token, list(gold_cfg["bases"].values()))
+            for c in codes:
+                entry = heldout.auto_number_spec(meta.get(c) or {}, [g["unit"] for g in answers if g["attribute"] == c])
+                if entry:
+                    entry["status"] = "auto"
+                    spec["attributes"][c] = entry
+            print(">>> auto specs: " + ", ".join(f"{c} {spec['attributes'][c].get('status')}" for c in codes), flush=True)
     gold_index = {(g["wba"], g["attribute"], g["year"]): g["value"] for g in answers}
     if a.keys:                                   # only these answers, e.g. another pilot's company-attribute-years
         want = {tuple(k.split("|")) for k in a.keys.split(",") if k.count("|") == 2}
@@ -1133,7 +1143,7 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
