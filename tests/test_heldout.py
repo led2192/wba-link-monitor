@@ -30,6 +30,21 @@ class HeldOut(unittest.TestCase):
                          ["total water withdrawal (in m3)", "total water withdrawal", "water withdrawal"])
         self.assertEqual(H.auto_labels("What is the company's total energy consumption?")[-1], "energy consumption")
 
+    def test_core_terms_drop_generic_words(self):
+        self.assertEqual(H.core_terms("Number of employees"), ["employees"])
+        self.assertEqual(H.core_terms("Total revenue"), ["revenue"])
+        self.assertEqual(H.core_terms("Scope 1 emissions"), ["scope 1 emissions"])
+        s = H.auto_number_spec({"Description": "Number of employees"}, [""])
+        self.assertEqual(s["more_terms"], ["employees"])
+        self.assertIn("employees", s["labels"])
+
+    def test_auto_queries_pairs(self):
+        q = H.auto_queries("Does the company have a board committee responsible for climate?")
+        self.assertIn("board committee", q)
+        self.assertIn("climate", " ".join(q))
+        self.assertLessEqual(len(q), 12)
+        self.assertEqual(H.auto_queries("Number of employees"), ["employees"])
+
     def test_spec_has_no_hand_written_parts(self):
         s = H.auto_number_spec({"Description": "Total energy consumption", "Definition": "<p>All energy used.</p>"}, ["MWh"])
         self.assertEqual(s["exclude"], [])

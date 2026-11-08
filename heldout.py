@@ -20,8 +20,10 @@ Rules for development (docs/decisions.md, 8 Nov 2026):
   by more than 3 points.
 
 The spec of a held-out number attribute is built at run time from Metadata Codes (auto_number_spec): its
-description is its name and its first label, its definition the model's definition, the unit family from the
-units of its validated answers; no reading notes, no exclusions, no siblings.
+description is its name and its first label, its content words (core_terms) its other labels and search terms,
+its definition the model's definition, the unit family from the units of its validated answers; no reading
+notes, no exclusions, no siblings. The same builder runs on development attributes with extract_eval
+--auto-spec, which is where the builder is checked and improved (never on held-out answers).
 """
 import collections, hashlib, json, os, re
 
@@ -78,6 +80,35 @@ def auto_labels(description):
     return [x for x in dict.fromkeys(out) if len(x) >= 3]
 
 
+GENERIC = {"number", "total", "amount", "value", "quantity", "annual", "annually", "per", "year", "years", "the",
+           "of", "in", "on", "for", "and", "a", "an", "to", "company", "company's", "companys", "its", "reported", "level",
+           "does", "do", "is", "are", "has", "have", "what", "which", "how", "whether", "there", "any", "this", "that",
+           "disclose", "discloses", "disclosed", "report", "reports", "provide", "provides", "with", "by", "or", "it"}
+
+
+def core_terms(description):
+    """The content words of a description, without words any number attribute could have ('number of',
+    'total', 'amount', 'per year'): 'Number of passengers per year' -> 'passengers'. Reports print the
+    content words, rarely the description, so these find the pages; generic, never written per attribute."""
+    out = []
+    for l in auto_labels(description):
+        ws = [w for w in re.findall(r"[a-z0-9][a-z0-9+\-']*", l) if w not in GENERIC]
+        if ws:
+            out.append(" ".join(ws))
+    return list(dict.fromkeys(out))
+
+
+def auto_queries(description):
+    """Search queries for a judgement attribute from its description alone: its content words (core_terms),
+    then every pair of neighbouring content words. A page is found when it has both words of a pair, in any
+    order, so a long question still finds the pages that discuss it (all its words together rarely appear).
+    At most 12 queries."""
+    core = core_terms(description)
+    words = core[-1].split() if core else []
+    pairs = [f"{a} {b}" for a, b in zip(words, words[1:])]
+    return list(dict.fromkeys(core[-1:] + pairs + (words if len(words) == 1 else [])))[:12]
+
+
 def auto_number_spec(meta, units):
     """An attributes.json entry for a held-out number attribute, from its Metadata Codes row and the units of its
     validated answers. None when it is a percentage or has no description."""
@@ -87,9 +118,9 @@ def auto_number_spec(meta, units):
         return None
     definition = re.sub(r"<[^>]+>", " ", meta.get("Definition") or "")
     definition = re.sub(r"\s+", " ", definition).strip()[:800]
-    labels = auto_labels(desc)
+    labels = list(dict.fromkeys(auto_labels(desc) + core_terms(desc)))
     return {"name": desc[:120], "definition": definition or desc, "type": "number", "unit_family": family,
-            "labels": labels, "exclude": [], "index": {"codes": [], "terms": labels[1:3]},
+            "labels": labels, "more_terms": core_terms(desc), "exclude": [], "index": {"codes": [], "terms": labels[1:3]},
             "doc_types": ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report"],
             "period": "fiscal_year", "scope": "group", "memory": True, "status": "heldout"}
 

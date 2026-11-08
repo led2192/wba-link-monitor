@@ -106,8 +106,9 @@ def gold_answers(token, codes, bases=(GOLD_BASE,), tier="reviewed"):
 def auto_attributes(token, bases, tier, n, have, keep=None):
     """Config entries for the n judgement attributes (yes/no, lists) with most answers at this tier in these
     bases, from the bases' own Metadata Codes table: name and question from Description and Definition, the
-    options from Select Options, and the description itself as the search words (BM25 needs no hand-made
-    queries). Attributes already in gold_attributes.json keep their hand-written entry. keep: a test on the code
+    options from Select Options, and search words from the description (heldout.auto_queries: its content words
+    and their neighbouring pairs, since 8 Nov 2026; the whole description as one query found pages for almost
+    no held-out attribute). Attributes already in gold_attributes.json keep their hand-written entry. keep: a test on the code
     (heldout.is_heldout for --heldout: only attributes never tuned on)."""
     import collections as C
     where = TIERS[tier] if tier == "reviewed" else f"AND({TIERS[tier]}, NOT({{Data Reviewed}}))"
@@ -141,7 +142,8 @@ def auto_attributes(token, bases, tier, n, have, keep=None):
         if kind != "boolean" and not opts:
             continue
         question = (desc if desc.endswith("?") else f"{desc}?") + (f" {re.sub(r'<[^>]+>', ' ', f.get('Definition') or '').strip()[:600]}" if f.get("Definition") else "")
-        out[c] = {"name": desc[:120], "type": kind, "queries": [desc], "question": question, "options": opts, "answers": count[c]}
+        import heldout
+        out[c] = {"name": desc[:120], "type": kind, "queries": heldout.auto_queries(desc) or [desc], "question": question, "options": opts, "answers": count[c]}
         if len(out) >= n:
             break
     return out
@@ -348,6 +350,7 @@ def main():
                     help="write narrative_disagreements.csv (every wrong answer, for a person to judge) and print it to the log")
     ap.add_argument("--pages", choices=["ts", "bm25", "fused"], default=PAGE_SEARCH,
                     help="page search: ts (default), bm25 or fused; compare on the same answers before changing the default")
+    ap.add_argument("--auto-spec", action="store_true", help="read the development attributes with search words built from their description (heldout.auto_queries), not the hand-written queries: how much those add")
     ap.add_argument("--heldout", type=int, default=0, help="read only the N held-out judgement attributes with most answers (heldout.py), questions from Metadata Codes")
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
     ap.add_argument("--evidence", choices=["pages", "pack3"], default="pack3",
@@ -370,6 +373,13 @@ def main():
     if a.heldout and token:                        # only held-out attributes, never tuned on (heldout.py)
         import heldout
         cfg = auto_attributes(token, bases, a.tier, a.heldout, set(), keep=heldout.is_heldout)
+    if a.auto_spec and token:                      # development attributes with the held-out builder's queries
+        import heldout
+        meta = heldout.metadata_codes(token, bases)
+        for c in cfg:
+            desc = ((meta.get(c) or {}).get("Description") or "").strip()
+            if desc:
+                cfg[c] = dict(cfg[c], queries=heldout.auto_queries(desc) or [desc])
     codes = [c for c in cfg if not a.attributes or c in a.attributes.split(",")]
     if not token or not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("narrative_eval.md", "w").write("### Narrative evaluation: GOLD_TOKEN or ANTHROPIC_API_KEY is not set; nothing run.\n")

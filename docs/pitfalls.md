@@ -249,3 +249,7 @@ Of 104,525 sources cited by validated answers in the three gold bases, 2% matche
 
 ## The cost line assumes Haiku (8 Nov 2026)
 `model_reader.cost` prices tokens at the Haiku list price unless `READER_PRICE` (or `READER_PRICE_IN` and `READER_PRICE_OUT`) is set. A Sonnet run (42477791889) printed "cost about $0.47" for 4.2 million input tokens, far below what it cost. Since #277 the line says so when `READER_MODEL` is not the default and no price is set. Read the token counts, not the dollars, when comparing models.
+
+## A built spec must search for what reports print (8 Nov 2026)
+Metadata Codes descriptions are written for analysts ("Number of patients treated", "Decarbonization levers/actions implementation timeframes"); reports print "patients treated" or discuss levers and timeframes in separate sentences. Searching for the description as a phrase, or for all its words at once, found no page for most held-out attributes, and the run then scored the empty answers as if a reader had read. Before trusting any score, check "Number on the ranked pages" (numbers) and "No pages found" (narratives): a near-empty pool means the search failed, not the reader.
+
