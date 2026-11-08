@@ -696,10 +696,11 @@ def read_value(cur, wba, year, attr, spec, usage, known=None):
     return mine
 
 
-def oracle_pages(holding, rows, best_pages, n=MODEL_PAGES):
+def oracle_pages(holding, rows, best_pages, n=None):
     """The reader's ceiling: the pages that print the analyst's figure first, in their ranked order (pages the
     ranking never reached last), then the model's usual pages, MODEL_PAGES in all. Never an option: it uses the
     answer to choose the pages."""
+    n = n or MODEL_PAGES
     pos = {(x[1], x[2]): i for i, x in enumerate(rows)}
     lead = [(0.0, None, lid, page, body) for lid, page, body in sorted(holding, key=lambda h: pos.get((h[0], h[1]), 10 ** 6))][:n]
     have = {(x[2], x[3]) for x in lead}
@@ -803,6 +804,7 @@ def main():
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
+    ap.add_argument("--model-pages", type=int, default=8, help="how many of the ranked pages the model reads (8 today): half by the rule candidates, half by rank; more pages cost more tokens per answer")
     ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
     a = ap.parse_args()
     a.memory = a.memory == "on"
@@ -817,8 +819,9 @@ def main():
     model_reader.UNSTATED_BASIS = a.unstated_basis
     model_reader.PERIOD_CHECK = a.period_check
     model_reader.SELECTOR = a.selector
-    global BM25_POOL
+    global BM25_POOL, MODEL_PAGES
     BM25_POOL = a.bm25_pool
+    MODEL_PAGES = max(1, a.model_pages)
     PAGE_TEXT = a.page_text
     if a.guidance == "md":
         import model_reader
@@ -1111,12 +1114,12 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector))
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 8 else 0))
                                                                               if v not in ("base", "today", "db", "keep", "all", 0, "off")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
