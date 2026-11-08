@@ -564,3 +564,13 @@ def cost(usage, model=None):
     pin = float(both[0]) if len(both) == 2 and both[0] else float(os.environ.get("READER_PRICE_IN") or "0.10")
     pout = float(both[1]) if len(both) == 2 and both[1] else float(os.environ.get("READER_PRICE_OUT") or "0.50")
     return usage["input_tokens"] / 1e6 * pin + usage["output_tokens"] / 1e6 * pout
+
+
+def cost_note():
+    """A warning for the cost line when the reader is not the default model and no price was given: the cost is
+    then at the Haiku list price and understates a larger model's (a Sonnet run of 8 Nov 2026 printed $0.47)."""
+    model = os.environ.get("READER_MODEL") or DEFAULT_MODEL
+    priced = os.environ.get("READER_PRICE") or os.environ.get("READER_PRICE_IN") or os.environ.get("READER_PRICE_OUT")
+    if model == DEFAULT_MODEL or priced:
+        return ""
+    return f" (at the {DEFAULT_MODEL} list price, not {model}'s: set READER_PRICE to \"in/out\" dollars per million tokens)"
