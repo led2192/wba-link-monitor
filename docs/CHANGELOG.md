@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-08 Selector fix after its first run (24% against 46%): a lone candidate is kept without a selector call, the selector must choose one of several, 600-token limit, an unreadable reply keeps the first candidate (#274)
+- 2026-11-08 Selector fix after its first run (24% against 46%): a lone candidate is kept without a selector call, the selector must choose one of several, 600-token limit, an unreadable reply keeps the first candidate (#273)
 - 2026-11-08 `extract_eval --keys WBA|GMC|YEAR,...`: read only these answers, to compare with another team's pilot on the same company, attribute and year (#272)
 - 2026-11-08 `extract_eval --selector candidates`: a generous extractor proposes up to 3 figures for the year asked (row, column, footnote; no conditions in its prompt), each checked against its page, and a second call chooses one against the attribute's definition, notes and guidance, or none. The report adds the extractor's recall, the rescued answers (candidate 2 or 3 chosen and right) and the choices that missed a right candidate. An option to measure (#271)
 - 2026-11-07 Four more number attributes in the evaluation, chosen from the gold inventory (validated answers for about 1,760 companies each): total capital expenditure (GMC_00063.1), Scope 3 emissions (GMC_00005.1), Scope 1 + 2 emissions (GMC_00124.1), total R&D spending (GMC_00047.1). Marked "measuring": propose_values.py proposes them only when named (#270)
