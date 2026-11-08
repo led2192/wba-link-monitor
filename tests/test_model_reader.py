@@ -347,14 +347,19 @@ class ExtractorSelector(unittest.TestCase):
         self.assertIn("Prefer the taxonomy-aligned", selector[1])
         self.assertIn("2. 300", selector[1])
 
-    def test_none_chosen_and_no_candidates(self):
+    def test_lone_candidate_unreadable_reply_and_no_candidates(self):
         import collections
-        self.replies = ['{"candidates": [{"page": "P1", "printed": "1,200", "scale": "millions", "year": 2024, "column": "FY2024"}]}',
-                        '{"choice": null, "why": "total, not aligned"}']
+        one = '{"candidates": [{"page": "P1", "printed": "1,200", "scale": "millions", "year": 2024, "column": "FY2024"}]}'
+        self.replies = [one]                                         # one candidate: kept, no selector call
         note = {}
-        self.assertEqual(self.M.read_candidates(self.g, self.attr, self.pages, collections.Counter(), note=note), [])
-        self.assertIsNone(note["choice"]); self.assertIn("selector", note["why"])
+        self.assertEqual([e["value"] for e in self.M.read_candidates(self.g, self.attr, self.pages, collections.Counter(), note=note)], [1200e6])
+        self.assertEqual((note["choice"], len(self.prompts)), (0, 1))
+        two = ('{"candidates": [{"page": "P1", "printed": "1,200", "scale": "millions", "year": 2024, "column": "FY2024"},'
+               ' {"page": "P1", "printed": "300", "scale": "millions", "year": 2024, "column": "FY2024"}]}')
+        self.replies = [two, 'Let me think about which figure {"choice": ']      # cut reply: the first candidate stays
+        u = collections.Counter()
+        self.assertEqual([e["value"] for e in self.M.read_candidates(self.g, self.attr, self.pages, u)], [1200e6])
+        self.assertEqual(u["selector unreadable, first kept"], 1)
         self.replies = ['{"candidates": [], "why": "not printed"}']
         note = {}
         self.assertEqual(self.M.read_candidates(self.g, self.attr, self.pages, collections.Counter(), note=note), [])
-        self.assertEqual(len(self.prompts), 3)                      # no selector call without candidates

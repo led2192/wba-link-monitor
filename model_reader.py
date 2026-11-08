@@ -481,8 +481,9 @@ def select_prompt(g, attr, cands):
                      + (f"; basis: {c.get('basis') or 'not stated'}" if attr.get("variant") else "")
                      + (f"; line on the page: {c['line'][:200]}" if c.get("line") else ""))
     lines += ["", "Compare them: which one is the attribute for the reporting year? A total and its part, or two bases, "
-              "are told apart by the definition. Answer null only when none of them is this attribute. "
-              "Reply with JSON: {\"choice\": the number of the figure or null, \"why\": ten words or fewer}"]
+              "are told apart by the definition. Choose the one that fits best; the figures were already found under "
+              "this attribute's labels, so always choose one. "
+              "Reply with JSON only, no text before it: {\"choice\": the number of the figure, \"why\": ten words or fewer}"]
     return "\n".join(l for l in lines if l is not None)
 
 
@@ -523,17 +524,18 @@ def read_candidates(g, attr, pages, usage, sess=None, note=None):
             note["why"] = str((reply or {}).get("why") or "(no candidate)")[:120]
     if not cands:
         return []
-    rep = parse_reply(call([{"role": "user", "content": select_prompt(g, attr, cands)}], usage, sess,
-                           system=SELECT_SYSTEM, max_tokens=200))
-    try:
-        k = int((rep or {}).get("choice")) - 1
-    except (TypeError, ValueError):
-        k = -1
-    if not 0 <= k < len(cands):
-        usage["selector chose none"] += 1
-        if note is not None:
-            note["why"] = "(selector: " + str((rep or {}).get("why") or "none")[:100] + ")"
-        return []
+    if len(cands) == 1:                   # nothing to choose between (8 Nov 2026: the first run let the selector
+        k = 0                             # refuse a lone right candidate 1 time in 3)
+    else:
+        rep = parse_reply(call([{"role": "user", "content": select_prompt(g, attr, cands)}], usage, sess,
+                               system=SELECT_SYSTEM, max_tokens=600))
+        try:
+            k = int((rep or {}).get("choice")) - 1
+        except (TypeError, ValueError):
+            k = -1
+        if not 0 <= k < len(cands):       # an unreadable or cut reply keeps the extractor's first candidate (8 Nov 2026:
+            usage["selector unreadable, first kept"] += 1      # 119 replies cut at 200 tokens read as "none")
+            k = 0
     if note is not None:
         note["choice"] = k
     chosen = cands[k]
