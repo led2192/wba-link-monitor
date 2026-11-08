@@ -302,6 +302,20 @@ class Oracle(unittest.TestCase):
         holding = [("d", i, "x") for i in range(20)]
         self.assertEqual(len(X.oracle_pages(holding, [], [], n=8)), 8)
 
+    def test_oracle_follows_the_model_pages_setting(self):
+        holding = [("d", i, "x") for i in range(20)]
+        saved = X.MODEL_PAGES
+        try:
+            X.MODEL_PAGES = 16
+            self.assertEqual(len(X.oracle_pages(holding, [], [])), 16)
+        finally:
+            X.MODEL_PAGES = saved
+
+    def test_pages_for_model_takes_n(self):
+        scored = [(1.0, "c" if i < 3 else None, "d", i, "x") for i in range(25)]
+        self.assertEqual(len(X.pages_for_model(scored, 16)), 16)
+        self.assertEqual(len(X.pages_for_model(scored, 8)), 8)
+
     def test_keys_are_stable_and_say_nothing(self):
         self.assertEqual(X.short_hash("PT_00001|2024|GMC"), X.short_hash("PT_00001|2024|GMC"))
         self.assertEqual(len(X.short_hash("x")), 12)
