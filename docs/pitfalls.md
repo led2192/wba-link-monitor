@@ -246,3 +246,6 @@ Of 104,525 sources cited by validated answers in the three gold bases, 2% matche
 
 ## A number pattern must not swallow the sentence's full stop (6 Nov 2026)
 `base_health.py` reads model spend from job logs with a pattern. `[\d.]+` took "0.29." from "cost about $0.29." (a narrative report line), `float()` raised, and the nightly report wrote no row on 5 and 6 Nov. Nothing else noticed: one_hop.py reads its record limit from base_health and kept using the 4 Nov row. Read amounts as `\d+(?:\.\d+)?`, and a report that feeds other jobs should not fail on one unreadable log.
+
+## The cost line assumes Haiku (8 Nov 2026)
+`model_reader.cost` prices tokens at the Haiku list price unless `READER_PRICE` (or `READER_PRICE_IN` and `READER_PRICE_OUT`) is set. A Sonnet run (42477791889) printed "cost about $0.47" for 4.2 million input tokens, far below what it cost. Since #277 the line says so when `READER_MODEL` is not the default and no price is set. Read the token counts, not the dollars, when comparing models.

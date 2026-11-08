@@ -208,6 +208,21 @@ class ModelReader(unittest.TestCase):
         # the data collection guidance's revenue rules reach the reader (4 Nov 2026)
         self.assertIn("own reporting currency", M.prompt(G, REV, PAGES))
 
+    def test_cost_note(self):
+        keys = ("READER_MODEL", "READER_PRICE", "READER_PRICE_IN", "READER_PRICE_OUT")
+        saved = {k: os.environ.pop(k, None) for k in keys}
+        try:
+            self.assertEqual(M.cost_note(), "")
+            os.environ["READER_MODEL"] = "claude-sonnet-5-5"
+            self.assertIn("claude-sonnet-5-5", M.cost_note())
+            os.environ["READER_PRICE"] = "3/15"
+            self.assertEqual(M.cost_note(), "")
+        finally:
+            for k in keys:
+                os.environ.pop(k, None)
+                if saved[k] is not None:
+                    os.environ[k] = saved[k]
+
     def test_cost(self):
         u = X.collections.Counter(input_tokens=1_000_000, output_tokens=100_000)
         self.assertAlmostEqual(M.cost(u), 0.10 + 0.05)

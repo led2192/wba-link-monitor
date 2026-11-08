@@ -993,10 +993,10 @@ def main():
                   f"{pct('proposal')} | **{pct('right')}** | {s['right'] / (s['proposal'] or 1):.0%} | {s['right in_docs'] / (s['in_docs'] or 1):.0%} | {pct('scale_miss')} |")
     md.append("")
     if a.reader == "model":
-        from model_reader import cost
+        from model_reader import cost, cost_note
         md += [f"Model calls: {usage['calls']:,} ({usage['model_errors']:,} failed); input tokens {usage['input_tokens']:,}; "
                f"output tokens {usage['output_tokens']:,}; cost about ${cost(usage):.2f} "
-               f"(${cost(usage) / (usage['calls'] or 1) * 1000:.2f} per 1,000 answers). "
+               f"(${cost(usage) / (usage['calls'] or 1) * 1000:.2f} per 1,000 answers){cost_note()}. "
                f"Proposals dropped because the named page does not print the number: {usage['quote_not_on_page']:,}. "
                f"Replies cut at the token limit: {usage['cut_at_token_limit']:,}. "
                f"The model's pages hold the validated number for {sum(s['model_pages'] for s in stats.values()):,} answers; "
