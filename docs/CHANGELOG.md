@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-08 Total capex (GMC_00063.1) and total R&D (GMC_00047.1): tighter reading notes and exclusions after their first reading (total capex 38%, half its proposals wrong, pages of misses full of balance-sheet words; R&D 53%): a cash-flow or segment capex, never a balance; total R&D, not the capitalised part or its amortisation. Both still "measuring" (#276)
 - 2026-11-08 extract_eval: when the model API refuses a call (key, credit, model name) the run stops but still prints its report and per-answer outcomes, and records RUN_FAILED model_refused (a Sonnet run lost 200 read answers to a credit stop) (#275)
 - 2026-11-08 Decision recorded: extractor and selector after the fix, a tie on 382 answers (46% and 46%); not adopted (#274)
 - 2026-11-08 Selector fix after its first run (24% against 46%): a lone candidate is kept without a selector call, the selector must choose one of several, 600-token limit, an unreadable reply keeps the first candidate (#273)

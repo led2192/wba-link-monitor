@@ -512,7 +512,7 @@
       "definition": "Total capital expenditure (CapEx) for the reporting year, in the company's currency.",
       "status": "measuring",
       "memory": true,
-      "reading_notes": "The company's total capital expenditure for the year: purchases of property, plant and equipment and intangible assets, as in the cash flow statement or the segment note, or the denominator of the EU Taxonomy CapEx KPI. Not a single segment, not a multi-year plan or guidance, not the taxonomy-aligned part.",
+      "reading_notes": "The company's total capital expenditure for the year: the cash spent on property, plant and equipment and on intangible assets, as in the investing activities of the cash flow statement (purchases or acquisitions of property, plant and equipment and of intangibles), the capex line of the segment note, or the denominator of the EU Taxonomy CapEx KPI. Never a balance: not the carrying amount, net book value, cost or accumulated depreciation of property, plant and equipment at year end, not additions in the fixed-asset roll-forward when a cash-flow capex is printed. Not a segment, not guidance or a plan, not the taxonomy-aligned part.",
       "type": "number",
       "unit_family": "currency",
       "labels": [
@@ -532,13 +532,21 @@
         "investissements"
       ],
       "exclude": [
+        "accumulated",
         "aligned",
+        "as at 31",
+        "at 31 december",
+        "balance at",
+        "budget",
+        "carrying amount",
+        "depreciation",
         "eligible",
         "guidance",
+        "impairment",
+        "net book value",
         "outlook",
-        "target",
         "plan ",
-        "budget"
+        "target"
       ],
       "index": {
         "codes": [],
@@ -679,7 +687,7 @@
       "definition": "Total research and development spending for the reporting year, in the company's currency.",
       "status": "measuring",
       "memory": true,
-      "reading_notes": "The company's total research and development expense or spending for the year, as in the income statement or the notes. Not R&D as a percentage of revenue, not a single programme, not capitalised development costs alone when a total is printed.",
+      "reading_notes": "The company's total research and development expense or spending for the year, as in the income statement, its notes or the management report (the R&D line, or total R&D spending including the part capitalised when the report prints that total). Not R&D as a percentage of revenue, not a single programme or segment, not capitalised development costs alone, not amortisation of capitalised development, not R&D tax credits or headcount.",
       "type": "number",
       "unit_family": "currency",
       "labels": [
@@ -698,7 +706,11 @@
       ],
       "exclude": [
         "% of",
+        "amortisation",
+        "amortization",
         "as a percentage",
+        "employees in",
+        "headcount",
         "intensity",
         "ratio",
         "tax credit"
