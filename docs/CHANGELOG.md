@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-08 Held-out attributes (`heldout.py`): a quarter of the attribute codes, by a hash, kept out of development; `extract_eval --heldout N` and `narrative_eval --heldout N` read only them, with specs from Metadata Codes and nothing written by hand. The narrative workflow's input `auto` becomes `options` (free narrative_eval flags) (#279)
 - 2026-11-08 `extract_eval --model-pages N`: how many of the ranked pages the model reads (8 today), to measure whether more pages on the same model beat a larger model on the same pages (Sonnet on 8 pages: +1.9, chance) (#278)
 - 2026-11-08 extract_eval: the cost line warns when the reader is not Haiku and no price was given (it printed a Sonnet run at Haiku prices). Decisions recorded: Sonnet on every answer, +1.9 points, not worth it as a default; total capex and R&D notes, R&D better, total capex unchanged and waiting on the analysts' definition (#277)
 - 2026-11-08 Total capex (GMC_00063.1) and total R&D (GMC_00047.1): tighter reading notes and exclusions after their first reading (total capex 38%, half its proposals wrong, pages of misses full of balance-sheet words; R&D 53%): a cash-flow or segment capex, never a balance; total R&D, not the capitalised part or its amortisation. Both still "measuring" (#276)
