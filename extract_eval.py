@@ -898,8 +898,10 @@ def main():
                 known = {y: v for (w, c, y), v in gold_index.items() if w == g["wba"] and c == g["attribute"] and y != g["year"]}
                 r = evaluate(cur, g, spec["attributes"][g["attribute"]], spec, a.reader, usage, known if a.memory else None)
             except Exception as e:
-                if type(e).__name__ == "ModelRefused":           # the API said no: stop and say why
-                    raise
+                if type(e).__name__ == "ModelRefused":           # the API said no: stop, keep what was read and say why
+                    s["answers"] -= 1                            # (8 Nov 2026: a run lost 200 read answers to a credit stop)
+                    db_stop = f"the model API refused the call ({str(e)[:160]})"
+                    break
                 if len(first_errors) < 3:
                     first_errors.append(f"{type(e).__name__}: {str(e).splitlines()[0][:160] if str(e) else ''}")
                     print(f"  database error on {g['id']}: {first_errors[-1]}", flush=True)
@@ -1122,7 +1124,8 @@ def main():
                            notes="accuracy: the proposal matches the validated answer. high_stakes_accuracy: the validated "
                                  "number is on the ranked pages (finding, before reading).")
     if db_stop:
-        run.failure("RUN_FAILED", "database_unavailable", key=f"{run.workflow}|database", stage="reading", message=db_stop[:500])
+        what = "model_refused" if db_stop.startswith("the model API") else "database_unavailable"
+        run.failure("RUN_FAILED", what, key=f"{run.workflow}|{what}", stage="reading", message=db_stop[:500])
     run.finish("failed" if db_stop else "ok", rows_in=len(todo), rows_out=sum(s["right"] for s in stats.values()),
                counters={c: dict(stats[c]) for c in codes})
     return 1 if db_stop else 0
