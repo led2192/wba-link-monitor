@@ -1,0 +1,53 @@
+import os, sys, unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import heldout as H  # noqa: E402
+
+
+class HeldOut(unittest.TestCase):
+    def test_development_attributes_are_never_held_out(self):
+        dev = H.development()
+        self.assertIn("GMC_00048.1", dev)          # revenue, tuned on
+        self.assertIn("GMC_01933.1", dev)          # narrative pilot
+        for c in dev:
+            self.assertFalse(H.is_heldout(c))
+
+    def test_about_a_quarter_held_out_and_stable(self):
+        codes = [f"GMC_{i:05d}.1" for i in range(3000, 5000)]
+        share = sum(H.is_heldout(c, set()) for c in codes) / len(codes)
+        self.assertTrue(0.2 < share < 0.3, share)
+        self.assertEqual([H.is_heldout(c, set()) for c in codes[:50]], [H.is_heldout(c, set()) for c in codes[:50]])
+
+    def test_unit_family(self):
+        self.assertEqual(H.unit_family(["USD", "USD", "EUR"]), "currency")
+        self.assertEqual(H.unit_family(["tCO2e"]), "tco2e")
+        self.assertEqual(H.unit_family(["%"]), "percent")
+        self.assertEqual(H.unit_family(["MWh"]), "count")
+        self.assertEqual(H.unit_family([]), "count")
+
+    def test_labels_from_the_description_alone(self):
+        self.assertEqual(H.auto_labels("Total water withdrawal (in m3)"),
+                         ["total water withdrawal (in m3)", "total water withdrawal", "water withdrawal"])
+        self.assertEqual(H.auto_labels("What is the company's total energy consumption?")[-1], "energy consumption")
+
+    def test_spec_has_no_hand_written_parts(self):
+        s = H.auto_number_spec({"Description": "Total energy consumption", "Definition": "<p>All energy used.</p>"}, ["MWh"])
+        self.assertEqual(s["exclude"], [])
+        self.assertNotIn("reading_notes", s)
+        self.assertNotIn("siblings", s)
+        self.assertEqual(s["definition"], "All energy used.")
+        self.assertEqual(s["status"], "heldout")
+        self.assertIsNone(H.auto_number_spec({"Description": "Share of renewable energy"}, ["%"]))
+        self.assertIsNone(H.auto_number_spec({}, ["USD"]))
+
+    def test_number_codes_only_held_out_numbers(self):
+        meta = {f"GMC_{i:05d}.1": {"Data Type": {"name": "Number" if i % 2 else "Boolean"}} for i in range(3000, 3400)}
+        got = H.number_codes(meta, 5, dev=set())
+        self.assertLessEqual(len(got), 15)
+        for c in got:
+            self.assertTrue(H.is_heldout(c, set()))
+            self.assertEqual(H.type_of(meta[c]), "Number")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -13,6 +13,7 @@ Read `docs/README.md` first. It indexes everything else.
 - Complete files, one branch per change, one pull request. Never merge: the owner merges.
 - Work from the committed code on `main`, never from memory of it.
 - No going back: a change to how a reader or ranker finds or reads pages ships as an option first, is run next to the current default on the same answers, and becomes the default only when no attribute gets worse by more than 3 points. A proxy experiment (rank_eval.py) is a reason to try, not to switch.
+- Held-out attributes (`heldout.py`) are never tuned on: no notes, labels or exclusions written for them, their wrong answers not read to tune. An option must also not make any held-out kind (numbers, yes/no and lists) worse by more than 3 points.
 
 ## Data rules
 - The Source Library bases (2024 `appsrc5xpZH12ezzP`, 2025 `appu5pLRjmq7PC4V3`) are read-only, always. They are read with a separate read-only token.

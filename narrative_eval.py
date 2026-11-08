@@ -103,11 +103,12 @@ def gold_answers(token, codes, bases=(GOLD_BASE,), tier="reviewed"):
     return out
 
 
-def auto_attributes(token, bases, tier, n, have):
+def auto_attributes(token, bases, tier, n, have, keep=None):
     """Config entries for the n judgement attributes (yes/no, lists) with most answers at this tier in these
     bases, from the bases' own Metadata Codes table: name and question from Description and Definition, the
     options from Select Options, and the description itself as the search words (BM25 needs no hand-made
-    queries). Attributes already in gold_attributes.json keep their hand-written entry."""
+    queries). Attributes already in gold_attributes.json keep their hand-written entry. keep: a test on the code
+    (heldout.is_heldout for --heldout: only attributes never tuned on)."""
     import collections as C
     where = TIERS[tier] if tier == "reviewed" else f"AND({TIERS[tier]}, NOT({{Data Reviewed}}))"
     count = C.Counter()
@@ -120,7 +121,7 @@ def auto_attributes(token, bases, tier, n, have):
             _, code, _ = gold_id(f.get("Metadata ID"))
             if code and nr not in LEFT_OUT:
                 count[code] += 1
-    codes = [c for c, _ in count.most_common() if c not in have][:max(n * 3, n)]
+    codes = [c for c, _ in count.most_common() if c not in have and (keep is None or keep(c))][:max(n * 3, n)]
     meta = {}
     for b in bases:                     # the first base that answers: Metadata Codes is the same list in each
         for r in read_base(token, b, "Metadata Codes", ["Global Metadata Code (GMC)", "Description", "Definition", "Data Type", "Select Options"]):
@@ -347,6 +348,7 @@ def main():
                     help="write narrative_disagreements.csv (every wrong answer, for a person to judge) and print it to the log")
     ap.add_argument("--pages", choices=["ts", "bm25", "fused"], default=PAGE_SEARCH,
                     help="page search: ts (default), bm25 or fused; compare on the same answers before changing the default")
+    ap.add_argument("--heldout", type=int, default=0, help="read only the N held-out judgement attributes with most answers (heldout.py), questions from Metadata Codes")
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
     ap.add_argument("--evidence", choices=["pages", "pack3"], default="pack3",
                     help="what the model reads: the evidence pack and one to three quotes (evidence_pack.py, the default since 6 Nov 2026), or the pages and one quote")
@@ -365,6 +367,9 @@ def main():
     token = os.environ.get("GOLD_TOKEN", "").strip()
     if a.auto and token:
         cfg.update(auto_attributes(token, bases, a.tier, a.auto, set(cfg)))
+    if a.heldout and token:                        # only held-out attributes, never tuned on (heldout.py)
+        import heldout
+        cfg = auto_attributes(token, bases, a.tier, a.heldout, set(), keep=heldout.is_heldout)
     codes = [c for c in cfg if not a.attributes or c in a.attributes.split(",")]
     if not token or not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("narrative_eval.md", "w").write("### Narrative evaluation: GOLD_TOKEN or ANTHROPIC_API_KEY is not set; nothing run.\n")
