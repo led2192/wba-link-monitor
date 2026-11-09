@@ -11,6 +11,9 @@ class Waiting(unittest.TestCase):
                 (3, "u", "", "active", None, None, 5, "create table if not exists public.page_map (x int)"),
                 (4, "u", "", "active", "Lock", "relation", 30, "  CREATE INDEX if not exists page_map_words on public.page_map using gin (words)")]
         self.assertEqual([r[0] for r in L.waiting_schema(rows)], [1, 4])
+        schema = (5, "u", "", "active", "Lock", "relation", 1394, "-- Schema of the evidence database (Supabase project wba-evidence).\n-- Applied by load_supabase.py on every committed run.\ncreate extension if not exists vector")
+        self.assertEqual([r[0] for r in L.waiting_schema([schema])], [5])
+        self.assertEqual(L.statement_text("-- a\n-- b\n  ALTER TABLE x"), "alter table x")
 
 
 if __name__ == "__main__":
