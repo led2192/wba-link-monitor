@@ -66,7 +66,8 @@ class Anchor(unittest.TestCase):
             X.ANCHOR = "pages"
             self.assertEqual(X.hints(None, (2023, 4892000000.0, {("d", 3): body}), 2024, {"unit_family": "currency"}), "")
         finally:
-            X.ANCHOR = "off"
+            X.ANCHOR = "note"                                   # the default since 9 Nov 2026
+        self.assertEqual(X.ANCHOR, "note")
 
 
 class AgainstPostgres(unittest.TestCase):
