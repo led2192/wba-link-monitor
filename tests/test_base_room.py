@@ -60,6 +60,22 @@ class BaseRoom(unittest.TestCase):
         self.assertEqual(sorted(l for l, *_ in cands), ["b", "e"])      # a cited, d verified, f recent; e is stale and untyped (rule C)
         self.assertEqual(c["candidates"], len(cands))
 
+    def test_type_coverage_counts_companies_per_type_and_year(self):
+        docs = [doc(library_id="a", wba_id="C1", year=2024, source_type_check="Sustainability Report"),
+                doc(library_id="b", wba_id="C1", year=2024, source_type_check="Sustainability Report"),      # same company twice: once
+                doc(library_id="c", wba_id="C2", year=2024, source_type_check="ESG Report"),
+                doc(library_id="d", wba_id="C3", year=2024, source_type_check="", discard=True),                # discarded: out
+                doc(library_id="e", wba_id="C4", year=2019, source_type_check="Annual Report")]                  # year not reported
+        cov = B.type_coverage(docs)
+        self.assertEqual(cov[("Sustainability Report", 2024)], {"C1"})
+        self.assertEqual(cov[("ESG Report", 2024)], {"C2"})
+        self.assertEqual(cov[("any", 2024)], {"C1", "C2"})
+        self.assertNotIn(("Annual Report", 2019), cov)
+        c, by, nofile, cands = B.analyse(docs, set(), KEYS, TODAY)
+        md = B.report_md({"report_library": 5}, c, by, nofile, cands, TODAY, docs)
+        self.assertIn("| Any document | 0 | 2 | 0 |", md)
+        self.assertIn("| Sustainability Report | 0 | 1 | 0 | 0% | 50% | 0% |", md)
+
     def test_rule_c_needs_a_stale_row(self):
         c, _, _, cands = B.analyse([doc(library_id="e", year=None, source_type_check="", first_seen="2025-12-01")], set(), KEYS, TODAY)
         self.assertEqual(cands[0][1], "C")

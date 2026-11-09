@@ -261,3 +261,6 @@ Metadata Codes descriptions are written for analysts ("Number of patients treate
 
 ## A query parameter compared with null needs a cast (9 Nov 2026)
 psycopg sends `%s` parameters untyped and lets Postgres infer the type from where they are used. `case when %s is null` gives Postgres nothing to infer from, so the query fails with "IndeterminateDatatype: could not determine data type of parameter $2", on every row. The first `extract_eval --select map` run (42635984142) died that way after 10 answers, and the offline test did not see it because the stub cursor runs no SQL. Write `%s::text is null` (or the real type) wherever a parameter is only compared, and let the tests assert that the SQL carries the cast, since they cannot run it.
+
+## first_seen is not when the row was created (9 Nov 2026)
+`report_library.first_seen` was filled in bulk when the field was added, so on old rows it holds a recent date. The first Base room run (42643649106) read 43,167 documents "arrived in the last 30 days" and found 0 stale documents without a file, both wrong. The record's own creation time (`createdTime` on the API record) is the age that cannot lie; use it for any age or intake measure, and treat first_seen as the pipeline's first sighting only where it was written by the pipeline.
