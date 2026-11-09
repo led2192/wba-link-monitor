@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 Document map creates only its own table (`doc_map.ensure_table`) instead of applying the whole schema, whose alter-table lines locked `public.pages` behind the running readers (#287)
 - 2026-11-09 Document map: `doc_map.py` and the `Document map` workflow write one model line per page of the key documents into `public.page_map` (schema.sql) with words and embeddings; `extract_eval --select map|map-half` reads the pages the map names (#286)
 - 2026-11-09 `extract_eval --reads N`: the model's pages read N times in different orders; agreement between reads, accuracy when they agree and the ceiling reported (#285)
 - 2026-11-09 `extract_eval --frequency pages`: a census of the big numbers printed on two or more pages of the year's documents raises the pages that print them; diagnostic of how often the validated figure recurs (#284)

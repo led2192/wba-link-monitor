@@ -69,6 +69,31 @@ def parse_lines(text, pages):
     return out
 
 
+PAGE_MAP_SQL = """
+create table if not exists public.page_map (
+  library_id  text not null references public.documents (library_id),
+  page        int  not null,
+  summary     text not null,
+  words       tsvector generated always as (public.page_words(summary)) stored,
+  embedding   extensions.vector(384),
+  model       text,
+  written     timestamptz not null default now(),
+  primary key (library_id, page)
+);
+create index if not exists page_map_words on public.page_map using gin (words);
+"""
+
+
+def ensure_table(cur):
+    """Creates public.page_map when missing: only its own statements, never the whole schema.sql, whose
+    "alter table public.pages add column if not exists" takes an exclusive lock on the pages table and waited
+    behind the running readers (9 Nov 2026, the first Document map run hung on it and was cancelled)."""
+    cur.execute("select to_regclass('public.page_map')")
+    if cur.fetchone()[0] is None:
+        cur.execute(PAGE_MAP_SQL)
+        cur.connection.commit()
+
+
 def documents_to_map(cur, doc_types, companies, year_min, max_docs):
     """[(library_id, pages not yet mapped)] of the key documents, newest first, companies given or all."""
     q = ("select d.library_id, d.year, count(p.page) from public.documents d join public.pages p using (library_id) "
@@ -195,6 +220,7 @@ def main():
     conn = evidence_db.connect()
     cur = conn.cursor()
     cur.execute("set statement_timeout = '120s'")
+    ensure_table(cur)
     types = [t.strip() for t in a.doc_types.split(",") if t.strip()]
     if a.command == "status":
         cur.execute("select count(*), count(embedding) from public.page_map")

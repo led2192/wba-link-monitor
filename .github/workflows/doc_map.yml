@@ -46,10 +46,6 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install sentence-transformers
-      - name: Apply the schema (page_map table)
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: python -c "import load_supabase as L; c = L.connect(__import__('os').environ['SUPABASE_DB_URL']); L.apply_schema(c, True)"
       - name: Map
         env:
           GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
