@@ -16,6 +16,12 @@ on:
       doc_types:
         description: "document types to map, comma-separated (blank = the key types in doc_map.py)"
         default: ""
+      sample_limit:
+        description: "with companies=sample: validated answers per attribute (as the evaluation's limit)"
+        default: "100"
+      attributes:
+        description: "with companies=sample: only these attribute codes, comma-separated (blank = all, plus held-out)"
+        default: ""
       max_docs:
         description: "documents per run"
         default: "200"
@@ -53,7 +59,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           READER_MODEL: claude-haiku-5-5
         run: |
-          ARGS="${{ inputs.command }} --companies ${{ inputs.companies }} --max-docs ${{ inputs.max_docs }} --max-usd ${{ inputs.max_usd }}"
+          ARGS="${{ inputs.command }} --companies ${{ inputs.companies }} --max-docs ${{ inputs.max_docs }} --max-usd ${{ inputs.max_usd }} --sample-limit ${{ inputs.sample_limit || '100' }}"
+          [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
           [ -n "${{ inputs.doc_types }}" ] && ARGS="$ARGS --doc-types \"${{ inputs.doc_types }}\""
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
           eval python doc_map.py $ARGS

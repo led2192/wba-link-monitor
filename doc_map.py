@@ -94,15 +94,19 @@ def ensure_table(cur):
         cur.connection.commit()
 
 
-def documents_to_map(cur, doc_types, companies, year_min, max_docs, years=None):
-    """[(library_id, pages not yet mapped)] of the key documents, newest first, companies given or all, and
-    only the given years when years is given (the evaluation sample's years and the year after each)."""
+def documents_to_map(cur, doc_types, companies, year_min, max_docs, years=None, pairs=None):
+    """[(library_id, pages not yet mapped)] of the key documents, newest first, companies given or all, only the
+    given years when years is given, and only the (company, year) pairs when pairs is given: the documents the
+    evaluation reads for its sample answers (9 Nov 2026: the first build, newest first over every sample
+    company, mapped 2026 and 2025 documents that no 2023 or 2024 answer reads; 2% to 5% of the answers had a map)."""
     q = ("select d.library_id, d.year, count(p.page) from public.documents d join public.pages p using (library_id) "
          "left join public.page_map m on m.library_id = p.library_id and m.page = p.page "
          "where d.doc_type = any(%s) and coalesce(d.year, 0) >= %s and m.page is null"
-         + (" and d.wba_id = any(%s)" if companies else "") + (" and d.year = any(%s)" if years else "") +
+         + (" and d.wba_id = any(%s)" if companies else "") + (" and d.year = any(%s)" if years else "")
+         + (" and d.wba_id || '|' || d.year::text = any(%s)" if pairs else "") +
          " group by d.library_id, d.year order by d.year desc, d.library_id limit %s")
-    params = [doc_types, year_min] + ([companies] if companies else []) + ([sorted(years)] if years else []) + [max_docs]
+    params = [doc_types, year_min] + ([companies] if companies else []) + ([sorted(years)] if years else []) \
+        + ([sorted(f"{w}|{y}" for w, y in pairs)] if pairs else []) + [max_docs]
     cur.execute(q, params)
     return [(lid, n) for lid, _, n in cur.fetchall()]
 
@@ -145,25 +149,31 @@ def gold_companies(token):
     return sorted(out)
 
 
-def sample_companies(token, limit):
-    """(companies, years) of the evaluation sample: the first `limit` validated answers per attribute of
-    attributes.json, as extract_eval takes them (gold_values order), plus the held-out number attributes it reads
-    (heldout.number_codes, 30 answers each); years are the answers' years and the year after each (a report of
-    the next year carries the comparative column). Maps exactly what the evaluations need first."""
+def sample_companies(token, limit, attributes=None):
+    """(companies, years, pairs) of the evaluation sample: the first `limit` validated answers per attribute of
+    attributes.json (or of `attributes` only, when given), as extract_eval takes them (gold_values order), plus the
+    held-out number attributes it reads (heldout.number_codes, 30 answers each; skipped when attributes are given);
+    years are the answers' years and the year after each (a report of the next year carries the comparative
+    column), and pairs the (company, year) couples the readers open for those answers. Maps exactly what the
+    evaluations need first."""
     from value_eval import gold_values
     import heldout
     here = os.path.dirname(os.path.abspath(__file__))
     cfg = json.load(open(os.path.join(here, "gold_attributes.json"), encoding="utf-8"))
     spec = json.load(open(os.path.join(here, "attributes.json"), encoding="utf-8"))
     bases = list(cfg["bases"].values())
-    meta = heldout.metadata_codes(token, bases)
-    plan = [(c, limit) for c in spec["attributes"]] + [(c, 30) for c in heldout.number_codes(meta, 20)]
-    companies, years = set(), set()
+    if attributes:
+        plan = [(c, limit) for c in attributes]
+    else:
+        meta = heldout.metadata_codes(token, bases)
+        plan = [(c, limit) for c in spec["attributes"]] + [(c, 30) for c in heldout.number_codes(meta, 20)]
+    companies, years, pairs = set(), set(), set()
     for code, n in plan:
         rows = [g for b in bases for g in gold_values(token, b, [code]) if g["value"]][:n]
         for g in rows:
             companies.add(g["wba"]); years.add(g["year"]); years.add(g["year"] + 1)
-    return sorted(companies), sorted(years)
+            pairs.add((g["wba"], g["year"])); pairs.add((g["wba"], g["year"] + 1))
+    return sorted(companies), sorted(years), pairs
 
 
 def embedder():
@@ -299,6 +309,7 @@ def main():
     ap.add_argument("--doc-types", default=",".join(KEY_TYPES))
     ap.add_argument("--companies", default="sample", help="sample (the companies and years of the evaluation sample, --sample-limit answers per attribute), gold (companies with validated answers), all, or WBA ids comma-separated")
     ap.add_argument("--sample-limit", type=int, default=100, help="with --companies sample: validated answers per attribute, as extract_eval --limit takes them")
+    ap.add_argument("--attributes", default="", help="with --companies sample: only these attribute codes, comma-separated (no held-out ones)")
     ap.add_argument("--years", type=int, default=YEAR_MIN, help="documents of this year or later")
     ap.add_argument("--max-docs", type=int, default=200)
     ap.add_argument("--max-usd", type=float, default=5.0)
@@ -324,16 +335,17 @@ def main():
             return 1
         print(f"embedded {embed_missing(cur, m, a.commit):,} lines" + ("" if a.commit else " (dry run: one batch, nothing written)"))
         return 0
-    companies, years = None, None
+    companies, years, pairs = None, None, None
     if a.companies == "sample":
-        companies, years = sample_companies(os.environ["GOLD_TOKEN"].strip(), a.sample_limit)
-        print(f">>> evaluation sample: {len(companies)} companies, years {', '.join(map(str, years))}", flush=True)
+        attrs = [c.strip() for c in a.attributes.split(",") if c.strip()]
+        companies, years, pairs = sample_companies(os.environ["GOLD_TOKEN"].strip(), a.sample_limit, attrs or None)
+        print(f">>> evaluation sample: {len(companies)} companies, years {', '.join(map(str, years))}, {len(pairs)} company-years", flush=True)
     elif a.companies == "gold":
         companies = gold_companies(os.environ["GOLD_TOKEN"].strip())
         print(f">>> {len(companies)} companies with validated answers", flush=True)
     elif a.companies != "all":
         companies = [c.strip() for c in a.companies.split(",") if c.strip()]
-    docs = documents_to_map(cur, types, companies, a.years, a.max_docs, years)
+    docs = documents_to_map(cur, types, companies, a.years, a.max_docs, years, pairs)
     print(f">>> {len(docs)} documents with {sum(n for _, n in docs):,} pages to map" + ("" if a.commit else " (dry run: first document only, nothing written)"), flush=True)
     usage = collections.Counter()
     model = os.environ.get("READER_MODEL") or DEFAULT_MODEL
