@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `--spec-by model` (`heldout.model_spec`): built specs with labels, exclusions and search terms written by a model from the name and definition, for attributes with no hand-written spec (#282)
 - 2026-11-09 The model reader reads 16 ranked pages, not 8 (`extract_eval.MODEL_PAGES`): +3.5 on revenue, employees and Scope 1 and 2, nothing worse on development or held-out attributes. Recorded: first held-out reading (numbers 9%, yes/no 62% against 67% for a constant answer) and built specs 17 points below hand-written ones (#281)
 - 2026-11-08 Held-out specs search for content words (`heldout.core_terms`, `heldout.auto_queries`), since the first held-out runs found no pages; `extract_eval --auto-spec` and `narrative_eval --auto-spec` read development attributes with built specs. Decisions recorded: 16 pages +3.5 on revenue, employees and Scope 1 and 2 (not yet default), extractor and selector dropped for numbers (#280)
 - 2026-11-08 Held-out attributes (`heldout.py`): a quarter of the attribute codes, by a hash, kept out of development; `extract_eval --heldout N` and `narrative_eval --heldout N` read only them, with specs from Metadata Codes and nothing written by hand. The narrative workflow's input `auto` becomes `options` (free narrative_eval flags) (#279)

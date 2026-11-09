@@ -45,6 +45,28 @@ class HeldOut(unittest.TestCase):
         self.assertLessEqual(len(q), 12)
         self.assertEqual(H.auto_queries("Number of employees"), ["employees"])
 
+    def test_parse_spec_reply(self):
+        l, e, t = H.parse_spec_reply('Here: {"labels": ["Total Revenue", "turnover", "x"], "exclude": ["per share"], "terms": ["net sales"]}')
+        self.assertEqual(l, ["total revenue", "turnover"])
+        self.assertEqual(e, ["per share"])
+        self.assertEqual(t, ["net sales"])
+        self.assertEqual(H.parse_spec_reply("not json"), ([], [], []))
+
+    def test_model_spec_adds_to_the_built_spec_and_sees_no_answers(self):
+        seen = {}
+        def call(messages, usage, sess=None, system=None, max_tokens=None):
+            seen["prompt"] = messages[0]["content"]
+            return '{"labels": ["headcount", "employees"], "exclude": ["average"], "terms": ["number employees"]}'
+        base = H.auto_number_spec({"Description": "Number of employees", "Definition": "People employed at year end."}, [""])
+        s = H.model_spec(base, {}, call=call)
+        self.assertEqual(s["labels"][0], base["labels"][0])
+        self.assertIn("headcount", s["labels"])
+        self.assertEqual(s["exclude"], ["average"])
+        self.assertIn("number employees", s["more_terms"])
+        self.assertEqual(s["spec_by"], "model")
+        self.assertIn("People employed at year end.", seen["prompt"])
+        self.assertEqual(H.model_spec(base, {}, call=lambda *a, **k: "")["spec_by"], "description")
+
     def test_spec_has_no_hand_written_parts(self):
         s = H.auto_number_spec({"Description": "Total energy consumption", "Definition": "<p>All energy used.</p>"}, ["MWh"])
         self.assertEqual(s["exclude"], [])

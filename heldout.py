@@ -152,6 +152,55 @@ def number_codes(meta, n, dev=None):
     return codes[:max(n * 3, n)]
 
 
+SPEC_SYSTEM = ("You prepare search words for finding one figure or disclosure in company reports (annual, sustainability, "
+               "integrated reports, 10-K). You never see the reports. Reply with JSON only.")
+
+
+def spec_prompt(name, definition, kind, unit_family=""):
+    return (f"Attribute: {name}\nDefinition: {definition}\nKind: {kind}" + (f", unit family {unit_family}" if unit_family else "") + "\n\n"
+            "Write the words a report prints next to this figure or in the passage that discloses it. Reply with one JSON object:\n"
+            '{"labels": [up to 20 short phrases a report prints as the row label or heading, most common first, lower case; '
+            "include synonyms, abbreviations and the usual wording in French, German, Spanish, Portuguese, Italian, Dutch, "
+            'Japanese and Chinese], '
+            '"exclude": [up to 10 short phrases that, printed on the same line, mean a different figure (a ratio, a target, '
+            'a part, another period)], '
+            '"terms": [up to 6 two or three word searches that find the page]}')
+
+
+def parse_spec_reply(text):
+    """(labels, exclude, terms) from the model's JSON reply, each a list of short lower-case strings; empty lists
+    when the reply is not JSON."""
+    m = re.search(r"\{.*\}", text or "", flags=re.S)
+    try:
+        j = json.loads(m.group(0)) if m else {}
+    except ValueError:
+        j = {}
+    def clean(xs, n):
+        out = []
+        for x in xs if isinstance(xs, list) else []:
+            x = re.sub(r"\s+", " ", str(x)).strip().lower()
+            if 2 <= len(x) <= 60:
+                out.append(x)
+        return list(dict.fromkeys(out))[:n]
+    return clean(j.get("labels"), 20), clean(j.get("exclude"), 10), clean(j.get("terms"), 6)
+
+
+def model_spec(entry, usage, sess=None, call=None):
+    """The entry with labels, exclusions and search terms written by a model from its name and definition only
+    (never from answers or pages), added to the ones built from the description. One call per attribute."""
+    if call is None:
+        from model_reader import call
+    reply = call([{"role": "user", "content": spec_prompt(entry["name"], entry.get("definition", ""), entry.get("type", "number"), entry.get("unit_family", ""))}],
+                 usage, sess=sess, system=SPEC_SYSTEM, max_tokens=900)
+    labels, exclude, terms = parse_spec_reply(reply)
+    out = dict(entry)
+    out["labels"] = list(dict.fromkeys(entry.get("labels", []) + labels))
+    out["exclude"] = list(dict.fromkeys(entry.get("exclude", []) + exclude))
+    out["more_terms"] = list(dict.fromkeys(entry.get("more_terms", []) + terms))
+    out["spec_by"] = "model" if (labels or terms) else "description"
+    return out
+
+
 if __name__ == "__main__":                 # list the held-out codes of a code list given on stdin, for a quick check
     import sys
     for line in sys.stdin:
