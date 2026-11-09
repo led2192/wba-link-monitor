@@ -1,0 +1,63 @@
+name: Document map
+
+# Draws the document map (doc_map.py): one line per page of the key documents, written once by a model and
+# stored in public.page_map, so every attribute finds pages by what they are about. Manual only; writes
+# only with commit = true. The embedding library is installed so the lines get a multilingual embedding.
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "build (summarise unmapped pages), embed (fill embeddings), status"
+        default: "status"
+      companies:
+        description: "gold (companies with validated answers), all, or WBA ids comma-separated"
+        default: "gold"
+      doc_types:
+        description: "document types to map, comma-separated (blank = the key types in doc_map.py)"
+        default: ""
+      max_docs:
+        description: "documents per run"
+        default: "200"
+      max_usd:
+        description: "stop when the model cost reaches this (dollars)"
+        default: "5"
+      commit:
+        description: "true to write the lines (dry run otherwise)"
+        default: "false"
+
+concurrency:
+  group: doc-map
+  cancel-in-progress: false
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Install the embedding model's library (CPU)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install sentence-transformers
+      - name: Apply the schema (page_map table)
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -c "import load_supabase as L; c = L.connect(__import__('os').environ['SUPABASE_DB_URL']); L.apply_schema(c, True)"
+      - name: Map
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          READER_MODEL: claude-haiku-5-5
+        run: |
+          ARGS="${{ inputs.command }} --companies ${{ inputs.companies }} --max-docs ${{ inputs.max_docs }} --max-usd ${{ inputs.max_usd }}"
+          [ -n "${{ inputs.doc_types }}" ] && ARGS="$ARGS --doc-types \"${{ inputs.doc_types }}\""
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          eval python doc_map.py $ARGS

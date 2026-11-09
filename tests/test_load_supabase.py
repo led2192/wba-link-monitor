@@ -1,4 +1,4 @@
-import os
+import re, os
 import tempfile
 import unittest
 
@@ -87,11 +87,11 @@ class AgainstPostgres(unittest.TestCase):
         store_files(d)
         schema = open(L.SCHEMA).read()
         schema = "\n".join(l for l in schema.splitlines() if "extension if not exists vector" not in l)
-        schema = schema.replace("extensions.vector(1024)", "real[]")
+        schema = re.sub(r"extensions\.vector\(\d+\)", "real[]", schema)
         L.SCHEMA = os.path.join(d, "schema.sql"); open(L.SCHEMA, "w").write(schema)
         url = os.environ["PG_TEST_URL"]
         with psycopg.connect(url) as c:
-            c.execute("drop table if exists public.datapoints, public.passages, public.pages, public.documents, "
+            c.execute("drop table if exists public.page_map, public.datapoints, public.passages, public.pages, public.documents, "
                       "public.load_log, public.load_state, public.search_access cascade")
             c.execute("drop function if exists public.search_pages, public.search_summary, public.search_passages")
             # the state of the database before this change: pages without stored words, the text-only index

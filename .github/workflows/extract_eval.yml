@@ -41,15 +41,15 @@ on:
         options: [db, pymupdf, docling]
         default: db
       select:
-        description: "how the rank half of the model's 8 pages is chosen: base (today), learned (page_select.py), or oracle (diagnostic: the pages printing the figure first)"
+        description: "how the model's pages are chosen: base (today), learned (page_select.py), oracle (diagnostic: the pages printing the figure first), map or map-half (the document map, doc_map.py)"
         type: choice
-        options: [base, learned, oracle]
+        options: [base, learned, oracle, map, map-half]
         default: base
       options:
         description: "more extract_eval options, e.g. --order reversed (position bias) or --unstated-basis keep (Scope 2 with no basis stated filed under market too) or --heldout 20 (20 held-out number attributes, heldout.py)"
         default: ""
   pull_request:
-    paths: [extract_eval.py, model_reader.py, heldout.py, decision_rules.json, page_select.py, table_text.py, attributes.json, .github/workflows/extract_eval.yml]
+    paths: [extract_eval.py, model_reader.py, heldout.py, doc_map.py, decision_rules.json, page_select.py, table_text.py, attributes.json, .github/workflows/extract_eval.yml]
 
 concurrency:                      # a newer commit of the same pull request replaces the older run (1 Nov 2026: two pushes
                                   # 4 s apart ran two 2-hour scorings that slowed each other past the limit). Manual runs
@@ -71,7 +71,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - name: Install the embedding model's library (CPU), for the learned page choice
-        if: github.event_name == 'workflow_dispatch' && inputs.select == 'learned'
+        if: github.event_name == 'workflow_dispatch' && (inputs.select == 'learned' || startsWith(inputs.select, 'map'))
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install sentence-transformers

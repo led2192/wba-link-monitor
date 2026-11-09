@@ -368,7 +368,9 @@ def read_text(lid, page, body):
 PAGE_ORDER = "today"     # "reversed" (--order): the model reads the same pages in the opposite order
 READS = 1                # --reads N (9 Nov 2026): the model reads the same pages N times in different orders; the answer stays
                          # the first read's, and the run reports agreement between reads and accuracy when they agree or not
-SELECT = "base"          # how the rank half of the model's pages is chosen: "base" (today) or "learned" (--select)
+SELECT = "base"          # how the rank half of the model's pages is chosen: "base" (today) or "learned" (--select);
+                         # "map": the pages the document map names (doc_map.py, 9 Nov 2026); "map-half": half map, half today
+MAP_EMBEDDER = None      # the sentence model that embeds the map query, when the library is installed
 SELECT_MODEL = None      # page_select.load() when SELECT is "learned"
 EMBEDDER = None          # page_select.Embedder() when SELECT is "learned"
 
@@ -385,6 +387,22 @@ def model_pages(scored, code=None, attr=None, pages=None, docs=None, fold=None):
             seen = set(o)
             scored = [scored[i] for i in o] + [x for j, x in enumerate(scored) if j not in seen]
     return pages_for_model(scored, MODEL_PAGES)
+
+
+def map_model_pages(cur, ids, year, attr, spec, best_pages, n):
+    """Up to n pages named by the document map for the attribute (doc_map.map_pages), as model page tuples
+    (score, candidate, library_id, page, body), best first. [] when the documents have no map yet, so the
+    caller keeps today's pages: a company whose map is not drawn reads as today."""
+    import doc_map
+    query = doc_map.map_query(attr)
+    qvec = MAP_EMBEDDER.m.encode([query], normalize_embeddings=True)[0] if MAP_EMBEDDER else None
+    got = doc_map.map_pages(cur, ids, query, n, qvec)
+    out = []
+    for lid, page, body, s in got:
+        cs = candidates(body, year, attr, spec)
+        top = max(cs, key=lambda c: c[0]) if cs else None
+        out.append((s, top, lid, page, body))
+    return out
 
 
 def pages_for_model(scored, n):
@@ -855,6 +873,12 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     best_pages = model_pages(scored, g["attribute"], attr, pages, docs, rank_eval.fold_of(g["wba"]))
     if SELECT == "oracle" and holding:       # stage diagnostic, not an option (7 Nov 2026)
         best_pages = oracle_pages(holding, rows, best_pages)
+    if SELECT in ("map", "map-half"):        # the document map's pages (doc_map.py, 9 Nov 2026)
+        mapped = map_model_pages(cur, ids, g["year"], attr, spec, best_pages, MODEL_PAGES if SELECT == "map" else MODEL_PAGES // 2)
+        r["map_pages"] = len(mapped)
+        r["map_hit"] = any(found_on(b, v) for *_, b in mapped for v, _, _ in forms)
+        if mapped:
+            best_pages = mapped if SELECT == "map" else mapped + [x for x in best_pages if (x[2], x[3]) not in {(m[2], m[3]) for m in mapped}][:MODEL_PAGES - len(mapped)]
     if PAGE_ORDER == "reversed":              # metamorphic check: the same pages in the opposite order
         best_pages = list(reversed(best_pages))
     r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
@@ -911,7 +935,7 @@ def main():
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
     ap.add_argument("--guidance", default="today", choices=["today", "learned", "check", "md"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt; md: WBA's own assessment guidance per attribute (Pipeline QA attribute_guidance) in the prompt")
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
-    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
+    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle", "map", "map-half"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
@@ -970,6 +994,13 @@ def main():
             open("extract_eval.md", "w").write(f"### Extraction: --select learned needs {os.path.basename(page_select.MODEL_FILE)} (select_eval.py --save); nothing run.\n")
             return 1
         EMBEDDER = page_select.Embedder()   # part of what was measured: no silent fallback
+    if SELECT in ("map", "map-half"):
+        global MAP_EMBEDDER
+        try:
+            import page_select
+            MAP_EMBEDDER = page_select.Embedder()
+        except Exception as e:
+            print(f">>> map query by words only ({type(e).__name__}: {str(e)[:80]})", flush=True)
     if a.reader == "model" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("extract_eval.md", "w").write("### Extraction: the model reader needs ANTHROPIC_API_KEY (a repository secret); nothing run.\n")
         return 0
@@ -1100,6 +1131,9 @@ def main():
                 s["memory"] += 1; s["memory in_pages"] += bool(r["in_pages"]); s["memory right"] += bool(r["right"])
             if r.get("anchor"):
                 s["anchor"] += 1; s["anchor hit"] += bool(r.get("anchor_hit")); s["anchor right"] += bool(r["right"])
+            if "map_pages" in r:
+                s["map answers"] += 1; s["map with pages"] += bool(r["map_pages"]); s["map hit"] += bool(r.get("map_hit"))
+                s["map right"] += bool(r["map_pages"] and r["right"]); s["no map right"] += bool(not r["map_pages"] and r["right"])
             if r.get("reads"):
                 s["reads"] += 1; s["agree"] += bool(r["agree"]); s["agree right"] += bool(r["agree"] and r["right"])
                 s["disagree right"] += bool(not r["agree"] and r["right"]); s["any right"] += bool(r.get("any_right"))
@@ -1260,6 +1294,17 @@ def main():
                   f"{s['memory right'] / (s['memory'] or 1):.0%} | {s['no memory']:,} | {s['no memory in_pages'] / (s['no memory'] or 1):.0%} | "
                   f"{s['no memory right'] / (s['no memory'] or 1):.0%} |")
     md.append("")
+    if SELECT in ("map", "map-half"):
+        md += [f"Document map (--select {SELECT}, 9 Nov 2026): the model's pages (or half of them) are the pages whose map lines "
+               "(doc_map.py) best match the attribute's name and definition. Answers whose documents have a map, where the "
+               "map's pages hold the figure, and right with and without a map:", "",
+               "| Attribute | Answers | With a map | Map pages hold the figure | Right with a map | Right without |", "| --- | --: | --: | --: | --: | --: |"]
+        for c in codes:
+            s = stats[c]
+            n = s["map answers"]; w = s["map with pages"]
+            md.append(f"| {c} {spec['attributes'][c]['name']} | {n:,} | {w / (n or 1):.0%} | {s['map hit'] / (w or 1):.0%} | "
+                      f"{s['map right'] / (w or 1):.0%} | {s['no map right'] / ((n - w) or 1):.0%} |")
+        md.append("")
     if READS > 1:
         md += [f"Quorum (--reads {READS}, 9 Nov 2026): the same pages read {READS} times in different orders; the answer scored is the "
                "first read's. Share of answers where every read gave the same figure (or none), accuracy when they agree and when "

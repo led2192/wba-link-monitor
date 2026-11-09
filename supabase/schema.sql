@@ -112,6 +112,22 @@ create table if not exists public.passages (
 create index if not exists passages_dims on public.passages using gin (dims);
 create index if not exists passages_words on public.passages using gin (public.page_words(body));
 
+-- The document map (doc_map.py, 9 Nov 2026): one line per page, written once by a model, saying what the
+-- page holds (section or table, metrics, years), so any attribute finds pages by what they are about
+-- rather than by its own labels. embedding: paraphrase-multilingual-MiniLM-L12-v2 (384), filled by the
+-- builder when the library is installed; the words index serves without it.
+create table if not exists public.page_map (
+  library_id  text not null references public.documents (library_id),
+  page        int  not null,
+  summary     text not null,
+  words       tsvector generated always as (public.page_words(summary)) stored,
+  embedding   extensions.vector(384),
+  model       text,
+  written     timestamptz not null default now(),
+  primary key (library_id, page)
+);
+create index if not exists page_map_words on public.page_map using gin (words);
+
 -- Extracted values, one per company x attribute x period. Empty until the extraction pilot.
 create table if not exists public.datapoints (
   id            bigint generated always as identity primary key,
