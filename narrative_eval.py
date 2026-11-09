@@ -222,7 +222,8 @@ def prompt(attr, pages, company):
     return "\n".join(lines)
 
 
-ANSWER = re.compile(r'"answer"\s*:\s*("(?:yes|no|true|false)"|\[[^\]]*\])', re.I)
+ANSWER = re.compile(r'"answer"\s*:\s*("(?:yes|no|true|false|not found|not_found|unknown)"|\[[^\]]*\])', re.I)
+NOT_FOUND = "not found"       # the yes/no reader's third answer with --abstain on (9 Nov 2026)
 
 
 def salvage(raw):
@@ -243,6 +244,8 @@ def read_reply(reply, attr):
         return None, None, ""
     a = reply.get("answer")
     if attr["type"] == "boolean":
+        if str(a).strip().lower().replace("_", " ") in ("not found", "unknown", "not stated", "none"):
+            return NOT_FOUND, reply.get("page"), str(reply.get("quote") or "")[:300]
         a = str(a).strip().lower() in ("yes", "true") if a is not None else None
     else:
         known = {o.lower(): o for o in attr["options"]}
@@ -258,6 +261,11 @@ def score(stats, attr, truth, answer):
         s["no reply"] += 1
         return False
     if attr["type"] == "boolean":
+        if answer == NOT_FOUND:               # scored as "no", today's answer when nothing is found, and counted apart
+            s["not found"] += 1; s["not found, truth yes"] += truth
+            answer = False
+        else:
+            s["found"] += 1; s["found right"] += answer == truth
         ok = answer == truth
         s["truth yes"] += truth; s["said yes"] += answer; s["yes and right"] += truth and answer
     else:
@@ -355,7 +363,12 @@ def main():
     ap.add_argument("--auto", type=int, default=0, help="also read the N judgement attributes with most answers in these bases")
     ap.add_argument("--evidence", choices=["pages", "pack3"], default="pack3",
                     help="what the model reads: the evidence pack and one to three quotes (evidence_pack.py, the default since 6 Nov 2026), or the pages and one quote")
+    ap.add_argument("--abstain", choices=["on", "off"], default="off",
+                    help="on: the yes/no reader may answer \"not found\" when no passage addresses the question (scored as no, counted apart): how often the reader says no for want of a passage, and the analyst's yes among those (9 Nov 2026)")
     a = ap.parse_args()
+    if a.abstain == "on":
+        import pack_eval
+        pack_eval.ABSTAIN = True
     if a.evidence == "pack3":
         import evidence_pack
         globals()["PACK_TERMS"] = evidence_pack.load()
@@ -501,6 +514,18 @@ def main():
         s = stats[c]
         n = sum(s["wrong: " + w] for w in WHERE)
         md += f"| {c} | {n:,} | " + " | ".join(f"{s['wrong: ' + w]:,}" for w in WHERE) + " |\n"
+    if a.abstain == "on":
+        md += ("\nAbstention (--abstain on, 9 Nov 2026): the yes/no reader could answer \"not found\" when no passage addressed the "
+               "question; those answers are scored as no, as today. Share not found, the analyst's yes among them (what a wider "
+               "search could recover), and accuracy among the answers the reader did find:\n\n"
+               "| Attribute | Answers | Not found | Analyst yes among not found | Found | Right when found |\n| --- | --: | --: | --: | --: | --: |\n")
+        for c in codes:
+            s = stats[c]
+            if cfg[c]["type"] != "boolean" or not s["answers"]:
+                continue
+            nf = s["not found"]; f = s["found"]
+            md += (f"| {c} {cfg[c]['name']} | {s['answers']:,} | {nf / s['answers']:.0%} | {s['not found, truth yes'] / (nf or 1):.0%} | "
+                   f"{f:,} | {s['found right'] / (f or 1):.0%} |\n")
     if stop:
         md += f"\nStopped at {stop}.\n"
     open("narrative_eval.md", "w").write(md)

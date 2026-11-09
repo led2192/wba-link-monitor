@@ -38,7 +38,7 @@ on:
         description: "what the model reads: pack3 (the evidence pack and one to three quotes, the default since 6 Nov 2026), or the pages of a page search: ts, bm25 or fused"
         default: pack3
       options:
-        description: "more narrative_eval options, e.g. --auto 10 (also the 10 yes/no and list attributes with most answers) or --heldout 15 (only 15 held-out attributes, heldout.py)"
+        description: "more narrative_eval options, e.g. --auto 10 (also the 10 yes/no and list attributes with most answers) or --heldout 15 (only 15 held-out attributes, heldout.py) or --abstain on (the yes/no reader may say not found)"
         default: ""
   pull_request:
     paths: [narrative_eval.py, evidence_pack.py, heldout.py, .github/workflows/narrative_eval.yml]
