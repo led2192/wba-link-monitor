@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-09 `base_health` watches the Airtable AI typing: Check when the AI typed under half of the English documents that arrived 2 to 9 days ago (200+ waiting). The two AI fields stopped around 20 Oct 2026 (79% typed on 19 Oct, about 2% after 25 Oct; about 35,000 documents untyped) while every daily row said OK (#PR)
+- 2026-11-09 `base_health` watches the Airtable AI typing: Check when the AI typed under half of the English documents that arrived 2 to 9 days ago (200+ waiting). The two AI fields stopped around 20 Oct 2026 (79% typed on 19 Oct, about 2% after 25 Oct; about 35,000 documents untyped) while every daily row said OK (#302)
 - 2026-11-09 Decisions recorded: anchor and frequency (chance on partial runs, the figure recurs on 2+ pages for 65% to 74% of revenue, Scope 1 and employees answers), yes/no abstention on development attributes (accuracy unchanged, 20% not found), the map's first 500 documents (#301)
 - 2026-11-09 `extract_eval --with-known`: only answers whose company has a validated value for another year, where the anchor and the memory can act (#300)
 - 2026-11-09 Decision recorded: model-written specs lift held-out numbers from 9% to 26% (+17.5, 28 fixed, 0 broken); description-built specs are 18.5 below hand-written on development attributes (#299)
