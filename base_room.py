@@ -232,7 +232,21 @@ def main():
     if not (os.environ.get("AIRTABLE_TOKEN") and os.environ.get("AIRTABLE_BASE")):
         sys.exit("Set AIRTABLE_TOKEN and AIRTABLE_BASE.")
     import qa
-    from base_health import count_rows, sweep
+    from base_health import req, sweep, API, BASE
+    from urllib.parse import quote
+
+    def count_rows(table):
+        """Rows of a table, fetched with no fields at all (fields[]=''), the cheap count base_health uses; a full-record
+        sweep of monitored_links timed out six times in a row on 9 Nov 2026 (run 42653341821)."""
+        n, offset = 0, None
+        while True:
+            p = [("pageSize", "100"), ("fields[]", "")] + ([("offset", offset)] if offset else [])
+            j = req("GET", f"{API}/{BASE}/{quote(table)}", params=p).json()
+            n += len(j.get("records", []))
+            offset = j.get("offset")
+            if not offset:
+                return n
+            time.sleep(0.12)
     run = qa.Run("base_room.py")
     today = datetime.now(timezone.utc).date()
     t0 = time.time()
