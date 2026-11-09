@@ -225,6 +225,20 @@ def same_value(a, b):
     return bool(a) and bool(b) and abs(a - b) / max(abs(a), abs(b)) <= MATCH
 
 
+def escalation_choice(got, reads, e2):
+    """The entry kept after the second level: the second level's (e2) when the first level had none; on a
+    disagreement between reads, e2 when it agrees with a read other than the first's (two votes against one);
+    else the first level's."""
+    if e2 is None:
+        return got
+    if got is None:
+        return e2
+    for v in reads or []:
+        if v and same_value(v, e2["value"]) and not same_value(v, got["value"]):
+            return e2
+    return got
+
+
 def read_order(texts, k):
     """The pages for the k-th extra read: reversed for k = 1, then rotated by k pages, so every read starts
     from a different page (the reader leans on the first pages: reversed order moved 7.8% of answers, 8 Nov 2026)."""
@@ -368,6 +382,9 @@ def read_text(lid, page, body):
 PAGE_ORDER = "today"     # "reversed" (--order): the model reads the same pages in the opposite order
 SLOTS = "off"            # --slots on (9 Nov 2026): attributes with "slots" in attributes.json are read variant by variant
                          # (model_reader.read_slots); the proposal is the first slot present; every slot is scored
+ESCALATE = "none"        # --escalate (9 Nov 2026): "empty" reads the NEXT ranked pages when the first read gives no figure;
+                         # "disagree" also when the reads of --reads N disagree. The second level is the same model on
+                         # pages 17 and on, never a larger model on the same pages (Sonnet on the same pages: +1.9, chance)
 READS = 1                # --reads N (9 Nov 2026): the model reads the same pages N times in different orders; the answer stays
                          # the first read's, and the run reports agreement between reads and accuracy when they agree or not
 SELECT = "base"          # how the rank half of the model's pages is chosen: "base" (today) or "learned" (--select);
@@ -910,6 +927,20 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
             r["reads"] = values
             r["agree"] = all(same_value(v, values[0]) for v in values[1:])
             r["any_right"] = any(right(v, g["value"]) for v in values if v)
+        if ESCALATE != "none" and (got is None or (ESCALATE == "disagree" and READS > 1 and not r.get("agree", True))):
+            used = {(lid, page) for _, _, lid, page, _ in best_pages}
+            more = [x for x in keep_pages(rows, n=len(rows), per_doc=PER_DOC * 3) if (x[1], x[2]) not in used][:MODEL_PAGES]
+            r["escalated"] = bool(more)
+            r["escalation_pages_hold"] = any(found_on(b, v) for *_, b in more for v, _, _ in forms)
+            if more:
+                second = read_years(dict(g, hint=hints(memory, anchor, g["year"], attr), fy_month=fy_end_month(cur, g["wba"])), attr,
+                                    [(lid, page, read_text(lid, page, body)) for _, lid, page, body, _ in more], usage, note={})
+                e2 = next((e for e in second if e["year"] == g["year"]), None)
+                r["escalation_found"] = bool(e2)
+                r["escalation_right"] = bool(e2) and right(e2["value"], g["value"])
+                chosen = escalation_choice(got, r.get("reads"), e2)
+                if chosen is not got:
+                    got = chosen; all_got = list(all_got) + [e2]
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
         r["dropped"] = list(note.get("dropped") or [])      # why the checks dropped entries (7 Nov 2026)
         r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
@@ -952,6 +983,7 @@ def main():
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
+    ap.add_argument("--escalate", choices=["none", "empty", "disagree"], default="none", help="second level (9 Nov 2026): when the first read gives no figure (empty), or also when the reads of --reads disagree, the same model reads the next ranked pages; the share escalated and the second level's hits are reported")
     ap.add_argument("--slots", choices=["off", "on"], default="off", help="read the attributes that have slots in attributes.json variant by variant (model_reader.read_slots); the first variant present is the proposal and every variant is scored, to learn which the analysts use (9 Nov 2026)")
     ap.add_argument("--reads", type=int, default=1, help="read the model's pages N times in different orders (quorum, 9 Nov 2026): the answer stays the first read's; agreement and accuracy when reads agree are reported. Costs N times the model calls")
     ap.add_argument("--frequency", choices=["off", "pages"], default="off", help="pages whose big numbers are printed on other pages of the documents too score higher: headline figures repeat, stray ones do not (recurring_numbers, 9 Nov 2026)")
@@ -975,9 +1007,10 @@ def main():
     model_reader.UNSTATED_BASIS = a.unstated_basis
     model_reader.PERIOD_CHECK = a.period_check
     model_reader.SELECTOR = a.selector
-    global BM25_POOL, MODEL_PAGES, ANCHOR, FREQUENCY, READS, SLOTS
+    global BM25_POOL, MODEL_PAGES, ANCHOR, FREQUENCY, READS, SLOTS, ESCALATE
     READS = max(1, a.reads)
     SLOTS = a.slots
+    ESCALATE = a.escalate
     BM25_POOL = a.bm25_pool
     ANCHOR = a.anchor
     FREQUENCY = a.frequency
@@ -1154,6 +1187,9 @@ def main():
                     s[f"slot {k} present"] += 1
                 for k in r["slots_right"]:
                     s[f"slot {k} right"] += 1
+            if r.get("escalated"):
+                s["escalated"] += 1; s["escalation pages hold"] += bool(r.get("escalation_pages_hold"))
+                s["escalation found"] += bool(r.get("escalation_found")); s["escalation right"] += bool(r.get("escalation_right"))
             if r.get("reads"):
                 s["reads"] += 1; s["agree"] += bool(r["agree"]); s["agree right"] += bool(r["agree"] and r["right"])
                 s["disagree right"] += bool(not r["agree"] and r["right"]); s["any right"] += bool(r.get("any_right"))
@@ -1339,6 +1375,16 @@ def main():
             for k in list(a_["slots"]) + list(a_.get("slot_sums") or {}):
                 md.append(f"| {k} | {s[f'slot {k} present'] / n:.0%} | {s[f'slot {k} right'] / n:.0%} |")
             md.append("")
+    if ESCALATE != "none":
+        md += [f"Second level (--escalate {ESCALATE}, 9 Nov 2026): when the first read gave no figure" + (" or the reads disagreed" if ESCALATE == "disagree" else "")
+               + f", the same model read the next {MODEL_PAGES} ranked pages. Answers escalated, how often those pages hold the figure, "
+               "how often the second level gave a figure, and how often it was right:", "",
+               "| Attribute | Escalated | Next pages hold the figure | Second level gave a figure | Second level right |", "| --- | --: | --: | --: | --: |"]
+        for c in codes:
+            s = stats[c]; n = s["escalated"]
+            md.append(f"| {c} {spec['attributes'][c]['name']} | {n:,} | {s['escalation pages hold'] / (n or 1):.0%} | "
+                      f"{s['escalation found'] / (n or 1):.0%} | {s['escalation right'] / (n or 1):.0%} |")
+        md.append("")
     if READS > 1:
         md += [f"Quorum (--reads {READS}, 9 Nov 2026): the same pages read {READS} times in different orders; the answer scored is the "
                "first read's. Share of answers where every read gave the same figure (or none), accuracy when they agree and when "
@@ -1386,12 +1432,12 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0), ("anchor", a.anchor if a.anchor != "off" else ""), ("frequency", a.frequency if a.frequency != "off" else ""), ("reads", READS if READS > 1 else ""), ("slots", a.slots if a.slots != "off" else ""))
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0), ("anchor", a.anchor if a.anchor != "off" else ""), ("frequency", a.frequency if a.frequency != "off" else ""), ("reads", READS if READS > 1 else ""), ("slots", a.slots if a.slots != "off" else ""), ("escalate", a.escalate if a.escalate != "none" else ""))
                                                                               if v not in ("base", "today", "db", "keep", "all", 0, "off")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
