@@ -11,8 +11,8 @@ on:
         description: "build (summarise unmapped pages), embed (fill embeddings), status"
         default: "status"
       companies:
-        description: "gold (companies with validated answers), all, or WBA ids comma-separated"
-        default: "gold"
+        description: "sample (the evaluation sample's companies and years), gold (companies with validated answers), all, or WBA ids comma-separated"
+        default: "sample"
       doc_types:
         description: "document types to map, comma-separated (blank = the key types in doc_map.py)"
         default: ""
