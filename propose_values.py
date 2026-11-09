@@ -520,18 +520,23 @@ def write_versions(conn, versions, method, now):
 
 
 def other_reports(chosen, versions, docs):
-    """{"other_reports": text, "restated": bool}: the same company, attribute and year as printed in other
-    documents, one line each with the difference from the value shown. Restated = one differs by more than 0.5%."""
-    lines, restated, seen = [], False, {chosen["library_id"]}
+    """{"other_reports": text, "restated": bool, "other_documents": [record ids]}: the same company, attribute and
+    year as printed in other documents, one line each with the difference from the value shown, and the library
+    rows of those documents as links (9 Nov 2026), so every source of the figure opens from the row. Restated =
+    one differs by more than 0.5%. A document not in the library stays in the text only: never a fabricated link."""
+    lines, links, restated, seen = [], [], False, {chosen["library_id"]}
     for e in sorted(versions, key=lambda e: -(e.get("asked") or 0)):
         if e["library_id"] in seen:
             continue
         seen.add(e["library_id"])
         diff = (e["value"] - chosen["value"]) / chosen["value"] if chosen["value"] else 0.0
         restated = restated or abs(diff) > 0.005
-        label = docs.get(e["library_id"], {}).get("label") or e["library_id"]
+        doc = docs.get(e["library_id"], {})
+        label = doc.get("label") or e["library_id"]
         lines.append(f"{label}, page {e.get('page')}: {e['value']:,.6g}" + (" (same)" if abs(diff) <= 0.005 else f" ({diff:+.1%})"))
-    return {"other_reports": "\n".join(lines) or None, "restated": restated}
+        if doc.get("id"):
+            links.append(doc["id"])
+    return {"other_reports": "\n".join(lines) or None, "restated": restated, "other_documents": links}
 
 
 def default_codes(spec, named=""):
