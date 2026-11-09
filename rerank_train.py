@@ -98,9 +98,11 @@ def train(pairs, out_dir, epochs=1, batch=16):
     return len(examples)
 
 
-def ensure_model(cur, token, spec, bases, out_dir, X, skip=100, per_attribute=80, epochs=1):
+def ensure_model(cur, token, spec, bases, out_dir, X, skip=100, per_attribute=40, epochs=1):
     """Trains the model into out_dir when it is not there yet (an evaluation run trains then reads); returns the
-    directory, or None when too few positives were found."""
+    directory, or None when too few positives were found. per_attribute 40 since 9 Nov 2026: building the pairs
+    ranks every page of every answer, about 14 seconds each, and 80 per attribute took 2.3 hours of the run's
+    budget (run 42635969792, which then failed on a missing library)."""
     if os.path.isdir(out_dir) and os.listdir(out_dir):
         return out_dir
     t0 = time.time()
