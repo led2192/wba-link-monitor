@@ -1,5 +1,5 @@
 {
-  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes). The \"index\" of an attribute (GRI and ESRS disclosure codes, and the words its index rows use) lets the retrieval read the report's own content index for the page the figure is on (content_index.py, 31 Oct 2026). A \"variant\" (Scope 2) names the basis the attribute wants (location-based or market-based) and whether a figure the report gives without naming a basis is filed under it (default): one such figure goes under location-based only, never under both (31 Oct 2026). status \"measuring\": added to the evaluation, proposed by propose_values.py only when named (7 Nov 2026). reading_notes: what the model reader is told about what counts and what to prefer, when the definition alone is not enough (31 Oct 2026). more_terms: wording searched in a second, separate query with its own short time limit, and counted as labels on the page; kept out of `labels` because a long phrase list timed out the main search (31 Oct 2026).",
+  "_about": "Attribute specification: everything the generic extractor (extract_eval.py) knows about an attribute is here, not in code. A methodology change is an edit of this file followed by a rerun of the gold scoring. Definitions are WBA's own (gold bases, Metadata Codes, 28 Oct 2026). Fields: name; definition; type (number, percentage, options); unit_family (currency, tco2e); labels (words that name the attribute in a table row or sentence, any language, most specific first); exclude (words that, next to a label, mean another figure: a segment, a subtotal, an intensity); doc_types (document types to read first, in order; others after); period (fiscal_year: WBA's convention, a period ending January to June counts as the previous year); scope (group: the consolidated total, not a segment); xbrl (concepts for the filing routes, sec_facts.py and esef_facts.py); options (multiple-select attributes). The \"index\" of an attribute (GRI and ESRS disclosure codes, and the words its index rows use) lets the retrieval read the report's own content index for the page the figure is on (content_index.py, 31 Oct 2026). A \"variant\" (Scope 2) names the basis the attribute wants (location-based or market-based) and whether a figure the report gives without naming a basis is filed under it (default): one such figure goes under location-based only, never under both (31 Oct 2026). status \"measuring\": added to the evaluation, proposed by propose_values.py only when named (7 Nov 2026). reading_notes: what the model reader is told about what counts and what to prefer, when the definition alone is not enough (31 Oct 2026). more_terms: wording searched in a second, separate query with its own short time limit, and counted as labels on the page; kept out of `labels` because a long phrase list timed out the main search (31 Oct 2026). slots (9 Nov 2026, optional): {key: what a report calls it} the accounting variants a slot read asks for one by one (model_reader.read_slots, extract_eval --slots on), the first the default proposal; slot_sums: {name: [slot keys]} sums computed in code and scored too.",
   "unit_families": {
     "currency": {
       "scales": {
@@ -376,7 +376,14 @@
       "scope": "group",
       "siblings": [
         "GMC_00048.1"
-      ]
+      ],
+      "slots": {
+        "taxonomy_aligned_capex": "EU taxonomy-aligned capex, as an amount",
+        "taxonomy_eligible_capex": "EU taxonomy-eligible capex, as an amount",
+        "green_capex_reported": "capex the company itself calls green, sustainable, low-carbon, climate or transition, as an amount",
+        "taxonomy_aligned_pct": "EU taxonomy-aligned capex as a percentage of total capex",
+        "taxonomy_eligible_pct": "EU taxonomy-eligible capex as a percentage of total capex"
+      }
     },
     "GMC_01933.1": {
       "name": "Climate expertise on the highest governance body",
@@ -569,7 +576,14 @@
       "siblings": [
         "GMC_00064.1",
         "GMC_00048.1"
-      ]
+      ],
+      "slots": {
+        "ppe_cash": "purchases of property, plant and equipment in the cash flow statement (cash paid in the year)",
+        "ppe_and_intangibles_cash": "purchases of property, plant and equipment plus intangible assets in the cash flow statement, or a total of investing payments for both",
+        "capex_reported": "a figure the report itself calls capital expenditure, capex, investments or capital investments (key figures, management report, segment table)",
+        "additions_note": "additions of the year in the property, plant and equipment note (accrual, not cash)",
+        "guidance": "planned, guided or expected capital expenditure for a future year"
+      }
     },
     "GMC_00005.1": {
       "name": "Scope 3 emissions",
@@ -680,7 +694,30 @@
       "siblings": [
         "GMC_00001.1",
         "GMC_00002.1"
-      ]
+      ],
+      "slots": {
+        "s12_printed_market": "a printed total of Scope 1 and 2 emissions, market-based",
+        "s12_printed_location": "a printed total of Scope 1 and 2 emissions, location-based",
+        "s12_printed": "a printed total of Scope 1 and 2 emissions with no basis stated",
+        "s1": "Scope 1 emissions",
+        "s2_market": "Scope 2 emissions, market-based",
+        "s2_location": "Scope 2 emissions, location-based",
+        "s2": "Scope 2 emissions with no basis stated"
+      },
+      "slot_sums": {
+        "s1+s2_location": [
+          "s1",
+          "s2_location"
+        ],
+        "s1+s2_market": [
+          "s1",
+          "s2_market"
+        ],
+        "s1+s2": [
+          "s1",
+          "s2"
+        ]
+      }
     },
     "GMC_00047.1": {
       "name": "R&D spending (total)",
@@ -732,7 +769,13 @@
       "scope": "group",
       "siblings": [
         "GMC_00048.1"
-      ]
+      ],
+      "slots": {
+        "rd_expense": "research and development expense of the year in the income statement or its note (expensed)",
+        "rd_total_spend": "total research and development spending or investment of the year including development costs capitalised",
+        "rd_capitalised": "development costs capitalised in the year",
+        "rd_amortisation": "amortisation of capitalised development costs in the year"
+      }
     }
   },
   "_about_siblings": "siblings: attributes whose figure is printed on the same page or next to it (2 Nov 2026, 331 company-years: Scope 1 and Scope 2 on the same page 89 to 93% of the time, revenue and low-carbon capex 46%, within two pages 70%). The sibling's best page is found first and the attribute's pages there and next to it score higher (extract_eval.sibling_pages)."
