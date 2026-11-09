@@ -19,16 +19,28 @@ SCHEMA_VERBS = ("alter table", "create table", "create index", "create unique in
 def sessions(cur):
     cur.execute("""
         select a.pid, a.usename, a.application_name, a.state, a.wait_event_type, a.wait_event,
-               extract(epoch from now() - a.query_start)::int as seconds, left(regexp_replace(a.query, '\\s+', ' ', 'g'), 160)
+               extract(epoch from now() - a.query_start)::int as seconds, left(a.query, 400)
         from pg_stat_activity a
         where a.datname = current_database() and a.pid <> pg_backend_pid() and a.state is not null and a.state <> 'idle'
         order by a.query_start""")
     return cur.fetchall()
 
 
+def statement_text(q):
+    """A query without its leading SQL comments (schema.sql starts with comment lines, so the running statement's
+    text shown by pg_stat_activity starts with "-- Schema of the evidence database")."""
+    import re
+    return re.sub(r"^(\s*--[^\n]*\n?)+", "", q or "").strip().lower()
+
+
 def waiting_schema(rows):
-    """The sessions running a schema statement and waiting for a lock."""
-    return [r for r in rows if r[4] == "Lock" and (r[7] or "").strip().lower().startswith(SCHEMA_VERBS)]
+    """The sessions running a schema statement (or the whole schema.sql) and waiting for a lock."""
+    out = []
+    for r in rows:
+        q = r[7] or ""
+        if r[4] == "Lock" and (statement_text(q).startswith(SCHEMA_VERBS) or "schema of the evidence database" in q.lower()):
+            out.append(r)
+    return out
 
 
 def main():
@@ -43,7 +55,8 @@ def main():
     rows = sessions(cur)
     print(f"{len(rows)} active sessions")
     for pid, user, app, state, wtype, wev, secs, q in rows:
-        print(f"  pid {pid} {user} [{app or '-'}] {state} {('waits ' + wtype + '/' + str(wev)) if wtype else ''} {secs}s: {q}")
+        import re
+        print(f"  pid {pid} {user} [{app or '-'}] {state} {('waits ' + wtype + '/' + str(wev)) if wtype else ''} {secs}s: {re.sub(chr(92) + 's+', ' ', q)[:160]}")
     stuck = waiting_schema(rows)
     if a.release:
         if not stuck:
