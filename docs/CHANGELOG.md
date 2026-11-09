@@ -4,6 +4,7 @@ Newest first. One line per change, with the pull request. Every pull request add
 
 ## November 2026
 - 2026-11-09 `plausibility.py --progression on|off`: a year-on-year check with a bound learned per attribute (the largest validated change), off by default and measured as a shadow check in every run; workflow input `progression` (#312)
+- 2026-11-09 `base_room.py`: a table count that fails (422 on the empty field, timeouts) falls back to the full sweep and then to 0 with a note; the report no longer dies on a count (#316)
 - 2026-11-09 `base_room.py` counts the small tables with no fields (`fields[]=`), as base_health does; the full-record sweep of monitored_links timed out six times in a row and failed run 42653341821 (#315)
 - 2026-11-09 `base_room.py`: companies with at least one live document of each type for 2023 to 2025 (coverage by document type), and ages from the record's creation time (first_seen was backfilled and read recent on every old row, so rules C and D counted 0) (#314)
 - 2026-11-09 `extract_eval --heldout N --with-known`: the held-out codes are chosen among the answers with another validated year, so the anchor check on held-out attributes reads answers it can act on (`known_other_year`) (#313)

@@ -237,17 +237,29 @@ def main():
 
     def count_rows(table):
         """Rows of a table, fetched with no fields at all (fields[]=''), the cheap count base_health uses; a full-record
-        sweep of monitored_links timed out six times in a row on 9 Nov 2026 (run 42653341821)."""
+        sweep of monitored_links timed out six times in a row on 9 Nov 2026 (run 42653341821). Some tables answer 422
+        to the empty field (webpage_library, run 42655198793): those fall back to the full sweep, and a count that
+        still fails is reported as 0 with a note rather than failing the report."""
         n, offset = 0, None
-        while True:
-            p = [("pageSize", "100"), ("fields[]", "")] + ([("offset", offset)] if offset else [])
-            j = req("GET", f"{API}/{BASE}/{quote(table)}", params=p).json()
-            n += len(j.get("records", []))
-            offset = j.get("offset")
-            if not offset:
-                return n
-            time.sleep(0.12)
+        try:
+            while True:
+                p = [("pageSize", "100"), ("fields[]", "")] + ([("offset", offset)] if offset else [])
+                j = req("GET", f"{API}/{BASE}/{quote(table)}", params=p).json()
+                n += len(j.get("records", []))
+                offset = j.get("offset")
+                if not offset:
+                    return n
+                time.sleep(0.12)
+        except Exception as e:
+            print(f"    cheap count of {table} failed ({type(e).__name__}); counting the full records", flush=True)
+        try:
+            return sum(1 for _ in sweep(table, []))
+        except Exception as e:
+            print(f"    could not count {table}: {type(e).__name__}", flush=True)
+            uncounted.append(table)
+            return 0
     run = qa.Run("base_room.py")
+    uncounted = []
     today = datetime.now(timezone.utc).date()
     t0 = time.time()
     keys = key_types()
@@ -270,6 +282,8 @@ def main():
     print(f"  report_library: {len(docs):,} rows in {time.time() - t0:.0f}s", flush=True)
     c, by, nofile, cands = analyse(docs, cited, keys, today)
     md = report_md(tables, c, by, nofile, cands, today, docs)
+    if uncounted:
+        md += "\nTables that could not be counted this run (shown as 0): " + ", ".join(uncounted) + ".\n"
     open(a.out + ".md", "w", encoding="utf-8").write(md)
     write_csv(cands, a.out + ".csv")
     print(md)
