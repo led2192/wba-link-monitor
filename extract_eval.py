@@ -366,6 +366,8 @@ def read_text(lid, page, body):
 
 
 PAGE_ORDER = "today"     # "reversed" (--order): the model reads the same pages in the opposite order
+SLOTS = "off"            # --slots on (9 Nov 2026): attributes with "slots" in attributes.json are read variant by variant
+                         # (model_reader.read_slots); the proposal is the first slot present; every slot is scored
 READS = 1                # --reads N (9 Nov 2026): the model reads the same pages N times in different orders; the answer stays
                          # the first read's, and the run reports agreement between reads and accuracy when they agree or not
 SELECT = "base"          # how the rank half of the model's pages is chosen: "base" (today) or "learned" (--select);
@@ -887,8 +889,17 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         read_years = model_reader.read_candidates if model_reader.SELECTOR == "candidates" else model_reader.read_years
         note = {}
         texts = [(lid, page, read_text(lid, page, body)) for _, _, lid, page, body in best_pages]
-        all_got = read_years(dict(g, hint=hints(memory, anchor, g["year"], attr), fy_month=fy_end_month(cur, g["wba"])), attr, texts, usage, note=note)
-        got = next((e for e in all_got if e["year"] == g["year"]), None)
+        if SLOTS == "on" and attr.get("slots"):           # the slot read: variants one by one, choice in code
+            all_got = model_reader.read_slots(dict(g, hint=hints(memory, anchor, g["year"], attr), fy_month=fy_end_month(cur, g["wba"])), attr, texts, usage, note=note)
+            r["slots"] = {e["slot"]: e["value"] for e in all_got}
+            for name, parts in (attr.get("slot_sums") or {}).items():
+                if all(p in r["slots"] for p in parts):
+                    r["slots"][name] = sum(r["slots"][p] for p in parts)
+            r["slots_right"] = sorted(k for k, v in r["slots"].items() if right(v, g["value"]))
+            got = all_got[0] if all_got else None
+        else:
+            all_got = read_years(dict(g, hint=hints(memory, anchor, g["year"], attr), fy_month=fy_end_month(cur, g["wba"])), attr, texts, usage, note=note)
+            got = next((e for e in all_got if e["year"] == g["year"]), None)
         if READS > 1:                                       # quorum (9 Nov 2026): the same pages again in other orders
             values = [got["value"] if got else None]
             for k in range(1, READS):
@@ -941,6 +952,7 @@ def main():
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
+    ap.add_argument("--slots", choices=["off", "on"], default="off", help="read the attributes that have slots in attributes.json variant by variant (model_reader.read_slots); the first variant present is the proposal and every variant is scored, to learn which the analysts use (9 Nov 2026)")
     ap.add_argument("--reads", type=int, default=1, help="read the model's pages N times in different orders (quorum, 9 Nov 2026): the answer stays the first read's; agreement and accuracy when reads agree are reported. Costs N times the model calls")
     ap.add_argument("--frequency", choices=["off", "pages"], default="off", help="pages whose big numbers are printed on other pages of the documents too score higher: headline figures repeat, stray ones do not (recurring_numbers, 9 Nov 2026)")
     ap.add_argument("--anchor", choices=["off", "pages", "note"], default="off", help="another year's known value searched in this year's pages (reports print the previous year beside the current one): pages join the pool with a boost; note also tells the reader (company_memory.anchor_pages, 9 Nov 2026)")
@@ -963,8 +975,9 @@ def main():
     model_reader.UNSTATED_BASIS = a.unstated_basis
     model_reader.PERIOD_CHECK = a.period_check
     model_reader.SELECTOR = a.selector
-    global BM25_POOL, MODEL_PAGES, ANCHOR, FREQUENCY, READS
+    global BM25_POOL, MODEL_PAGES, ANCHOR, FREQUENCY, READS, SLOTS
     READS = max(1, a.reads)
+    SLOTS = a.slots
     BM25_POOL = a.bm25_pool
     ANCHOR = a.anchor
     FREQUENCY = a.frequency
@@ -1135,6 +1148,12 @@ def main():
             if "map_pages" in r:
                 s["map answers"] += 1; s["map with pages"] += bool(r["map_pages"]); s["map hit"] += bool(r.get("map_hit"))
                 s["map right"] += bool(r["map_pages"] and r["right"]); s["no map right"] += bool(not r["map_pages"] and r["right"])
+            if "slots" in r:
+                s["slot answers"] += 1; s["slot any right"] += bool(r["slots_right"])
+                for k in r["slots"]:
+                    s[f"slot {k} present"] += 1
+                for k in r["slots_right"]:
+                    s[f"slot {k} right"] += 1
             if r.get("reads"):
                 s["reads"] += 1; s["agree"] += bool(r["agree"]); s["agree right"] += bool(r["agree"] and r["right"])
                 s["disagree right"] += bool(not r["agree"] and r["right"]); s["any right"] += bool(r.get("any_right"))
@@ -1306,6 +1325,20 @@ def main():
             md.append(f"| {c} {spec['attributes'][c]['name']} | {n:,} | {w / (n or 1):.0%} | {s['map hit'] / (w or 1):.0%} | "
                       f"{s['map right'] / (w or 1):.0%} | {s['no map right'] / ((n - w) or 1):.0%} |")
         md.append("")
+    if SLOTS == "on":
+        md += ["Slot read (--slots on, 9 Nov 2026): the attribute's accounting variants asked one by one; the proposal scored above is "
+               "the first variant present. Per variant (and per sum computed in code): answers where the pages printed it, and where "
+               "it equals the analyst's figure. The variant the analysts use shows as the one most often equal:", ""]
+        for c in codes:
+            a_ = spec["attributes"][c]
+            if not a_.get("slots") or not stats[c]["slot answers"]:
+                continue
+            s = stats[c]; n = s["slot answers"]
+            md += [f"{c} {a_['name']}: {n:,} answers read by slots; some variant equals the analyst's figure for {s['slot any right'] / n:.0%}.", "",
+                   "| Variant | Printed on the pages | Equals the analyst's figure |", "| --- | --: | --: |"]
+            for k in list(a_["slots"]) + list(a_.get("slot_sums") or {}):
+                md.append(f"| {k} | {s[f'slot {k} present'] / n:.0%} | {s[f'slot {k} right'] / n:.0%} |")
+            md.append("")
     if READS > 1:
         md += [f"Quorum (--reads {READS}, 9 Nov 2026): the same pages read {READS} times in different orders; the answer scored is the "
                "first read's. Share of answers where every read gave the same figure (or none), accuracy when they agree and when "
@@ -1353,12 +1386,12 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0), ("anchor", a.anchor if a.anchor != "off" else ""), ("frequency", a.frequency if a.frequency != "off" else ""), ("reads", READS if READS > 1 else ""))
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0), ("anchor", a.anchor if a.anchor != "off" else ""), ("frequency", a.frequency if a.frequency != "off" else ""), ("reads", READS if READS > 1 else ""), ("slots", a.slots if a.slots != "off" else ""))
                                                                               if v not in ("base", "today", "db", "keep", "all", 0, "off")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),

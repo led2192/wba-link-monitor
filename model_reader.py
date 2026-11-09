@@ -426,6 +426,54 @@ def read_years(g, attr, pages, usage, sess=None, note=None):
     return got
 
 
+def slots_prompt(g, attr, pages):
+    """The slot read (9 Nov 2026): the attribute's variants (attr["slots"]) asked one by one for the reporting year,
+    each with its page, printed number, scale, unit and column, so the choice between accounting variants is
+    made afterwards in code, with the analysts' rule, not by the model. The header is the usual prompt's."""
+    head = prompt(g, attr, pages).split("\nReply with JSON:")[0]
+    y = g["year"]
+    slots = "\n".join(f'  "{k}": {v}' for k, v in attr["slots"].items())
+    tail = ["", f"Reports print several figures that could be called {attr['name']}. Give every one of these variants that the pages "
+            f"print for reporting year {y}, as its own entry, and leave out the variants the pages do not print:", slots, "",
+            "Reply with JSON: {\"values\": [{\"slot\": the variant's key above, \"page\": \"P1\", \"printed\": \"12,345.6\", "
+            "\"scale\": one of " + ", ".join(f'"{s}"' for s in SCALES) + " (the unit the page states; a percentage is \"units\"), "
+            f"\"unit\": \"EUR\", \"tCO2e\" or \"%\", \"year\": {y}, \"column\": the column or line heading as printed, "
+            "\"period_end\": YYYY-MM when the page says it}, ...]}. One entry per variant at most, the figure for reporting year "
+            f"{y} only, never a figure the pages do not print, no text before or after the JSON. If the pages print none, reply "
+            "{\"values\": [], \"why\": \"...\"}."]
+    return head + "\n".join(tail)
+
+
+def read_slots(g, attr, pages, usage, sess=None, note=None):
+    """One call: the attribute's variants the pages print for the year asked, each checked against its page
+    (check), as entries carrying "slot". Order: attr["slots"] order (the first present is the default proposal).
+    Entries for other years, or whose slot is unknown, are dropped. note["why"] as read_years."""
+    if not pages or not attr.get("slots"):
+        return []
+    from extract_eval import to_number
+    from value_eval import numbers_on
+    text = call([{"role": "user", "content": slots_prompt(g, attr, pages)}], usage, sess, max_tokens=1200)
+    reply = parse_reply(text)
+    entries = reply.get("values") if isinstance(reply, dict) and isinstance(reply.get("values"), list) else []
+    if note is not None and not entries:
+        note["why"] = (str(reply.get("why") or "")[:120] if isinstance(reply, dict) else ("(no JSON in the reply)" if text else "(empty reply)"))
+    dropped = note.setdefault("dropped", []) if note is not None else None
+    by_slot = {}
+    for e in entries:
+        if not isinstance(e, dict) or str(e.get("slot") or "") not in attr["slots"] or str(e.get("slot")) in by_slot:
+            continue
+        got = check(e, pages, to_number, numbers_on, g.get("fy_month"), dropped, PERIOD_CHECK == "all" or attr.get("unit_family") == "currency")
+        if got is False:
+            usage["quote_not_on_page"] += 1
+            continue
+        if not got or (got["year"] is not None and got["year"] != g["year"]):
+            continue
+        got["year"] = g["year"]; got["slot"] = str(e["slot"])
+        by_slot[got["slot"]] = got
+    usage["slots_returned"] += len(by_slot)
+    return [by_slot[k] for k in attr["slots"] if k in by_slot]
+
+
 SELECTOR = "off"   # "candidates" (extract_eval --selector candidates, 8 Nov 2026): a generous extractor proposes up to
                    # CANDIDATES figures for the year asked, with row, column and footnote, and a second call picks one
                    # of them against the attribute's definition and notes (or none). The attribute's conditions help

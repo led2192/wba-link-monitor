@@ -378,3 +378,49 @@ class ExtractorSelector(unittest.TestCase):
         self.replies = ['{"candidates": [], "why": "not printed"}']
         note = {}
         self.assertEqual(self.M.read_candidates(self.g, self.attr, self.pages, collections.Counter(), note=note), [])
+
+
+class SlotRead(unittest.TestCase):
+    """--slots on (9 Nov 2026): the attribute's accounting variants asked one by one, each checked on its page."""
+
+    def setUp(self):
+        import model_reader as M
+        self.M, self.saved = M, M.call
+        self.prompts, self.replies = [], []
+
+        def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
+            self.prompts.append(messages[0]["content"]); return self.replies.pop(0)
+        M.call = call
+
+    def tearDown(self):
+        self.M.call = self.saved
+
+    pages = [("d1", 7, "Cash flow statement FY2024 FY2023\nPurchase of property, plant and equipment 5,002 4,610\n"
+                       "Purchase of intangible assets 145 120\nCapital expenditure (management report) 5,147 4,730")]
+    attr = {"name": "Total capex", "definition": "Capital expenditure of the year.", "labels": ["capex"], "unit_family": "currency",
+            "slots": {"ppe_cash": "purchases of PP&E in the cash flow statement", "capex_reported": "a figure the report calls capex",
+                      "guidance": "planned capex for a future year"}}
+    g = {"year": 2024, "attribute": "GMC_00063.1"}
+
+    def test_variants_come_back_in_slot_order_checked_on_the_page(self):
+        import collections
+        usage = collections.Counter()
+        self.replies = ['{"values": [{"slot": "capex_reported", "page": "P1", "printed": "5,147", "scale": "millions", "unit": "USD", "year": 2024, "column": "FY2024"}, '
+                        '{"slot": "ppe_cash", "page": "P1", "printed": "5,002", "scale": "millions", "unit": "USD", "year": 2024, "column": "FY2024"}, '
+                        '{"slot": "guidance", "page": "P1", "printed": "9,999", "scale": "millions", "unit": "USD", "year": 2024, "column": "FY2024"}, '
+                        '{"slot": "unknown_slot", "page": "P1", "printed": "145", "scale": "millions", "unit": "USD", "year": 2024, "column": "FY2024"}]}']
+        got = self.M.read_slots(self.g, self.attr, self.pages, usage)
+        self.assertEqual([e["slot"] for e in got], ["ppe_cash", "capex_reported"])      # slot order; 9,999 is not on the page; unknown slot dropped
+        self.assertEqual(got[0]["value"], 5_002_000_000.0)
+        self.assertEqual(usage["slots_returned"], 2); self.assertEqual(usage["quote_not_on_page"], 1)
+        self.assertIn('"ppe_cash": purchases of PP&E', self.prompts[0]); self.assertIn("Reply with JSON", self.prompts[0])
+        self.assertEqual(self.M.read_slots(self.g, {"name": "x"}, self.pages, usage), [])  # no slots: nothing read
+
+    def test_other_years_are_dropped_and_why_is_kept(self):
+        import collections
+        usage, note = collections.Counter(), {}
+        self.replies = ['{"values": [{"slot": "ppe_cash", "page": "P1", "printed": "4,610", "scale": "millions", "unit": "USD", "year": 2023, "column": "FY2023"}]}']
+        self.assertEqual(self.M.read_slots(self.g, self.attr, self.pages, usage, note=note), [])
+        self.replies = ['{"values": [], "why": "no capex printed"}']
+        self.assertEqual(self.M.read_slots(self.g, self.attr, self.pages, usage, note=note), [])
+        self.assertEqual(note["why"], "no capex printed")
