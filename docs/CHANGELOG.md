@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `archive_documents.py` and the Archive documents workflow (manual, dry run by default): discards, with the reason "Archived: before 2022, not cited", the old documents nobody uses (rule B 92,029 on 9 Nov); the reason joins the purge job's machine reasons so `--machine-only --days 7` deletes them after the undo window (#327)
 - 2026-11-09 Generic reader, Document map, Narrative and Propose values workflows cache pip wheels and the downloaded embedding models between runs (torch and sentence-transformers took 3 to 5 minutes of every run) (#326)
 - 2026-11-09 `model_reader.call` speaks to the Gemini API when READER_MODEL starts with "gemini" (GEMINI_API_KEY; thinking at the lowest level, thoughts counted as output tokens); Generic reader and Narrative workflows pass the key, Generic reader gains a `price` input for the cost line (#325)
 - 2026-11-09 `--spec-examples off` is the default (worked examples gave -3.1 on held-out numbers, 0 fixed, 5 broken); decisions recorded for wave D: model specs -7.3 against hand-written specs on the four pilots (they are for attributes without one), the held-out yes/no reader with "not found" (abstention right or wrong by the attribute's base rate), and the map build's second attempt (#324)

@@ -1,0 +1,62 @@
+name: Archive documents
+
+# Frees room in the Disclosure Library (archive_documents.py): ticks discard, with the reason
+# "Archived: before 2022, not cited", on the live documents that meet the rule (B by default: reporting year
+# 2021 or earlier, not a key type, never cited, verified, imported or a current key report). Nothing is deleted
+# here: the Purge discarded job (machine-only, 7 days) deletes them later, archiving every field first.
+# Manual only. Dry run unless commit is true; the report and the candidate list are the run's artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rule:
+        description: "B (2021 or earlier and not a key type) or A (2021 or earlier, any type)"
+        type: choice
+        options: [B, A]
+        default: B
+      limit:
+        description: "at most this many rows (0 = all)"
+        default: "0"
+      commit:
+        description: "true to tick discard on the rows (false = dry run)"
+        default: "false"
+
+concurrency:
+  group: archive-documents
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Archive
+        run: |
+          ARGS="--rule ${{ inputs.rule }} --limit ${{ inputs.limit }}"
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          python archive_documents.py $ARGS
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+      - name: Summary
+        if: always()
+        run: cat archive_candidates.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: archive-candidates
+          path: |
+            archive_candidates.md
+            archive_candidates.csv
+          if-no-files-found: ignore
