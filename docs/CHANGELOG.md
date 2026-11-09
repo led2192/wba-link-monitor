@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `attribute_values.printed_on_pages` and `printed_in_documents`: the report's own agreement with each model reader proposal (consensus, wave A), written by propose_values.py for the reviewers' queue (#311)
 - 2026-11-09 `attribute_values.other_documents`: the other documents that print the same figure, linked (not only listed in `other_reports`), with `values_also_printed_here` as the reverse on report_library; written by propose_values.py for model reader rows (#310)
 - 2026-11-09 `base_room.py` and the Base room workflow (monthly, by hand): records per table, live documents by year and kind with citations, and archive candidates under four rules, written as a report and a list, nothing to Airtable (#309)
 - 2026-11-09 Decisions recorded, wave B: slots as a reader worse on all four attributes but the probe names the analysts' variants (capex as reported 29%, R&D expense 37%, Scope 1+2 printed total 30% against computed sums 8%); the anchor where it can act: pages +1.1 (chance), note +5.3 (p 0.007, R&D +13.5), held-out check before adoption (#308)

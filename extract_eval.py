@@ -792,6 +792,16 @@ def consensus(cur, ids, value, scales):
     return len(hits), len({lid for lid, _ in hits})
 
 
+def proposal_consensus(cur, wba, year, attr, value):
+    """(pages, documents) of the company's documents of this year that print the proposed figure: consensus() for a
+    production proposal (propose_values.py), looked up from the year's documents again. (0, 0) when nothing."""
+    from value_eval import scales_for
+    docs, _ = year_documents(cur, wba, year, attr)
+    if not docs:
+        return 0, 0
+    return consensus(cur, [d[0] for d in docs], value, scales_for(attr.get("unit_family")))
+
+
 def anchor_for_year(cur, ids, year, attr, known):
     """(other year, value, {(library_id, page): body}) for --anchor, or None when off or no other year is known."""
     import company_memory
