@@ -1,0 +1,48 @@
+name: Base room
+
+# Where the room in the Disclosure Library goes, and which documents could be archived (base_room.py).
+# Reads everything, writes nothing to Airtable: the report (base_room.md) and the candidate list
+# (base_room.csv) are uploaded as the run's artifact for the owner to decide on. Monthly, and by hand.
+
+on:
+  schedule:
+    - cron: "23 5 1 * *"       # 05:23 UTC on the 1st of each month
+  workflow_dispatch:
+
+concurrency:
+  group: base-room
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  room:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Report
+        run: python base_room.py
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          RECORD_LIMIT: "500000"
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: "true"
+      - name: Summary
+        if: always()
+        run: cat base_room.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: base-room
+          path: |
+            base_room.md
+            base_room.csv
+          if-no-files-found: ignore
