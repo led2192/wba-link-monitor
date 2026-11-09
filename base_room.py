@@ -12,7 +12,10 @@ documents, this report says, from the base itself and never from memory:
      Library (the analysts' own collection: never archive candidates);
   4. live documents without a usable file (blocked, gone, not_pdf, too_big) by age;
   5. archive candidates under four rules, each counted on its own and all together, with the room they would
-     free and the days of intake that room buys at the last 30 days' rate.
+     free and the days of intake that room buys at the last 30 days' rate;
+  6. companies with at least one live document of each type for 2023, 2024 and 2025 (coverage by document type:
+     which kinds of document companies publish and we hold; a separate ESG data book is published by a minority).
+Ages are taken from the record's creation time: first_seen was backfilled and reads recent on old rows.
 
 The rules (a document is a candidate only when NO attribute_values row cites it, nobody verified it, it did
 not come from the Source Library, and it is not a company's current key report):
@@ -86,7 +89,7 @@ def rules_for(f, cited, keys, today):
     if (f.get("origin") or "").startswith("Source Library"):
         return ""
     y, kind = year_of(f), kind_of(f, keys)
-    age = days_since(f.get("first_seen") or f.get("created_time"), today)
+    age = days_since(f.get("created_time") or f.get("first_seen"), today)      # created_time: first_seen was backfilled on 9 Nov 2026 and reads recent on old rows
     stale = age is not None and age > STALE_DAYS
     out = ""
     if y is not None and y <= CUTOFF_YEAR:
@@ -98,6 +101,25 @@ def rules_for(f, cited, keys, today):
     if (f.get("file_status") or "") in NO_FILE and stale:
         out += "D"
     return out
+
+
+TYPE_YEARS = (2023, 2024, 2025)
+
+
+def type_coverage(docs):
+    """{(type, year): set of companies} for live documents: which companies have at least one document of each
+    type for each reporting year of TYPE_YEARS (the coverage by document type, 9 Nov 2026). "any" = any type."""
+    cov = collections.defaultdict(set)
+    for f in docs:
+        if f.get("discard") or not f.get("wba_id"):
+            continue
+        y = year_of(f)
+        if y not in TYPE_YEARS:
+            continue
+        t = (f.get("source_type_check") or "").strip() or "no type"
+        cov[(t, y)].add(f["wba_id"])
+        cov[("any", y)].add(f["wba_id"])
+    return cov
 
 
 def analyse(docs, cited, keys, today):
@@ -124,7 +146,7 @@ def analyse(docs, cited, keys, today):
             by[g]["verified"] += 1
         if (f.get("origin") or "").startswith("Source Library"):
             by[g]["imported"] += 1
-        age = days_since(f.get("first_seen") or f.get("created_time"), today)
+        age = days_since(f.get("created_time") or f.get("first_seen"), today)
         if age is not None and age <= 30:
             c["new_30d"] += 1
         if (f.get("file_status") or "") in NO_FILE:
@@ -144,7 +166,7 @@ def pct(n, d):
     return f"{n / d:.1%}" if d else "0%"
 
 
-def report_md(tables, c, by, nofile, cands, today):
+def report_md(tables, c, by, nofile, cands, today, docs_for_report=None):
     total = sum(tables.values())
     md = [f"# Room in the Disclosure Library ({today.isoformat()})", "",
           f"{total:,} records of {RECORD_LIMIT:,} ({pct(total, RECORD_LIMIT)}). Nothing here was written to Airtable; the "
@@ -160,6 +182,22 @@ def report_md(tables, c, by, nofile, cands, today):
     for g in YEAR_GROUPS:
         b = by.get(g, collections.Counter())
         md.append(f"| {g} | {b['total']:,} | {b['key type']:,} | {b['other type']:,} | {b['no type']:,} | {b['cited']:,} | {b['verified']:,} | {b['imported']:,} |")
+    cov = type_coverage(docs_for_report) if docs_for_report is not None else {}
+    if cov:
+        n_companies = max((len(v) for (t, y), v in cov.items() if t == "any"), default=0)
+        types = sorted({t for t, _ in cov if t != "any"}, key=lambda t: -max(len(cov.get((t, y), ())) for y in TYPE_YEARS))
+        md += ["", "## Companies with at least one live document of each type, by reporting year", "",
+               f"Of the companies with any document for the year (the first line). A type's share is the share of companies that publish "
+               f"that kind of document and that we hold, not the discovery's success: an ESG data book is a separate document only some "
+               f"companies publish. The type is set by Airtable's AI, which stopped about 20 Oct 2026, so recent years are undertyped "
+               f"(the 'no type' line).", "",
+               "| Document type | " + " | ".join(str(y) for y in TYPE_YEARS) + " | " + " | ".join(f"{y} share" for y in TYPE_YEARS) + " |",
+               "| --- | " + " | ".join("--:" for _ in TYPE_YEARS) + " | " + " | ".join("--:" for _ in TYPE_YEARS) + " |"]
+        for t in ["any"] + types:
+            ns = [len(cov.get((t, y), ())) for y in TYPE_YEARS]
+            anys = [len(cov.get(("any", y), ())) or 1 for y in TYPE_YEARS]
+            md.append(f"| {t if t != 'any' else 'Any document'} | " + " | ".join(f"{n:,}" for n in ns) + " | "
+                      + " | ".join(f"{n / a:.0%}" for n, a in zip(ns, anys)) + " |")
     md += ["", "## Live documents without a usable file", "",
            f"{nofile['all']:,} live documents have file_status blocked, gone, not_pdf or too_big; {nofile['stale']:,} of them were first seen "
            f"more than {STALE_DAYS} days ago and are still without a file.", "",
@@ -217,7 +255,7 @@ def main():
     tables["report_library"] = len(docs)
     print(f"  report_library: {len(docs):,} rows in {time.time() - t0:.0f}s", flush=True)
     c, by, nofile, cands = analyse(docs, cited, keys, today)
-    md = report_md(tables, c, by, nofile, cands, today)
+    md = report_md(tables, c, by, nofile, cands, today, docs)
     open(a.out + ".md", "w", encoding="utf-8").write(md)
     write_csv(cands, a.out + ".csv")
     print(md)
