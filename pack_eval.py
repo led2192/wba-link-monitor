@@ -194,11 +194,20 @@ PACK_SYSTEM = ("You read passages of a company's own reports and answer one ques
 QUOTE_WORDS = {1: 25, 3: 60}
 
 
+ABSTAIN = False          # --abstain on (narrative_eval, 9 Nov 2026): the yes/no reader may answer "not found"
+
+
 def pack_prompt(attr, pas, chosen, docs, quotes):
     """The question, the pack's passages numbered (document type, year and page each), and the reply shape:
-    one quote of 25 words as today, or one to three quotes of up to 60 words from different passages."""
+    one quote of 25 words as today, or one to three quotes of up to 60 words from different passages. With
+    ABSTAIN the yes/no reader has a third answer, "not found", for passages that do not address the question,
+    so a missing passage is told apart from a stated no."""
     lines = [f"Question: {attr['question']}"]
-    if attr["type"] == "boolean":
+    if attr["type"] == "boolean" and ABSTAIN:
+        lines.append('Answer "yes" when a passage states it; "no" when a passage addresses the question and shows the company does not '
+                     'have or do it; "not found" when no passage addresses the question at all.')
+        ans = '"yes", "no" or "not found"'
+    elif attr["type"] == "boolean":
         lines.append('Answer "yes" only when a passage states it; "no" when the passages do not.')
         ans = '"yes" or "no"'
     else:

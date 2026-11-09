@@ -45,6 +45,29 @@ class Replies(unittest.TestCase):
         N.score(t, LIST, frozenset({"Sustainability"}), frozenset({"Sustainability", "Climate mitigation"}))
         self.assertEqual((t["right"], t["option Sustainability: right"], t["option Climate mitigation: right"]), (0, 1, 0))
 
+    def test_not_found_is_scored_as_no_and_counted_apart(self):
+        self.assertEqual(N.read_reply({"answer": "not found"}, BOOL)[0], N.NOT_FOUND)
+        self.assertEqual(N.read_reply({"answer": "NOT_FOUND"}, BOOL)[0], N.NOT_FOUND)
+        self.assertIs(N.read_reply({"answer": "no"}, BOOL)[0], False)
+        self.assertEqual(N.salvage('{"answer": "not found", "quote": "cut')["answer"], "not found")
+        s = collections.Counter()
+        self.assertFalse(N.score(s, BOOL, True, N.NOT_FOUND))        # the analyst said yes: a miss a wider search could recover
+        self.assertTrue(N.score(s, BOOL, False, N.NOT_FOUND))        # the analyst said no
+        self.assertTrue(N.score(s, BOOL, True, True))
+        self.assertEqual((s["not found"], s["not found, truth yes"], s["found"], s["found right"], s["right"]), (2, 1, 1, 1, 2))
+
+    def test_abstain_changes_the_pack_prompt(self):
+        import pack_eval as P
+        pas = [("D1", 3, 0, "The board oversees climate.")]
+        saved = P.ABSTAIN
+        try:
+            P.ABSTAIN = True
+            self.assertIn('"not found"', P.pack_prompt(BOOL, pas, [0], {}, 3))
+            P.ABSTAIN = False
+            self.assertNotIn('"not found"', P.pack_prompt(BOOL, pas, [0], {}, 3))
+        finally:
+            P.ABSTAIN = saved
+
     def test_query_and_prompt(self):
         self.assertEqual(N.or_query(["board oversight of climate", "TCFD governance"]), "(board & oversight & climate) | (tcfd & governance)")
         p = N.prompt(LIST, [("L1", "Sustainability Report", 7, "The ESG committee leads...")], "PT_1")

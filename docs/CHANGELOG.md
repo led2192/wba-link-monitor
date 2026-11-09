@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `narrative_eval --abstain on`: the yes/no reader may answer "not found" (scored as no, counted apart with the analyst's yes among them and the accuracy of found answers) (#291)
 - 2026-11-09 `--spec-by model` writes with four hand-written development specs as worked examples (`heldout.spec_examples`), never the attribute's own; `--spec-examples off` for the definition-only writer (#290)
 - 2026-11-09 `db_locks.py` and the `Database locks` workflow: list sessions and lock waits, end a schema statement stuck waiting for a lock (#288)
 - 2026-11-09 Document map creates only its own table (`doc_map.ensure_table`) instead of applying the whole schema, whose alter-table lines locked `public.pages` behind the running readers (#287)
