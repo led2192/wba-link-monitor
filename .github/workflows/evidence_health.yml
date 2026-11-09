@@ -1,0 +1,55 @@
+name: Evidence health
+
+# Does the evidence database look the way it should (evidence_health.py)? Rows per table, documents by text
+# status and year, the page map by document year and with embeddings, values and reads of the last day, and
+# six checks that fail as DATA_CHECK rows in Pipeline QA. Read-only on the database. Daily, after the Document
+# map and Propose values have run, and by hand.
+
+on:
+  schedule:
+    - cron: "41 6 * * *"      # 06:41 UTC daily, after the night's reading jobs
+  workflow_run:
+    workflows: ["Document map"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "write the run row and the failures to Pipeline QA (false = print only)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: evidence-health
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then python evidence_health.py
+          else python evidence_health.py --commit; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+      - name: Summary
+        if: always()
+        run: cat evidence_health.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-health
+          path: evidence_health.md
+          if-no-files-found: ignore

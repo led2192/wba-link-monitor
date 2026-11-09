@@ -66,6 +66,7 @@ A code whose owner is "to build" is a gap in the design, not a job for a person:
 | CO_GAP | a completeness check fails or a report is overdue | gap_pages, overdue_reports |
 | CO_MISSED_KNOWN | a document known to exist is not in the library | Source Library matching, research, audits (to build) |
 | RUN_FAILED | a job or a write did not complete | base_health, `qa.record_exception()` |
+| DATA_CHECK | a table of the evidence database does not look the way it should (a map built for the wrong years, lines without embeddings, documents without pages, a stale value table, orphan versions) | evidence_health (daily; key = the check's name, so a recurring failure updates its row) |
 
 Document rows are written only for report-shaped documents (a report-family type, or a report word plus a 2023+ year); the rest is counted in the run's counters. Severity is High when the failure hides or costs a 2023+ sustainability or annual report, or blocks a whole domain. For a gone or unreachable page that means a report hub, a sustainability report page, or a sustainability or investor page whose address lists reports (`qa_sync.page_holds_reports`, since 26 Oct 2026); a gone topic page is Medium.
 

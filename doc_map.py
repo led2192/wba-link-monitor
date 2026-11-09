@@ -377,6 +377,10 @@ def main():
         m = embedder()
         if m:
             print(f"embedded {embed_missing(cur, m, True):,} lines", flush=True)
+        # what this run wrote, read back by the document's year (9 Nov 2026: a build newest first went unnoticed)
+        cur.execute("select coalesce(d.year, 0), count(*) from public.page_map m join public.documents d using (library_id) "
+                    "where m.written > now() - interval '12 hours' group by 1 order by 1")
+        print("lines written in the last 12 hours by document year: " + ", ".join(f"{y or 'none'} {n:,}" for y, n in cur.fetchall()), flush=True)
     return 0
 
 
