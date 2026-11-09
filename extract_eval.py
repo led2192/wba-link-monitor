@@ -955,7 +955,9 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
             r["reads"] = values
             r["agree"] = all(same_value(v, values[0]) for v in values[1:])
             r["any_right"] = any(right(v, g["value"]) for v in values if v)
-        if ESCALATE != "none" and (got is None or (ESCALATE == "disagree" and READS > 1 and not r.get("agree", True))):
+        once = ESCALATE == "once" and got is not None and consensus(cur, ids, got["value"], scales)[0] < 2   # printed on one page only
+        if ESCALATE != "none" and (got is None or once or (ESCALATE == "disagree" and READS > 1 and not r.get("agree", True))):
+            r["escalated_once"] = once
             used = {(lid, page) for _, _, lid, page, _ in best_pages}
             ladder = [x for x in keep_pages(rows, n=len(rows), per_doc=PER_DOC * 3) if (x[1], x[2]) not in used]
             r["escalated"] = bool(ladder[:MODEL_PAGES])
@@ -971,7 +973,10 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
                 e2 = next((e for e in second if e["year"] == g["year"]), None)
                 r["escalation_found"] = r.get("escalation_found") or bool(e2)
                 r["escalation_right"] = r.get("escalation_right") or (bool(e2) and right(e2["value"], g["value"]))
-                chosen = escalation_choice(got, r.get("reads"), e2)
+                if once and e2 is not None and not same_value(e2["value"], got["value"]):     # a figure the report repeats beats one printed once
+                    chosen = e2 if consensus(cur, ids, e2["value"], scales)[0] >= 2 else got
+                else:
+                    chosen = escalation_choice(got, r.get("reads"), e2)
                 if chosen is not got:
                     got = chosen; all_got = list(all_got) + [e2]
                 if got is not None:
@@ -1019,7 +1024,7 @@ def main():
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
-    ap.add_argument("--escalate", choices=["none", "empty", "disagree"], default="none", help="second level (9 Nov 2026): when the first read gives no figure (empty), or also when the reads of --reads disagree, the same model reads the next ranked pages; the share escalated and the second level's hits are reported")
+    ap.add_argument("--escalate", choices=["none", "empty", "disagree", "once"], default="none", help="second level (9 Nov 2026): when the first read gives no figure (empty), or also when the reads of --reads disagree, or also when the figure is printed on one page only (once: figures the report repeats were right 76% to 88%, printed once 50% to 77%), the same model reads the next ranked pages; with once the second level's figure replaces the first only when the report prints it on 2+ pages")
     ap.add_argument("--with-known", action="store_true", help="only answers whose company has a validated value for another year: the answers where the anchor and the memory can act (9 Nov 2026: the anchor found a value for 26 of 341 answers, revenue and low-carbon capex only, because the other attributes have one validated year per company)")
     ap.add_argument("--escalate-steps", type=int, default=1, help="with --escalate: how many times the second level may read the next pages while the answer stays empty (8 + 8 + 16 with --model-pages 8 --escalate-steps 2: the adaptive budget)")
     ap.add_argument("--slots", choices=["off", "on"], default="off", help="read the attributes that have slots in attributes.json variant by variant (model_reader.read_slots); the first variant present is the proposal and every variant is scored, to learn which the analysts use (9 Nov 2026)")
@@ -1453,7 +1458,7 @@ def main():
                 md.append(f"| {k} | {s[f'slot {k} present'] / n:.0%} | {s[f'slot {k} right'] / n:.0%} |")
             md.append("")
     if ESCALATE != "none":
-        md += [f"Second level (--escalate {ESCALATE}, 9 Nov 2026): when the first read gave no figure" + (" or the reads disagreed" if ESCALATE == "disagree" else "")
+        md += [f"Second level (--escalate {ESCALATE}, 9 Nov 2026): when the first read gave no figure" + (" or the reads disagreed" if ESCALATE == "disagree" else "") + (" or the figure was printed on one page only" if ESCALATE == "once" else "")
                + f", the same model read the next {MODEL_PAGES} ranked pages. Answers escalated, how often those pages hold the figure, "
                "how often the second level gave a figure, and how often it was right:", "",
                "| Attribute | Escalated | Next pages hold the figure | Second level gave a figure | Second level right |", "| --- | --: | --: | --: | --: |"]
