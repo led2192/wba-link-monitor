@@ -41,6 +41,20 @@ class Lines(unittest.TestCase):
         self.assertEqual(cur.rows[0], ("d", 1, "Cover", "m"))
 
 
+class Table(unittest.TestCase):
+    def test_ensure_table_creates_only_when_missing(self):
+        class Cur:
+            def __init__(self, exists): self.exists, self.q = exists, []
+            def execute(self, q, params=None): self.q.append(q)
+            def fetchone(self): return ("public.page_map" if self.exists else None,)
+            class connection:
+                @staticmethod
+                def commit(): pass
+        c = Cur(True); D.ensure_table(c); self.assertEqual(len(c.q), 1)
+        c = Cur(False); D.ensure_table(c); self.assertEqual(len(c.q), 2); self.assertIn("create table if not exists public.page_map", c.q[1])
+        self.assertNotIn("alter table", D.PAGE_MAP_SQL)
+
+
 class Search(unittest.TestCase):
     def test_map_query_works_from_a_built_spec(self):
         q = D.map_query({"name": "Number of passengers per year", "definition": "Passengers carried in the year."})

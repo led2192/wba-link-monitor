@@ -253,3 +253,6 @@ Of 104,525 sources cited by validated answers in the three gold bases, 2% matche
 ## A built spec must search for what reports print (8 Nov 2026)
 Metadata Codes descriptions are written for analysts ("Number of patients treated", "Decarbonization levers/actions implementation timeframes"); reports print "patients treated" or discuss levers and timeframes in separate sentences. Searching for the description as a phrase, or for all its words at once, found no page for most held-out attributes, and the run then scored the empty answers as if a reader had read. Before trusting any score, check "Number on the ranked pages" (numbers) and "No pages found" (narratives): a near-empty pool means the search failed, not the reader.
 
+## Never run the whole schema.sql while the readers run (9 Nov 2026)
+`supabase/schema.sql` holds "alter table public.pages add column if not exists" lines. Even when the column exists, the statement takes an ACCESS EXCLUSIVE lock on `public.pages` (6.6 million rows), waits behind every running query on it and then blocks the new ones. The first Document map run applied the whole schema while five Generic reader runs were reading pages and hung for 15 minutes before it was cancelled. A script that needs one new table creates that table alone (`doc_map.ensure_table`); `apply_schema` is for the loader, when nothing else reads.
+
