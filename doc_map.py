@@ -32,7 +32,7 @@ PAGE_CHARS = 1400
 YEAR_MIN = 2023
 EMBED_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"        # 384 dimensions, the model page_select.py already uses
 EMBED_DIMS = 384
-THREADS = 6
+THREADS = 12
 SYSTEM = ("You index the pages of company reports (annual, sustainability, integrated reports, codes and policies) so that "
           "a later search can find the page that holds a given figure or disclosure. You see the first part of each page. "
           "Reply with JSON only.")
@@ -94,14 +94,15 @@ def ensure_table(cur):
         cur.connection.commit()
 
 
-def documents_to_map(cur, doc_types, companies, year_min, max_docs):
-    """[(library_id, pages not yet mapped)] of the key documents, newest first, companies given or all."""
+def documents_to_map(cur, doc_types, companies, year_min, max_docs, years=None):
+    """[(library_id, pages not yet mapped)] of the key documents, newest first, companies given or all, and
+    only the given years when years is given (the evaluation sample's years and the year after each)."""
     q = ("select d.library_id, d.year, count(p.page) from public.documents d join public.pages p using (library_id) "
          "left join public.page_map m on m.library_id = p.library_id and m.page = p.page "
          "where d.doc_type = any(%s) and coalesce(d.year, 0) >= %s and m.page is null"
-         + (" and d.wba_id = any(%s)" if companies else "") +
+         + (" and d.wba_id = any(%s)" if companies else "") + (" and d.year = any(%s)" if years else "") +
          " group by d.library_id, d.year order by d.year desc, d.library_id limit %s")
-    params = [doc_types, year_min] + ([companies] if companies else []) + [max_docs]
+    params = [doc_types, year_min] + ([companies] if companies else []) + ([sorted(years)] if years else []) + [max_docs]
     cur.execute(q, params)
     return [(lid, n) for lid, _, n in cur.fetchall()]
 
@@ -142,6 +143,27 @@ def gold_companies(token):
             if wba:
                 out.add(wba)
     return sorted(out)
+
+
+def sample_companies(token, limit):
+    """(companies, years) of the evaluation sample: the first `limit` validated answers per attribute of
+    attributes.json, as extract_eval takes them (gold_values order), plus the held-out number attributes it reads
+    (heldout.number_codes, 30 answers each); years are the answers' years and the year after each (a report of
+    the next year carries the comparative column). Maps exactly what the evaluations need first."""
+    from value_eval import gold_values
+    import heldout
+    here = os.path.dirname(os.path.abspath(__file__))
+    cfg = json.load(open(os.path.join(here, "gold_attributes.json"), encoding="utf-8"))
+    spec = json.load(open(os.path.join(here, "attributes.json"), encoding="utf-8"))
+    bases = list(cfg["bases"].values())
+    meta = heldout.metadata_codes(token, bases)
+    plan = [(c, limit) for c in spec["attributes"]] + [(c, 30) for c in heldout.number_codes(meta, 20)]
+    companies, years = set(), set()
+    for code, n in plan:
+        rows = [g for b in bases for g in gold_values(token, b, [code]) if g["value"]][:n]
+        for g in rows:
+            companies.add(g["wba"]); years.add(g["year"]); years.add(g["year"] + 1)
+    return sorted(companies), sorted(years)
 
 
 def embedder():
@@ -209,7 +231,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=["build", "embed", "status"])
     ap.add_argument("--doc-types", default=",".join(KEY_TYPES))
-    ap.add_argument("--companies", default="gold", help="gold (companies with validated answers), all, or WBA ids comma-separated")
+    ap.add_argument("--companies", default="sample", help="sample (the companies and years of the evaluation sample, --sample-limit answers per attribute), gold (companies with validated answers), all, or WBA ids comma-separated")
+    ap.add_argument("--sample-limit", type=int, default=100, help="with --companies sample: validated answers per attribute, as extract_eval --limit takes them")
     ap.add_argument("--years", type=int, default=YEAR_MIN, help="documents of this year or later")
     ap.add_argument("--max-docs", type=int, default=200)
     ap.add_argument("--max-usd", type=float, default=5.0)
@@ -235,13 +258,16 @@ def main():
             return 1
         print(f"embedded {embed_missing(cur, m, a.commit):,} lines" + ("" if a.commit else " (dry run: one batch, nothing written)"))
         return 0
-    companies = None
-    if a.companies == "gold":
+    companies, years = None, None
+    if a.companies == "sample":
+        companies, years = sample_companies(os.environ["GOLD_TOKEN"].strip(), a.sample_limit)
+        print(f">>> evaluation sample: {len(companies)} companies, years {', '.join(map(str, years))}", flush=True)
+    elif a.companies == "gold":
         companies = gold_companies(os.environ["GOLD_TOKEN"].strip())
         print(f">>> {len(companies)} companies with validated answers", flush=True)
     elif a.companies != "all":
         companies = [c.strip() for c in a.companies.split(",") if c.strip()]
-    docs = documents_to_map(cur, types, companies, a.years, a.max_docs)
+    docs = documents_to_map(cur, types, companies, a.years, a.max_docs, years)
     print(f">>> {len(docs)} documents with {sum(n for _, n in docs):,} pages to map" + ("" if a.commit else " (dry run: first document only, nothing written)"), flush=True)
     usage = collections.Counter()
     model = os.environ.get("READER_MODEL") or DEFAULT_MODEL
