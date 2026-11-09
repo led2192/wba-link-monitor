@@ -51,7 +51,7 @@ from company_memory import MEMORY_WEIGHT, ANCHOR_WEIGHT  # page score added to a
 FREQUENCY = "off"                    # --frequency: "off", "pages" (pages whose big numbers recur across the documents score higher)
 FREQ_WEIGHT = 0.7                    # page score added, times the share (up to 5) of the page's recurring big numbers
 FREQ_TIMEOUT = "6s"                  # the number census of a company-year's documents may take this long, else it is skipped
-ANCHOR = "off"                       # --anchor: "off", "pages" (another year's known value searched in this year's pages), "note" (pages + the reader told)
+ANCHOR = "note"                      # --anchor: "off", "pages" (another year's known value searched in this year's pages), "note" (pages + the reader told); default note since 9 Nov 2026 (+5.3 where a year is known)
 BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
 # a printed number: Indian grouping, comma/dot/apostrophe groups, space groups (never followed by another
@@ -1050,7 +1050,7 @@ def main():
     ap.add_argument("--slots", choices=["off", "on"], default="off", help="read the attributes that have slots in attributes.json variant by variant (model_reader.read_slots); the first variant present is the proposal and every variant is scored, to learn which the analysts use (9 Nov 2026)")
     ap.add_argument("--reads", type=int, default=1, help="read the model's pages N times in different orders (quorum, 9 Nov 2026): the answer stays the first read's; agreement and accuracy when reads agree are reported. Costs N times the model calls")
     ap.add_argument("--frequency", choices=["off", "pages"], default="off", help="pages whose big numbers are printed on other pages of the documents too score higher: headline figures repeat, stray ones do not (recurring_numbers, 9 Nov 2026)")
-    ap.add_argument("--anchor", choices=["off", "pages", "note"], default="off", help="another year's known value searched in this year's pages (reports print the previous year beside the current one): pages join the pool with a boost; note also tells the reader (company_memory.anchor_pages, 9 Nov 2026)")
+    ap.add_argument("--anchor", choices=["off", "pages", "note"], default="note", help="another year's known value searched in this year's pages (reports print the previous year beside the current one): pages join the pool with a boost; note also tells the reader (company_memory.anchor_pages). Default note since 9 Nov 2026: +5.3 points on the answers with a known other year, 13 fixed, 2 broken (abstentions), no attribute worse; off where no other year is known")
     ap.add_argument("--spec-examples", choices=["on", "off"], default="on", help="with --spec-by model: the hand-written specs of four development attributes as worked examples in the writer's prompt (never the attribute's own); off writes from the definition alone (the 9 Nov 00:13 runs)")
     ap.add_argument("--spec-by", choices=["description", "model"], default="description", help="built specs (--auto-spec, --heldout): from the description alone, or with labels, exclusions and search terms a model writes from the name and definition (heldout.model_spec, one call per attribute)")
     ap.add_argument("--auto-spec", action="store_true", help="read the chosen (development) attributes with the spec heldout.py builds from Metadata Codes, not the hand-written one: how much the hand-written specs add, and where the builder is improved")
