@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 Decision recorded: model-written specs lift held-out numbers from 9% to 26% (+17.5, 28 fixed, 0 broken); description-built specs are 18.5 below hand-written on development attributes (#299)
 - 2026-11-09 Held-out numbers: every held-out number code is a candidate (gold read in chunks of 40 codes), so more than 8 attributes with validated answers can be measured (#298)
 - 2026-11-09 extract_eval reports, for every model proposal, on how many pages and documents the figure is printed and the accuracy by group (`consensus`) (#297)
 - 2026-11-09 `rerank_train.py` and `extract_eval --select rerank`: a multilingual cross-encoder fine-tuned on the analysts' validated pages (development attributes, answers after the first 100) orders the pool (#296)
