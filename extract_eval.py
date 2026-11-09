@@ -1020,6 +1020,7 @@ def main():
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
     ap.add_argument("--escalate", choices=["none", "empty", "disagree"], default="none", help="second level (9 Nov 2026): when the first read gives no figure (empty), or also when the reads of --reads disagree, the same model reads the next ranked pages; the share escalated and the second level's hits are reported")
+    ap.add_argument("--with-known", action="store_true", help="only answers whose company has a validated value for another year: the answers where the anchor and the memory can act (9 Nov 2026: the anchor found a value for 26 of 341 answers, revenue and low-carbon capex only, because the other attributes have one validated year per company)")
     ap.add_argument("--escalate-steps", type=int, default=1, help="with --escalate: how many times the second level may read the next pages while the answer stays empty (8 + 8 + 16 with --model-pages 8 --escalate-steps 2: the adaptive budget)")
     ap.add_argument("--slots", choices=["off", "on"], default="off", help="read the attributes that have slots in attributes.json variant by variant (model_reader.read_slots); the first variant present is the proposal and every variant is scored, to learn which the analysts use (9 Nov 2026)")
     ap.add_argument("--reads", type=int, default=1, help="read the model's pages N times in different orders (quorum, 9 Nov 2026): the answer stays the first read's; agreement and accuracy when reads agree are reported. Costs N times the model calls")
@@ -1154,6 +1155,13 @@ def main():
         want = {tuple(k.split("|")) for k in a.keys.split(",") if k.count("|") == 2}
         answers = [g for g in answers if (g["wba"], g["attribute"], str(g["year"])) in want]
         print(f">>> --keys: {len(want):,} asked, {len(answers):,} with a validated answer", flush=True)
+    if a.with_known:                             # only answers whose company has a validated value for another year (anchor, memory)
+        years = collections.defaultdict(set)
+        for (w, c, y) in gold_index:
+            years[(w, c)].add(y)
+        before = len(answers)
+        answers = [g for g in answers if len(years[(g["wba"], g["attribute"])]) > 1]
+        print(f">>> --with-known: {len(answers):,} of {before:,} answers have another validated year for the company", flush=True)
     by = collections.defaultdict(list)
     for g in answers:
         by[g["attribute"]].append(g)
@@ -1501,7 +1509,7 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "escalate_steps": ESCALATE_STEPS if a.escalate != "none" else None, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "with_known": a.with_known or None, "escalate_steps": ESCALATE_STEPS if a.escalate != "none" else None, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
