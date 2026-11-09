@@ -135,5 +135,7 @@ class SamplePairs(unittest.TestCase):
         self.assertIn("d.wba_id || '|' || d.year::text = any(%s)", cur.q)
         self.assertEqual(cur.p[-2], ["A|2024", "B|2025"])                # the pairs, sorted, before the limit
         self.assertEqual(cur.p[-1], 50)
+        self.assertIn("order by d.year asc", cur.q)                        # the answers' own years first when the budget cuts the build
         D.documents_to_map(cur, ["Annual Report"], None, 2023, 50)
         self.assertNotIn("||", cur.q)
+        self.assertIn("order by d.year desc", cur.q)

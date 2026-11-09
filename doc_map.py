@@ -98,13 +98,15 @@ def documents_to_map(cur, doc_types, companies, year_min, max_docs, years=None, 
     """[(library_id, pages not yet mapped)] of the key documents, newest first, companies given or all, only the
     given years when years is given, and only the (company, year) pairs when pairs is given: the documents the
     evaluation reads for its sample answers (9 Nov 2026: the first build, newest first over every sample
-    company, mapped 2026 and 2025 documents that no 2023 or 2024 answer reads; 2% to 5% of the answers had a map)."""
+    company, mapped 2026 and 2025 documents that no 2023 or 2024 answer reads; 2% to 5% of the answers had a map).
+    With pairs the oldest year comes first: the answers' own years (2023, 2024) before the year-after documents
+    that only carry comparatives, so a build cut by its budget still covers what the answers read first."""
     q = ("select d.library_id, d.year, count(p.page) from public.documents d join public.pages p using (library_id) "
          "left join public.page_map m on m.library_id = p.library_id and m.page = p.page "
          "where d.doc_type = any(%s) and coalesce(d.year, 0) >= %s and m.page is null"
          + (" and d.wba_id = any(%s)" if companies else "") + (" and d.year = any(%s)" if years else "")
          + (" and d.wba_id || '|' || d.year::text = any(%s)" if pairs else "") +
-         " group by d.library_id, d.year order by d.year desc, d.library_id limit %s")
+         " group by d.library_id, d.year order by d.year " + ("asc" if pairs else "desc") + ", d.library_id limit %s")
     params = [doc_types, year_min] + ([companies] if companies else []) + ([sorted(years)] if years else []) \
         + ([sorted(f"{w}|{y}" for w, y in pairs)] if pairs else []) + [max_docs]
     cur.execute(q, params)
