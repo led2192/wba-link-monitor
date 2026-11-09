@@ -1,9 +1,12 @@
 name: Company contacts
 
 # The email addresses companies publish in their own key reports (contacts.py), into the
-# company_contacts table. Manual for now; a pull request touching it runs a dry run on 400 key reports
-# and posts the result.
+# company_contacts table. Weekly on Sundays at 04:44 UTC since 9 Nov 2026 (committed: new key reports
+# bring new addresses, rows are never deleted); manual with a mode; a pull request touching it runs a dry
+# run on 400 key reports and posts the result.
 on:
+  schedule:
+    - cron: "44 4 * * 0"
   workflow_dispatch:
     inputs:
       mode:
@@ -44,6 +47,7 @@ jobs:
           TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=(--limit 400)
+          elif [ "${{ github.event_name }}" = "schedule" ]; then ARGS=(--commit)
           else ARGS=(--wba "${{ inputs.wba }}"); [ "${{ inputs.mode }}" = "commit" ] && ARGS+=(--commit); fi
           python contacts.py "${ARGS[@]}"
       - name: Keep the left-out domains list
