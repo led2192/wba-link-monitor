@@ -48,6 +48,9 @@ SIBLING_NEAR = {0: 1.0, 1: 0.6, 2: 0.3}   # share of SIBLING_WEIGHT by distance 
 NEIGHBOUR_DECAY = {1: 1.0, 2: 0.4}   # share of the neighbour's score that reaches this page, by distance in pages
 NEIGHBOUR_TOP = 10                   # the best pages whose missing next and previous pages are fetched and scored
 from company_memory import MEMORY_WEIGHT, ANCHOR_WEIGHT  # page score added to a page carrying the line the company used another year, or printing its value
+FREQUENCY = "off"                    # --frequency: "off", "pages" (pages whose big numbers recur across the documents score higher)
+FREQ_WEIGHT = 0.7                    # page score added, times the share (up to 5) of the page's recurring big numbers
+FREQ_TIMEOUT = "6s"                  # the number census of a company-year's documents may take this long, else it is skipped
 ANCHOR = "off"                       # --anchor: "off", "pages" (another year's known value searched in this year's pages), "note" (pages + the reader told)
 BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
@@ -241,7 +244,49 @@ def label_query(labels):
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
 
-def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0, memory_boost=0.0, sibling_boost=0.0, anchor_boost=0.0):
+def num_key(printed):
+    """A printed number as a comparison key: its digits, decimals dropped ("5,147.3", "5.147" and "5 147" -> "5147")."""
+    s = re.sub(r"[.,]\d{1,2}$", "", printed.strip())
+    return re.sub(r"\D", "", s)
+
+
+def recurring_numbers(cur, ids):
+    """{number key: pages printing it} for the big numbers (BIGNUM) printed on two or more pages of these
+    documents: the census behind --frequency. Headline figures (group revenue, total emissions) are printed on
+    several pages of a report (key figures, the statement, the notes, the letter); a segment line or a stray
+    figure is printed once. Own time limit; {} on timeout."""
+    cur.execute("show statement_timeout")
+    before = cur.fetchone()[0]
+    try:
+        with cur.connection.transaction():
+            cur.execute(f"set local statement_timeout = '{FREQ_TIMEOUT}'")
+            cur.execute("with n as (select library_id, page, unnest(regexp_matches(body, %s, 'g')) as num from public.pages where library_id = any(%s)) "
+                        "select num, count(distinct (library_id, page)) from n group by num having count(distinct (library_id, page)) >= 2",
+                        (BIGNUM.pattern, ids))
+            out = collections.Counter()
+            for num, n in cur.fetchall():
+                k = num_key(num)
+                if len(k) >= 4:
+                    out[k] = max(out[k], n)
+            return dict(out)
+    except Exception:
+        return {}
+    finally:
+        try:
+            cur.execute(f"set statement_timeout = '{before}'")
+        except Exception:
+            pass
+
+
+def frequency_boost(body, recurring):
+    """0 to 1: how many of the page's big numbers (up to 5) are printed on other pages of the documents too."""
+    if not recurring:
+        return 0.0
+    keys = {num_key(m) for m in BIGNUM.findall(body or "")}
+    return min(sum(1 for k in keys if k in recurring), 5) / 5
+
+
+def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0, memory_boost=0.0, sibling_boost=0.0, anchor_boost=0.0, freq_boost=0.0):
     """How likely a page holds the attribute's figure for the year, from five signals, each in 0 to 1:
     the label match of the word index, the best rule candidate on the page, how much of a table it is
     (numbers of four digits or more), whether it prints the year (or its fiscal label), how often the
@@ -255,7 +300,7 @@ def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_b
     hits = min(len(label_positions(body or "", labels, exclude)), 5) / 5
     c = max(cand, 0) / 8 if cand is not None else 0.0
     return (1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight + INDEX_WEIGHT * index_boost
-            + MEMORY_WEIGHT * memory_boost + SIBLING_WEIGHT * sibling_boost + ANCHOR_WEIGHT * anchor_boost)
+            + MEMORY_WEIGHT * memory_boost + SIBLING_WEIGHT * sibling_boost + ANCHOR_WEIGHT * anchor_boost + FREQ_WEIGHT * freq_boost)
 
 
 def retrieval_miss(holding, rows, forms):
@@ -531,8 +576,10 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, sib
     if info is not None:
         info["siblings"] = dict(siblings)
     anchor = anchor or {}
+    recurring = recurring_numbers(cur, ids) if FREQUENCY != "off" else {}
     if info is not None:
         info["anchor"] = set(anchor)
+        info["recurring"] = recurring
     missing = (set(cited) | set(siblings)) - {(lid, page) for lid, page, _, _ in found}
     if missing:
         cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and page = any(%s)",
@@ -555,7 +602,7 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, sib
         top = max(cs, key=lambda c: c[0]) if cs else None
         sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []) + attr.get("more_terms", []),
                         attr.get("exclude", []), weight.get(lid, 0), cited.get((lid, page), 0.0), company_memory.boost(body, memory),
-                        siblings.get((lid, page), 0.0), 1.0 if (lid, page) in anchor else 0.0)
+                        siblings.get((lid, page), 0.0), 1.0 if (lid, page) in anchor else 0.0, frequency_boost(body, recurring))
         return (sc, lid, page, body, top)
     rows = [score(lid, page, body, rk) for lid, page, body, rk in found]
     # the pages next to the best ones join the pool (a table running on, the page after an index entry)
@@ -771,6 +818,9 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
     r["more_terms"] = info.get("more_terms")
+    if FREQUENCY != "off":                                            # the census: on how many pages is the validated figure printed?
+        rec = info.get("recurring") or {}
+        r["gold_pages"] = max([rec.get(num_key(f"{v:,.{d}f}"), 1) for v, _, d in forms] or [1]) if holding else 0
     r["index_cited"] = bool(info.get("cited"))                       # the report's own index named a page
     r["index_hit"] = any((lid, page) in info.get("cited", {}) for lid, page, _ in holding)
     r["sibling_pages"] = bool(info.get("siblings"))
@@ -839,6 +889,7 @@ def main():
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
+    ap.add_argument("--frequency", choices=["off", "pages"], default="off", help="pages whose big numbers are printed on other pages of the documents too score higher: headline figures repeat, stray ones do not (recurring_numbers, 9 Nov 2026)")
     ap.add_argument("--anchor", choices=["off", "pages", "note"], default="off", help="another year's known value searched in this year's pages (reports print the previous year beside the current one): pages join the pool with a boost; note also tells the reader (company_memory.anchor_pages, 9 Nov 2026)")
     ap.add_argument("--spec-by", choices=["description", "model"], default="description", help="built specs (--auto-spec, --heldout): from the description alone, or with labels, exclusions and search terms a model writes from the name and definition (heldout.model_spec, one call per attribute)")
     ap.add_argument("--auto-spec", action="store_true", help="read the chosen (development) attributes with the spec heldout.py builds from Metadata Codes, not the hand-written one: how much the hand-written specs add, and where the builder is improved")
@@ -858,9 +909,10 @@ def main():
     model_reader.UNSTATED_BASIS = a.unstated_basis
     model_reader.PERIOD_CHECK = a.period_check
     model_reader.SELECTOR = a.selector
-    global BM25_POOL, MODEL_PAGES, ANCHOR
+    global BM25_POOL, MODEL_PAGES, ANCHOR, FREQUENCY
     BM25_POOL = a.bm25_pool
     ANCHOR = a.anchor
+    FREQUENCY = a.frequency
     MODEL_PAGES = max(1, a.model_pages)
     PAGE_TEXT = a.page_text
     if a.guidance == "md":
@@ -1018,6 +1070,9 @@ def main():
                 s["memory"] += 1; s["memory in_pages"] += bool(r["in_pages"]); s["memory right"] += bool(r["right"])
             if r.get("anchor"):
                 s["anchor"] += 1; s["anchor hit"] += bool(r.get("anchor_hit")); s["anchor right"] += bool(r["right"])
+            if r.get("gold_pages"):
+                s["census"] += 1; s["gold on 2+ pages"] += r["gold_pages"] >= 2; s["gold on 3+ pages"] += r["gold_pages"] >= 3
+                s["gold on 2+ pages right"] += r["gold_pages"] >= 2 and bool(r["right"]); s["gold once right"] += r["gold_pages"] < 2 and bool(r["right"])
             else:
                 s["no memory"] += 1; s["no memory in_pages"] += bool(r["in_pages"]); s["no memory right"] += bool(r["right"])
             if r.get("more_terms"):
@@ -1172,6 +1227,17 @@ def main():
                   f"{s['memory right'] / (s['memory'] or 1):.0%} | {s['no memory']:,} | {s['no memory in_pages'] / (s['no memory'] or 1):.0%} | "
                   f"{s['no memory right'] / (s['no memory'] or 1):.0%} |")
     md.append("")
+    if FREQUENCY != "off":
+        md += [f"Figure frequency (--frequency {FREQUENCY}, 9 Nov 2026): big numbers printed on two or more pages of the year's documents "
+               "raise a page's score. Diagnostic: of the answers whose figure is in the documents, how many print it on 2+ and 3+ pages, "
+               "and right when printed on 2+ pages against once:", "",
+               "| Attribute | Figure in documents | On 2+ pages | On 3+ pages | Right when on 2+ | Right when once |", "| --- | --: | --: | --: | --: | --: |"]
+        for c in codes:
+            s = stats[c]
+            n2 = s["gold on 2+ pages"]; n1 = s["census"] - n2
+            md.append(f"| {c} {spec['attributes'][c]['name']} | {s['census']:,} | {n2 / (s['census'] or 1):.0%} | {s['gold on 3+ pages'] / (s['census'] or 1):.0%} | "
+                      f"{s['gold on 2+ pages right'] / (n2 or 1):.0%} | {s['gold once right'] / (n1 or 1):.0%} |")
+        md.append("")
     if ANCHOR != "off":
         md += [f"Anchor (--anchor {ANCHOR}, 9 Nov 2026): another year's known value searched in this year's pages, which print the "
                "previous year beside the current one. Answers where it was found on some page, where that page holds this "
@@ -1197,12 +1263,12 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0), ("anchor", a.anchor if a.anchor != "off" else ""))
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0), ("anchor", a.anchor if a.anchor != "off" else ""), ("frequency", a.frequency if a.frequency != "off" else ""))
                                                                               if v not in ("base", "today", "db", "keep", "all", 0, "off")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),

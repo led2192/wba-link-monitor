@@ -316,6 +316,36 @@ class Oracle(unittest.TestCase):
         self.assertEqual(len(X.pages_for_model(scored, 16)), 16)
         self.assertEqual(len(X.pages_for_model(scored, 8)), 8)
 
+    def test_figure_frequency_census_and_boost(self):
+        self.assertEqual([X.num_key(s) for s in ("5,147.3", "5.147", "5 147", "12,345.50", "12345")], ["5147", "5147", "5147", "12345", "12345"])
+        class Cur:
+            def __init__(self):
+                self.calls = []
+            def execute(self, q, params=None):
+                self.calls.append(q)
+                if q.startswith("show"):
+                    self.rows = [("30s",)]
+                elif "regexp_matches" in q:
+                    self.rows = [("5,147", 4), ("5.147", 2), ("4,892", 3), ("123", 5)]
+            def fetchone(self):
+                return self.rows[0]
+            def fetchall(self):
+                return self.rows
+            class connection:
+                @staticmethod
+                def transaction():
+                    import contextlib
+                    return contextlib.nullcontext()
+        cur = Cur()
+        rec = X.recurring_numbers(cur, ["d"])
+        self.assertEqual(rec, {"5147": 4, "4892": 3})                    # keys merge printed forms; short numbers left out
+        self.assertTrue(any("set statement_timeout = '30s'" in q for q in cur.calls))   # the timeout restored
+        self.assertEqual(X.frequency_boost("Revenue 5,147 4,892\nCosts 1,234 999", rec), 0.4)
+        self.assertEqual(X.frequency_boost("Revenue 5,147", {}), 0.0)
+        body = "Key figures 2024 2023\nTurnover 5,147 4,892"
+        plain = X.page_score(0.0, None, body, 2024, ["revenue"], [], 0.0)
+        self.assertAlmostEqual(X.page_score(0.0, None, body, 2024, ["revenue"], [], 0.0, freq_boost=0.4) - plain, X.FREQ_WEIGHT * 0.4)
+
     def test_keys_are_stable_and_say_nothing(self):
         self.assertEqual(X.short_hash("PT_00001|2024|GMC"), X.short_hash("PT_00001|2024|GMC"))
         self.assertEqual(len(X.short_hash("x")), 12)
