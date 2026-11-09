@@ -14,7 +14,7 @@ the evaluations, not by a look at the tables. This job looks at the tables every
        map_years          page_map lines whose document year is 2025 or later outnumber 2023 and 2024 (the build order bug)
        docs_without_pages documents with text_status ok and no page
        pages_unindexed    pages whose words are null (the index backfill behind)
-       stale_versions     no value_versions in 3 days while propose_values is scheduled nightly
+       stale_versions     no value_versions in 3 days (only with --nightly-values: Propose values runs by hand today)
        orphan_versions    value_versions whose library_id is not in documents
 Writes evidence_health.md (the report); the Pipeline QA run row carries the counters. Never writes to the database.
 Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run record (QA_COMMIT=true writes it).
@@ -128,7 +128,7 @@ def report_md(counts, docs, pmap, vals, unindexed, failed, today):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true", help="write the run row and the failures to Pipeline QA")
-    ap.add_argument("--no-nightly-values", action="store_true", help="skip the stale_versions check (propose_values not scheduled)")
+    ap.add_argument("--nightly-values", action="store_true", help="run the stale_versions check (only once Propose values is scheduled; today it runs by hand, in passes)")
     a = ap.parse_args()
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
@@ -144,7 +144,7 @@ def main():
         pmap = page_map(cur)
         vals = values(cur)
         unindexed = unindexed_pages(cur)
-    failed = checks(docs, pmap, vals, unindexed, nightly_values=not a.no_nightly_values)
+    failed = checks(docs, pmap, vals, unindexed, nightly_values=a.nightly_values)
     for name, text in failed:
         run.failure("DATA_CHECK", text, key=name, stage="evidence_health")
     md = report_md(counts, docs, pmap, vals, unindexed, failed, today)
