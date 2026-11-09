@@ -30,6 +30,45 @@ class Lines(unittest.TestCase):
         self.assertEqual(M.hint(None), "")
 
 
+class Anchor(unittest.TestCase):
+    """--anchor (9 Nov 2026): another year's known value searched in this year's pages."""
+    def test_anchor_for_picks_the_nearest_other_year(self):
+        self.assertEqual(M.anchor_for({2023: 4.0, 2024: 5.0, 2025: 6.0}, 2024), (2025, 6.0))   # later year first on a tie
+        self.assertEqual(M.anchor_for({2022: 4.0, 2025: 0}, 2024), (2022, 4.0))               # an empty value is not known
+        self.assertIsNone(M.anchor_for({2024: 5.0}, 2024)); self.assertIsNone(M.anchor_for(None, 2024))
+
+    def test_anchor_pages_keeps_only_pages_printing_the_value(self):
+        class Cur:
+            def execute(self, q, params):
+                self.q = q
+                self.rows = [("d", 3, "Revenue 5,147 4,892\nCosts 100 90"), ("d", 7, "In 2023 we had 4,892 employees"), ("d", 9, "Nothing 4,8921")]
+            def fetchall(self):
+                return self.rows
+        cur = Cur()
+        got = M.anchor_pages(cur, ["d"], 4892000000.0, {"unit_family": "currency"})
+        self.assertEqual(sorted(got), [("d", 3), ("d", 7)])                 # found_on checked, 4,8921 is not the number
+        self.assertIn("to_tsquery", cur.q)
+        self.assertEqual(M.anchor_pages(cur, [], 4892000000.0, {"unit_family": "currency"}), {})
+
+    def test_anchor_hint_names_the_other_year_and_forbids_its_value(self):
+        h = M.anchor_hint(2024, 2023, 4892000000.0, {"unit_family": "currency"})
+        self.assertIn("2023 figure", h); self.assertIn("4,892", h); self.assertIn("Never give", h); self.assertIn("2024 column", h)
+
+    def test_anchor_pages_join_the_pool_and_score_higher(self):
+        body = "Group figures 2024 2023\nTurnover 5,147 4,892"
+        with_anchor = X.page_score(0.0, None, body, 2024, ["revenue"], [], 0.0, anchor_boost=1.0)
+        self.assertAlmostEqual(with_anchor - X.page_score(0.0, None, body, 2024, ["revenue"], [], 0.0), M.ANCHOR_WEIGHT)
+        self.assertEqual(X.hints(None, None, 2024, {}), "")
+        X.ANCHOR = "note"
+        try:
+            h = X.hints(None, (2023, 4892000000.0, {("d", 3): body}), 2024, {"unit_family": "currency"})
+            self.assertIn("Anchor:", h)
+            X.ANCHOR = "pages"
+            self.assertEqual(X.hints(None, (2023, 4892000000.0, {("d", 3): body}), 2024, {"unit_family": "currency"}), "")
+        finally:
+            X.ANCHOR = "off"
+
+
 class AgainstPostgres(unittest.TestCase):
     def test_memory_from_another_year_brings_this_years_page(self):
         url = os.environ.get("PG_TEST_URL")

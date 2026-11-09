@@ -47,7 +47,8 @@ SIBLING_WEIGHT = 1.0                 # page score added to the page where a sibl
 SIBLING_NEAR = {0: 1.0, 1: 0.6, 2: 0.3}   # share of SIBLING_WEIGHT by distance from the sibling's page
 NEIGHBOUR_DECAY = {1: 1.0, 2: 0.4}   # share of the neighbour's score that reaches this page, by distance in pages
 NEIGHBOUR_TOP = 10                   # the best pages whose missing next and previous pages are fetched and scored
-from company_memory import MEMORY_WEIGHT  # page score added to a page carrying the line the company used another year
+from company_memory import MEMORY_WEIGHT, ANCHOR_WEIGHT  # page score added to a page carrying the line the company used another year, or printing its value
+ANCHOR = "off"                       # --anchor: "off", "pages" (another year's known value searched in this year's pages), "note" (pages + the reader told)
 BIGNUM = re.compile(r"\d{1,3}(?:[,.'\u00a0\u202f ]\d{3})+|\d{4,}")
 MATCH = 0.005
 # a printed number: Indian grouping, comma/dot/apostrophe groups, space groups (never followed by another
@@ -240,7 +241,7 @@ def label_query(labels):
     return " or ".join(f'"{l}"' if " " in l else l for l in ascii_labels) or "zzzz"
 
 
-def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0, memory_boost=0.0, sibling_boost=0.0):
+def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_boost=0.0, memory_boost=0.0, sibling_boost=0.0, anchor_boost=0.0):
     """How likely a page holds the attribute's figure for the year, from five signals, each in 0 to 1:
     the label match of the word index, the best rule candidate on the page, how much of a table it is
     (numbers of four digits or more), whether it prints the year (or its fiscal label), how often the
@@ -254,7 +255,7 @@ def page_score(text_rank, cand, body, year, labels, exclude, doc_weight, index_b
     hits = min(len(label_positions(body or "", labels, exclude)), 5) / 5
     c = max(cand, 0) / 8 if cand is not None else 0.0
     return (1.0 * text_rank + 1.0 * min(c, 1) + 0.5 * tab + 0.5 * has_year + 0.5 * hits + 0.7 * doc_weight + INDEX_WEIGHT * index_boost
-            + MEMORY_WEIGHT * memory_boost + SIBLING_WEIGHT * sibling_boost)
+            + MEMORY_WEIGHT * memory_boost + SIBLING_WEIGHT * sibling_boost + ANCHOR_WEIGHT * anchor_boost)
 
 
 def retrieval_miss(holding, rows, forms):
@@ -506,14 +507,16 @@ def bm25_text_rank(cur, found, attr):
     return [(lid, page, body, s / top) for (lid, page, body, _), s in zip(found, scores)]
 
 
-def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, siblings=None):
+def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, siblings=None, anchor=None):
     """[(score, library_id, page, body, best rule candidate)] for the label-matching pages of the documents,
     plus the pages the documents' own content index cites for the attribute (content_index.py, 31 Oct 2026),
     which get INDEX_WEIGHT and join the pool even when no label is on them, plus (memory, from
     company_memory.memory_for, 1 Nov 2026) the pages carrying the line the company printed the figure on
     another year, which get MEMORY_WEIGHT, plus (siblings, from sibling_pages, 2 Nov 2026) the pages where a
     sibling attribute's figure is and the ones next to it, which get SIBLING_WEIGHT times their share. info, a
-    dict when given, receives "cited": {(library_id, page): weight} and "siblings": the sibling pages."""
+    dict when given, receives "cited": {(library_id, page): weight} and "siblings": the sibling pages. anchor
+    (company_memory.anchor_pages, --anchor, 9 Nov 2026): {(library_id, page): body} of this year's pages printing
+    another year's known value; they join the pool and get ANCHOR_WEIGHT."""
     import content_index, company_memory
     cited = content_index.cited(cur, ids, attr)
     if info is not None:
@@ -527,11 +530,16 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, sib
     siblings = {k: v for k, v in (siblings or {}).items() if k[0] in set(ids)}
     if info is not None:
         info["siblings"] = dict(siblings)
+    anchor = anchor or {}
+    if info is not None:
+        info["anchor"] = set(anchor)
     missing = (set(cited) | set(siblings)) - {(lid, page) for lid, page, _, _ in found}
     if missing:
         cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and page = any(%s)",
                     (sorted({l for l, _ in missing}), sorted({p for _, p in missing})))
         found += [(lid, page, body, 0.0) for lid, page, body in cur.fetchall() if (lid, page) in missing]
+    have = {(lid, page) for lid, page, _, _ in found}
+    found += [(lid, page, body, 0.0) for (lid, page), body in anchor.items() if (lid, page) not in have]
     if memory:
         found += company_memory.memory_pages(cur, ids, memory, {(lid, page) for lid, page, _, _ in found})
     if BM25_POOL:
@@ -547,7 +555,7 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, sib
         top = max(cs, key=lambda c: c[0]) if cs else None
         sc = page_score(rk, top[0] if top else None, body, year, attr.get("labels", []) + attr.get("more_terms", []),
                         attr.get("exclude", []), weight.get(lid, 0), cited.get((lid, page), 0.0), company_memory.boost(body, memory),
-                        siblings.get((lid, page), 0.0))
+                        siblings.get((lid, page), 0.0), 1.0 if (lid, page) in anchor else 0.0)
         return (sc, lid, page, body, top)
     rows = [score(lid, page, body, rk) for lid, page, body, rk in found]
     # the pages next to the best ones join the pool (a table running on, the page after an index entry)
@@ -656,6 +664,26 @@ def more_terms_pages(cur, ids, attr, have, info=None):
             pass
 
 
+def anchor_for_year(cur, ids, year, attr, known):
+    """(other year, value, {(library_id, page): body}) for --anchor, or None when off or no other year is known."""
+    import company_memory
+    if ANCHOR == "off" or not known:
+        return None
+    a = company_memory.anchor_for(known, year)
+    if not a:
+        return None
+    return a[0], a[1], company_memory.anchor_pages(cur, ids, a[1], attr)
+
+
+def hints(memory, anchor, year, attr):
+    """The reader's hint text: the memory line, plus the anchor sentence with --anchor note."""
+    from company_memory import hint, anchor_hint
+    parts = [hint(memory)]
+    if ANCHOR == "note" and anchor and anchor[2]:
+        parts.append(anchor_hint(year, anchor[0], anchor[1], attr))
+    return " ".join(p for p in parts if p)
+
+
 def read_values(cur, wba, year, attr, spec, usage, known=None):
     """Every figure the model reads for a company and attribute from the documents of one year, with no
     validated answer needed: the same documents, ranking and pages as evaluate(). The year asked comes first
@@ -672,14 +700,17 @@ def read_values(cur, wba, year, attr, spec, usage, known=None):
     memory = memory_for(cur, wba, attr, year, known, year_documents) if known else None
     if memory:
         usage["with a memory from another year"] += 1
+    anchor = anchor_for_year(cur, [d[0] for d in docs], year, attr, known)
+    if anchor and anchor[2]:
+        usage["with an anchor from another year"] += 1
     pages = keep_pages(ranked_pages(cur, [d[0] for d in docs], weight, year, attr, spec, memory=memory,
-                                    siblings=sibling_pages(cur, wba, year, attr, spec)))
+                                    siblings=sibling_pages(cur, wba, year, attr, spec), anchor=anchor[2] if anchor else None))
     scored = [((top[0] if top else -99) - 0.05 * i, top, lid, page, body) for i, (_, lid, page, body, top) in enumerate(pages)]
     code = next((c for c, v in spec["attributes"].items() if v is attr), None)
     best = model_pages(scored, code, attr, pages, docs)
     if not best:
         return []
-    got = read_years({"wba": wba, "year": year, "hint": hint(memory), "fy_month": fy_end_month(cur, wba)}, attr,
+    got = read_years({"wba": wba, "year": year, "hint": hints(memory, anchor, year, attr), "fy_month": fy_end_month(cur, wba)}, attr,
                      [(lid, page, body) for _, _, lid, page, body in best], usage)
     for e in got:
         e["asked"] = year
@@ -730,9 +761,13 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     from company_memory import memory_for, hint
     memory = memory_for(cur, g["wba"], attr, g["year"], known, year_documents) if known else None
     r["memory"] = bool(memory)
+    anchor = anchor_for_year(cur, ids, g["year"], attr, known)
+    r["anchor"] = bool(anchor and anchor[2])                                             # another year's value found on this year's pages
+    r["anchor_hit"] = bool(anchor) and any((lid, page) in anchor[2] for lid, page, _ in holding)   # ... on a page that holds this year's figure
     r["fy_shift"] = document_year(g["year"], fy_end_month(cur, g["wba"])) != g["year"]   # a January-to-June year end
     rows = ranked_pages(cur, ids, weight, g["year"], attr, spec, info, memory,
-                        siblings=sibling_pages(cur, g["wba"], g["year"], attr, spec) if SIBLINGS_ON else None)
+                        siblings=sibling_pages(cur, g["wba"], g["year"], attr, spec) if SIBLINGS_ON else None,
+                        anchor=anchor[2] if anchor else None)
     pages = keep_pages(rows)
     r["in_pages"] = any(found_on(p[3], v) for p in pages for v, _, _ in forms)
     r["more_terms"] = info.get("more_terms")
@@ -759,7 +794,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         import model_reader
         read_years = model_reader.read_candidates if model_reader.SELECTOR == "candidates" else model_reader.read_years
         note = {}
-        all_got = read_years(dict(g, hint=hint(memory), fy_month=fy_end_month(cur, g["wba"])), attr,
+        all_got = read_years(dict(g, hint=hints(memory, anchor, g["year"], attr), fy_month=fy_end_month(cur, g["wba"])), attr,
                              [(lid, page, read_text(lid, page, body)) for _, _, lid, page, body in best_pages], usage, note=note)
         got = next((e for e in all_got if e["year"] == g["year"]), None)
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
@@ -804,6 +839,7 @@ def main():
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
+    ap.add_argument("--anchor", choices=["off", "pages", "note"], default="off", help="another year's known value searched in this year's pages (reports print the previous year beside the current one): pages join the pool with a boost; note also tells the reader (company_memory.anchor_pages, 9 Nov 2026)")
     ap.add_argument("--spec-by", choices=["description", "model"], default="description", help="built specs (--auto-spec, --heldout): from the description alone, or with labels, exclusions and search terms a model writes from the name and definition (heldout.model_spec, one call per attribute)")
     ap.add_argument("--auto-spec", action="store_true", help="read the chosen (development) attributes with the spec heldout.py builds from Metadata Codes, not the hand-written one: how much the hand-written specs add, and where the builder is improved")
     ap.add_argument("--heldout", type=int, default=0, help="read N held-out number attributes instead (heldout.py: never tuned on, spec built from Metadata Codes at run time)")
@@ -822,8 +858,9 @@ def main():
     model_reader.UNSTATED_BASIS = a.unstated_basis
     model_reader.PERIOD_CHECK = a.period_check
     model_reader.SELECTOR = a.selector
-    global BM25_POOL, MODEL_PAGES
+    global BM25_POOL, MODEL_PAGES, ANCHOR
     BM25_POOL = a.bm25_pool
+    ANCHOR = a.anchor
     MODEL_PAGES = max(1, a.model_pages)
     PAGE_TEXT = a.page_text
     if a.guidance == "md":
@@ -979,6 +1016,8 @@ def main():
                 s["fy shift"] += 1; s["fy shift right"] += bool(r["right"]); s["fy shift proposal"] += bool(r["proposal"])
             if r.get("memory"):
                 s["memory"] += 1; s["memory in_pages"] += bool(r["in_pages"]); s["memory right"] += bool(r["right"])
+            if r.get("anchor"):
+                s["anchor"] += 1; s["anchor hit"] += bool(r.get("anchor_hit")); s["anchor right"] += bool(r["right"])
             else:
                 s["no memory"] += 1; s["no memory in_pages"] += bool(r["in_pages"]); s["no memory right"] += bool(r["right"])
             if r.get("more_terms"):
@@ -1133,6 +1172,16 @@ def main():
                   f"{s['memory right'] / (s['memory'] or 1):.0%} | {s['no memory']:,} | {s['no memory in_pages'] / (s['no memory'] or 1):.0%} | "
                   f"{s['no memory right'] / (s['no memory'] or 1):.0%} |")
     md.append("")
+    if ANCHOR != "off":
+        md += [f"Anchor (--anchor {ANCHOR}, 9 Nov 2026): another year's known value searched in this year's pages, which print the "
+               "previous year beside the current one. Answers where it was found on some page, where that page holds this "
+               "year's figure, and right:", "",
+               "| Attribute | Anchor found | On a page holding the figure | Right |", "| --- | --: | --: | --: |"]
+        for c in codes:
+            s = stats[c]
+            md.append(f"| {c} {spec['attributes'][c]['name']} | {s['anchor']:,} | {s['anchor hit'] / (s['anchor'] or 1):.0%} | "
+                      f"{s['anchor right'] / (s['anchor'] or 1):.0%} |")
+        md.append("")
     md += ["Fiscal years ending January to May (2 Nov 2026): the reporting year's document is the one dated the year after, "
            "and the model is told the year end. Answers of such companies, proposals and right:", "",
            "| Attribute | Answers with a January-to-May year end | Proposal | Right |", "| --- | --: | --: | --: |"]
@@ -1148,12 +1197,12 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0))
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0), ("anchor", a.anchor if a.anchor != "off" else ""))
                                                                               if v not in ("base", "today", "db", "keep", "all", 0, "off")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),

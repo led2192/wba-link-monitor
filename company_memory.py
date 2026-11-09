@@ -12,6 +12,12 @@ line and the scale. That memory is then used for the year being read, in two pla
   2. the model reader is told, as a hint, how the company printed the figure that other year (never the
      value), and still has to find this year's column.
 
+A third use, the anchor (--anchor, 9 Nov 2026): reports print the previous year beside the current one
+("Revenue 5,147 4,892"), so the remembered value itself, searched in THIS year's documents, lands on the
+very table that holds this year's figure, whatever the line is called and in whatever language. Pages
+printing it get ANCHOR_WEIGHT (anchor_pages); with --anchor note the reader is also told that value is the
+other year's, printed as a comparative, and that the figure asked is the one beside it.
+
 The year being read is never used: its own answer is what the reader is scored against. Read-only.
 """
 import re
@@ -19,6 +25,8 @@ import re
 from value_eval import found_on, printed_forms, scales_for
 
 MEMORY_WEIGHT = 1.0                  # page score added to a page carrying the remembered line
+ANCHOR_WEIGHT = 1.5                  # page score added to a page printing another year's known value (--anchor)
+ANCHOR_POOL = 12                     # pages of this year's documents the anchor may bring in
 MEMORY_POOL = 20                     # pages of this year's documents the remembered line may bring in
 MIN_SHARE = 0.8                      # share of the line's words a page must carry
 STOP = {"the", "and", "for", "of", "in", "to", "a", "an", "on", "by", "per", "total", "group"}
@@ -128,3 +136,40 @@ def hint(memory):
     return (f"Hint from another year: in {where} this company printed the figure on a line reading \"{memory['label']}\" "
             f"(words only, numbers removed), in {scale}. The same line in these pages is likely the one; take the column "
             f"for the reporting year asked, and check the scale this page states.")
+
+
+def anchor_for(known, year):
+    """(other year, its known right value) nearest to year, the later year first on a tie; None without one."""
+    ys = sorted((y for y in (known or {}) if y != year and known[y]), key=lambda y: (abs(y - year), -y))
+    return (ys[0], known[ys[0]]) if ys else None
+
+
+def anchor_pages(cur, ids, value, attr, have=()):
+    """{(library_id, page): body} of this year's pages that print the other year's known value at any of the
+    attribute's scales (found_on checked on the text, not only the word index). At most ANCHOR_POOL pages,
+    pages already in the pool listed too (the caller scores them), bodies given for the new ones."""
+    from value_eval import tsquery_for
+    forms = printed_forms(value, scales_for(attr.get("unit_family")))
+    if not forms or not ids:
+        return {}
+    q = " | ".join(f"({tsquery_for(v, d)})" for v, _, d in forms)
+    cur.execute("select library_id, page, body from public.pages where library_id = any(%s) "
+                "and words @@ to_tsquery('simple', %s) limit 60", (ids, q))
+    out = {}
+    for lid, page, body in cur.fetchall():
+        if any(found_on(body, v) for v, _, _ in forms):
+            out[(lid, page)] = body
+            if len(out) >= ANCHOR_POOL:
+                break
+    return out
+
+
+def anchor_hint(year, other, value, attr):
+    """What the reader is told with --anchor note: the other year's value is printed on these pages as a
+    comparative, the figure asked is the one beside it for the reporting year, and that value is never the answer."""
+    forms = printed_forms(value, scales_for(attr.get("unit_family")))
+    shown = ", ".join(f"{v:,.{d}f}" for v, _, d in forms[:3]) if forms else f"{value:,}"
+    return (f"Anchor: this company's {other} figure for this attribute was {shown} (at some scale). Reports print the previous "
+            f"year beside the current one, so where one of these numbers appears, the {year} figure is most likely the "
+            f"number next to it on the same line, in the {year} column. Never give {shown} as the {year} value.")
+
