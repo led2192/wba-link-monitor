@@ -54,7 +54,8 @@ def req(method, url, **kw):
 # Reasons written by the robots (dedupe_library.py). Rows discarded for these reasons may be purged
 # without the 7-day wait (--machine-only): the duplicate keeps its twin in the library, the archive
 # keeps every field, and a row can be restored from the archive if a rule was wrong.
-MACHINE_REASONS = ("Duplicate of another document", "Not a disclosure")
+MACHINE_REASONS = ("Duplicate of another document", "Not a disclosure",
+                   "Archived: before 2022, not cited")       # archive_documents.py, 9 Nov 2026: old documents nobody uses
 
 
 def candidates(days, machine_only=False):
