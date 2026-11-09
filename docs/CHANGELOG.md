@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-09 `evidence_health`: the stale_versions check is opt-in (`--nightly-values`); Propose values runs by hand, in passes, so the first run (42707648767) flagged it wrongly. First report: 11.7 million pages (planner estimate), 304,682 documents, 280,074 with pages, page map 68,658 lines all embedded, 271 ok documents without pages (#PRNUM)
+- 2026-11-09 `evidence_health`: the stale_versions check is opt-in (`--nightly-values`); Propose values runs by hand, in passes, so the first run (42707648767) flagged it wrongly. First report: 11.7 million pages (planner estimate), 304,682 documents, 280,074 with pages, page map 68,658 lines all embedded, 271 ok documents without pages (#330)
 - 2026-11-09 `evidence_health.py` and the Evidence health workflow (daily 06:41 UTC, after Document map, by hand): the evidence database's tables looked at every day, six checks as DATA_CHECK failures (a new quality code) in Pipeline QA (#329)
 - 2026-11-09 `rerank_train.ensure_model` imports the training libraries before building pairs, so a missing one fails in the first second rather than after hours (#328)
 - 2026-11-09 `archive_documents.py` and the Archive documents workflow (manual, dry run by default): discards, with the reason "Archived: before 2022, not cited", the old documents nobody uses (rule B 92,029 on 9 Nov); the reason joins the purge job's machine reasons so `--machine-only --days 7` deletes them after the undo window (#327)
