@@ -43,7 +43,7 @@ CODES = (
     "PAGE_UNREACHABLE", "PAGE_GONE", "PAGE_BLOCKED", "PAGE_EMPTY", "PAGE_UNHARVESTED", "PAGE_WRONG_TYPE",
     "DOC_FETCH_FAIL", "DOC_UNREADABLE", "DOC_DROPPED", "DOC_DUPLICATE", "DOC_WRONG_ROW",
     "TYPE_DISAGREE", "TYPE_MISSING", "LABEL_CORRECTION", "DOC_FLAGGED",
-    "CO_GAP", "CO_MISSED_KNOWN", "RUN_FAILED",
+    "CO_GAP", "CO_MISSED_KNOWN", "RUN_FAILED", "DATA_CHECK",
 )
 SEVERITIES = ("High", "Medium", "Low")
 # Default severity per code when the caller does not say; the rule in the design doc refines it
@@ -55,7 +55,7 @@ DEFAULT_SEVERITY = {
     "DOC_DUPLICATE": "Low", "DOC_WRONG_ROW": "Medium",
     "TYPE_DISAGREE": "High", "TYPE_MISSING": "High", "LABEL_CORRECTION": "High",
     "DOC_FLAGGED": "High",
-    "CO_GAP": "Medium", "CO_MISSED_KNOWN": "High", "RUN_FAILED": "High",
+    "CO_GAP": "Medium", "CO_MISSED_KNOWN": "High", "RUN_FAILED": "High", "DATA_CHECK": "High",
 }
 # Context fields a failure may carry (anything else is dropped with a strict-mode error).
 FAILURE_FIELDS = ("wba_id", "company_name", "page_url", "document_url", "library_id", "record_id",
