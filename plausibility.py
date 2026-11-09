@@ -118,15 +118,18 @@ def yearly_ratio(a, b, gap):
 
 def progression_bounds(history):
     """{attribute: (bound, pairs)} from the companies' validated histories: the 99th percentile of the validated
-    year-on-year ratios (as the range check uses percentiles), learned only for attributes with PROG_MIN_PAIRS pairs
-    of validated years or more. Not the maximum: the first shadow measure (9 Nov 2026) gave revenue 5.7e12 a year
-    because one validated pair has a unit slip in the analysts' own data; one bad pair must not set the bound."""
+    year-on-year ratios (as the range check uses percentiles), pairs that are a scale slip apart left out, learned
+    only for attributes with PROG_MIN_PAIRS pairs of validated years or more. Not the maximum: the first shadow
+    measure (9 Nov 2026) gave revenue 5.7e12 a year because validated pairs with unit slips exist in the analysts'
+    own data; a bad pair must not set the bound."""
     ratios = collections.defaultdict(list)
     for (wba, code, k), pts in history.items():
         pts = sorted({(y, x) for y, x in pts if x and x > 0})
         for (y1, x1), (y2, x2) in zip(pts, pts[1:]):
             r = yearly_ratio(x1, x2, y2 - y1)
-            if r:
+            # a validated pair a thousand times apart is a unit slip in the data, not a change: the 99th percentile
+            # of 242 revenue pairs was still 1,330 a year on the second shadow measure (9 Nov 2026)
+            if r and scale_slip(max(x1, x2) / min(x1, x2)) is None:
                 ratios[code].append(r)
     out = {}
     for code, v in ratios.items():

@@ -87,13 +87,14 @@ class Plausibility(unittest.TestCase):
             P.PROGRESSION = "off"
         self.assertIsNone(P.yearly_ratio(0, 5, 1))
         # one validated pair with a unit slip (9 Nov 2026: revenue came out 5.7e12 a year) must not set the bound
-        rows.append(row("PT_00030", P.REVENUE, 2022, None, "USD", validated=31e9 / 1e6))
+        rows += [row("PT_00130", P.REVENUE, 2022, None, "USD", validated=31e9 / 1e6), row("PT_00130", P.REVENUE, 2023, None, "USD", validated=31e9)]
         for i in range(26, 125):                                   # 99 more ordinary pairs so the percentile is below the slip
             rows.append(row(f"PT_{i:05d}", P.REVENUE, 2022, None, "USD", validated=(i + 1) * 1e9 / 1.3))
             if i >= 60:
                 rows.append(row(f"PT_{i:05d}", P.REVENUE, 2023, None, "USD", validated=(i + 1) * 1e9))
         _, _, per_head = P.learn(rows, RATES)
         self.assertLess(per_head["progression"][P.REVENUE][0], 10)
+        self.assertEqual(per_head["progression"][P.REVENUE][1], 124)      # the slip pair is left out of the 125
 
     def test_too_few_validated_answers_learn_no_range(self):
         self.assertIsNone(P.bounds([1.0] * 10))
