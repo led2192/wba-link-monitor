@@ -38,8 +38,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Check
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then python evidence_health.py
-          else python evidence_health.py --commit; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.commit }}" != "true" ]; then python evidence_health.py --nightly-values
+          else python evidence_health.py --commit --nightly-values; fi
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}

@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 Propose values runs nightly at 05:07 UTC: SEC and ESEF filings for every company, then the model reader on the five pilot attributes for 2025 and 2024, incremental (30 days) and capped at 1.5 USD; a refused call stops the reading and writes what was read. Evidence health now runs its stale_versions check (#331)
 - 2026-11-09 `evidence_health`: the stale_versions check is opt-in (`--nightly-values`); Propose values runs by hand, in passes, so the first run (42707648767) flagged it wrongly. First report: 11.7 million pages (planner estimate), 304,682 documents, 280,074 with pages, page map 68,658 lines all embedded, 271 ok documents without pages (#330)
 - 2026-11-09 `evidence_health.py` and the Evidence health workflow (daily 06:41 UTC, after Document map, by hand): the evidence database's tables looked at every day, six checks as DATA_CHECK failures (a new quality code) in Pipeline QA (#329)
 - 2026-11-09 `rerank_train.ensure_model` imports the training libraries before building pairs, so a missing one fails in the first second rather than after hours (#328)
