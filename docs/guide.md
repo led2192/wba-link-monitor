@@ -58,7 +58,7 @@ Two more doors, for documents the watched pages cannot give: regulator databases
 ## 4. Your routine
 
 ### Every weekday (about 15 minutes)
-1. **Base health** (Disclosure Library, interface "Base health", page Health, or the `base_health` table, top row). Read `status` and `attention`. OK = nothing to do. Check = the base is over 80% full or nothing new arrived. Problem = a job failed twice (it re-runs itself once first; `failed_jobs` links it) or the base is over 90% full. Nothing to do: the weekly review reads it. Average completeness is the headline number.
+1. **Base health** (Disclosure Library, interface "Base health", page Health, or the `base_health` table, top row). Read `status` and `attention`. OK = nothing to do. Check = the base is over 80% full, nothing new arrived, or the Airtable AI stopped typing new English documents (it typed under half of those that arrived 2 to 9 days ago; since 9 Nov 2026). Problem = a job failed twice (it re-runs itself once first; `failed_jobs` links it) or the base is over 90% full. Nothing to do: the weekly review reads it. Average completeness is the headline number.
 2. **Check Claude's answers** (Pipeline QA), after 13:00 Madrid: about 5 cards, one click each (Agree, Disagree, Can't tell). Section 7.4.
 3. **Notifications from Claude.** The 06:46 gap research tells you which companies it researched and which links it pasted. The 12:46 labelling tells you how many cards it labelled, how many it left for you and any pattern it saw.
 4. **Optional:** the queue on interface Hoy (Analyst and Action filters) when you have time to chase a missing report by hand.
