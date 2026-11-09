@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `base_room.py` counts the small tables with no fields (`fields[]=`), as base_health does; the full-record sweep of monitored_links timed out six times in a row and failed run 42653341821 (#315)
 - 2026-11-09 `base_room.py`: companies with at least one live document of each type for 2023 to 2025 (coverage by document type), and ages from the record's creation time (first_seen was backfilled and read recent on every old row, so rules C and D counted 0) (#314)
 - 2026-11-09 `extract_eval --heldout N --with-known`: the held-out codes are chosen among the answers with another validated year, so the anchor check on held-out attributes reads answers it can act on (`known_other_year`) (#313)
 - 2026-11-09 `attribute_values.printed_on_pages` and `printed_in_documents`: the report's own agreement with each model reader proposal (consensus, wave A), written by propose_values.py for the reviewers' queue (#311)
