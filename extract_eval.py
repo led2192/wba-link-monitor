@@ -391,6 +391,8 @@ READS = 1                # --reads N (9 Nov 2026): the model reads the same page
 SELECT = "base"          # how the rank half of the model's pages is chosen: "base" (today) or "learned" (--select);
                          # "map": the pages the document map names (doc_map.py, 9 Nov 2026); "map-half": half map, half today
 MAP_EMBEDDER = None      # the sentence model that embeds the map query, when the library is installed
+RERANKER = None          # rerank_train.Reranker when SELECT is "rerank" (9 Nov 2026): a cross-encoder trained on the analysts'
+RERANK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rerank_model")   # validated pages reorders the pool
 SELECT_MODEL = None      # page_select.load() when SELECT is "learned"
 EMBEDDER = None          # page_select.Embedder() when SELECT is "learned"
 
@@ -406,6 +408,9 @@ def model_pages(scored, code=None, attr=None, pages=None, docs=None, fold=None):
         if o:
             seen = set(o)
             scored = [scored[i] for i in o] + [x for j, x in enumerate(scored) if j not in seen]
+    if SELECT == "rerank" and RERANKER and scored:      # the trained cross-encoder orders the pool (9 Nov 2026)
+        sc = RERANKER.scores(attr, [x[4] for x in scored])
+        scored = [x for _, x in sorted(zip(sc, scored), key=lambda p: -p[0])]
     return pages_for_model(scored, MODEL_PAGES)
 
 
@@ -991,7 +996,7 @@ def main():
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
     ap.add_argument("--guidance", default="today", choices=["today", "learned", "check", "md"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt; md: WBA's own assessment guidance per attribute (Pipeline QA attribute_guidance) in the prompt")
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
-    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle", "map", "map-half", "navigate", "navigate-half"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
+    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle", "map", "map-half", "navigate", "navigate-half", "rerank"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
@@ -1065,6 +1070,18 @@ def main():
             MAP_EMBEDDER = page_select.Embedder()
         except Exception as e:
             print(f">>> map query by words only ({type(e).__name__}: {str(e)[:80]})", flush=True)
+    if SELECT == "rerank":                       # trained on validated answers after the first 100 per attribute (rerank_train.py)
+        global RERANKER
+        import rerank_train, evidence_db
+        c0 = evidence_db.connect(); cur0 = c0.cursor(); cur0.execute("set statement_timeout = '30s'")
+        got = rerank_train.ensure_model(cur0, os.environ["GOLD_TOKEN"].strip(), json.load(open(SPEC, encoding="utf-8")),
+                                        list(json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "gold_attributes.json"), encoding="utf-8"))["bases"].values()),
+                                        RERANK_DIR, sys.modules[__name__])
+        c0.close()
+        if not got:
+            open("extract_eval.md", "w").write("### Extraction: --select rerank found too few validated pages to train; nothing run.\n")
+            return 1
+        RERANKER = rerank_train.Reranker(got)
     if a.reader == "model" and not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         open("extract_eval.md", "w").write("### Extraction: the model reader needs ANTHROPIC_API_KEY (a repository secret); nothing run.\n")
         return 0
