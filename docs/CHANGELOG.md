@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `base_room.py` and the Base room workflow (monthly, by hand): records per table, live documents by year and kind with citations, and archive candidates under four rules, written as a report and a list, nothing to Airtable (#309)
 - 2026-11-09 Decisions recorded, wave B: slots as a reader worse on all four attributes but the probe names the analysts' variants (capex as reported 29%, R&D expense 37%, Scope 1+2 printed total 30% against computed sums 8%); the anchor where it can act: pages +1.1 (chance), note +5.3 (p 0.007, R&D +13.5), held-out check before adoption (#308)
 - 2026-11-09 `doc_map.map_pages`: the embedding parameter compared with null is cast to text; the first `--select map` run (42635984142) failed on every answer with "could not determine data type of parameter $2" (#307)
 - 2026-11-09 `base_health` watches the Airtable AI typing: Check when the AI typed under half of the English documents that arrived 2 to 9 days ago (200+ waiting). The two AI fields stopped around 20 Oct 2026 (79% typed on 19 Oct, about 2% after 25 Oct; about 35,000 documents untyped) while every daily row said OK (#302)
