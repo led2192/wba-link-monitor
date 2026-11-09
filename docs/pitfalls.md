@@ -267,3 +267,6 @@ psycopg sends `%s` parameters untyped and lets Postgres infer the type from wher
 
 ## A library imported only at training time fails after the expensive part (9 Nov 2026)
 `sentence_transformers.CrossEncoder.fit` imports `datasets` when it starts training, not when the module loads. The first `--select rerank` run built 5,249 training pairs for 2.3 hours (ranking every page of 604 answers) and then died on `ImportError: Please install datasets`. Install every library a run will need in the workflow, and when a step is long, import its libraries at the top so a missing one fails in the first second.
+
+## Build a map for the documents the test reads, not the newest ones (9 Nov 2026)
+The first document map took the key documents of the sample companies newest first, 500 of them. The evaluation answers are 2023 and 2024 and read the documents of those years, so the map covered 2025 and 2026 reports and 2% to 5% of the answers had a map: runs 42641417581 (`--select map`) and 42636000437 (`navigate`) measured the baseline twice (+0.4 and +1.2, noise). Any index built for an evaluation must be built from the answers' own (company, year) pairs; `documents_to_map` takes them since #PRNUM.
