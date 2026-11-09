@@ -47,7 +47,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip                      # wheels kept between runs (torch and sentence-transformers took 3 to 5 minutes a run, 9 Nov 2026)
+          cache-dependency-path: |
+            requirements.txt
+            .github/workflows/*.yml
       - run: pip install -r requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ runner.os }}-v1
       - name: Install the embedding model's library (CPU)
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
