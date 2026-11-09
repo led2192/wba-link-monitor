@@ -82,6 +82,30 @@ class Search(unittest.TestCase):
             def execute(self, q, params=None): self.rows = []
         self.assertEqual(D.map_pages(Empty(), ["d"], "x", 2, None), [])
 
+    def test_navigation_prompt_and_reply(self):
+        lines = [("d1", "Annual Report", 2024, 3, "Contents"), ("d1", "Annual Report", 2024, 57, "Consolidated statement of cash flows 2024 2023"),
+                 ("d2", "Sustainability Report", 2024, 12, "GHG emissions by scope 2022-2024")]
+        content, codes = D.nav_prompt({"name": "Total capex", "definition": "x", "unit_family": "currency"}, 2024, lines, 16)
+        self.assertIn("[D1: Annual Report, 2024]", content); self.assertIn("D1 p57: Consolidated statement", content); self.assertIn("D2 p12:", content)
+        self.assertEqual(codes, {"D1": "d1", "D2": "d2"})
+        self.assertEqual(D.parse_nav('{"pages": ["D1:57", "D2 p12", "D1:57", "D9:1", "bad"]}', codes, 16), [("d1", 57), ("d2", 12)])
+        self.assertEqual(D.parse_nav("no json", codes, 16), [])
+        self.assertEqual(D.parse_nav('{"pages": ["D1:1", "D1:2", "D1:3"]}', codes, 2), [("d1", 1), ("d1", 2)])
+
+    def test_navigate_pages_reads_the_map_then_the_bodies(self):
+        class Cur:
+            def execute(self, q, params=None):
+                self.rows = ([("d1", "Annual Report", 2024, 57, "Cash flows"), ("d1", "Annual Report", 2024, 3, "Contents")] if "page_map" in q
+                             else [("d1", 57, "body 57")])
+            def fetchall(self): return self.rows
+        import collections
+        got = D.navigate_pages(Cur(), ["d1"], {"name": "Capex"}, 2024, 16, collections.Counter(), call=lambda m, u, **k: '{"pages": ["D1:57"]}')
+        self.assertEqual([(l, p, b) for l, p, b, _ in got], [("d1", 57, "body 57")])
+        class Empty:
+            def execute(self, q, params=None): pass
+            def fetchall(self): return []
+        self.assertEqual(D.navigate_pages(Empty(), ["d1"], {"name": "Capex"}, 2024, 16, collections.Counter(), call=lambda m, u, **k: "x"), [])
+
     def test_eval_keeps_todays_pages_when_the_documents_have_no_map(self):
         saved = X.SELECT
         try:
