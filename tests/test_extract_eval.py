@@ -316,6 +316,15 @@ class Oracle(unittest.TestCase):
         self.assertEqual(len(X.pages_for_model(scored, 16)), 16)
         self.assertEqual(len(X.pages_for_model(scored, 8)), 8)
 
+    def test_consensus_counts_pages_and_documents_printing_the_figure(self):
+        class Cur:
+            def execute(self, q, params=None):
+                self.rows = [("d1", 7, "Revenue 5,147 4,892"), ("d1", 9, "Revenue of 5,147 million"), ("d2", 3, "Group revenue 5,147"), ("d2", 4, "5,1470 nothing")]
+            def fetchall(self): return self.rows
+        self.assertEqual(X.consensus(Cur(), ["d1", "d2"], 5147000000.0, X.scales_for("currency")), (3, 2))
+        self.assertEqual(X.consensus(Cur(), [], 5147000000.0, X.scales_for("currency")), (0, 0))
+        self.assertEqual(X.consensus(Cur(), ["d1"], None, X.scales_for("currency")), (0, 0))
+
     def test_escalation_choice(self):
         a, b, c = {"value": 100.0}, {"value": 200.0}, {"value": 201.0}
         self.assertIs(X.escalation_choice(None, None, b), b)              # empty first level: the second level's figure

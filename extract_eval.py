@@ -776,6 +776,22 @@ def more_terms_pages(cur, ids, attr, have, info=None):
             pass
 
 
+def consensus(cur, ids, value, scales):
+    """(pages, documents) of the year's documents that print the proposed figure at any scale: the report's own
+    agreement with the reader (9 Nov 2026). A headline figure is printed on several pages and often in more than
+    one document; a figure printed once is more often a misread. Diagnostic for every model proposal."""
+    forms = printed_forms(value, scales) if value else []
+    if not forms or not ids:
+        return 0, 0
+    q = " | ".join(f"({tsquery_for(v, d)})" for v, _, d in forms)
+    try:
+        cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and words @@ to_tsquery('simple', %s) limit 60", (ids, q))
+        hits = {(lid, page) for lid, page, body in cur.fetchall() if any(found_on(body, v) for v, _, _ in forms)}
+    except Exception:
+        return 0, 0
+    return len(hits), len({lid for lid, _ in hits})
+
+
 def anchor_for_year(cur, ids, year, attr, known):
     """(other year, value, {(library_id, page): body}) for --anchor, or None when off or no other year is known."""
     import company_memory
@@ -973,6 +989,7 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
             r["right"] = right(got["value"], g["value"])
             r["scale_miss"] = not r["right"] and any(right(got["printed"] * s, g["value"]) for s in scales)
             r["got"] = ((got["value"], got["printed"], got["scale"], "the model"), got["library_id"], got["page"])
+            r["proposal_pages"], r["proposal_docs"] = consensus(cur, ids, got["value"], scales)
         return r
     best = max((x for x in scored if x[1]), key=lambda x: x[0], default=None)
     if best:
@@ -1215,6 +1232,11 @@ def main():
             if "map_pages" in r:
                 s["map answers"] += 1; s["map with pages"] += bool(r["map_pages"]); s["map hit"] += bool(r.get("map_hit"))
                 s["map right"] += bool(r["map_pages"] and r["right"]); s["no map right"] += bool(not r["map_pages"] and r["right"])
+            if r.get("proposal") and "proposal_pages" in r:
+                k = "consensus 2+ pages" if r["proposal_pages"] >= 2 else "consensus 1 page"
+                s[k] += 1; s[k + " right"] += bool(r["right"])
+                k = "consensus 2+ docs" if r["proposal_docs"] >= 2 else "consensus 1 doc"
+                s[k] += 1; s[k + " right"] += bool(r["right"])
             if "slots" in r:
                 s["slot answers"] += 1; s["slot any right"] += bool(r["slots_right"])
                 for k in r["slots"]:
@@ -1394,6 +1416,19 @@ def main():
             n = s["map answers"]; w = s["map with pages"]
             md.append(f"| {c} {spec['attributes'][c]['name']} | {n:,} | {w / (n or 1):.0%} | {s['map hit'] / (w or 1):.0%} | "
                       f"{s['map right'] / (w or 1):.0%} | {s['no map right'] / ((n - w) or 1):.0%} |")
+        md.append("")
+    if a.reader == "model":
+        md += ["Consensus (9 Nov 2026): on how many pages and in how many of the year's documents the proposed figure is printed, and the "
+               "accuracy of each group. A figure the report repeats is more often the right one; a figure printed once is a candidate "
+               "for a second look:", "",
+               "| Attribute | Printed once: proposals | Right | Printed on 2+ pages: proposals | Right | In 1 document | Right | In 2+ documents | Right |",
+               "| --- | --: | --: | --: | --: | --: | --: | --: | --: |"]
+        for c in codes:
+            s = stats[c]
+            md.append(f"| {c} {spec['attributes'][c]['name']} | {s['consensus 1 page']:,} | {s['consensus 1 page right'] / (s['consensus 1 page'] or 1):.0%} | "
+                      f"{s['consensus 2+ pages']:,} | {s['consensus 2+ pages right'] / (s['consensus 2+ pages'] or 1):.0%} | "
+                      f"{s['consensus 1 doc']:,} | {s['consensus 1 doc right'] / (s['consensus 1 doc'] or 1):.0%} | "
+                      f"{s['consensus 2+ docs']:,} | {s['consensus 2+ docs right'] / (s['consensus 2+ docs'] or 1):.0%} |")
         md.append("")
     if SLOTS == "on":
         md += ["Slot read (--slots on, 9 Nov 2026): the attribute's accounting variants asked one by one; the proposal scored above is "
