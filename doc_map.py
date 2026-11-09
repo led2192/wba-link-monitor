@@ -209,7 +209,7 @@ def map_pages(cur, ids, query, k, qvec=None):
     q = words_query([query])
     vec = ("[" + ",".join(f"{x:.6f}" for x in qvec) + "]") if qvec is not None else None
     cur.execute("select m.library_id, m.page, ts_rank_cd(m.words, to_tsquery('simple', %s)) as rk, "
-                "case when m.embedding is null or %s is null then null else 1 - (m.embedding <=> %s::vector) end as cos "
+                "case when m.embedding is null or %s::text is null then null else 1 - (m.embedding <=> %s::vector) end as cos "
                 "from public.page_map m where m.library_id = any(%s)", (q, vec, vec, ids))
     rows = cur.fetchall()
     if not rows:

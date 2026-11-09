@@ -76,6 +76,8 @@ class Search(unittest.TestCase):
         got = D.map_pages(cur, ["d"], "passengers carried", 2, [0.1] * 384)
         self.assertEqual([(l, p) for l, p, _, _ in got], [("d", 5), ("d", 7)])     # 0.5*0.5+0.5*0.9 beats 0.5*1+0.5*0.1
         self.assertEqual(got[0][2], "body five")
+        self.assertNotIn("%s is null", cur.q[0])        # a bare parameter compared with null has no type for Postgres (9 Nov 2026 run failed)
+        self.assertIn("%s::text is null", cur.q[0])
         self.assertEqual(D.map_pages(cur, ["d"], "x", 2, None) and True, True)
         cur.rows = []
         class Empty(Cur):
