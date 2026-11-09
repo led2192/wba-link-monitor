@@ -944,6 +944,7 @@ def main():
     ap.add_argument("--reads", type=int, default=1, help="read the model's pages N times in different orders (quorum, 9 Nov 2026): the answer stays the first read's; agreement and accuracy when reads agree are reported. Costs N times the model calls")
     ap.add_argument("--frequency", choices=["off", "pages"], default="off", help="pages whose big numbers are printed on other pages of the documents too score higher: headline figures repeat, stray ones do not (recurring_numbers, 9 Nov 2026)")
     ap.add_argument("--anchor", choices=["off", "pages", "note"], default="off", help="another year's known value searched in this year's pages (reports print the previous year beside the current one): pages join the pool with a boost; note also tells the reader (company_memory.anchor_pages, 9 Nov 2026)")
+    ap.add_argument("--spec-examples", choices=["on", "off"], default="on", help="with --spec-by model: the hand-written specs of four development attributes as worked examples in the writer's prompt (never the attribute's own); off writes from the definition alone (the 9 Nov 00:13 runs)")
     ap.add_argument("--spec-by", choices=["description", "model"], default="description", help="built specs (--auto-spec, --heldout): from the description alone, or with labels, exclusions and search terms a model writes from the name and definition (heldout.model_spec, one call per attribute)")
     ap.add_argument("--auto-spec", action="store_true", help="read the chosen (development) attributes with the spec heldout.py builds from Metadata Codes, not the hand-written one: how much the hand-written specs add, and where the builder is improved")
     ap.add_argument("--heldout", type=int, default=0, help="read N held-out number attributes instead (heldout.py: never tuned on, spec built from Metadata Codes at run time)")
@@ -1031,7 +1032,7 @@ def main():
             entry = heldout.auto_number_spec(meta.get(c) or {}, units.get(c, []))
             if entry and any(g["attribute"] == c and g["value"] for g in raw) and len(codes) < a.heldout:
                 if a.spec_by == "model":
-                    entry = heldout.model_spec(entry, usage)
+                    entry = heldout.model_spec(entry, usage, code=c, examples=a.spec_examples == "on")
                 spec["attributes"][c] = entry
                 codes.append(c)
         answers = [g for g in raw if g["attribute"] in codes and g["value"] and not g["unit"].lower().startswith(("%", "percent"))]
@@ -1048,7 +1049,7 @@ def main():
                 if entry:
                     entry["status"] = "auto"
                     if a.spec_by == "model":
-                        entry = heldout.model_spec(entry, usage)
+                        entry = heldout.model_spec(entry, usage, code=c, examples=a.spec_examples == "on")
                     spec["attributes"][c] = entry
             print(">>> auto specs: " + ", ".join(f"{c} {spec['attributes'][c].get('status')} {spec['attributes'][c].get('spec_by', 'description')} {len(spec['attributes'][c].get('labels', []))} labels" for c in codes), flush=True)
     gold_index = {(g["wba"], g["attribute"], g["year"]): g["value"] for g in answers}
@@ -1352,7 +1353,7 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]

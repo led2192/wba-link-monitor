@@ -156,8 +156,33 @@ SPEC_SYSTEM = ("You prepare search words for finding one figure or disclosure in
                "integrated reports, 10-K). You never see the reports. Reply with JSON only.")
 
 
-def spec_prompt(name, definition, kind, unit_family=""):
-    return (f"Attribute: {name}\nDefinition: {definition}\nKind: {kind}" + (f", unit family {unit_family}" if unit_family else "") + "\n\n"
+EXAMPLE_CODES = ["GMC_00048.1", "GMC_00001.1", "GMC_02526.1", "GMC_00064.1"]   # revenue, Scope 1, employees, low-carbon capex
+
+
+def spec_examples(exclude_code=None, codes=EXAMPLE_CODES):
+    """Worked examples for the spec writer: the hand-written specs of development attributes (their name and
+    definition, then the labels and exclusions that won), never the attribute being written (exclude_code), so
+    with --auto-spec a development attribute is written without seeing its own spec. The model learns from them
+    how a definition becomes the telegraphic row labels reports print, in several languages, and what to
+    exclude; it still sees no answer and no page. The held-out rule holds: these are development attributes."""
+    try:
+        spec = json.load(open(os.path.join(HERE, "attributes.json"), encoding="utf-8"))["attributes"]
+    except (OSError, KeyError, ValueError):
+        return ""
+    out = []
+    for c in codes:
+        a = spec.get(c)
+        if not a or c == exclude_code:
+            continue
+        ex = {"labels": a.get("labels", [])[:14], "exclude": a.get("exclude", [])[:8], "terms": (a.get("index") or {}).get("terms", [])[:4]}
+        out.append(f"Attribute: {a.get('name', '')}\nDefinition: {(a.get('definition') or '')[:220]}\nKind: number, unit family {a.get('unit_family', '')}\n"
+                   f"Answer: {json.dumps(ex, ensure_ascii=False)}")
+    return "\n\n".join(out)
+
+
+def spec_prompt(name, definition, kind, unit_family="", examples=""):
+    return ((f"Worked examples, written by hand for other attributes:\n\n{examples}\n\nNow this attribute.\n\n" if examples else "") +
+            f"Attribute: {name}\nDefinition: {definition}\nKind: {kind}" + (f", unit family {unit_family}" if unit_family else "") + "\n\n"
             "Write the words a report prints next to this figure or in the passage that discloses it. Reply with one JSON object:\n"
             '{"labels": [up to 20 short phrases a report prints as the row label or heading, most common first, lower case; '
             "include synonyms, abbreviations and the usual wording in French, German, Spanish, Portuguese, Italian, Dutch, "
@@ -185,12 +210,15 @@ def parse_spec_reply(text):
     return clean(j.get("labels"), 20), clean(j.get("exclude"), 10), clean(j.get("terms"), 6)
 
 
-def model_spec(entry, usage, sess=None, call=None):
+def model_spec(entry, usage, sess=None, call=None, code=None, examples=True):
     """The entry with labels, exclusions and search terms written by a model from its name and definition only
-    (never from answers or pages), added to the ones built from the description. One call per attribute."""
+    (never from answers or pages), added to the ones built from the description. One call per attribute. With
+    examples (the default since 9 Nov 2026) the prompt carries the hand-written specs of four development
+    attributes as worked examples, the attribute's own left out (code)."""
     if call is None:
         from model_reader import call
-    reply = call([{"role": "user", "content": spec_prompt(entry["name"], entry.get("definition", ""), entry.get("type", "number"), entry.get("unit_family", ""))}],
+    ex = spec_examples(exclude_code=code) if examples else ""
+    reply = call([{"role": "user", "content": spec_prompt(entry["name"], entry.get("definition", ""), entry.get("type", "number"), entry.get("unit_family", ""), ex)}],
                  usage, sess=sess, system=SPEC_SYSTEM, max_tokens=900)
     labels, exclude, terms = parse_spec_reply(reply)
     out = dict(entry)

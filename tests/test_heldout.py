@@ -67,6 +67,19 @@ class HeldOut(unittest.TestCase):
         self.assertIn("People employed at year end.", seen["prompt"])
         self.assertEqual(H.model_spec(base, {}, call=lambda *a, **k: "")["spec_by"], "description")
 
+    def test_spec_examples_come_from_development_specs_and_never_the_own(self):
+        ex = H.spec_examples()
+        self.assertIn("Revenue", ex); self.assertIn("scope 1", ex.lower()); self.assertIn("Answer: {", ex)
+        self.assertNotIn("Revenue", H.spec_examples(exclude_code="GMC_00048.1"))
+        seen = {}
+        def call(messages, usage, sess=None, system=None, max_tokens=None):
+            seen["prompt"] = messages[0]["content"]; return '{"labels": ["x"], "exclude": [], "terms": []}'
+        base = H.auto_number_spec({"Description": "Number of mines", "Definition": "Operating mines."}, [""])
+        H.model_spec(base, {}, call=call, code="GMC_00001.1")
+        self.assertIn("Worked examples", seen["prompt"]); self.assertNotIn("Scope 1 emissions\nDefinition", seen["prompt"]); self.assertIn("Number of mines", seen["prompt"])
+        H.model_spec(base, {}, call=call, examples=False)
+        self.assertNotIn("Worked examples", seen["prompt"])
+
     def test_spec_has_no_hand_written_parts(self):
         s = H.auto_number_spec({"Description": "Total energy consumption", "Definition": "<p>All energy used.</p>"}, ["MWh"])
         self.assertEqual(s["exclude"], [])
