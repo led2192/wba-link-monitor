@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-09 `model_reader.call` speaks to the Gemini API when READER_MODEL starts with "gemini" (GEMINI_API_KEY; thinking at the lowest level, thoughts counted as output tokens); Generic reader and Narrative workflows pass the key, Generic reader gains a `price` input for the cost line (#PRNUM)
+- 2026-11-09 `model_reader.call` speaks to the Gemini API when READER_MODEL starts with "gemini" (GEMINI_API_KEY; thinking at the lowest level, thoughts counted as output tokens); Generic reader and Narrative workflows pass the key, Generic reader gains a `price` input for the cost line (#325)
 - 2026-11-09 `--spec-examples off` is the default (worked examples gave -3.1 on held-out numbers, 0 fixed, 5 broken); decisions recorded for wave D: model specs -7.3 against hand-written specs on the four pilots (they are for attributes without one), the held-out yes/no reader with "not found" (abstention right or wrong by the attribute's base rate), and the map build's second attempt (#324)
 - 2026-11-09 `doc_map build` with the sample maps the oldest year first (the answers' own documents before the year-after comparatives); the $4 build (42666659267) covered 725 of the 1,848 documents the four pilots' sample reads, newest first (#323)
 - 2026-11-09 `--anchor note` is the reader's default: +5.3 points where another year's value is known (wave B), no attribute worse, a no-op elsewhere; the held-out check is vacuous because no held-out code has a company with two validated years (runs 42666461316, 42666486767 read 0 answers) (#322)
