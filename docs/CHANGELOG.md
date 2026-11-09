@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 Company contacts run weekly (Sundays 04:44 UTC, committed); `company_contacts` gains `source_published` (lookup of the document's `pub_date`) and `source_age_days` (formula); the duplicated scripts.md rows merged (#304)
 - 2026-11-09 Decisions recorded: anchor and frequency (chance on partial runs, the figure recurs on 2+ pages for 65% to 74% of revenue, Scope 1 and employees answers), yes/no abstention on development attributes (accuracy unchanged, 20% not found), the map's first 500 documents (#301)
 - 2026-11-09 `extract_eval --with-known`: only answers whose company has a validated value for another year, where the anchor and the memory can act (#300)
 - 2026-11-09 Decision recorded: model-written specs lift held-out numbers from 9% to 26% (+17.5, 28 fixed, 0 broken); description-built specs are 18.5 below hand-written on development attributes (#299)
