@@ -316,6 +316,14 @@ class Oracle(unittest.TestCase):
         self.assertEqual(len(X.pages_for_model(scored, 16)), 16)
         self.assertEqual(len(X.pages_for_model(scored, 8)), 8)
 
+    def test_escalation_choice(self):
+        a, b, c = {"value": 100.0}, {"value": 200.0}, {"value": 201.0}
+        self.assertIs(X.escalation_choice(None, None, b), b)              # empty first level: the second level's figure
+        self.assertIs(X.escalation_choice(a, None, None), a)
+        self.assertIs(X.escalation_choice(a, [100.0, 200.0], c), c)      # the second level sides with the second read
+        self.assertIs(X.escalation_choice(a, [100.0, 200.0], {"value": 100.4}), a)
+        self.assertIs(X.escalation_choice(a, [100.0, 200.0], {"value": 999.0}), a)   # agrees with nobody: the first stays
+
     def test_quorum_helpers(self):
         self.assertTrue(X.same_value(1000.0, 1003.0)); self.assertTrue(X.same_value(None, 0))
         self.assertFalse(X.same_value(1000.0, None)); self.assertFalse(X.same_value(1000.0, 1200.0))
