@@ -144,12 +144,13 @@ def type_of(f):
 
 
 def number_codes(meta, n, dev=None):
-    """The held-out codes of number attributes, in hash order (a fixed, arbitrary order), at most n*3 so the
-    caller can drop percentages and attributes without answers and still keep n."""
+    """The held-out codes of number attributes, in hash order (a fixed, arbitrary order), all of them: the caller
+    keeps the first n that have validated answers that are not percentages. (Until 9 Nov 2026 only n*3 were
+    returned, and of the first 60 only 8 had such answers.)"""
     dev = development() if dev is None else dev
     codes = [c for c, f in meta.items() if type_of(f) == "Number" and is_heldout(c, dev)]
     codes.sort(key=lambda c: hashlib.sha1((SALT + c).encode()).hexdigest())
-    return codes[:max(n * 3, n)]
+    return codes
 
 
 SPEC_SYSTEM = ("You prepare search words for finding one figure or disclosure in company reports (annual, sustainability, "

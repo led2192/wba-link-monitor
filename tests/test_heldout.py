@@ -93,7 +93,7 @@ class HeldOut(unittest.TestCase):
     def test_number_codes_only_held_out_numbers(self):
         meta = {f"GMC_{i:05d}.1": {"Data Type": {"name": "Number" if i % 2 else "Boolean"}} for i in range(3000, 3400)}
         got = H.number_codes(meta, 5, dev=set())
-        self.assertLessEqual(len(got), 15)
+        self.assertGreater(len(got), 15)                                  # all held-out number codes, the caller stops at n with answers
         for c in got:
             self.assertTrue(H.is_heldout(c, set()))
             self.assertEqual(H.type_of(meta[c]), "Number")
