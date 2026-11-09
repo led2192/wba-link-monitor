@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `rerank_train.py` and `extract_eval --select rerank`: a multilingual cross-encoder fine-tuned on the analysts' validated pages (development attributes, answers after the first 100) orders the pool (#296)
 - 2026-11-09 `extract_eval --select navigate|navigate-half` (a model picks pages from the document's map lines, `doc_map.navigate_pages`) and `--escalate-steps N` (the second level as a ladder, the adaptive page budget) (#295)
 - 2026-11-09 Document map: `--companies sample` maps the evaluation sample's companies and years first; 12 threads. Dry run on one report gave one line per page as an analyst would name them (#294)
 - 2026-11-09 `extract_eval --escalate empty|disagree`: a second level reads the next ranked pages when the first read gives no figure or the reads disagree; share escalated and hits reported (#293)

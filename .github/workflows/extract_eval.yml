@@ -41,9 +41,9 @@ on:
         options: [db, pymupdf, docling]
         default: db
       select:
-        description: "how the model's pages are chosen: base (today), learned (page_select.py), oracle (diagnostic: the pages printing the figure first), map or map-half (the document map, doc_map.py)"
+        description: "how the model's pages are chosen: base (today), learned (page_select.py), oracle (diagnostic: the pages printing the figure first), map, map-half, navigate or navigate-half (the document map, doc_map.py), rerank (a cross-encoder trained on the analysts' validated pages, rerank_train.py)"
         type: choice
-        options: [base, learned, oracle, map, map-half]
+        options: [base, learned, oracle, map, map-half, navigate, navigate-half, rerank]
         default: base
       options:
         description: "more extract_eval options, e.g. --order reversed (position bias) or --unstated-basis keep (Scope 2 with no basis stated filed under market too) or --heldout 20 (20 held-out number attributes, heldout.py)"
@@ -71,7 +71,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - name: Install the embedding model's library (CPU), for the learned page choice
-        if: github.event_name == 'workflow_dispatch' && (inputs.select == 'learned' || startsWith(inputs.select, 'map'))
+        if: github.event_name == 'workflow_dispatch' && (inputs.select == 'learned' || inputs.select == 'rerank' || startsWith(inputs.select, 'map'))
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install sentence-transformers
