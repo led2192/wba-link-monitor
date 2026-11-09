@@ -424,3 +424,12 @@ class BM25Pool(unittest.TestCase):
             def fetchall(self):
                 raise RuntimeError("timeout")
         self.assertEqual(X.bm25_pool_pages(Broken([]), ["d"], attr, set(), 5, 0.4), [])
+
+
+class WithKnown(unittest.TestCase):
+    def test_known_other_year_keeps_companies_with_two_validated_years(self):
+        import extract_eval as X
+        g = lambda w, c, y, v=1.0: {"wba": w, "attribute": c, "year": y, "value": v}
+        rows = [g("A", "X", 2023), g("A", "X", 2024), g("B", "X", 2024), g("C", "X", 2023), g("C", "X", 2024, None), g("A", "Y", 2024)]
+        got = X.known_other_year(rows)
+        self.assertEqual([(r["wba"], r["year"]) for r in got], [("A", 2023), ("A", 2024)])   # B one year; C's other year has no value; Y one year

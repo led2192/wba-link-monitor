@@ -792,6 +792,16 @@ def consensus(cur, ids, value, scales):
     return len(hits), len({lid for lid, _ in hits})
 
 
+def known_other_year(answers):
+    """The answers whose company has a validated value for another year of the same attribute (--with-known): the
+    population the anchor and the company memory can act on."""
+    years = collections.defaultdict(set)
+    for g in answers:
+        if g.get("value"):
+            years[(g["wba"], g["attribute"])].add(g["year"])
+    return [g for g in answers if len(years[(g["wba"], g["attribute"])]) > 1]
+
+
 def proposal_consensus(cur, wba, year, attr, value):
     """(pages, documents) of the company's documents of this year that print the proposed figure: consensus() for a
     production proposal (propose_values.py), looked up from the year's documents again. (0, 0) when nothing."""
@@ -1137,6 +1147,8 @@ def main():
         meta = heldout.metadata_codes(token, list(gold_cfg["bases"].values()))
         cand = heldout.number_codes(meta, a.heldout)
         raw = [g for base in gold_cfg["bases"].values() for i in range(0, len(cand), 40) for g in gold_values(token, base, cand[i:i + 40])]
+        if a.with_known:                         # choose the held-out codes among the answers the anchor can act on (9 Nov 2026)
+            raw = known_other_year(raw)
         units = collections.defaultdict(list)
         for g in raw:
             units[g["attribute"]].append(g["unit"])
@@ -1171,11 +1183,8 @@ def main():
         answers = [g for g in answers if (g["wba"], g["attribute"], str(g["year"])) in want]
         print(f">>> --keys: {len(want):,} asked, {len(answers):,} with a validated answer", flush=True)
     if a.with_known:                             # only answers whose company has a validated value for another year (anchor, memory)
-        years = collections.defaultdict(set)
-        for (w, c, y) in gold_index:
-            years[(w, c)].add(y)
         before = len(answers)
-        answers = [g for g in answers if len(years[(g["wba"], g["attribute"])]) > 1]
+        answers = known_other_year(answers)
         print(f">>> --with-known: {len(answers):,} of {before:,} answers have another validated year for the company", flush=True)
     by = collections.defaultdict(list)
     for g in answers:
