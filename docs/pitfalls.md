@@ -264,3 +264,6 @@ psycopg sends `%s` parameters untyped and lets Postgres infer the type from wher
 
 ## first_seen is not when the row was created (9 Nov 2026)
 `report_library.first_seen` was filled in bulk when the field was added, so on old rows it holds a recent date. The first Base room run (42643649106) read 43,167 documents "arrived in the last 30 days" and found 0 stale documents without a file, both wrong. The record's own creation time (`createdTime` on the API record) is the age that cannot lie; use it for any age or intake measure, and treat first_seen as the pipeline's first sighting only where it was written by the pipeline.
+
+## A library imported only at training time fails after the expensive part (9 Nov 2026)
+`sentence_transformers.CrossEncoder.fit` imports `datasets` when it starts training, not when the module loads. The first `--select rerank` run built 5,249 training pairs for 2.3 hours (ranking every page of 604 answers) and then died on `ImportError: Please install datasets`. Install every library a run will need in the workflow, and when a step is long, import its libraries at the top so a missing one fails in the first second.
