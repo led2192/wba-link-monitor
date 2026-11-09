@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `plausibility.py --progression on|off`: a year-on-year check with a bound learned per attribute (the 99th percentile of the validated changes), off by default and measured as a shadow check in every run; workflow input `progression` (#PRNUM)
 - 2026-11-09 Decisions recorded, wave C: escalate once +0.9 (chance) and the next pages never hold the figure, so the second level as the same reader on more pages is closed; map and navigate not measured (2% to 5% of answers had a map, rerun after #317); reranker failed on a library (#319); the anchor note's broken answers are abstentions, not echoes. Base room first report: rule B 92,029 documents (18.4% of the limit), coverage by document type 83% against 18% for 2024 (#320)
 - 2026-11-09 Reranker: the Generic reader workflow installs `datasets` (CrossEncoder.fit needs it; run 42635969792 failed after 2.3 hours of pair building) and the in-run training takes 40 answers per attribute instead of 80 (#319)
 - 2026-11-09 `base_room.py`: a table count that fails (422 on the empty field, timeouts) falls back to the full sweep and then to 0 with a note; the report no longer dies on a count (#316)
