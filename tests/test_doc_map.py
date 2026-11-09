@@ -122,3 +122,18 @@ class Search(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SamplePairs(unittest.TestCase):
+    def test_documents_to_map_filters_on_company_years_when_pairs_are_given(self):
+        class Cur:
+            def execute(self, q, params): self.q, self.p = q, params
+            def fetchall(self): return [("d1", 2024, 12)]
+        cur = Cur()
+        got = D.documents_to_map(cur, ["Annual Report"], ["A", "B"], 2023, 50, years={2024, 2025}, pairs={("A", 2024), ("B", 2025)})
+        self.assertEqual(got, [("d1", 12)])
+        self.assertIn("d.wba_id || '|' || d.year::text = any(%s)", cur.q)
+        self.assertEqual(cur.p[-2], ["A|2024", "B|2025"])                # the pairs, sorted, before the limit
+        self.assertEqual(cur.p[-1], 50)
+        D.documents_to_map(cur, ["Annual Report"], None, 2023, 50)
+        self.assertNotIn("||", cur.q)

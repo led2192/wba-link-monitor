@@ -264,3 +264,6 @@ psycopg sends `%s` parameters untyped and lets Postgres infer the type from wher
 
 ## first_seen is not when the row was created (9 Nov 2026)
 `report_library.first_seen` was filled in bulk when the field was added, so on old rows it holds a recent date. The first Base room run (42643649106) read 43,167 documents "arrived in the last 30 days" and found 0 stale documents without a file, both wrong. The record's own creation time (`createdTime` on the API record) is the age that cannot lie; use it for any age or intake measure, and treat first_seen as the pipeline's first sighting only where it was written by the pipeline.
+
+## Build a map for the documents the test reads, not the newest ones (9 Nov 2026)
+The first document map took the key documents of the sample companies newest first, 500 of them. The evaluation answers are 2023 and 2024 and read the documents of those years, so the map covered 2025 and 2026 reports and 2% to 5% of the answers had a map: runs 42641417581 (`--select map`) and 42636000437 (`navigate`) measured the baseline twice (+0.4 and +1.2, noise). Any index built for an evaluation must be built from the answers' own (company, year) pairs; `documents_to_map` takes them since #PRNUM.
