@@ -19,7 +19,8 @@ printed for. Each entry is checked on its own page; read_years returns them all,
 the year asked (with the others under "others"). One call therefore gives the history that separate calls
 per year used to cost, and the value a later report repeats for an earlier year checks the earlier read.
 
-Model: READER_MODEL (default claude-haiku-5-5), through the Messages API with ANTHROPIC_API_KEY. Token use
+Model: READER_MODEL (default claude-haiku-5-5), through the Messages API with ANTHROPIC_API_KEY, or through the
+Gemini API with GEMINI_API_KEY when the name starts with "gemini" (9 Nov 2026, to measure other readers). Token use
 is added to the `usage` counter the caller passes (calls, input_tokens, output_tokens, quote_not_on_page,
 model_errors). No document text is printed.
 """
@@ -323,12 +324,68 @@ def check_all(reply, pages, to_number, numbers_on, usage, fy_month=None, why=Non
     return out
 
 
+GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+
+def is_gemini(model):
+    return (model or "").lower().startswith("gemini")
+
+
+def gemini_body(messages, system, max_tokens, thinking=True):
+    """The Gemini generateContent request for the same messages: roles user and model, the system text as
+    system_instruction, temperature 0, and the lowest thinking level (a figure read from a table needs none;
+    thinking tokens are billed as output)."""
+    body = {"system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]} for m in messages],
+            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0}}
+    if thinking:
+        body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": "low"}
+    return body
+
+
+def call_gemini(messages, usage, sess, model, system, max_tokens):
+    """The model's text reply from the Gemini API (GEMINI_API_KEY), with the same retries and usage counting as
+    the Messages API path; a 400 that names the thinking setting is retried without it (older models)."""
+    url = GEMINI_API.format(model=model)
+    headers = {"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip(), "content-type": "application/json"}
+    thinking = True
+    for attempt in range(6):
+        r = sess.post(url, headers=headers, json=gemini_body(messages, system, max_tokens, thinking), timeout=180)
+        if r.status_code in (429, 500, 503) and attempt < 5:
+            try:
+                wait = float((getattr(r, "headers", None) or {}).get("retry-after") or 0)
+            except (TypeError, ValueError):
+                wait = 0
+            time.sleep(min(max(wait, 10 * 2 ** attempt), 120)); continue
+        if r.status_code == 400 and thinking and "think" in (r.text or "").lower():
+            thinking = False; continue
+        if r.status_code != 200:
+            usage["model_errors"] += 1
+            if r.status_code in (400, 401, 403, 404):
+                raise ModelRefused(f"Gemini API refused the call: HTTP {r.status_code} {r.text[:300]}")
+            return ""
+        j = r.json()
+        usage["calls"] += 1
+        meta = j.get("usageMetadata", {})
+        usage["input_tokens"] += meta.get("promptTokenCount", 0)
+        usage["output_tokens"] += meta.get("candidatesTokenCount", 0) + meta.get("thoughtsTokenCount", 0)
+        cands = j.get("candidates") or [{}]
+        if cands[0].get("finishReason") == "MAX_TOKENS":
+            usage["cut_at_token_limit"] += 1
+        return "".join(p.get("text", "") for p in cands[0].get("content", {}).get("parts", []) if not p.get("thought"))
+    return ""
+
+
 def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
-    """The model's text reply (Messages API), retrying four times on overload or rate limits (parallel shards
-    share the account's limits, 31 Oct 2026). system and max_tokens default to the reader's."""
+    """The model's text reply (Messages API, or the Gemini API when the model name starts with "gemini", 9 Nov
+    2026), retrying four times on overload or rate limits (parallel shards share the account's limits, 31 Oct
+    2026). system and max_tokens default to the reader's."""
     import requests
     sess = sess or requests
-    body = {"model": model or (os.environ.get("READER_MODEL") or DEFAULT_MODEL), "max_tokens": max_tokens or MAX_TOKENS,
+    model = model or (os.environ.get("READER_MODEL") or DEFAULT_MODEL)
+    if is_gemini(model):
+        return call_gemini(messages, usage, sess, model, system or SYSTEM, max_tokens or MAX_TOKENS)
+    body = {"model": model, "max_tokens": max_tokens or MAX_TOKENS,
             "system": system or SYSTEM, "messages": messages}
     headers = {"x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(), "anthropic-version": "2023-06-01",
                "content-type": "application/json"}
