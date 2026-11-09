@@ -105,6 +105,7 @@ def ensure_model(cur, token, spec, bases, out_dir, X, skip=100, per_attribute=40
     budget (run 42635969792, which then failed on a missing library)."""
     if os.path.isdir(out_dir) and os.listdir(out_dir):
         return out_dir
+    import sentence_transformers, datasets, torch  # noqa: F401  fail in the first second, not after the hours of pair building (9 Nov 2026)
     t0 = time.time()
     pairs, counts = build_pairs(cur, token, spec, bases, skip, per_attribute, X)
     pos = sum(1 for _, _, y in pairs if y)

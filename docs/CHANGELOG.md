@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `rerank_train.ensure_model` imports the training libraries before building pairs, so a missing one fails in the first second rather than after hours (#328)
 - 2026-11-09 `archive_documents.py` and the Archive documents workflow (manual, dry run by default): discards, with the reason "Archived: before 2022, not cited", the old documents nobody uses (rule B 92,029 on 9 Nov); the reason joins the purge job's machine reasons so `--machine-only --days 7` deletes them after the undo window (#327)
 - 2026-11-09 Generic reader, Document map, Narrative and Propose values workflows cache pip wheels and the downloaded embedding models between runs (torch and sentence-transformers took 3 to 5 minutes of every run) (#326)
 - 2026-11-09 `model_reader.call` speaks to the Gemini API when READER_MODEL starts with "gemini" (GEMINI_API_KEY; thinking at the lowest level, thoughts counted as output tokens); Generic reader and Narrative workflows pass the key, Generic reader gains a `price` input for the cost line (#325)
