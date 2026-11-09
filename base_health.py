@@ -13,8 +13,9 @@ changes data, and it writes a single row (upserted by date) with:
   - status (OK / Check / Problem) and `attention`: the plain-language list of what needs a person
 
 Status rules: Problem when a job failed or the base is >= 90% full. Check when the base is >= 80%
-full, nothing new arrived in 24h, the purge backlog is large, or average completeness dropped by
-more than one point since the previous row. OK otherwise.
+full, nothing new arrived in 24h, the purge backlog is large, average completeness dropped by
+more than one point since the previous row, or the Airtable AI typed under half of the English
+documents that arrived 2 to 9 days ago (200+ waiting). OK otherwise.
 
 Modes: dry run by default (prints the row); --commit writes it.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, RECORD_LIMIT, PURGE_DAYS (default 30),
@@ -288,6 +289,54 @@ def evidence_backlog():
         return None
 
 
+AI_MIN_WAITING = int(os.environ.get("AI_MIN_WAITING") or 200)  # fewer untyped rows than this: too few to judge
+AI_MIN_SHARE = float(os.environ.get("AI_MIN_SHARE") or 0.5)    # Check below this share typed
+
+
+def _ai_value(v):
+    """An Airtable AI field comes back as {'state', 'value', ...} (state empty or error: no answer);
+    a plain field as a string."""
+    if isinstance(v, dict):
+        v = v.get("value")
+    return v.strip() if isinstance(v, str) else ""
+
+
+def ai_typing_share(records):
+    """(typed, untyped) among English report_library rows queued for the Airtable AI fields
+    (classify_input = run). A row counts as typed when the AI answered source_type_check or
+    source_title. Pure: the rows are passed in."""
+    typed = sum(1 for r in records if _ai_value(r.get("fields", {}).get("source_type_check"))
+                or _ai_value(r.get("fields", {}).get("source_title")))
+    return typed, len(records) - typed
+
+
+def ai_typing(now, rows=None):
+    """How many of the English documents that arrived 2 to 9 days ago the Airtable AI typed.
+    9 Nov 2026: the two AI fields (source_type_check, source_title) stopped answering around 20 Oct
+    (typed share 79% of the rows of 19 Oct, 2% after 25 Oct); 35,000 documents waited for a type for
+    three weeks and nothing noticed, because nothing failed. Returns {typed, untyped, share} or None."""
+    since = (now - timedelta(days=9)).date().isoformat(); until = (now - timedelta(days=2)).date().isoformat()
+    formula = (f"AND({{classify_input}}='run', NOT({{discard}}), IS_AFTER(CREATED_TIME(), '{since}'), "
+               f"IS_BEFORE(CREATED_TIME(), '{until}'))")
+    try:
+        recs = list(rows if rows is not None else sweep("report_library", ["source_type_check", "source_title"], formula))
+    except requests.RequestException as e:
+        print(f"    could not read the AI typing: {e}", flush=True)
+        return None
+    typed, untyped = ai_typing_share(recs)
+    total = typed + untyped
+    return {"typed": typed, "untyped": untyped, "share": typed / total if total else None}
+
+
+def ai_typing_attention(ai):
+    """The attention line when the AI typing has stalled, else None."""
+    if not ai or ai["share"] is None or ai["untyped"] < AI_MIN_WAITING or ai["share"] >= AI_MIN_SHARE:
+        return None
+    return (f"The Airtable AI typed only {ai['share']:.0%} of the English documents that arrived 2 to 9 days ago "
+            f"({ai['untyped']:,} wait for source_type_check and source_title). Check the workspace's AI credits "
+            "and that the two AI fields still generate automatically.")
+
+
 def previous_avg(today):
     rows = list(sweep(HEALTH, ["date", "completeness_avg"], formula=f"IS_BEFORE({{date}}, '{today}')"))
     rows.sort(key=lambda r: r.get("fields", {}).get("date", ""))
@@ -319,6 +368,7 @@ def main():
     qs = qa_stats()
     eb = evidence_backlog()
     spend = model_spend(now)
+    ai = ai_typing(now)
 
     total = sum(counts.values())
     full = total / RECORD_LIMIT
@@ -352,6 +402,10 @@ def main():
         status = "Check" if status == "OK" else status
         attention.append(f"The model calls cost about ${spend['7d']:.2f} in 7 days (${spend['24h']:.2f} in 24h), over "
                          f"${SPEND_WEEK_USD:g}. Check the Anthropic credit before the next long run.")
+    ai_line = ai_typing_attention(ai)
+    if ai_line:
+        status = "Check" if status == "OK" else status
+        attention.append(ai_line)
     if fails is None:
         attention.append("Failed-job check skipped (no GitHub token in this run).")
     if qs:
@@ -391,6 +445,8 @@ def main():
         row[field] = co["miss"].get(tag, 0)
 
     print("\n".join(f"  {k}: {v}" for k, v in row.items()), flush=True)
+    if ai:
+        print(f"  AI typing, arrivals 2 to 9 days old: {ai['typed']:,} typed, {ai['untyped']:,} waiting", flush=True)
     print("  records by table: " + ", ".join(f"{t} {n:,}" for t, n in counts.items()), flush=True)
     if not a.commit:
         print(">>> dry run, nothing written.")

@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `base_health` watches the Airtable AI typing: Check when the AI typed under half of the English documents that arrived 2 to 9 days ago (200+ waiting). The two AI fields stopped around 20 Oct 2026 (79% typed on 19 Oct, about 2% after 25 Oct; about 35,000 documents untyped) while every daily row said OK (#302)
 - 2026-11-09 `extract_eval --escalate once`: the second level also reads on when the proposed figure is printed on one page only, and its figure wins only when the report prints it on 2+ pages (#306)
 - 2026-11-09 Decisions recorded, wave A: anchor +0.0, frequency +1.7 (chance), quorum reads agree 84% to 95% and add no right answers; figures printed on 2+ pages are right 76% to 88% against 50% to 77% printed once (#305)
 - 2026-11-09 Company contacts run weekly (Sundays 04:44 UTC, committed); `company_contacts` gains `source_published` (lookup of the document's `pub_date`) and `source_age_days` (formula); the duplicated scripts.md rows merged (#304)

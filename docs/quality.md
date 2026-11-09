@@ -35,6 +35,7 @@ Nothing depends on a person working through failure rows: there are tens of thou
 | DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every day (OCR scanned covers); broken files stay counted | yes (#57) |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
 | TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
+| TYPE_MISSING (pending, English) | the Airtable AI types it; base_health turns Check when the AI typed under half of the English arrivals of 2 to 9 days ago (since 9 Nov 2026); the address, file name and cover title type what they can nightly (Dedupe) | yes (watch only: restarting the AI is the owner's) |
 | TYPE_MISSING (non-English) | cover-title phrases in other languages (cover_terms.json), nightly in Dedupe, measured on every change | yes (#55) |
 | CO_GAP | the daily gap research (25 companies a day) | yes |
 | CO_MISSED_KNOWN | Source Library matching, the daily research | partly |
