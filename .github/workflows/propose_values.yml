@@ -5,8 +5,13 @@ name: Propose values
 # attribute read by the model reader from the company's reports, compared with the validated 2025
 # answers. Writes only with commit ticked; never touches a row a person accepted or rejected. A pull
 # request touching it runs a dry run: 30 companies per filing method, and the model reader on three
-# companies with no filing (at most 0.30 USD).
+# companies with no filing (at most 0.30 USD). Nightly since 9 Nov 2026 (05:07 UTC): the filings for every
+# company and the model reader, incremental, on the pilot attributes with a 1.5 USD cap.
 on:
+  schedule:
+    - cron: "7 5 * * *"        # 05:07 UTC nightly (owner's decision, 9 Nov 2026): SEC and ESEF for every company, then the
+                               # model reader on the pilot attributes for 2024 and 2025, what was not read in 30 days,
+                               # up to 1.5 USD; a refused call (no credit) stops the reading and writes what was read
   workflow_dispatch:
     inputs:
       commit:
@@ -97,6 +102,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             ARGS="--limit 30 --methods sec,esef,model --companies PT_02083,PT_00646,PT_02801 --model-years 2024 --max-usd 0.3"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            ARGS="--years 2018- --methods sec,esef,model --model-years 2025,2024 --attributes GMC_00048.1,GMC_00001.1,GMC_00002.1,GMC_00003.1,GMC_02526.1 --max-usd 1.5 --fresh-days 30 --commit"
           else
             ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }} --model-years ${{ inputs.model_years }} --max-usd ${{ inputs.max_usd }} --fresh-days ${{ inputs.fresh_days || '30' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
