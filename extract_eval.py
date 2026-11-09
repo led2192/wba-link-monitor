@@ -1120,7 +1120,7 @@ def main():
         import heldout
         meta = heldout.metadata_codes(token, list(gold_cfg["bases"].values()))
         cand = heldout.number_codes(meta, a.heldout)
-        raw = [g for base in gold_cfg["bases"].values() for g in gold_values(token, base, cand)]
+        raw = [g for base in gold_cfg["bases"].values() for i in range(0, len(cand), 40) for g in gold_values(token, base, cand[i:i + 40])]
         units = collections.defaultdict(list)
         for g in raw:
             units[g["attribute"]].append(g["unit"])

@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 Held-out numbers: every held-out number code is a candidate (gold read in chunks of 40 codes), so more than 8 attributes with validated answers can be measured (#298)
 - 2026-11-09 extract_eval reports, for every model proposal, on how many pages and documents the figure is printed and the accuracy by group (`consensus`) (#297)
 - 2026-11-09 `rerank_train.py` and `extract_eval --select rerank`: a multilingual cross-encoder fine-tuned on the analysts' validated pages (development attributes, answers after the first 100) orders the pool (#296)
 - 2026-11-09 `extract_eval --select navigate|navigate-half` (a model picks pages from the document's map lines, `doc_map.navigate_pages`) and `--escalate-steps N` (the second level as a ladder, the adaptive page budget) (#295)
