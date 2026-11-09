@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-09 `doc_map build` with the sample maps the oldest year first (the answers' own documents before the year-after comparatives); the $4 build (42666659267) covered 725 of the 1,848 documents the four pilots' sample reads, newest first (#PRNUM)
+- 2026-11-09 `doc_map build` with the sample maps the oldest year first (the answers' own documents before the year-after comparatives); the $4 build (42666659267) covered 725 of the 1,848 documents the four pilots' sample reads, newest first (#323)
 - 2026-11-09 `--anchor note` is the reader's default: +5.3 points where another year's value is known (wave B), no attribute worse, a no-op elsewhere; the held-out check is vacuous because no held-out code has a company with two validated years (runs 42666461316, 42666486767 read 0 answers) (#322)
 - 2026-11-09 `plausibility.py --progression on|off`: a year-on-year check with a bound learned per attribute (the 99th percentile of the validated changes), off by default and measured as a shadow check in every run; workflow input `progression` (#321)
 - 2026-11-09 Decisions recorded, wave C: escalate once +0.9 (chance) and the next pages never hold the figure, so the second level as the same reader on more pages is closed; map and navigate not measured (2% to 5% of answers had a map, rerun after #317); reranker failed on a library (#319); the anchor note's broken answers are abstentions, not echoes. Base room first report: rule B 92,029 documents (18.4% of the limit), coverage by document type 83% against 18% for 2024 (#320)
