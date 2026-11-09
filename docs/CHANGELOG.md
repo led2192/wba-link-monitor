@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `extract_eval --reads N`: the model's pages read N times in different orders; agreement between reads, accuracy when they agree and the ceiling reported (#285)
 - 2026-11-09 `extract_eval --frequency pages`: a census of the big numbers printed on two or more pages of the year's documents raises the pages that print them; diagnostic of how often the validated figure recurs (#284)
 - 2026-11-09 `extract_eval --anchor pages|note`: another year's known value searched in this year's pages (the comparative column), pages boosted, reader optionally told (`company_memory.anchor_pages`, `anchor_hint`) (#283)
 - 2026-11-09 `--spec-by model` (`heldout.model_spec`): built specs with labels, exclusions and search terms written by a model from the name and definition, for attributes with no hand-written spec (#282)

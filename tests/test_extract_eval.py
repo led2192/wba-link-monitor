@@ -316,6 +316,14 @@ class Oracle(unittest.TestCase):
         self.assertEqual(len(X.pages_for_model(scored, 16)), 16)
         self.assertEqual(len(X.pages_for_model(scored, 8)), 8)
 
+    def test_quorum_helpers(self):
+        self.assertTrue(X.same_value(1000.0, 1003.0)); self.assertTrue(X.same_value(None, 0))
+        self.assertFalse(X.same_value(1000.0, None)); self.assertFalse(X.same_value(1000.0, 1200.0))
+        pages = [("d", i, f"p{i}") for i in range(1, 5)]
+        self.assertEqual([p[1] for p in X.read_order(pages, 1)], [4, 3, 2, 1])
+        self.assertEqual([p[1] for p in X.read_order(pages, 2)], [3, 4, 1, 2])
+        self.assertEqual(X.read_order([], 2), [])
+
     def test_figure_frequency_census_and_boost(self):
         self.assertEqual([X.num_key(s) for s in ("5,147.3", "5.147", "5 147", "12,345.50", "12345")], ["5147", "5147", "5147", "12345", "12345"])
         class Cur:
