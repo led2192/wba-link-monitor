@@ -73,6 +73,9 @@ class Propose(unittest.TestCase):
         f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1", "unit_family": "tco2e"}, 2024, dict(got, unit=""), {}, {}, None, NOW)
         self.assertEqual((f["unit"], f["source_url"], f["matches_validated"]), ("tCO2e", None, "no validated answer"))
         self.assertNotIn("document", f)
+        self.assertNotIn("printed_on_pages", f)                            # no consensus computed: nothing written
+        f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1"}, 2024, dict(got, printed_pages=1, printed_docs=1), {}, {}, None, NOW)
+        self.assertEqual((f["printed_on_pages"], f["printed_in_documents"]), (1, 1))
 
     def test_evidence_link_even_without_a_web_address(self):
         # PACCAR, 4 Nov 2026: a Source Library file with no document_url left source_url and evidence_link blank
@@ -143,8 +146,9 @@ class Propose(unittest.TestCase):
             if wba == "PT_2":
                 raise model_reader.ModelRefused("Messages API refused the call: HTTP 400 credit balance is too low")
             return [dict(value=5.0, printed=5.0, scale=1, library_id="L", page=1, unit="tCO2e", year=year, column=str(year), asked=year)]
-        real = (psycopg.connect, extract_eval.read_values, P.library_docs)
+        real = (psycopg.connect, extract_eval.read_values, P.library_docs, extract_eval.proposal_consensus)
         psycopg.connect = lambda *a, **k: Conn(); extract_eval.read_values = fake; P.library_docs = lambda *a: {}
+        extract_eval.proposal_consensus = lambda cur, wba, year, attr, value: (3, 2)
         os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
         a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024", companies="PT_1,PT_2,PT_3", limit=0, max_usd=1.0, budget=300)
         spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number", "unit_family": "tco2e"}}
@@ -153,9 +157,11 @@ class Propose(unittest.TestCase):
             c = collections.Counter()
             rows = P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c)
         finally:
-            psycopg.connect, extract_eval.read_values, P.library_docs = real
+            psycopg.connect, extract_eval.read_values, P.library_docs, extract_eval.proposal_consensus = real
         self.assertEqual(calls, ["PT_1", "PT_2"])                         # stops at the refusal, PT_3 is not read
         self.assertEqual([r["wba_id"] for r in rows], ["PT_1"])            # PT_1's figure is kept
+        self.assertEqual((rows[0]["printed_on_pages"], rows[0]["printed_in_documents"]), (3, 2))   # the report's agreement, 9 Nov 2026
+        self.assertEqual(c["model reader: proposals printed on 2+ pages"], 1)
         self.assertEqual(c["model reader: stopped, the API refused a call"], 1)
         self.assertIn("credit balance", P.REFUSED[0])
         P.REFUSED.clear()

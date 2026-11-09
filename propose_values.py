@@ -236,6 +236,8 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
         f["company"] = [company_rec]
     if doc.get("id"):
         f["document"] = [doc["id"]]
+    if "printed_pages" in got:
+        f["printed_on_pages"], f["printed_in_documents"] = got["printed_pages"], got["printed_docs"]
     if g:
         f["validated_value"] = g["value"]
         f["matches_validated"] = "match" if g["value"] and abs(got["value"] - g["value"]) / g["value"] <= 0.005 else "differs"
@@ -335,7 +337,7 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     """Model-reader proposals for the companies, attributes and years asked. Revenue is skipped for a
     company and year that already has a SEC or ESEF row: the filing is the better source."""
     import psycopg
-    from extract_eval import read_values
+    from extract_eval import read_values, proposal_consensus
     from model_reader import cost
     if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         c["model reader: no ANTHROPIC_API_KEY"] += 1
@@ -420,6 +422,19 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                     break
             if stop:
                 break
+        # The report's own agreement with the reader (9 Nov 2026): on how many pages and in how many of the year's
+        # documents the proposed figure is printed. Wave A: printed on 2+ pages right 76% to 88%, printed once 50%
+        # to 77%. Written on the row for the reviewers' queue and, later, as the acceptance signal.
+        for wba, code, yy, e in got_rows:
+            try:
+                e["printed_pages"], e["printed_docs"] = proposal_consensus(cur, wba, e.get("asked") or yy, spec[code], e["value"])
+                c["model reader: proposals printed on 2+ pages" if e["printed_pages"] >= 2 else "model reader: proposals printed once"] += 1
+            except Exception:                                      # a signal, never a reason to lose the proposal
+                c["model reader: consensus not computed"] += 1
+                try:
+                    conn.rollback(); cur.execute("set statement_timeout = '90s'")
+                except Exception:
+                    pass
         c["model reader: figures found (all versions)"] = len(versions)
         if getattr(a, "commit", False) and versions:
             try:
