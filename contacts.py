@@ -33,8 +33,12 @@ For each company and address, one row in company_contacts:
                for contact; the role mailboxes are preferred;
   evidence     "p.<page>: <the sentence around it>" from the newest report that prints it;
   source_document, source_year, reports_with_it, first_seen, last_seen.
+  Dates (owner's question, 9 Nov 2026): first_seen is when the pipeline first extracted the address,
+  last_seen the last run that still found it; source_published (an Airtable lookup of the source
+  document's pub_date) is when the report that printed it was published, and source_age_days (a formula,
+  today minus source_published) how old that report is; source_year is its reporting year.
 Rows are never deleted: an address the newer reports no longer print keeps its row and an older
-last_seen.
+last_seen. Runs weekly (Sundays 04:44 UTC, committed) since 9 Nov 2026.
 
 Does the domain accept mail? For each distinct domain, its MX records are read through DNS over HTTPS
 (Google's resolver; no email is sent): domain_mail = accepts (mail servers published), none (no mail
