@@ -3,8 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-09 `doc_map build --companies sample`: maps only the company-years the evaluation reads for its sample answers (`--attributes` restricts the sample; workflow inputs `sample_limit`, `attributes`); the first build, newest first over every sample company, mapped 2025 and 2026 documents that no 2023 or 2024 answer reads, so 2% to 5% of the answers of the first `--select map` and `navigate` runs had a map (#317)
-- 2026-11-09 Reranker: the Generic reader workflow installs `datasets` (CrossEncoder.fit needs it; run 42635969792 failed after 2.3 hours of pair building) and the in-run training takes 40 answers per attribute instead of 80 (#PRNUM)
+- 2026-11-09 Reranker: the Generic reader workflow installs `datasets` (CrossEncoder.fit needs it; run 42635969792 failed after 2.3 hours of pair building) and the in-run training takes 40 answers per attribute instead of 80 (#318)
 - 2026-11-09 `base_room.py`: a table count that fails (422 on the empty field, timeouts) falls back to the full sweep and then to 0 with a note; the report no longer dies on a count (#316)
 - 2026-11-09 `base_room.py` counts the small tables with no fields (`fields[]=`), as base_health does; the full-record sweep of monitored_links timed out six times in a row and failed run 42653341821 (#315)
 - 2026-11-09 `base_room.py`: companies with at least one live document of each type for 2023 to 2025 (coverage by document type), and ages from the record's creation time (first_seen was backfilled and read recent on every old row, so rules C and D counted 0) (#314)
