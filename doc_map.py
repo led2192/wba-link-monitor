@@ -227,6 +227,72 @@ def map_pages(cur, ids, query, k, qvec=None):
     return [(lid, page, bodies.get((lid, page), ""), s) for s, lid, page in top if (lid, page) in bodies]
 
 
+NAV_SYSTEM = ("You are given the table of pages of a company's reports, one line per page saying what the page holds, and "
+              "an attribute to find. Choose the pages most likely to print the figure asked. Reply with JSON only.")
+NAV_MAX_LINES = 900
+
+
+def map_lines(cur, ids):
+    """[(library_id, doc_type, year, page, line)] of the documents' map, in document and page order."""
+    cur.execute("select m.library_id, coalesce(d.doc_type, ''), coalesce(d.year, 0), m.page, m.summary from public.page_map m "
+                "join public.documents d using (library_id) where m.library_id = any(%s) order by m.library_id, m.page", (ids,))
+    return cur.fetchall()
+
+
+def nav_prompt(attr, year, lines, k):
+    """The attribute, the year, and the documents' pages as 'D1 p12: line', asking for up to k pages best first."""
+    docs = {}
+    out = [f"Attribute: {attr.get('name', '')}", f"Definition: {(attr.get('definition') or '')[:400]}",
+           f"Unit family: {attr.get('unit_family', '')}" if attr.get("unit_family") else "", f"Reporting year: {year}.", "",
+           f"Choose up to {k} pages, the most likely to print this figure for that year first: the statement or table that holds "
+           "it, its note, the key figures page. Prefer tables over narrative, the reporting year's document over older ones. "
+           "Reply with JSON: {\"pages\": [\"D1:12\", \"D2:7\", ...]} using the document and page codes below, nothing else.", "", "Pages:"]
+    for lid, dtype, y, page, line in lines[:NAV_MAX_LINES]:
+        if lid not in docs:
+            docs[lid] = f"D{len(docs) + 1}"
+            out.append(f"[{docs[lid]}: {dtype or 'report'}{', ' + str(y) if y else ''}]")
+        out.append(f"{docs[lid]} p{page}: {line}")
+    return "\n".join(o for o in out if o is not None), {v: k_ for k_, v in docs.items()}
+
+
+def parse_nav(text, codes, k):
+    """[(library_id, page)] the reply names, in order, known codes only, at most k."""
+    m = re.search(r"\{.*\}", text or "", flags=re.S)
+    try:
+        j = json.loads(m.group(0)) if m else {}
+    except ValueError:
+        j = {}
+    out = []
+    for item in (j.get("pages") if isinstance(j, dict) and isinstance(j.get("pages"), list) else []):
+        mm = re.fullmatch(r"\s*(D\d+)\s*[:p ]+\s*(\d+)\s*", str(item))
+        if mm and mm.group(1) in codes:
+            key = (codes[mm.group(1)], int(mm.group(2)))
+            if key not in out:
+                out.append(key)
+        if len(out) >= k:
+            break
+    return out
+
+
+def navigate_pages(cur, ids, attr, year, k, usage, call=None):
+    """[(library_id, page, body, score)]: the pages a model picks from the documents' map lines for the attribute
+    (information scent: it reads the table of pages, not the pages), best first. [] without a map. One call."""
+    lines = map_lines(cur, ids)
+    if not lines:
+        return []
+    if call is None:
+        from model_reader import call
+    content, codes = nav_prompt(attr, year, lines, k)
+    reply = call([{"role": "user", "content": content}], usage, system=NAV_SYSTEM, max_tokens=300)
+    picked = parse_nav(reply, codes, k)
+    if not picked:
+        return []
+    cur.execute("select library_id, page, body from public.pages where library_id = any(%s) and page = any(%s)",
+                (sorted({l for l, _ in picked}), sorted({p for _, p in picked})))
+    bodies = {(l, p): b for l, p, b in cur.fetchall()}
+    return [(lid, page, bodies[(lid, page)], 1.0 - i / (len(picked) or 1)) for i, (lid, page) in enumerate(picked) if (lid, page) in bodies]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=["build", "embed", "status"])

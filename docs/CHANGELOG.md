@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-09 `extract_eval --select navigate|navigate-half` (a model picks pages from the document's map lines, `doc_map.navigate_pages`) and `--escalate-steps N` (the second level as a ladder, the adaptive page budget) (#295)
 - 2026-11-09 Document map: `--companies sample` maps the evaluation sample's companies and years first; 12 threads. Dry run on one report gave one line per page as an analyst would name them (#294)
 - 2026-11-09 `extract_eval --escalate empty|disagree`: a second level reads the next ranked pages when the first read gives no figure or the reads disagree; share escalated and hits reported (#293)
 - 2026-11-09 `extract_eval --slots on` and `model_reader.read_slots`: attributes with `slots` in attributes.json (total capex, low-carbon capex, total R&D, Scope 1+2) read variant by variant, each variant and each coded sum scored, to read the analysts' definition from their answers (#292)

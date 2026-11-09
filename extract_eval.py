@@ -382,6 +382,7 @@ def read_text(lid, page, body):
 PAGE_ORDER = "today"     # "reversed" (--order): the model reads the same pages in the opposite order
 SLOTS = "off"            # --slots on (9 Nov 2026): attributes with "slots" in attributes.json are read variant by variant
                          # (model_reader.read_slots); the proposal is the first slot present; every slot is scored
+ESCALATE_STEPS = 1       # --escalate-steps N: how many times the second level may read the next pages while the answer stays empty
 ESCALATE = "none"        # --escalate (9 Nov 2026): "empty" reads the NEXT ranked pages when the first read gives no figure;
                          # "disagree" also when the reads of --reads N disagree. The second level is the same model on
                          # pages 17 and on, never a larger model on the same pages (Sonnet on the same pages: +1.9, chance)
@@ -408,14 +409,18 @@ def model_pages(scored, code=None, attr=None, pages=None, docs=None, fold=None):
     return pages_for_model(scored, MODEL_PAGES)
 
 
-def map_model_pages(cur, ids, year, attr, spec, best_pages, n):
-    """Up to n pages named by the document map for the attribute (doc_map.map_pages), as model page tuples
-    (score, candidate, library_id, page, body), best first. [] when the documents have no map yet, so the
-    caller keeps today's pages: a company whose map is not drawn reads as today."""
+def map_model_pages(cur, ids, year, attr, spec, best_pages, n, navigate=False, usage=None):
+    """Up to n pages named by the document map for the attribute, as model page tuples (score, candidate,
+    library_id, page, body), best first: by search over the map lines (doc_map.map_pages) or, with navigate, the
+    pages a model picks reading the table of pages (doc_map.navigate_pages, one call). [] when the documents have
+    no map yet, so the caller keeps today's pages: a company whose map is not drawn reads as today."""
     import doc_map
-    query = doc_map.map_query(attr)
-    qvec = MAP_EMBEDDER.m.encode([query], normalize_embeddings=True)[0] if MAP_EMBEDDER else None
-    got = doc_map.map_pages(cur, ids, query, n, qvec)
+    if navigate:
+        got = doc_map.navigate_pages(cur, ids, attr, year, n, usage if usage is not None else collections.Counter())
+    else:
+        query = doc_map.map_query(attr)
+        qvec = MAP_EMBEDDER.m.encode([query], normalize_embeddings=True)[0] if MAP_EMBEDDER else None
+        got = doc_map.map_pages(cur, ids, query, n, qvec)
     out = []
     for lid, page, body, s in got:
         cs = candidates(body, year, attr, spec)
@@ -892,12 +897,14 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     best_pages = model_pages(scored, g["attribute"], attr, pages, docs, rank_eval.fold_of(g["wba"]))
     if SELECT == "oracle" and holding:       # stage diagnostic, not an option (7 Nov 2026)
         best_pages = oracle_pages(holding, rows, best_pages)
-    if SELECT in ("map", "map-half"):        # the document map's pages (doc_map.py, 9 Nov 2026)
-        mapped = map_model_pages(cur, ids, g["year"], attr, spec, best_pages, MODEL_PAGES if SELECT == "map" else MODEL_PAGES // 2)
+    if SELECT in ("map", "map-half", "navigate", "navigate-half"):   # the document map's pages (doc_map.py, 9 Nov 2026)
+        half = SELECT.endswith("-half")
+        mapped = map_model_pages(cur, ids, g["year"], attr, spec, best_pages, MODEL_PAGES // 2 if half else MODEL_PAGES,
+                                 navigate=SELECT.startswith("navigate"), usage=usage)
         r["map_pages"] = len(mapped)
         r["map_hit"] = any(found_on(b, v) for *_, b in mapped for v, _, _ in forms)
         if mapped:
-            best_pages = mapped if SELECT == "map" else mapped + [x for x in best_pages if (x[2], x[3]) not in {(m[2], m[3]) for m in mapped}][:MODEL_PAGES - len(mapped)]
+            best_pages = mapped if not half else mapped + [x for x in best_pages if (x[2], x[3]) not in {(m[2], m[3]) for m in mapped}][:MODEL_PAGES - len(mapped)]
     if PAGE_ORDER == "reversed":              # metamorphic check: the same pages in the opposite order
         best_pages = list(reversed(best_pages))
     r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
@@ -929,18 +936,25 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
             r["any_right"] = any(right(v, g["value"]) for v in values if v)
         if ESCALATE != "none" and (got is None or (ESCALATE == "disagree" and READS > 1 and not r.get("agree", True))):
             used = {(lid, page) for _, _, lid, page, _ in best_pages}
-            more = [x for x in keep_pages(rows, n=len(rows), per_doc=PER_DOC * 3) if (x[1], x[2]) not in used][:MODEL_PAGES]
-            r["escalated"] = bool(more)
-            r["escalation_pages_hold"] = any(found_on(b, v) for *_, b in more for v, _, _ in forms)
-            if more:
+            ladder = [x for x in keep_pages(rows, n=len(rows), per_doc=PER_DOC * 3) if (x[1], x[2]) not in used]
+            r["escalated"] = bool(ladder[:MODEL_PAGES])
+            r["escalation_steps"] = 0
+            for step in range(ESCALATE_STEPS):            # the ladder: the next MODEL_PAGES pages, again while still empty
+                more = ladder[step * MODEL_PAGES:(step + 1) * MODEL_PAGES]
+                if not more:
+                    break
+                r["escalation_steps"] += 1
+                r["escalation_pages_hold"] = r.get("escalation_pages_hold") or any(found_on(b, v) for *_, b in more for v, _, _ in forms)
                 second = read_years(dict(g, hint=hints(memory, anchor, g["year"], attr), fy_month=fy_end_month(cur, g["wba"])), attr,
                                     [(lid, page, read_text(lid, page, body)) for _, lid, page, body, _ in more], usage, note={})
                 e2 = next((e for e in second if e["year"] == g["year"]), None)
-                r["escalation_found"] = bool(e2)
-                r["escalation_right"] = bool(e2) and right(e2["value"], g["value"])
+                r["escalation_found"] = r.get("escalation_found") or bool(e2)
+                r["escalation_right"] = r.get("escalation_right") or (bool(e2) and right(e2["value"], g["value"]))
                 chosen = escalation_choice(got, r.get("reads"), e2)
                 if chosen is not got:
                     got = chosen; all_got = list(all_got) + [e2]
+                if got is not None:
+                    break
         r["others"] = [e for e in all_got if e is not got]        # the other years the same call read
         r["dropped"] = list(note.get("dropped") or [])      # why the checks dropped entries (7 Nov 2026)
         r["declined_why"] = note.get("why") or ("(only other years: " + ", ".join(str(e["year"]) for e in all_got) + ")" if all_got and not got else None)
@@ -977,13 +991,14 @@ def main():
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
     ap.add_argument("--guidance", default="today", choices=["today", "learned", "check", "md"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt; md: WBA's own assessment guidance per attribute (Pipeline QA attribute_guidance) in the prompt")
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
-    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle", "map", "map-half"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
+    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle", "map", "map-half", "navigate", "navigate-half"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
     ap.add_argument("--escalate", choices=["none", "empty", "disagree"], default="none", help="second level (9 Nov 2026): when the first read gives no figure (empty), or also when the reads of --reads disagree, the same model reads the next ranked pages; the share escalated and the second level's hits are reported")
+    ap.add_argument("--escalate-steps", type=int, default=1, help="with --escalate: how many times the second level may read the next pages while the answer stays empty (8 + 8 + 16 with --model-pages 8 --escalate-steps 2: the adaptive budget)")
     ap.add_argument("--slots", choices=["off", "on"], default="off", help="read the attributes that have slots in attributes.json variant by variant (model_reader.read_slots); the first variant present is the proposal and every variant is scored, to learn which the analysts use (9 Nov 2026)")
     ap.add_argument("--reads", type=int, default=1, help="read the model's pages N times in different orders (quorum, 9 Nov 2026): the answer stays the first read's; agreement and accuracy when reads agree are reported. Costs N times the model calls")
     ap.add_argument("--frequency", choices=["off", "pages"], default="off", help="pages whose big numbers are printed on other pages of the documents too score higher: headline figures repeat, stray ones do not (recurring_numbers, 9 Nov 2026)")
@@ -1011,6 +1026,8 @@ def main():
     READS = max(1, a.reads)
     SLOTS = a.slots
     ESCALATE = a.escalate
+    global ESCALATE_STEPS
+    ESCALATE_STEPS = max(1, a.escalate_steps)
     BM25_POOL = a.bm25_pool
     ANCHOR = a.anchor
     FREQUENCY = a.frequency
@@ -1350,9 +1367,9 @@ def main():
                   f"{s['memory right'] / (s['memory'] or 1):.0%} | {s['no memory']:,} | {s['no memory in_pages'] / (s['no memory'] or 1):.0%} | "
                   f"{s['no memory right'] / (s['no memory'] or 1):.0%} |")
     md.append("")
-    if SELECT in ("map", "map-half"):
+    if SELECT in ("map", "map-half", "navigate", "navigate-half"):
         md += [f"Document map (--select {SELECT}, 9 Nov 2026): the model's pages (or half of them) are the pages whose map lines "
-               "(doc_map.py) best match the attribute's name and definition. Answers whose documents have a map, where the "
+               "(doc_map.py) best match the attribute's name and definition" + (", chosen by a model reading the table of pages" if SELECT.startswith("navigate") else "") + ". Answers whose documents have a map, where the "
                "map's pages hold the figure, and right with and without a map:", "",
                "| Attribute | Answers | With a map | Map pages hold the figure | Right with a map | Right without |", "| --- | --: | --: | --: | --: | --: |"]
         for c in codes:
@@ -1432,7 +1449,7 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "escalate_steps": ESCALATE_STEPS if a.escalate != "none" else None, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
