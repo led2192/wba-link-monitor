@@ -80,7 +80,8 @@ class ModelPages(unittest.TestCase):
         self.assertEqual(len(pages), E.MODEL_PAGES)
         self.assertIn(("A", 21), pages)                              # the rule candidate stays
         rank_half = [x for x in pages if x != ("A", 21)]
-        self.assertTrue(all(lid == "B" for lid, _ in rank_half), rank_half)
+        b_pages = sum(1 for _, _, lid, _, _ in p if lid == "B")
+        self.assertTrue(all(lid == "B" for lid, _ in rank_half[:b_pages]), rank_half)   # B first, A only once B is used up
 
     def test_learned_without_a_trained_attribute_is_today(self):
         p = pool(25, cand={20})
