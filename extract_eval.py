@@ -37,7 +37,7 @@ SPEC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "attributes.json
 MAX_DOCS, MAX_PAGES = 12, 25         # documents of the year searched; pages kept after ranking
 PER_DOC = 10                         # at most this many of the kept pages from one document
 POOL = 400                           # label-matching pages scored before ranking
-MODEL_PAGES = 8                      # pages given to the model reader: half by the rule candidates, half by rank
+MODEL_PAGES = 16                     # pages given to the model reader: half by the rule candidates, half by rank (8 until 9 Nov 2026)
 DB_FAILS_IN_A_ROW = 10                # answers failing on the database one after another: an outage, so the run stops
 MORE_TERMS_TIMEOUT = "4s"            # the second query (an attribute's more_terms) may take this long, else it is skipped
 MORE_POOL = 30                       # pages it may add (bodies are read for these only)
@@ -806,7 +806,7 @@ def main():
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
     ap.add_argument("--auto-spec", action="store_true", help="read the chosen (development) attributes with the spec heldout.py builds from Metadata Codes, not the hand-written one: how much the hand-written specs add, and where the builder is improved")
     ap.add_argument("--heldout", type=int, default=0, help="read N held-out number attributes instead (heldout.py: never tuned on, spec built from Metadata Codes at run time)")
-    ap.add_argument("--model-pages", type=int, default=8, help="how many of the ranked pages the model reads (8 today): half by the rule candidates, half by rank; more pages cost more tokens per answer")
+    ap.add_argument("--model-pages", type=int, default=16, help="how many of the ranked pages the model reads (16 since 9 Nov 2026, 8 before): half by the rule candidates, half by rank; more pages cost more tokens per answer")
     ap.add_argument("--order", default="today", choices=["today", "reversed"], help="the order of the model's pages; reversed is a metamorphic check of position bias")
     a = ap.parse_args()
     a.memory = a.memory == "on"
@@ -1148,7 +1148,7 @@ def main():
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
         if n > 0 and not db_stop:                 # a run cut by an outage is not a score
-            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 8 else 0))
+            run.evaluation(f"reader {c} {spec['attributes'][c]['name']}", n, s["right"] / n, version=f"{a.reader} reader" + "".join(f", {k} {v}" for k, v in (("select", SELECT), ("order", PAGE_ORDER), ("guidance", a.guidance), ("page text", PAGE_TEXT), ("unstated basis", a.unstated_basis), ("period check", a.period_check), ("bm25 pool", a.bm25_pool), ("selector", a.selector), ("model pages", MODEL_PAGES if MODEL_PAGES != 16 else 0))
                                                                               if v not in ("base", "today", "db", "keep", "all", 0, "off")),
                            high_stakes=s["in_pages"] / n, suite="validated answers",
                            per_class={"proposal": round(s["proposal"] / n, 4), "number in the documents": round(s["in_docs"] / n, 4),
