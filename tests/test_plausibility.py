@@ -63,6 +63,29 @@ class Plausibility(unittest.TestCase):
         reasons, _ = P.check(rows[-2], learned, history, per_head, RATES)
         self.assertTrue(any("revenue per employee" in r for r in reasons))
 
+    def test_progression_learns_the_largest_validated_change_and_flags_beyond_it(self):
+        # 9 Nov 2026: 25 companies with two validated revenues growing at most 1.5x a year; a proposal 3x the
+        # company's validated 2023 is beyond any validated change, 1.4x is not; two years apart halves the rate
+        rows = universe()
+        for i in range(25):
+            rows.append(row(f"PT_{i:05d}", P.REVENUE, 2022, None, "USD", validated=(i + 1) * 1e9 / (1.2 + 0.3 * (i % 2))))
+        rows += [row("PT_00001", P.REVENUE, 2024, 6e9, "USD"), row("PT_00002", P.REVENUE, 2024, 4.2e9, "USD"),
+                 row("PT_00003", P.REVENUE, 2025, 8e9, "USD")]
+        learned, history, per_head = P.learn(rows, RATES)
+        self.assertAlmostEqual(per_head["progression"][P.REVENUE], 1.5)
+        self.assertNotIn(P.EMPLOYEES, per_head["progression"])          # one validated year each: no pairs
+        self.assertIn("changes 3 times a year", P.progression_reason(rows[-3], history, per_head["progression"]))
+        self.assertIsNone(P.progression_reason(rows[-2], history, per_head["progression"]))
+        self.assertIsNone(P.progression_reason(rows[-1], history, per_head["progression"]))   # 2x over two years = 1.41 a year
+        self.assertEqual(P.check(rows[-3], learned, history, per_head, RATES), ([], None))      # off by default: shadow only
+        P.PROGRESSION = "on"
+        try:
+            reasons, _ = P.check(rows[-3], learned, history, per_head, RATES)
+            self.assertEqual(P.kinds_of(reasons), ["progression"])
+        finally:
+            P.PROGRESSION = "off"
+        self.assertIsNone(P.yearly_ratio(0, 5, 1))
+
     def test_too_few_validated_answers_learn_no_range(self):
         self.assertIsNone(P.bounds([1.0] * 10))
 
