@@ -18,7 +18,14 @@ attribute_values (validated_value), so nobody sets a margin:
              can print in (10^3, 10^4, 10^5, 10^6, 10^7, 10^8, 10^9, 10^12), the value rescaled is suggested
              (never from the range alone: companies differ a thousand times in size);
   per head   revenue per employee (same company and year, US dollars) against the validated pairs, with the
-             same percentile rule.
+             same percentile rule;
+  progression (option, --progression on; 9 Nov 2026) the value against the company's nearest validated year as
+             a change per year: flagged when it changes faster than any validated pair of years of that attribute
+             ever did (the bound is the 99th percentile of the validated year-on-year ratios, learned per attribute
+             from companies with two or more validated years, PROG_MIN_PAIRS of them at least). The history check needs 10 times;
+             this one learns that revenue rarely doubles in a year while emissions may halve. Off by default: the
+             nightly run measures it as a shadow check (its own precision, and the recall it would add) until it
+             is adopted on that measure.
 A flag never changes value or status: it writes `plausibility` (the reasons, plain words) for a person to
 look at. No rescaled number is written: on the second dry run none of 7 equalled the validated answer.
 
@@ -40,6 +47,8 @@ HISTORY_RATIO = 10.0       # more than 10x away from the company's own validated
 MIN_LEARN = 30             # validated answers needed before an attribute (or a per-head pair) gets a range
 SCALE_POWERS = (3, 4, 5, 6, 7, 8, 9, 12)
 SCALE_TOLERANCE = 0.3      # |log10(ratio) - power| below this counts as a scale slip
+PROGRESSION = "off"        # "on": the progression check flags; "off": measured as a shadow check only
+PROG_MIN_PAIRS = 20        # validated pairs of years an attribute needs before its progression bound is learned
 COUNT_UNITS = {"people", "persons", "person", "employees", "employee", "headcount", "fte", "ftes", "number"}
 REVENUE, EMPLOYEES = "GMC_00048.1", "GMC_02526.1"
 ECB = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
@@ -100,6 +109,55 @@ def scale_slip(ratio):
     return None
 
 
+def yearly_ratio(a, b, gap):
+    """How many times a figure changes per year between two values `gap` years apart (always 1 or more)."""
+    if not a or not b or a <= 0 or b <= 0 or gap < 1:
+        return None
+    return (max(a, b) / min(a, b)) ** (1.0 / gap)
+
+
+def progression_bounds(history):
+    """{attribute: (bound, pairs)} from the companies' validated histories: the 99th percentile of the validated
+    year-on-year ratios (as the range check uses percentiles), pairs that are a scale slip apart left out, learned
+    only for attributes with PROG_MIN_PAIRS pairs of validated years or more. Not the maximum: the first shadow
+    measure (9 Nov 2026) gave revenue 5.7e12 a year because validated pairs with unit slips exist in the analysts'
+    own data; a bad pair must not set the bound."""
+    ratios = collections.defaultdict(list)
+    for (wba, code, k), pts in history.items():
+        pts = sorted({(y, x) for y, x in pts if x and x > 0})
+        for (y1, x1), (y2, x2) in zip(pts, pts[1:]):
+            r = yearly_ratio(x1, x2, y2 - y1)
+            # a validated pair a thousand times apart is a unit slip in the data, not a change: the 99th percentile
+            # of 242 revenue pairs was still 1,330 a year on the second shadow measure (9 Nov 2026)
+            if r and scale_slip(max(x1, x2) / min(x1, x2)) is None:
+                ratios[code].append(r)
+    out = {}
+    for code, v in ratios.items():
+        if len(v) >= PROG_MIN_PAIRS:
+            v = sorted(v)
+            out[code] = (v[min(len(v) - 1, int(round(0.99 * (len(v) - 1))))], len(v))
+    return out
+
+
+def progression_reason(row, history, bounds):
+    """The progression check's reason for one row, or None: the value against the company's nearest validated
+    year, as a change per year, beyond every validated year-on-year change of the attribute."""
+    v, code = row["value"], row["attribute"]
+    b = (bounds.get(code) or (None, 0))[0] if bounds else None
+    h = history.get((row["wba_id"], code, kind(row["unit"])))
+    if not b or not h or not v or v <= 0 or row["year"] is None:
+        return None
+    others = [(abs(y - row["year"]), y, x) for y, x in h if y != row["year"] and x and x > 0]
+    if not others:
+        return None
+    gap, y, x = min(others)
+    r = yearly_ratio(v, x, gap)
+    if r and r > b:
+        return (f"changes {r:.3g} times a year against the company's validated {y} ({fmt(x)} {row['unit']}), more than any "
+                f"validated {row['attribute_name'] or code} ever did ({b:.3g} times)")
+    return None
+
+
 def check(row, learned, history, per_head, rates):
     """(reasons, suggested value or None) for one proposed row."""
     reasons, suggested = [], None
@@ -108,6 +166,10 @@ def check(row, learned, history, per_head, rates):
         return reasons, None
     if v <= 0:
         return ["zero or negative"], None
+    if PROGRESSION == "on":
+        pr = progression_reason(row, history, per_head.get("progression"))
+        if pr:
+            reasons.append(pr)
     c = comparable(v, unit, rates)
     b = learned.get(code)
     ref = None          # a scale is suggested only against the company's own other years: companies differ
@@ -149,7 +211,7 @@ def check(row, learned, history, per_head, rates):
     return reasons, suggested
 
 
-CHECKS = ("zero", "range", "history", "scale slip", "per head")
+CHECKS = ("zero", "range", "history", "scale slip", "per head", "progression")
 
 
 def kinds_of(reasons):
@@ -157,7 +219,8 @@ def kinds_of(reasons):
     out = set()
     for r in reasons:
         out.add("zero" if r.startswith("zero") else "range" if r.startswith("far ") else
-                "scale slip" if r.startswith("looks like a scale") else "per head" if r.startswith("revenue per") else "history")
+                "scale slip" if r.startswith("looks like a scale") else "per head" if r.startswith("revenue per") else
+                "progression" if r.startswith("changes ") else "history")
     return sorted(out)
 
 
@@ -204,7 +267,7 @@ def learn(rows, rates):
             if cv:
                 vpairs[(r["wba_id"], r["year"])][r["attribute"]] = cv
     rpe = [p[REVENUE] / p[EMPLOYEES] for p in vpairs.values() if p.get(REVENUE) and p.get(EMPLOYEES)]
-    return learned, history, {"bounds": bounds(rpe), "pairs": pairs, "n": len(rpe)}
+    return learned, history, {"bounds": bounds(rpe), "pairs": pairs, "n": len(rpe), "progression": progression_bounds(history)}
 
 
 def load(H, base):
@@ -230,7 +293,10 @@ def load(H, base):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true", help="write plausibility")
+    ap.add_argument("--progression", choices=["off", "on"], default="off", help="on: the progression check flags; off: shadow measure only")
     a = ap.parse_args()
+    global PROGRESSION
+    PROGRESSION = a.progression
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
     base, H = os.environ["AIRTABLE_BASE"], {"Authorization": f"Bearer {os.environ['AIRTABLE_TOKEN']}"}
@@ -265,6 +331,12 @@ def main():
         if r["matches"] in ("match", "differs"):
             for name in kinds_of(reasons):
                 c[f"check {name} {r['matches']}"] += 1
+            if PROGRESSION != "on":                              # the shadow measure of the option
+                pr = progression_reason(r, history, per_head.get("progression"))
+                if pr:
+                    c[f"check progression {r['matches']}"] += 1
+                    if not flagged:
+                        c[f"progression alone {r['matches']}"] += 1
     fd, fm, cd, cm = c["flagged differs"], c["flagged match"], c["clear differs"], c["clear match"]
     md = ["### Plausibility of proposed values (bounds learned from the validated answers)", "",
           f"{c['proposed']:,} proposed values; {c['flagged']:,} flagged ({c['flagged'] / (c['proposed'] or 1):.0%}). "
@@ -279,8 +351,14 @@ def main():
           "| Check | Flags | Wrong among them | Precision |", "| --- | --: | --: | --: |"]
     for name in CHECKS:
         d, m = c[f"check {name} differs"], c[f"check {name} match"]
-        md.append(f"| {name} | {d + m:,} | {d:,} | {d / ((d + m) or 1):.0%} |")
+        md.append(f"| {name}{' (shadow, not flagging)' if name == 'progression' and PROGRESSION != 'on' else ''} | {d + m:,} | {d:,} | {d / ((d + m) or 1):.0%} |")
+    if PROGRESSION != "on":
+        ad, am = c["progression alone differs"], c["progression alone match"]
+        md += ["", f"If progression flagged too: {ad:,} more wrong rows caught and {am:,} more right rows flagged; recall would be "
+               f"{(fd + ad) / ((fd + cd) or 1):.0%} and precision {(fd + ad) / ((fd + fm + ad + am) or 1):.0%}."]
+    prog = per_head.get("progression") or {}
     md += ["", "Ranges learned (US dollars for currencies):", ""]
+    md += [f"- {k}: changes at most {b:.3g} times a year in the validated answers (99th percentile of {n:,} pairs of years)" for k, (b, n) in sorted(prog.items())]
     md += [f"- {k}: {fmt(lo)} to {fmt(hi)}" for k, (lo, hi) in sorted(learned.items())]
     if per_head["bounds"]:
         md.append(f"- revenue per employee: {fmt(per_head['bounds'][0])} to {fmt(per_head['bounds'][1])} USD")
