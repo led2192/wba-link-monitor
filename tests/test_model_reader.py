@@ -424,3 +424,45 @@ class SlotRead(unittest.TestCase):
         self.replies = ['{"values": [], "why": "no capex printed"}']
         self.assertEqual(self.M.read_slots(self.g, self.attr, self.pages, usage, note=note), [])
         self.assertEqual(note["why"], "no capex printed")
+
+
+class GeminiPath(unittest.TestCase):
+    """The same reader through the Gemini API when READER_MODEL starts with gemini (9 Nov 2026)."""
+    class GSess:
+        def __init__(self, *replies): self.replies, self.sent = list(replies), []
+        def post(self, url, headers=None, json=None, timeout=None):
+            self.sent.append((url, headers, json))
+            status, text = self.replies.pop(0)
+            if status != 200:
+                return Resp(status, {"error": {"message": text}})
+            return Resp(200, {"candidates": [{"content": {"parts": [{"text": text}]}, "finishReason": "STOP"}],
+                              "usageMetadata": {"promptTokenCount": 3000, "candidatesTokenCount": 50, "thoughtsTokenCount": 20}})
+
+    def test_gemini_request_shape_and_usage(self):
+        os.environ["GEMINI_API_KEY"] = "k"
+        M.time.sleep = lambda s: None
+        usage = X.collections.Counter()
+        s = self.GSess((200, '{"page": "P2", "printed": "102,502", "scale": "millions", "unit": "USD", "year": 2024}'))
+        text = M.call([{"role": "user", "content": "hello"}], usage, sess=s, model="gemini-3.8-flash", system="sys", max_tokens=99)
+        self.assertIn('"page": "P2"', text)
+        url, headers, body = s.sent[0]
+        self.assertIn("/models/gemini-3.8-flash:generateContent", url)
+        self.assertEqual(headers["x-goog-api-key"], "k")
+        self.assertEqual(body["system_instruction"]["parts"][0]["text"], "sys")
+        self.assertEqual(body["contents"][0], {"role": "user", "parts": [{"text": "hello"}]})
+        self.assertEqual(body["generationConfig"]["maxOutputTokens"], 99)
+        self.assertEqual(body["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"})
+        self.assertEqual((usage["calls"], usage["input_tokens"], usage["output_tokens"]), (1, 3000, 70))   # thoughts count as output
+
+    def test_gemini_retries_the_thinking_setting_and_refuses_a_bad_key(self):
+        os.environ["GEMINI_API_KEY"] = "k"
+        M.time.sleep = lambda s: None
+        usage = X.collections.Counter()
+        s = self.GSess((400, "Unknown name thinkingLevel"), (200, "ok"))
+        self.assertEqual(M.call([{"role": "user", "content": "x"}], usage, sess=s, model="gemini-2.5-flash"), "ok")
+        self.assertNotIn("thinkingConfig", s.sent[1][2]["generationConfig"])
+        with self.assertRaises(M.ModelRefused):
+            M.call([{"role": "user", "content": "x"}], usage, sess=self.GSess((403, "API key not valid")), model="gemini-3.8-flash")
+        s = self.GSess((429, "quota"), (200, "ok"))
+        self.assertEqual(M.call([{"role": "user", "content": "x"}], usage, sess=s, model="gemini-3.8-flash"), "ok")
+        self.assertFalse(M.is_gemini("claude-haiku-5-5")); self.assertTrue(M.is_gemini("Gemini-3.8-flash-lite"))

@@ -2,7 +2,7 @@ name: Generic reader
 
 # The generic reader of number attributes (extract_eval.py), driven by attributes.json, scored stage by
 # stage against the validated 2025 answers: documents, pages, reading, right value. The last step is read
-# by rules or, with reader "model", by a language model (model_reader.py, ANTHROPIC_API_KEY, READER_MODEL).
+# by rules or, with reader "model", by a language model (model_reader.py, ANTHROPIC_API_KEY or GEMINI_API_KEY, READER_MODEL).
 # Read-only against the gold bases (GOLD_TOKEN) and the evidence database. Manual; a pull request touching
 # it runs 40 answers per attribute with both readers and posts both tables (the model run costs cents).
 on:
@@ -25,8 +25,11 @@ on:
         options: [ts, bm25]
         default: ts
       model:
-        description: "model for the model reader"
+        description: "model for the model reader: a Claude model name, or a Gemini one (gemini-...; GEMINI_API_KEY)"
         default: "claude-haiku-5-5"
+      price:
+        description: "the model's price as in/out dollars per million tokens (blank = Haiku's list price in the cost line)"
+        default: ""
       guidance:
         description: "today, or learned: the analysts' choice rules (decision_rules.json) in the prompt and as a check"
         type: choice
@@ -88,7 +91,9 @@ jobs:
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           READER_MODEL: ${{ inputs.model || 'claude-haiku-5-5' }}
+          READER_PRICE: ${{ inputs.price }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             python extract_eval.py --limit 40 --reader rules; mv extract_eval.md rules.md

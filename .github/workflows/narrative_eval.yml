@@ -61,6 +61,7 @@ jobs:
           GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           READER_MODEL: ${{ inputs.model }}
           READER_PRICE: ${{ inputs.price }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
