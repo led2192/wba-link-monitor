@@ -520,6 +520,47 @@ create or replace function public.type_weight(doc_type text) returns real
       else 0.5 end::real
   $$;
 
+-- The words and phrases of a query, the way a web search engine reads them (10 Nov 2026): quoted phrases
+-- are kept whole; the rest is split into words, lower case, without the little words of the main
+-- languages (the, of, la, de, der, van...), at most 8 (a lone digit stays: scope 1); a word of 4 letters or
+-- more also matches its longer forms (emission matches emissions; prefix match), a shorter one matches
+-- exactly (CO2, GRI). A page that prints the words together, in order, ranks above one that scatters them.
+create or replace function public.find_terms(q text, out phrases text[], out words text[])
+language plpgsql immutable
+as $$
+declare
+  rest text;
+  stop text[] := array['the','a','an','of','in','on','at','to','for','and','or','is','are','was','were','be','by','with','from',
+    'as','that','this','these','those','it','its','their','our','we','you','they','he','she','do','does','did','has','have','had',
+    'not','but','if','than','then','so','what','which','who','how','when','where','about','into','over','under','per','vs','any',
+    'all','also','more','most','some','such','each','other','only','can','could','will','would','should','may','might','there',
+    'el','la','los','las','un','una','unos','unas','de','del','al','y','o','u','en','con','por','para','que','es','son','se','su',
+    'sus','lo','le','les','des','du','et','ou','à','au','aux','dans','sur','pour','par','est','sont','ce','cette','ces','une',
+    'der','die','das','den','dem','ein','eine','einer','eines','und','oder','im','am','auf','für','mit','von','zu','zur','zum',
+    'ist','sind','nicht','os','um','uma','do','da','dos','das','nos','nas','com','il','gli','di','della','dei','delle','ed','che',
+    'è','het','een','van','op','voor','met','zijn','te','bij','om','niet'];
+begin
+  phrases := coalesce(array(select btrim(m[1]) from regexp_matches(coalesce(q, ''), '"([^"]+)"', 'g') m where btrim(m[1]) <> ''), '{}');
+  rest := regexp_replace(coalesce(q, ''), '"[^"]*"', ' ', 'g');
+  words := coalesce(array(
+    select w from (
+      select distinct on (w) w, ord from (
+        select lower(regexp_replace(t, '[^[:alnum:]]', '', 'g')) as w, ordinality as ord
+        from regexp_split_to_table(rest, '[[:space:],;:()\[\]{}<>|/\\]+') with ordinality t) x
+      where (length(w) >= 2 or w ~ '^[0-9]$') and w <> all(stop)
+      order by w, ord) y
+    order by ord limit 8), '{}');
+end;
+$$;
+
+-- One word as a tsquery: a prefix match from 4 letters, exact below (to_tsquery lower-cases).
+create or replace function public.find_word_query(w text) returns tsquery
+  language sql immutable
+  as $$ select to_tsquery('simple', case when length(w) >= 4 then w || ':*' else w end) $$;
+
+alter table public.search_log add column if not exists relaxed int;        -- words dropped to find results (0 = all words)
+alter table public.search_log add column if not exists terms text;          -- the words and phrases the engine read
+
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text);
 create or replace function public.find_pages(
   key text, q text, company_filter text default null, year_from int default null, year_to int default null,
@@ -534,13 +575,24 @@ set plan_cache_mode = 'force_custom_plan'
 as $$
 declare
   k text := public.search_key_name(key);
-  tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
+  t record;
+  phrases text[];
+  words text[];
+  nw int;
+  tqs tsquery[] := '{}';            -- one tsquery per word
+  phrase_q tsquery := null;         -- every phrase, required always
+  or_q tsquery := null;             -- every word or phrase, for the ranking
+  together_q tsquery := null;       -- the words as one phrase, in order: a page printing them together ranks higher
+  sub_q tsquery;
   need int := least(greatest(coalesce(max_rows, 50), 1), 200);
   per_year int := 600;
   cap int := 2400;
   got int := 0;
   n int;
   y int;
+  i int;
+  mask int;
+  drop_n int := 0;
   this_year int := extract(year from now())::int;
   t0 timestamptz := clock_timestamp();
   lid bigint;
@@ -553,41 +605,86 @@ begin
   if k <> 'owner' and (select count(*) from public.search_log l where l.key_name = k and l.at > now() - interval '1 minute') >= 60 then
     raise exception 'too many searches in a minute' using errcode = '53400';
   end if;
-  if numnode(tsq) = 0 then
-    return;
+  select * into t from public.find_terms(q);
+  phrases := t.phrases; words := t.words;
+  nw := coalesce(array_length(words, 1), 0);
+  if nw = 0 and coalesce(array_length(phrases, 1), 0) = 0 then   -- only little words: take them as typed
+    words := coalesce(array(select lower(regexp_replace(w, '[^[:alnum:]]', '', 'g')) from regexp_split_to_table(coalesce(q, ''), '\s+') w
+                            where length(regexp_replace(w, '[^[:alnum:]]', '', 'g')) >= 1 limit 8), '{}');
+    nw := coalesce(array_length(words, 1), 0);
+    if nw = 0 then
+      return;
+    end if;
   end if;
-  create temp table if not exists find_cand (library_id text, page int, words tsvector, year int, doc_type text) on commit drop;
-  truncate find_cand;
-  for y in select distinct coalesce(d.year, 0) from public.documents d
-            where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
-            order by 1 desc
-  loop
-    insert into find_cand
-      select p.library_id, p.page, p.words, p.year, p.doc_type
-      from public.pages p
-      where p.words @@ tsq
-        and p.year = y
-        and p.wba_id <> ''
-        and (types is null or p.doc_type = any(types))
-        and (ids is null or p.wba_id = any(ids))
-      limit least(per_year, cap - got);
-    get diagnostics n = row_count;
-    got := got + n;
-    exit when got >= cap;
+  for i in 1..coalesce(array_length(phrases, 1), 0) loop
+    phrase_q := coalesce(phrase_q && phraseto_tsquery('simple', phrases[i]), phraseto_tsquery('simple', phrases[i]));
+    or_q := coalesce(or_q || phraseto_tsquery('simple', phrases[i]), phraseto_tsquery('simple', phrases[i]));
   end loop;
-  insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client)
+  for i in 1..nw loop
+    tqs := tqs || public.find_word_query(words[i]);
+    or_q := coalesce(or_q || tqs[i], tqs[i]);
+  end loop;
+  if nw >= 2 then
+    together_q := phraseto_tsquery('simple', array_to_string(words, ' '));
+  end if;
+  create temp table if not exists find_cand (library_id text, page int, words tsvector, year int, doc_type text, primary key (library_id, page)) on commit drop;
+  truncate find_cand;
+  -- level 0: every word; then every subset missing one word, then missing two, until enough pages are found
+  <<levels>>
+  for drop_n in 0..least(2, greatest(nw - 1, 0)) loop
+    for mask in 0..(case when nw = 0 then 0 else (1 << nw) - 1 end) loop
+      -- the subset is the words whose bit is set; it must drop exactly drop_n words
+      continue when nw > 0 and (nw - (select count(*) from generate_series(0, nw - 1) b where (mask >> b) & 1 = 1)) <> drop_n;
+      sub_q := phrase_q;
+      for i in 1..nw loop
+        if (mask >> (i - 1)) & 1 = 1 then
+          sub_q := coalesce(sub_q && tqs[i], tqs[i]);
+        end if;
+      end loop;
+      continue when sub_q is null;
+      for y in select distinct coalesce(d.year, 0) from public.documents d
+                where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+                order by 1 desc
+      loop
+        insert into find_cand
+          select p.library_id, p.page, p.words, p.year, p.doc_type
+          from public.pages p
+          where p.words @@ sub_q
+            and p.year = y
+            and p.wba_id <> ''
+            and (types is null or p.doc_type = any(types))
+            and (ids is null or p.wba_id = any(ids))
+          limit least(per_year, cap - got)
+        on conflict do nothing;
+        get diagnostics n = row_count;
+        got := got + n;
+        exit when got >= cap;
+      end loop;
+      exit levels when got >= cap;
+    end loop;
+    exit levels when got >= need;
+  end loop;
+  insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms)
     values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), got,
-            extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60))
+            extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), drop_n,
+            left(array_to_string(words, ' ') || case when coalesce(array_length(phrases, 1), 0) > 0 then ' "' || array_to_string(phrases, '" "') || '"' else '' end, 300))
     returning id into lid;
   return query
     with scored as (
       select c.library_id, c.page, c.year, c.doc_type,
-             (ts_rank_cd(c.words, tsq, 5) * public.type_weight(c.doc_type)
-              / (1 + 0.15 * greatest(this_year - coalesce(nullif(c.year, 0), this_year), 0)))::real as score
+             (select count(*) from unnest(tqs) tq where c.words @@ tq)::int as matched,
+             ts_rank_cd(c.words, or_q, 5) as rel,
+             (together_q is not null and c.words @@ together_q) as together
       from find_cand c),
-    ranked as (
-      select s.*, row_number() over (partition by s.library_id order by s.score desc, s.page) as in_doc
+    weighted as (
+      select s.*, (s.rel * public.type_weight(s.doc_type)
+                   / (1 + 0.15 * greatest(this_year - coalesce(nullif(s.year, 0), this_year), 0))
+                   * power((s.matched + 0.5) / (greatest(nw, 1) + 0.5), 2)
+                   * case when s.together then 1.5 else 1.0 end)::real as score
       from scored s),
+    ranked as (
+      select w.*, row_number() over (partition by w.library_id order by w.score desc, w.page) as in_doc
+      from weighted w),
     top as (
       select r.library_id, r.page, r.year, r.doc_type, r.score,
              row_number() over (order by r.score desc, r.year desc, r.library_id, r.page) as rk
@@ -595,13 +692,13 @@ begin
       where r.in_doc <= 3
       order by r.score desc, r.year desc, r.library_id, r.page
       limit need)
-    select lid, t.rk::int, t.library_id, d.company, d.wba_id, t.year, t.doc_type, d.label, d.url, t.page, t.score,
-           ts_headline('simple', left(p.body, 200000), tsq,
+    select lid, t2.rk::int, t2.library_id, d.company, d.wba_id, t2.year, t2.doc_type, d.label, d.url, t2.page, t2.score,
+           ts_headline('simple', left(p.body, 200000), or_q,
                        'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
-    from top t
-    join public.documents d on d.library_id = t.library_id
-    join public.pages p on p.library_id = t.library_id and p.page = t.page
-    order by t.rk;
+    from top t2
+    join public.documents d on d.library_id = t2.library_id
+    join public.pages p on p.library_id = t2.library_id and p.page = t2.page
+    order by t2.rk;
 end;
 $$;
 
@@ -622,10 +719,16 @@ $$;
 -- interface caps set-returning functions at 1,000 rows).
 create or replace function public.find_companies(key text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
+set statement_timeout = '20s'
 as $$
 begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if to_regclass('public.companies') is not null and (select count(*) from public.companies) > 0 then
+    -- the profiles (load_companies.py): 2,000 rows, instant; industry, country and region for the box's filters
+    return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.name, 'industry', c.industry, 'country', c.country, 'region', c.region) order by c.name), '[]'::jsonb)
+            from public.companies c where c.name is not null);
   end if;
   return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.company, 'documents', c.documents) order by c.company), '[]'::jsonb)
           from (select d.wba_id, max(d.company) as company, count(*) as documents
@@ -637,6 +740,8 @@ $$;
 
 revoke all on function public.search_key_name(text) from public, anon, authenticated;
 revoke all on function public.type_weight(text) from public, anon, authenticated;
+revoke all on function public.find_terms(text) from public, anon, authenticated;
+revoke all on function public.find_word_query(text) from public, anon, authenticated;
 revoke all on function public.find_pages(text, text, text, int, int, text, int, text) from public;
 grant execute on function public.find_pages(text, text, text, int, int, text, int, text) to anon, authenticated;
 revoke all on function public.find_click(text, bigint, text, int, int) from public;

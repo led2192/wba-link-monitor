@@ -4,12 +4,14 @@ Newest first. One line per change, with the pull request. Every pull request add
 
 ## November 2026
 - 2026-11-10 `semantic_index.py` and the `Semantic index` workflow (manual, dry run by default, partition k/N): the main reports from 2024 on cut into 120-word passages and embedded with multilingual-e5-small into `chunks` (HNSW index) with `chunk_docs` as the done-marker (#356)
+- 2026-11-10 lanterN's placeholder fits the box again (#361)
 - 2026-11-10 `load_companies.py` and the `Company profiles` workflow (nightly after the Evidence database load): industry, country, region and website of the 2,000 companies from Airtable into `public.companies`, for Lantern's filters (#360)
 - 2026-11-10 lanterN's lantern carries eleven thin bands in WBA's colours, closer to the stripes of WBA's own mark (#359)
 - 2026-11-10 lanterN shows your recent searches under the box (this browser only, the last 30, narrowed as you type, each removable, all clearable) (#358)
 - 2026-11-10 lanterN: the mark with WBA's colour bands and a soft beam towards the name, each letter in a brand colour (a small l, a capital N under the widening beam, the owner's choice); the header holds only the mark, the hint and the tagline leave the top, the filters open from a funnel beside the box, the footer carries the tagline and the Powered by line once (#357)
 - 2026-11-10 Lantern reads every company and every year typed in the box ("Scope 1 emissions 2024 2025 Nike Unilever" filters both companies and the span), not the first of each (#355)
 - 2026-11-10 Lantern in WBA's brand colours (navy 00194B, blue 1E64CC, yellow FAC300, from the branding guide's theme); "World Benchmarking Alliance" links to the website (#354)
+- 2026-11-10 Lantern reads a query like a web search engine: little words dropped, prefix match from 4 letters, every word first and then the pages missing one or two words when results are short, a bonus for the words printed together; WBA's brand colours from the branding guide (navy 00194B, blue 1E64CC, yellow FAC300); the search check prints the terms read and two more sample queries (#353)
 - 2026-11-10 Evidence health reports the main reports (annual, integrated, sustainability, ESG, CSR) with text by year: documents, pages, characters and about how many 120-word passages, the size of the semantic index to come (#352)
 - 2026-11-10 The one-box search is named Lantern: mark, favicon, "Powered by World Benchmarking Alliance"; the three brand colours are variables at the top of the stylesheet (#351)
 - 2026-11-10 `extract_eval --escalate whole` (option): a doubtful answer (no figure, or a figure printed once) gets its documents whole, in at most 4 chunks of `--whole-chars`, read until a figure appears. The escalation measure "pages hold the figure" read the candidate instead of the page text and always said no (the "0 %" of wave C was that bug; the +0.9 verdict stands) (#350)
