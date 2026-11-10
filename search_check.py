@@ -27,6 +27,10 @@ SEARCHES = [
     ("WBA: \"World Benchmarking Alliance\"", "pages", ('"World Benchmarking Alliance"',)),
     ("evidence passages, nature: water withdrawal", "passages", ("water withdrawal", "nature")),
     ("evidence passages, social, no words", "passages", ("", "social")),
+    # the one-box search (find_pages, 10 Nov 2026): ranked by relevance; the owner's connection counts as a key
+    ("find: climate", "find", ("climate",)),
+    ("find: \"living wage\"", "find", ('"living wage"',)),
+    ("find: Unilever scope 1, 2024", "find", ("scope 1", "Unilever", 2024, 2024)),
 ]
 
 
@@ -53,6 +57,11 @@ def run(cur, fn, args, exact_companies=False):
             cur.execute("select public.search_company_count(%s, %s, %s, %s, %s)", a)
             exact = (cur.fetchone()[0], time.time() - t2)
         return summary, rows, t1 - t0, t2 - t1, exact
+    if fn == "find":
+        a = list(args) + [None] * (5 - len(args))
+        cur.execute("select company, year, page from public.find_pages(null, %s, %s, %s, %s, %s, 50, 'search_check')", a)
+        rows = cur.fetchall()
+        return None, rows, 0.0, time.time() - t0, None
     if fn == "documents":
         a = list(args) + [None] * (5 - len(args))
         cur.execute("select company, year, pages from public.search_documents(%s, %s, %s, %s, %s, 50)", a)
@@ -75,8 +84,19 @@ def main():
         cur.execute("set statement_timeout = '120s'")
         exact_ok = has_function(cur, "search_company_count")
         docs_ok = has_function(cur, "search_documents")
+        find_ok = has_function(cur, "find_pages")
+        if find_ok:                                           # the keys: at least one active, and a wrong key matches none
+            try:
+                cur.execute("select count(*) filter (where active), count(*) filter (where key_hash = encode(extensions.digest('not-a-key', 'sha256'), 'hex')) from public.search_keys")
+                active, wrong = cur.fetchone()
+                md.append(f"| find: keys | {active} active; a wrong key {'matches none' if wrong == 0 else 'MATCHES A KEY'} | | | | | | |")
+            except Exception as e:
+                conn.rollback(); cur.execute("set statement_timeout = '120s'")
+                md.append(f"| find: a wrong key | failed: {type(e).__name__} | | | | | | |")
         for label, fn, args in SEARCHES:
             if fn == "documents" and not docs_ok:
+                continue
+            if fn == "find" and not find_ok:
                 continue
             try:
                 s, rows, tc, tr, exact = run(cur, fn, args, exact_ok)
