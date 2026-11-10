@@ -40,5 +40,30 @@ class Writes(unittest.TestCase):
         self.assertEqual(calls[-1][0], "one"); self.assertIn("chunk_docs", calls[-1][1]); self.assertEqual(calls[-1][2], ("PT_1-abc", 3, "m"))
 
 
+class Pairs(unittest.TestCase):
+    def test_neighbouring_words_become_lexemes(self):
+        lex = S.pair_lexemes("ACT Core methodology; Scope 1 emissions. ACT Core")
+        self.assertEqual(lex, ["1_emissions", "act_core", "core_methodology", "emissions_act", "methodology_scope", "scope_1"])
+        self.assertEqual(S.pair_lexemes("alone"), []); self.assertEqual(S.pair_lexemes(None), [])
+
+    def test_other_scripts_and_broken_words(self):
+        self.assertIn("développement_durable", S.pair_lexemes("Développement durable"))
+        self.assertEqual(S.pair_lexemes("x" * 41 + " word"), [])
+
+    def test_rows_leave_out_empty_pages_and_quote_lexemes(self):
+        self.assertEqual(S.pair_rows([(1, "just transition"), (2, "one"), (3, "")]), [(1, "'just_transition'")])
+        self.assertEqual(S.pairs_literal(["a_b", "o'x_y"]), "'a_b' 'ox_y'")
+
+    def test_pairs_are_written_before_the_marker(self):
+        calls = []
+
+        class Cur:
+            def executemany(self, sql, rows): calls.append(("many", sql[:40], len(rows)))
+            def execute(self, sql, args=None): calls.append(("one", sql[:40], args))
+        S.write_document(Cur(), "PT_1-abc", [(1, 0, "a")], [[0.0] * 3], "m", [(1, "'a_b'"), (2, "'c_d'")])
+        self.assertIn("page_pairs", calls[0][1]); self.assertEqual(calls[0][2], 2)
+        self.assertIn("chunk_docs", calls[-1][1])
+
+
 if __name__ == "__main__":
     unittest.main()

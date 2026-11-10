@@ -154,6 +154,20 @@ create table if not exists public.chunk_docs (
 alter table public.chunks enable row level security;
 alter table public.chunk_docs enable row level security;
 
+-- The neighbouring-word pairs of each page of the same documents (semantic_index.py writes them in the same
+-- pass): 'scope_1', 'act_core', 'just_transition'. pages_search knows which pages hold two words, not whether
+-- they stand together, and checking that reads each page's word list from disk (a millisecond a page): a rare
+-- phrase of common words could not be found within a search's seconds (10 Nov 2026). Here a phrase is one
+-- index question.
+create table if not exists public.page_pairs (
+  library_id  text not null references public.documents (library_id),
+  page        int  not null,
+  pairs       tsvector not null,
+  primary key (library_id, page)
+);
+create index if not exists page_pairs_pairs on public.page_pairs using gin (pairs);
+alter table public.page_pairs enable row level security;
+
 -- Extracted values, one per company x attribute x period. Empty until the extraction pilot.
 create table if not exists public.datapoints (
   id            bigint generated always as identity primary key,
