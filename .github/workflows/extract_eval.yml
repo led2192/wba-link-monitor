@@ -85,7 +85,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && (inputs.select == 'learned' || inputs.select == 'rerank' || startsWith(inputs.select, 'map'))
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install sentence-transformers datasets
+          pip install sentence-transformers datasets "accelerate>=1.1.0"
       - name: Install the table parser, for pages re-read with their tables
         if: github.event_name == 'workflow_dispatch' && inputs.page_text != 'db' && inputs.page_text != ''
         run: |
