@@ -101,3 +101,9 @@ def test_ask_is_signed_limited_and_keeps_the_key_out_of_the_page():
     assert "to authenticated;" in ask and "from public, anon;" in ask
     page = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
     assert "api.anthropic.com" not in page and "x-api-key" not in page
+
+
+def test_documents_come_in_the_order_the_types_were_asked():
+    assert FIND.count("coalesce(array_position(types, d.doc_type), 99)") == 2
+    page = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
+    assert 'ANNUAL = "10K Form;Annual Report;Integrated Report"' in page and "TYPE_ALONE[alone]" in page
