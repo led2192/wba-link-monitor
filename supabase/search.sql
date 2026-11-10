@@ -852,6 +852,124 @@ begin
 end;
 $$;
 
+-- ==============================================================================================
+-- The values the robot has read, beside the search results, and people's reviews of them (10 Nov 2026).
+-- When a search names one to five companies, the page asks find_values for what value_versions holds for them
+-- (optionally some attributes and years): for each company, attribute and year the value most readings agree on,
+-- with how many documents gave it, how many readings there are in all and how many different values, its
+-- source document and page, and the reviews so far. Evidence, not a verdict: agreement between documents says
+-- the figure is printed more than once, not that it is the right figure (the owner's point); a calibrated
+-- confidence comes from the measured accuracy of proposals like it, once the reviews give enough of them.
+-- A review needs an author: review_value takes a signed-in WBA address (the code by email of the older page),
+-- one review per person and value (a second replaces the first). seconds is how long the value was on screen
+-- before the verdict: a review made in three seconds is kept and weighed as such.
+create table if not exists public.value_reviews (
+  id             bigserial primary key,
+  at             timestamptz not null default now(),
+  reviewer       text not null,
+  version_id     text not null,
+  wba_id         text,
+  attribute      text,
+  year           int,
+  value          double precision,           -- the value shown when it was reviewed
+  verdict        text not null check (verdict in ('ok', 'wrong', 'unsure')),
+  correct_value  text,
+  comment        text,
+  source_url     text,                       -- where the reviewer says the right figure is
+  source_page    int,
+  seconds        int,
+  log_id         bigint,
+  client         text,
+  unique (version_id, reviewer)
+);
+alter table public.value_reviews enable row level security;
+create index if not exists value_reviews_version on public.value_reviews (version_id);
+
+create or replace function public.find_values(
+  key text, company_filter text, year_from int default null, year_to int default null, attribute_filter text default null)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '15s'
+as $$
+declare
+  ids text[] := public.companies_matching(company_filter);
+  attrs text[] := public.types_matching(attribute_filter);
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if ids is null or coalesce(array_length(ids, 1), 0) = 0 or array_length(ids, 1) > 5 then
+    return '[]'::jsonb;
+  end if;
+  return (
+    with g as (
+      select v.wba_id, v.attribute, v.year, v.value, count(distinct v.library_id) as docs, max(v.last_seen) as seen
+      from public.value_versions v
+      where v.wba_id = any(ids) and (attrs is null or v.attribute = any(attrs))
+        and (year_from is null or v.year >= year_from) and (year_to is null or v.year <= year_to)
+      group by 1, 2, 3, 4),
+    tot as (select wba_id, attribute, year, sum(docs)::int as readings, count(*)::int as variants from g group by 1, 2, 3),
+    best as (select distinct on (wba_id, attribute, year) * from g order by wba_id, attribute, year, docs desc, seen desc),
+    pick as (
+      select distinct on (b.wba_id, b.attribute, b.year) vv.version_id, vv.unit, vv.printed, vv.basis, vv.library_id, vv.page,
+             b.wba_id, b.attribute, b.year, b.value, b.docs
+      from best b join public.value_versions vv on vv.wba_id = b.wba_id and vv.attribute = b.attribute and vv.year = b.year and vv.value = b.value
+      order by b.wba_id, b.attribute, b.year, vv.last_seen desc)
+    select coalesce(jsonb_agg(x.j order by x.company, x.attribute, x.year desc), '[]'::jsonb) from (
+      select d.company, p.attribute, p.year,
+             jsonb_build_object('version_id', p.version_id, 'wba_id', p.wba_id, 'company', coalesce(d.company, p.wba_id), 'attribute', p.attribute,
+               'year', p.year, 'value', p.value, 'unit', p.unit, 'printed', p.printed, 'basis', p.basis, 'library_id', p.library_id, 'page', p.page,
+               'url', d.url, 'label', d.label, 'doc_type', d.doc_type, 'agree', p.docs, 'readings', t.readings, 'variants', t.variants,
+               'ok', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'ok'),
+               'wrong', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'wrong')) as j
+      from pick p
+      join tot t on t.wba_id = p.wba_id and t.attribute = p.attribute and t.year = p.year
+      left join public.documents d on d.library_id = p.library_id
+      order by d.company, p.attribute, p.year desc
+      limit 80) x);
+end;
+$$;
+
+create or replace function public.review_value(
+  version_id text, verdict text, correct_value text default null, comment text default null, source_url text default null,
+  source_page int default null, seconds int default null, log_id bigint default null, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  v public.value_versions%rowtype;
+  vid text := version_id;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to review' using errcode = '42501';
+  end if;
+  if verdict not in ('ok', 'wrong', 'unsure') then
+    raise exception 'verdict must be ok, wrong or unsure' using errcode = '22023';
+  end if;
+  select * into v from public.value_versions vv where vv.version_id = vid;
+  if not found then
+    raise exception 'no such value' using errcode = '22023';
+  end if;
+  insert into public.value_reviews (reviewer, version_id, wba_id, attribute, year, value, verdict, correct_value, comment, source_url, source_page, seconds, log_id, client)
+    values (who, vid, v.wba_id, v.attribute, v.year, v.value, verdict, nullif(left(btrim(correct_value), 200), ''), nullif(left(btrim(comment), 1000), ''),
+            nullif(left(btrim(source_url), 1000), ''), source_page, seconds, log_id, left(client, 60))
+    on conflict on constraint value_reviews_version_id_reviewer_key do update
+      set at = now(), verdict = excluded.verdict, correct_value = excluded.correct_value, comment = excluded.comment,
+          source_url = excluded.source_url, source_page = excluded.source_page, seconds = excluded.seconds, log_id = excluded.log_id, client = excluded.client;
+  return jsonb_build_object('ok', (select count(*) from public.value_reviews r where r.version_id = vid and r.verdict = 'ok'),
+                            'wrong', (select count(*) from public.value_reviews r where r.version_id = vid and r.verdict = 'wrong'),
+                            'mine', (select count(*) from public.value_reviews r where r.reviewer = who));
+end;
+$$;
+
+revoke all on function public.find_values(text, text, int, int, text) from public;
+grant execute on function public.find_values(text, text, int, int, text) to anon, authenticated;
+revoke all on function public.review_value(text, text, text, text, text, int, int, bigint, text) from public, anon;
+grant execute on function public.review_value(text, text, text, text, text, int, int, bigint, text) to authenticated;
 revoke all on function public.search_key_name(text) from public, anon, authenticated;
 revoke all on function public.type_weight(text) from public, anon, authenticated;
 revoke all on function public.find_terms(text) from public, anon, authenticated;

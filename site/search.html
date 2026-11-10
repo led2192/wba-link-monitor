@@ -85,6 +85,33 @@
                                     background: var(--box); color: var(--fg); min-width: 0; }
   @media (max-width: 560px) { .filters .row { grid-template-columns: 1fr 1fr; } }
   .status { color: var(--muted); font-size: 14px; margin: 6px 0 10px; min-height: 20px; }
+  .values { border: 1px solid var(--line); background: var(--box); border-radius: 12px; padding: 10px 12px; margin: 0 0 14px; font-size: 13px; }
+  .values[hidden] { display: none; }
+  .values summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
+  .values summary::-webkit-details-marker { display: none; }
+  .values summary b { color: var(--fg); font-weight: 500; }
+  .values .v { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 8px 0; border-top: 1px solid var(--line); margin-top: 8px; }
+  .values .v + .v { margin-top: 0; }
+  .values .what { color: var(--muted); }
+  .values .num { font-size: 16px; font-weight: 600; color: var(--fg); }
+  .values .num small { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .values .ev { color: var(--muted); font-size: 12px; grid-column: 1 / -1; }
+  .values .ev a { color: var(--accent); }
+  .values .btns { display: flex; gap: 4px; align-items: start; }
+  .values .btns button { width: 30px; height: 30px; border-radius: 15px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; }
+  .values .btns button:hover { border-color: var(--accent); color: var(--accent); }
+  .values .btns .yes.on { background: #4BB42D; border-color: #4BB42D; color: #fff; }
+  .values .btns .no.on { background: #FF3C23; border-color: #FF3C23; color: #fff; }
+  .values .fix { grid-column: 1 / -1; display: grid; gap: 6px; margin-top: 4px; }
+  .values .fix input, .values .fix textarea, .values .sign input { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
+  .values .fix .two { display: grid; grid-template-columns: 1fr 80px; gap: 6px; }
+  .values .fix button, .values .sign button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; justify-self: start; }
+  .values .sign { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: grid; gap: 6px; }
+  .values .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  @media (min-width: 1180px) {
+    .values { position: absolute; top: 96px; left: calc(50% + 396px); width: 310px; margin: 0; max-height: 80vh; overflow: auto; }
+    .wrap { position: relative; }
+  }
   .strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; font-size: 13px; }
   .strip .lbl { color: var(--muted); margin-right: 4px; }
   .strip .co { font: inherit; font-size: 13px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--box); color: var(--fg); cursor: pointer; }
@@ -140,6 +167,7 @@
     </div>
   </div>
   <div class="status" id="status"></div>
+  <details class="values" id="values" hidden open></details>
   <div class="strip" id="strip"></div>
   <div id="results"></div>
   <div id="notice"></div>
@@ -149,7 +177,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v3 2026-11-10";
+  const CLIENT = "lantern v4 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -346,13 +374,118 @@
       else if (!state.q) setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} documents, newest first. (${s} s)`);
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
+      state.logId = rows.length ? rows[0].log_id : null;
+      if (!more) loadValues();
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
     } catch (e) {
       setStatus(e.message.includes("not allowed") ? "This link no longer works; ask for a new one." : `Search failed: ${e.message}`);
-      $("results").innerHTML = "";
+      $("results").innerHTML = ""; $("values").hidden = true;
     }
   }
+  // ---- The values the robot has read, and the reviews (10 Nov 2026) ----
+  const ATTRS = [
+    ["GMC_00001.1", "Scope 1 emissions", ["scope 1", "scope one", "alcance 1"]],
+    ["GMC_00002.1", "Scope 2 emissions, location-based", ["scope 2", "scope two", "alcance 2", "location-based", "location based"]],
+    ["GMC_00003.1", "Scope 2 emissions, market-based", ["scope 2", "scope two", "alcance 2", "market-based", "market based"]],
+    ["GMC_00005.1", "Scope 3 emissions", ["scope 3", "scope three", "alcance 3"]],
+    ["GMC_00124.1", "Scope 1 + 2 emissions", ["scope 1 and 2", "scope 1+2", "scope 1 + 2", "scope 1 & 2"]],
+    ["GMC_00048.1", "Revenue", ["revenue", "revenues", "turnover", "net sales", "sales", "ingresos"]],
+    ["GMC_02526.1", "Employees", ["employees", "headcount", "workforce", "empleados", "plantilla"]],
+    ["GMC_00063.1", "Capital expenditure", ["capex", "capital expenditure", "capital expenditures"]],
+    ["GMC_00064.1", "Low-carbon capital expenditure", ["low-carbon capex", "low carbon capex", "low-carbon capital expenditure", "green capex"]],
+    ["GMC_00047.1", "R&D spending", ["r&d", "research and development", "i+d"]],
+  ];
+  const EMISSIONS = ["GMC_00001.1", "GMC_00002.1", "GMC_00003.1", "GMC_00005.1", "GMC_00124.1"];
+  const ATTR_NAME = Object.fromEntries(ATTRS.map(a => [a[0], a[1]]));
+  function attrsIn(text) {
+    const low = " " + text.toLowerCase() + " "; const out = new Set();
+    for (const [code, , words] of ATTRS) if (words.some(w => low.includes(w))) out.add(code);
+    if (!out.size && /emission|emisiones|ghg|greenhouse|carbon/.test(low)) EMISSIONS.forEach(c => out.add(c));
+    return [...out];
+  }
+  const fmt = v => { const a = Math.abs(v); return a >= 1e9 ? (v / 1e9).toLocaleString("en", { maximumFractionDigits: 2 }) + " bn" : a >= 1e6 ? (v / 1e6).toLocaleString("en", { maximumFractionDigits: 2 }) + " m" : v.toLocaleString("en", { maximumFractionDigits: 2 }); };
+
+  // Reviewing needs an author: a code sent to a WBA address, kept in this browser. Searching stays without sign-in.
+  const auth = { get() { try { return JSON.parse(localStorage.getItem("find_session") || "null"); } catch (e) { return null; } },
+                 set(v) { try { v ? localStorage.setItem("find_session", JSON.stringify(v)) : localStorage.removeItem("find_session"); } catch (e) {} } };
+  async function authCall(path, body) {
+    const r = await fetch(`${CONFIG.url}/auth/v1/${path}`, { method: "POST", headers: { apikey: CONFIG.key, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.msg || j.error_description || j.message || `${r.status}`);
+    return j;
+  }
+  async function token() {
+    let s = auth.get(); if (!s) return null;
+    if (s.expires_at && s.expires_at * 1000 < Date.now() + 60000) {
+      try { const j = await authCall("token?grant_type=refresh_token", { refresh_token: s.refresh_token }); s = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at, email: j.user && j.user.email }; auth.set(s); }
+      catch (e) { auth.set(null); return null; }
+    }
+    return s.access_token;
+  }
+  async function review(body) {
+    const t = await token(); if (!t) throw new Error("sign in");
+    const r = await fetch(`${CONFIG.url}/rest/v1/rpc/review_value`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.message || `${r.status}`);
+    return j;
+  }
+  function signInBox(panel, then) {
+    let box = panel.querySelector(".sign"); if (box) box.remove();
+    box = el("div", "sign");
+    const msg = el("div", "what", "To review, enter your WBA email; a code arrives by mail. Once per browser.");
+    const mail = el("input"); mail.type = "email"; mail.placeholder = "name@worldbenchmarkingalliance.org";
+    const send = el("button", null, "Send me the code");
+    const code = el("input"); code.placeholder = "Code from the email"; code.inputMode = "numeric"; code.style.display = "none";
+    const ok = el("button", null, "Sign in"); ok.style.display = "none";
+    send.onclick = async () => { try { send.disabled = true; await authCall("otp", { email: mail.value.trim(), create_user: true }); msg.textContent = "Code sent. Type it here."; code.style.display = ok.style.display = ""; code.focus(); } catch (e) { msg.textContent = `Could not send the code: ${e.message}`; } finally { send.disabled = false; } };
+    ok.onclick = async () => { try { const j = await authCall("verify", { type: "email", email: mail.value.trim(), token: code.value.trim() }); auth.set({ access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at, email: mail.value.trim() }); box.remove(); then(); } catch (e) { msg.textContent = `That code did not work: ${e.message}`; } };
+    box.append(msg, mail, send, code, ok); panel.appendChild(box); mail.focus();
+  }
+  async function loadValues() {
+    const panel = $("values"); panel.hidden = true; panel.innerHTML = "";
+    if (!state.company) return;
+    const attrs = attrsIn($("q").value);
+    let vals;
+    try { vals = await rpc("find_values", { key, company_filter: state.company, year_from: state.from, year_to: state.to, attribute_filter: attrs.length ? attrs.join(";") : null }); }
+    catch (e) { return; }                                    // the panel is an extra: a failure never touches the search
+    if (!vals || !vals.length) return;
+    const shownAt = Date.now();
+    const sum = el("summary"); sum.innerHTML = `<b>Values we hold</b> · ${vals.length} · read by the robot, yours to confirm`; panel.appendChild(sum);
+    for (const v of vals.slice(0, 40)) {
+      const row = el("div", "v");
+      const left = el("div");
+      left.append(el("div", "what", `${v.company} · ${ATTR_NAME[v.attribute] || v.attribute} · ${v.year}`));
+      const num = el("div", "num", fmt(v.value) + " "); num.append(el("small", null, [v.unit, v.basis].filter(Boolean).join(", "))); left.appendChild(num);
+      const btns = el("div", "btns"); const yes = el("button", "yes", "✓"); yes.title = "This value is right"; const no = el("button", "no", "✗"); no.title = "This value is wrong";
+      btns.append(yes, no);
+      const ev = el("div", "ev");
+      const evidence = v.readings > 1 ? `${v.agree} of ${v.readings} documents read give this figure` + (v.variants > 1 ? `, ${v.variants} different figures in all` : "") : "read in one document";
+      ev.append(document.createTextNode(evidence + " · "));
+      if (v.url) { const a = el("a", null, `source, page ${v.page || "?"}`); a.href = /\.pdf(\?|$)/i.test(v.url) || !/#/.test(v.url) ? `${v.url}#page=${v.page || 1}` : v.url; a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); }
+      if (v.ok || v.wrong) ev.append(document.createTextNode(` · reviews: ${v.ok} ✓ ${v.wrong} ✗`));
+      const send = async (verdict, extra) => {
+        const body = Object.assign({ version_id: v.version_id, verdict, seconds: Math.round((Date.now() - shownAt) / 1000), log_id: state.logId, client: CLIENT }, extra || {});
+        try { await review(body); yes.classList.toggle("on", verdict === "ok"); no.classList.toggle("on", verdict === "wrong"); const f = row.querySelector(".fix"); if (f && verdict === "ok") f.remove(); return true; }
+        catch (e) { if (/sign in|JWT|401|42501/.test(e.message)) { signInBox(panel, () => send(verdict, extra)); } else { ev.append(document.createTextNode(` · not saved: ${e.message}`)); } return false; }
+      };
+      yes.onclick = () => send("ok");
+      no.onclick = () => {
+        if (row.querySelector(".fix")) return;
+        const f = el("div", "fix");
+        const right = el("input"); right.placeholder = "The right value, if you know it (optional)";
+        const two = el("div", "two"); const link = el("input"); link.placeholder = "Link to the document that has it (optional)"; const pg = el("input"); pg.placeholder = "Page"; pg.inputMode = "numeric"; two.append(link, pg);
+        const why = el("textarea"); why.rows = 2; why.placeholder = "Why, in a line (optional)";
+        const go = el("button", null, "Send correction");
+        go.onclick = async () => { if (await send("wrong", { correct_value: right.value, source_url: link.value, source_page: parseInt(pg.value, 10) || null, comment: why.value })) { f.innerHTML = ""; f.append(el("div", "what", "Thank you. The team reviews corrections before anything changes.")); } };
+        f.append(right, two, why, go); row.appendChild(f); right.focus();
+      };
+      row.append(left, btns, ev); panel.appendChild(row);
+    }
+    panel.append(el("div", "note", "Agreement between documents says a figure is printed more than once, not that it is the right one."));
+    panel.hidden = false; panel.open = window.matchMedia("(min-width: 1180px)").matches || vals.length <= 3;
+  }
+
   function companyId(name) { const c = companies.find(x => (x.name || "").toLowerCase() === name.toLowerCase()); return c ? c.id : name; }
 
   // Your recent searches, in this browser only (the link's key is shared, so the database cannot tell people apart).
