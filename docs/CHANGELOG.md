@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-10 lanterN: a signed-in reviewer sees "Your reviews: N" in the footer and the list of what they reviewed (`my_reviews`); the values panel shows only when the search names an attribute or only a company (it sat beside "Nike código de conducta") (#PRNUM)
+- 2026-11-10 lanterN: a signed-in reviewer sees "Your reviews: N" in the footer and the list of what they reviewed (`my_reviews`); the values panel shows only when the search names an attribute or only a company (it sat beside "Nike código de conducta") (#371)
 - 2026-11-10 lanterN: the neighbouring-words pass is bounded (per year, 4,000 pages checked, 2.5 seconds in all): two common words as a phrase ("ACT Core") had scanned every page holding both and timed out; a Cancel button on the correction form (#370)
 - 2026-11-10 lanterN logs what the person typed (`search_log.typed`) beside what the box read out of it; document types are recognised in Spanish and French too (código de conducta, código de comportamiento, informe anual, memoria de sostenibilidad...); when a type was read from the words, a link offers to search those words inside the documents instead (#369)
 - 2026-11-10 lanterN: a quoted phrase alone searches again (the documents-only branch had swallowed it: "ACT Core" and "Just Transition" in quotes found nothing); pages printing two neighbouring words together enter the pool first and rank higher (ACT Core without quotes ranked pages full of "core"); the relaxation stops after six seconds instead of running into the timeout (#368)
