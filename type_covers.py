@@ -39,7 +39,7 @@ TYPES = {
     "Impact Report": "a standalone report on the company's impact (social, community, foundation, purpose)",
     "Climate Report": "a report on climate: TCFD, climate transition plan, net zero, carbon, decarbonisation",
     "Environmental Reports": "a report on the environment other than climate: water, biodiversity, waste, environmental data, EMAS",
-    "Social Reports": "a report on people: human capital, diversity, gender pay gap, modern slavery statement, labour, health and safety",
+    "Social Reports": "a report on people: human capital, diversity, gender pay gap, labour, health and safety",
     "CDP Report": "a CDP questionnaire response (climate, water, forests)",
     "GRI": "a GRI content index or GRI-referenced sustainability data book",
     "SASB Index": "a SASB or ISSB standards index or table",
@@ -48,7 +48,7 @@ TYPES = {
     "Interim Reports": "a quarterly or half-year report, results release or interim statement",
     "10K Form": "a US SEC annual filing (Form 10-K, 20-F, 40-F) or proxy statement",
     "Registration Document": "a universal registration document or document de reference filed with a securities regulator",
-    "Statutory Documents": "articles of association, bylaws, certificate of incorporation, charters of board committees, shareholder meeting notices and resolutions, prospectuses",
+    "Statutory Documents": "articles of association, bylaws, certificate of incorporation, charters of board committees, terms of appointment, shareholder meeting notices and resolutions, prospectuses and their supplements, stock exchange announcements, Pillar 3 and other regulatory disclosures, modern slavery statements",
     "Company Presentations": "slides: investor, results, strategy, capital markets day or ESG presentations",
     "Policy Documents": "a policy, standard or statement on one topic (environment, anti-corruption, supplier, tax, privacy...), other than human rights or the code of conduct",
     "Human Rights Policy": "a human rights policy or statement",
@@ -66,8 +66,10 @@ def prompt(cover):
               "",
               "Rules: the type is what the document is as a whole, not a topic it mentions. A yearly report with a sustainability "
               "chapter is an Annual Report (Integrated Report only when it calls itself integrated). A report named sustainability, "
-              "ESG or CSR takes that name. A quarterly or half-year report or results release is Interim Reports; slides are Company "
-              "Presentations even when they present quarterly results. Anything issued for shareholders or a regulator about the "
+              "ESG or CSR takes that name. A quarterly or half-year report, results release or earnings call transcript is Interim "
+              "Reports; a full-year results release, summary of operating results or set of financial ratios is Financial Statement. "
+              "Slides (a deck of short pages, often saying 'this presentation') are Company Presentations even when titled Full Year "
+              "Results or quarterly results. Anything issued for shareholders or a regulator about the "
               "company as a legal entity (meeting notices, resolutions, bylaws, charters, prospectuses and their supplements, listing "
               "documents, capital notices) is Statutory Documents, not UNKNOWN. A document that states what the company commits to "
               "on one topic is Policy Documents even when it is short or called a statement, position or guideline. Use UNKNOWN only "
