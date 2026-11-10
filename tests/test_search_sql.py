@@ -141,7 +141,7 @@ def test_company_names_are_read_without_accents_and_with_separators():
 
 def test_no_grey_globe_for_a_company_without_an_icon():
     icon = PAGE[PAGE.index("function companyIcon"):PAGE.index("function companyIcon") + 1400]
-    assert "img.naturalWidth < 32" in icon and "img.remove()" in icon
+    assert "t.naturalWidth >= 32" in icon and "img.remove()" in icon and "iconOk.get(host)" in icon     # asked once a site
 
 
 def test_longer_documents_first_within_a_year_and_type():
