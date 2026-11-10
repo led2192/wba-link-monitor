@@ -46,3 +46,15 @@ def test_timed_returns_the_first_row_and_seconds():
         def fetchone(self): return (7,)
     row, s = search_timing.timed(Cur(), "select 7")
     assert row == (7,) and s >= 0
+
+
+def test_added_values_are_signed_and_one_per_person():
+    add = SQL[SQL.index("create or replace function public.add_value("):SQL.index("-- The signed-in person's own reviews")]
+    assert "public.email_may_search(who)" in add and "42501" in add
+    assert "on conflict on constraint value_submissions_one_per_person do update" in add
+    assert "to authenticated;" in add and "from public, anon;" in add
+    assert "status      text not null default 'new'" in SQL
+
+
+def test_the_documents_list_shows_a_document_held_twice_once():
+    assert "select distinct on (d0.wba_id, d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)))" in FIND
