@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-10 lanterN: the mark with WBA's colour bands and a soft beam towards the name, each letter in a brand colour (a small l, a capital N under the widening beam, the owner's choice); the header holds only the mark, the hint and the tagline leave the top, the filters open from a funnel beside the box, the footer carries the tagline and the Powered by line once (#PRNUM)
+- 2026-11-10 lanterN: the mark with WBA's colour bands and a soft beam towards the name, each letter in a brand colour (a small l, a capital N under the widening beam, the owner's choice); the header holds only the mark, the hint and the tagline leave the top, the filters open from a funnel beside the box, the footer carries the tagline and the Powered by line once (#357)
 - 2026-11-10 Lantern reads every company and every year typed in the box ("Scope 1 emissions 2024 2025 Nike Unilever" filters both companies and the span), not the first of each (#355)
 - 2026-11-10 Lantern in WBA's brand colours (navy 00194B, blue 1E64CC, yellow FAC300, from the branding guide's theme); "World Benchmarking Alliance" links to the website (#354)
 - 2026-11-10 Evidence health reports the main reports (annual, integrated, sustainability, ESG, CSR) with text by year: documents, pages, characters and about how many 120-word passages, the size of the semantic index to come (#352)
