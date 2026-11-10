@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 `load_scores.py` and the `Benchmark scores` workflow (manual): a first, read-only look at the WBA Data API (datasets, the columns of the benchmark results and measurement areas, a sample row) with the `WBA_DATA_API_KEY` secret, before the table and the nightly load for lanterN's company card are written. (#382)
 - 2026-11-10 lanterN shows the values people have added for the companies searched under the robot's (`find_submissions`: value, source, date, "added by you" or "by a colleague", no names), so the same figure is not added twice unknowingly; the panel reloads after a value is added. (#380)
 - 2026-11-10 lanterN "+ Add a value": each field has its label above it and the figure its own row (the placeholders were cut off in the narrow panel). (#379)
 - 2026-11-10 lanterN: "I'm feeling lucky" in the footer shows a signed-in person one unreviewed value at a time with its source (`lucky_value`: fewest reviews first, then random), with points (a review in under four seconds counts a quarter), a badge and a place among reviewers without names (`review_score`). A search for a company alone shows a small card (name, industry, country, region, link to its website; `find_companies` now returns the website). Scoring by right answers (validated values mixed in) is not built: the validated values are not in the evidence database. (#378)
