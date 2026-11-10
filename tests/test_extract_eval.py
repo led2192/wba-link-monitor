@@ -433,3 +433,61 @@ class WithKnown(unittest.TestCase):
         rows = [g("A", "X", 2023), g("A", "X", 2024), g("B", "X", 2024), g("C", "X", 2023), g("C", "X", 2024, None), g("A", "Y", 2024)]
         got = X.known_other_year(rows)
         self.assertEqual([(r["wba"], r["year"]) for r in got], [("A", 2023), ("A", 2024)])   # B one year; C's other year has no value; Y one year
+
+
+class WholeDocument(unittest.TestCase):
+    """--select whole (10 Nov 2026): every page of the year's documents in one call, up to a character budget."""
+
+    class Cur:
+        def __init__(self, pages):
+            self.pages, self.lid = pages, None
+
+        def execute(self, sql, args=None):
+            self.lid = args[0]
+
+        def fetchall(self):
+            return [(p, b) for l, p, b in self.pages if l == self.lid]
+
+    def test_the_document_holding_the_chosen_pages_is_read_whole_first_in_page_order(self):
+        import extract_eval as X
+        pages = [("A", 1, "a" * 10), ("A", 2, "b" * 10), ("A", 3, "c" * 10), ("B", 1, "d" * 10), ("B", 2, "e" * 10)]
+        docs = [("A", "Annual Report", 2024), ("B", "Sustainability Report", 2024)]
+        best = [(1.0, None, "B", 2, "e" * 10), (0.9, None, "B", 1, "d" * 10), (0.8, None, "A", 3, "c" * 10)]
+        got = X.whole_document_pages(self.Cur(pages), docs, best, budget=1000)
+        self.assertEqual([(l, p) for _, _, l, p, _ in got], [("B", 1), ("B", 2), ("A", 1), ("A", 2), ("A", 3)])
+        self.assertTrue(all(s == 0.0 and c is None for s, c, *_ in got))
+
+    def test_the_budget_cuts_the_second_document_and_counts_a_page_up_to_page_chars(self):
+        import extract_eval as X, model_reader as M
+        pages = [("A", 1, "a" * (M.PAGE_CHARS + 5000)), ("A", 2, "b" * 100), ("B", 1, "c" * 100), ("B", 2, "d" * 100)]
+        docs = [("A", "Annual Report", 2024), ("B", "Sustainability Report", 2024)]
+        got = X.whole_document_pages(self.Cur(pages), docs, [], budget=M.PAGE_CHARS + 250)
+        self.assertEqual([(l, p) for _, _, l, p, _ in got], [("A", 1), ("A", 2), ("B", 1)])   # the long page counts PAGE_CHARS; B2 does not fit
+        self.assertEqual(X.whole_document_pages(self.Cur(pages), docs, [], budget=10), [])    # no page fits: the caller keeps today's pages
+
+    def test_the_budget_follows_the_model_unless_given(self):
+        import extract_eval as X
+        old = os.environ.get("READER_MODEL")
+        try:
+            os.environ["READER_MODEL"] = "gemini-3.8-flash"
+            self.assertEqual(X.whole_chars(), 1_200_000)
+            os.environ["READER_MODEL"] = "claude-haiku-5-5"
+            self.assertEqual(X.whole_chars(), 600_000)
+            X.WHOLE_CHARS = 250_000
+            self.assertEqual(X.whole_chars(), 250_000)
+        finally:
+            X.WHOLE_CHARS = 0
+            if old is None:
+                os.environ.pop("READER_MODEL", None)
+            else:
+                os.environ["READER_MODEL"] = old
+
+    def test_a_long_call_gets_one_adjacency_line_per_run(self):
+        import model_reader as M
+        pages = [("A", p, "x") for p in range(1, 21)] + [("B", 7, "y")] + [("B", 9, "y"), ("B", 10, "y")]
+        notes = M.adjacent_notes(pages)
+        self.assertEqual(notes, ["P1 to P20 are consecutive pages of one document, in order: a table may run from one to the next.",
+                                 "P22 to P23 are consecutive pages of one document, in order: a table may run from one to the next."])
+        short = [("A", p, "x") for p in range(1, 4)]                 # 16 pages or fewer: today's lines, unchanged
+        self.assertEqual(len(M.adjacent_notes(short)), 2)
+        self.assertTrue(M.adjacent_notes(short)[0].startswith("P2 is the page right after P1"))

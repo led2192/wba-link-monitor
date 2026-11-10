@@ -44,9 +44,9 @@ on:
         options: [db, pymupdf, docling]
         default: db
       select:
-        description: "how the model's pages are chosen: base (today), learned (page_select.py), oracle (diagnostic: the pages printing the figure first), map, map-half, navigate or navigate-half (the document map, doc_map.py), rerank (a cross-encoder trained on the analysts' validated pages, rerank_train.py)"
+        description: "how the model's pages are chosen: base (today), learned (page_select.py), oracle (diagnostic: the pages printing the figure first), map, map-half, navigate or navigate-half (the document map, doc_map.py), rerank (a cross-encoder trained on the analysts' validated pages, rerank_train.py), whole (no choice: every page of the year's documents in one call, a long-context model; --whole-chars in options)"
         type: choice
-        options: [base, learned, oracle, map, map-half, navigate, navigate-half, rerank]
+        options: [base, learned, oracle, map, map-half, navigate, navigate-half, rerank, whole]
         default: base
       options:
         description: "more extract_eval options, e.g. --order reversed (position bias) or --unstated-basis keep (Scope 2 with no basis stated filed under market too) or --heldout 20 (20 held-out number attributes, heldout.py)"

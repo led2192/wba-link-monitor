@@ -394,6 +394,8 @@ MAP_EMBEDDER = None      # the sentence model that embeds the map query, when th
 RERANKER = None          # rerank_train.Reranker when SELECT is "rerank" (9 Nov 2026): a cross-encoder trained on the analysts'
 RERANK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rerank_model")   # validated pages reorders the pool
 SELECT_MODEL = None      # page_select.load() when SELECT is "learned"
+WHOLE_CHARS = 0          # --whole-chars: characters of document text one call may carry with --select whole (0 = by model:
+                         # 1,200,000 for a Gemini model, about 350,000 tokens; 600,000 for a Claude one, 200,000-token window)
 EMBEDDER = None          # page_select.Embedder() when SELECT is "learned"
 
 
@@ -446,6 +448,40 @@ def pages_for_model(scored, n):
             break
         if x not in out:
             out.append(x)
+    return out
+
+
+def whole_chars():
+    """The character budget of --select whole: WHOLE_CHARS, or by the reader's model when 0."""
+    if WHOLE_CHARS:
+        return WHOLE_CHARS
+    import model_reader
+    model = os.environ.get("READER_MODEL") or model_reader.DEFAULT_MODEL
+    return 1_200_000 if model_reader.is_gemini(model) else 600_000
+
+
+def whole_document_pages(cur, docs, best_pages, budget):
+    """--select whole (10 Nov 2026): every page of the year's documents, in page order, as model page tuples
+    (0, None, library_id, page, body), until budget characters (each page counted up to model_reader.PAGE_CHARS, as
+    the prompt cuts it). Documents go in the order of how many of today's chosen pages they hold, then the preference
+    order of docs: the document the ranking finds most relevant is read whole first, and a long second document
+    is cut where the budget ends. The paradigm to measure against choosing 16 pages: finding the page costs
+    about 7 points (the oracle), and a long-context model can be given the document instead. [] when the budget
+    allows no page, so the caller keeps today's pages."""
+    import model_reader
+    hits = collections.Counter(lid for _, _, lid, _, _ in best_pages)
+    order = sorted((d[0] for d in docs), key=lambda lid: (-hits[lid], [d[0] for d in docs].index(lid)))
+    out, used = [], 0
+    for lid in order:
+        if used >= budget:
+            break
+        cur.execute("select page, body from public.pages where library_id = %s order by page", (lid,))
+        for page, body in cur.fetchall():
+            n = min(len(body or ""), model_reader.PAGE_CHARS)
+            if used + n > budget:
+                return out
+            out.append((0.0, None, lid, page, body))
+            used += n
     return out
 
 
@@ -946,6 +982,12 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
         r["map_hit"] = any(found_on(b, v) for *_, b in mapped for v, _, _ in forms)
         if mapped:
             best_pages = mapped if not half else mapped + [x for x in best_pages if (x[2], x[3]) not in {(m[2], m[3]) for m in mapped}][:MODEL_PAGES - len(mapped)]
+    if SELECT == "whole":                     # the whole document in one call (10 Nov 2026)
+        whole = whole_document_pages(cur, docs, best_pages, whole_chars())
+        r["whole_pages"] = len(whole)
+        r["whole_docs"] = len({lid for _, _, lid, _, _ in whole})
+        if whole:
+            best_pages = whole
     if PAGE_ORDER == "reversed":              # metamorphic check: the same pages in the opposite order
         best_pages = list(reversed(best_pages))
     r["model_pages_have_number"] = any(found_on(b, v) for *_, b in best_pages for v, _, _ in forms)
@@ -1038,7 +1080,8 @@ def main():
     ap.add_argument("--siblings", default="on", choices=["on", "off"], help="boost the pages of a sibling attribute's figure (attributes.json siblings)")
     ap.add_argument("--guidance", default="today", choices=["today", "learned", "check", "md"], help="learned: the choice rules of decision_rules.json in the model's prompt, and figures on an avoided line dropped (model_reader.RULES); check: only the drop, today's prompt; md: WBA's own assessment guidance per attribute (Pipeline QA attribute_guidance) in the prompt")
     ap.add_argument("--page-text", default="db", choices=["db", "pymupdf", "docling"], help="the text the model reads: the database text, or each page re-read from the PDF with its tables kept as tables (table_text.py)")
-    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle", "map", "map-half", "navigate", "navigate-half", "rerank"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option)")
+    ap.add_argument("--select", default="base", choices=["base", "learned", "oracle", "map", "map-half", "navigate", "navigate-half", "rerank", "whole"], help="how the rank half of the model's 8 pages is chosen: today's order or the learned one (page_select.py); oracle: the pages that print the analyst's figure first (a stage diagnostic: the reader's ceiling, never an option); whole: no choice, every page of the year's documents in one call up to --whole-chars (a long-context model)")
+    ap.add_argument("--whole-chars", type=int, default=0, help="with --select whole: characters of document text in one call (0 = 1,200,000 for a Gemini model, 600,000 for a Claude one)")
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
@@ -1062,8 +1105,9 @@ def main():
     global SIBLINGS_ON, TEXT_RANK
     SIBLINGS_ON = a.siblings == "on"
     TEXT_RANK = a.text_rank
-    global SELECT, SELECT_MODEL, EMBEDDER, PAGE_TEXT
+    global SELECT, SELECT_MODEL, EMBEDDER, PAGE_TEXT, WHOLE_CHARS
     SELECT = a.select
+    WHOLE_CHARS = max(0, a.whole_chars)
     global PAGE_ORDER
     PAGE_ORDER = a.order
     import model_reader
@@ -1537,7 +1581,7 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "with_known": a.with_known or None, "escalate_steps": ESCALATE_STEPS if a.escalate != "none" else None, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "whole_chars": whole_chars() if SELECT == "whole" else None, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "with_known": a.with_known or None, "escalate_steps": ESCALATE_STEPS if a.escalate != "none" else None, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
