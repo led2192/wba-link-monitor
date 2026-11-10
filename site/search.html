@@ -4,13 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Disclosure search</title>
+<title>Lantern</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Crect x='13' y='4' width='18' height='5' rx='2' fill='%2314213D'/%3E%3Cpath d='M11 12h22l-3 24H14z' fill='%23E07A2F'/%3E%3Crect x='18' y='18' width='8' height='11' rx='1' fill='%23FBFBF8'/%3E%3Crect x='20' y='21' width='4' height='1.6' fill='%23E07A2F'/%3E%3Crect x='20' y='24' width='4' height='1.6' fill='%23E07A2F'/%3E%3Crect x='10' y='36' width='24' height='4' rx='2' fill='%2314213D'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+  /* Brand colours: --brand (dark), --accent (buttons, links), --flame (the lantern's light). Swap these three for
+     WBA's own hex codes; everything else follows. */
   :root {
-    --bg: #FBFBF8; --fg: #14213D; --muted: #5B6472; --line: #E3E6E4; --box: #FFFFFF;
-    --accent: #2A7F9E; --accent-2: #E07A2F; --mark: #FFF1C2; --chip: #EEF3F2;
+    --brand: #14213D; --accent: #2A7F9E; --flame: #E07A2F;
+    --bg: #FBFBF8; --fg: var(--brand); --muted: #5B6472; --line: #E3E6E4; --box: #FFFFFF;
+    --accent-2: var(--flame); --mark: #FFF1C2; --chip: #EEF3F2;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -26,12 +30,19 @@
   html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 Inter, system-ui, sans-serif; }
   a { color: var(--accent); }
   .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 80px; }
-  header { display: flex; align-items: baseline; gap: 12px; padding: 28px 0 8px; }
+  header { display: flex; align-items: center; gap: 14px; padding: 28px 0 8px; }
   header.home { flex-direction: column; align-items: center; padding-top: 18vh; gap: 4px; }
-  .brand { font-weight: 600; font-size: 20px; letter-spacing: -0.01em; white-space: nowrap; }
-  header.home .brand { font-size: 34px; }
-  .brand small { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 8px; }
-  header.home .brand small { display: block; margin: 4px 0 0; text-align: center; }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 22px; letter-spacing: -0.02em; white-space: nowrap; }
+  .brand svg { width: 30px; height: 30px; flex: none; }
+  header.home .brand { font-size: 40px; gap: 16px; }
+  header.home .brand svg { width: 52px; height: 52px; }
+  .brand .lamp { fill: var(--brand); } .brand .flame { fill: var(--flame); } .brand .glass { fill: var(--bg); }
+  .powered { color: var(--muted); font-weight: 400; font-size: 13px; letter-spacing: 0.02em; }
+  header.home .powered { font-size: 14px; margin-top: 2px; }
+  .tag { color: var(--muted); font-weight: 400; font-size: 14px; margin-top: 6px; text-align: center; }
+  header:not(.home) .tag { display: none; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .brand .lamp { fill: #ECEFF4; } }
+  :root[data-theme="dark"] .brand .lamp { fill: #ECEFF4; }
   form.box { display: flex; gap: 0; width: 100%; margin: 14px 0 6px; }
   header.home + form.box { max-width: 640px; margin: 22px auto 10px; }
   .box input { flex: 1; min-width: 0; font: inherit; font-size: 18px; padding: 12px 16px; border: 1px solid var(--line);
@@ -69,7 +80,12 @@
 <body>
 <div class="wrap">
   <header id="head" class="home">
-    <div class="brand">Disclosure search<small id="brandNote">Every page of every report WBA holds, in any language</small></div>
+    <a class="brand" href="search.html" style="text-decoration:none;color:inherit" aria-label="Lantern, home">
+      <svg viewBox="0 0 44 44" aria-hidden="true"><rect class="lamp" x="13" y="4" width="18" height="5" rx="2"/><path class="flame" d="M11 12h22l-3 24H14z"/><rect class="glass" x="18" y="18" width="8" height="11" rx="1"/><rect class="flame" x="20" y="21" width="4" height="1.6"/><rect class="flame" x="20" y="24" width="4" height="1.6"/><rect class="lamp" x="10" y="36" width="24" height="4" rx="2"/></svg>
+      <span>Lantern</span>
+    </a>
+    <div class="powered">Powered by World Benchmarking Alliance</div>
+    <div class="tag">Every page of every report WBA holds, in any language</div>
   </header>
   <form class="box" id="form" autocomplete="off">
     <input id="q" type="search" placeholder="e.g. Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
@@ -96,7 +112,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "search.html v1 2026-11-10";
+  const CLIENT = "lantern v1 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -245,7 +261,7 @@
 
   $("form").addEventListener("submit", e => { e.preventDefault(); search(false); });
   for (const id of ["fCompany", "fFrom", "fTo", "fType"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) search(false); });
-  $("foot").textContent = "Searches and the pages opened are logged, without names, to improve the ranking.";
+  $("foot").textContent = "Lantern · Powered by World Benchmarking Alliance · Searches and the pages opened are logged, without names, to improve the ranking.";
   loadCompanies().then(() => {
     const q0 = new URLSearchParams(location.search).get("q");
     if (q0) { $("q").value = q0; search(false); }
