@@ -35,6 +35,8 @@ SEARCHES = [
     ("find, relaxed: grievance mechanism remediation outcomes 2025 suppliers", "find", ("grievance mechanism remediation outcomes 2025 suppliers",)),
     ("find, synonym and industry: wba in Oil & Gas", "find_industry", ("wba", "Oil & Gas")),
     ("find, documents only: Nike code of conduct", "find", ("", "Nike", None, None, "Code of Conduct")),
+    ("find, a quoted phrase alone: \"just transition\"", "find", ('"just transition"',)),
+    ("find, neighbouring words: ACT Core World Benchmarking Alliance", "find", ("ACT Core World Benchmarking Alliance",)),
 ]
 
 
