@@ -1004,6 +1004,32 @@ begin
 end;
 $$;
 
+-- The signed-in person's own reviews, newest first, with the totals: what they have reviewed stays visible to them
+-- (and is what the review game will count).
+create or replace function public.my_reviews(max_rows int default 100) returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  who text := lower(auth.jwt() ->> 'email');
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'reviewer', who,
+    'total', (select count(*) from public.value_reviews r where r.reviewer = who),
+    'ok', (select count(*) from public.value_reviews r where r.reviewer = who and r.verdict = 'ok'),
+    'wrong', (select count(*) from public.value_reviews r where r.reviewer = who and r.verdict = 'wrong'),
+    'reviews', (select coalesce(jsonb_agg(x.j order by x.at desc), '[]'::jsonb) from (
+        select r.at, jsonb_build_object('at', r.at, 'company', coalesce(c.name, r.wba_id), 'attribute', r.attribute, 'year', r.year, 'value', r.value,
+                                        'verdict', r.verdict, 'correct_value', r.correct_value, 'comment', r.comment) as j
+        from public.value_reviews r left join public.companies c on c.wba_id = r.wba_id
+        where r.reviewer = who order by r.at desc limit least(greatest(coalesce(max_rows, 100), 1), 500)) x));
+end;
+$$;
+revoke all on function public.my_reviews(int) from public, anon;
+grant execute on function public.my_reviews(int) to authenticated;
 revoke all on function public.find_values(text, text, int, int, text) from public;
 grant execute on function public.find_values(text, text, int, int, text) to anon, authenticated;
 revoke all on function public.review_value(text, text, text, text, text, int, int, bigint, text) from public, anon;

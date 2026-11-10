@@ -177,7 +177,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v5 2026-11-10";
+  const CLIENT = "lantern v6 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -458,6 +458,7 @@
     const panel = $("values"); panel.hidden = true; panel.innerHTML = "";
     if (!state.company) return;
     const attrs = attrsIn($("q").value);
+    if (!attrs.length && state.q) return;                    // the search is about something else (a policy, a phrase): no values beside it
     let vals;
     try { vals = await rpc("find_values", { key, company_filter: state.company, year_from: state.from, year_to: state.to, attribute_filter: attrs.length ? attrs.join(";") : null }); }
     catch (e) { return; }                                    // the panel is an extra: a failure never touches the search
@@ -478,7 +479,7 @@
       if (v.ok || v.wrong) ev.append(document.createTextNode(` · reviews: ${v.ok} ✓ ${v.wrong} ✗`));
       const send = async (verdict, extra) => {
         const body = Object.assign({ version_id: v.version_id, verdict, seconds: Math.round((Date.now() - shownAt) / 1000), log_id: state.logId, client: CLIENT }, extra || {});
-        try { await review(body); yes.classList.toggle("on", verdict === "ok"); no.classList.toggle("on", verdict === "wrong"); const f = row.querySelector(".fix"); if (f && verdict === "ok") f.remove(); return true; }
+        try { await review(body); showMine(false); yes.classList.toggle("on", verdict === "ok"); no.classList.toggle("on", verdict === "wrong"); const f = row.querySelector(".fix"); if (f && verdict === "ok") f.remove(); return true; }
         catch (e) { if (/sign in|JWT|401|42501/.test(e.message)) { signInBox(panel, () => send(verdict, extra)); } else { ev.append(document.createTextNode(` · not saved: ${e.message}`)); } return false; }
       };
       yes.onclick = () => send("ok");
@@ -498,6 +499,32 @@
     }
     panel.append(el("div", "note", "Agreement between documents says a figure is printed more than once, not that it is the right one."));
     panel.hidden = false; panel.open = window.matchMedia("(min-width: 1180px)").matches || vals.length <= 3;
+  }
+
+  // What I have reviewed: a line in the footer once signed in, opening the list.
+  async function authed(fn, body) {
+    const t = await token(); if (!t) return null;
+    const r = await fetch(`${CONFIG.url}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    return r.ok ? r.json() : null;
+  }
+  async function showMine(open) {
+    const mine = await authed("my_reviews", { max_rows: 100 }); const slot = $("mine");
+    if (!mine) { slot.textContent = ""; return; }
+    slot.innerHTML = ""; const a = el("a", null, `Your reviews: ${mine.total} (${mine.ok} ✓, ${mine.wrong} ✗)`); a.href = "#";
+    a.onclick = ev => { ev.preventDefault(); showMine(true); }; slot.append(a);
+    if (!open) return;
+    const panel = $("values"); panel.innerHTML = ""; const sum = el("summary"); sum.innerHTML = `<b>Your reviews</b> · ${mine.total} · ${mine.reviewer}`; panel.appendChild(sum);
+    for (const r of mine.reviews) {
+      const row = el("div", "v"); const left = el("div");
+      left.append(el("div", "what", `${r.company} · ${ATTR_NAME[r.attribute] || r.attribute} · ${r.year}`));
+      left.append(el("div", "num", fmt(r.value)));
+      const mark = el("div", "btns"); const b = el("button", r.verdict === "ok" ? "yes on" : r.verdict === "wrong" ? "no on" : "", r.verdict === "ok" ? "✓" : r.verdict === "wrong" ? "✗" : "?"); b.disabled = true; mark.appendChild(b);
+      const ev = el("div", "ev", new Date(r.at).toLocaleString() + (r.correct_value ? ` · right value: ${r.correct_value}` : "") + (r.comment ? ` · ${r.comment}` : ""));
+      row.append(left, mark, ev); panel.appendChild(row);
+    }
+    if (!mine.reviews.length) panel.append(el("div", "note", "Nothing reviewed yet."));
+    const out = el("div", "note"); const so = el("a", null, "Sign out"); so.href = "#"; so.onclick = ev => { ev.preventDefault(); auth.set(null); panel.hidden = true; $("mine").textContent = ""; }; out.appendChild(so); panel.appendChild(out);
+    panel.hidden = false; panel.open = true;
   }
 
   function companyId(name) { const c = companies.find(x => (x.name || "").toLowerCase() === name.toLowerCase()); return c ? c.id : name; }
@@ -534,6 +561,8 @@
   $("form").addEventListener("submit", e => { e.preventDefault(); closeHistory(); search(false); });
   $("funnel").addEventListener("click", () => { const f = $("filters"); f.hidden = !f.hidden; $("funnel").setAttribute("aria-expanded", String(!f.hidden)); if (!f.hidden) $("fCompany").focus(); });
   for (const id of ["fCompany", "fFrom", "fTo", "fType"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) search(false); });
+  $("foot").insertAdjacentHTML("beforebegin", '<div id="mine" style="text-align:center;font-size:13px;margin-top:auto;padding-top:40px"></div>');
+  $("foot").style.cssText = "margin-top:8px;padding-top:0"; showMine(false);
   $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches and the pages opened are logged, without names, to improve the ranking.';
   loadCompanies().then(() => {
     const q0 = new URLSearchParams(location.search).get("q");
