@@ -880,7 +880,7 @@ begin
     end loop;
     -- The pages that print two neighbouring words together ("ACT Core", "just transition"): when the pool could not
     -- take every page holding the words, they may have stayed out, and they are what the person means. Bounded by
-    -- pages read, not by the clock: for at most three pairs, 3,000 pages holding both words in all (recent years
+    -- pages read, not by the clock: for at most three pairs, 1,500 pages holding both words in all (a page's word list read from disk costs about a millisecond) (recent years
     -- first when nothing narrows the search) are checked for the phrase, 120 kept a pair.
     if drop_n = 0 and capped and coalesce(array_length(pair_qs, 1), 0) > 0 then
       np := least(array_length(pair_qs, 1), 3);
@@ -896,7 +896,7 @@ begin
                   and (yeq is null or p.year = yeq)
                   and (yeq is not null or ((year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)))
                   and (not split or p.year + 0 >= recent_from)
-                limit 3000 / np) x
+                limit 1500 / np) x
           where x.words @@ pair_qs[i]
           limit 120
         on conflict do nothing;

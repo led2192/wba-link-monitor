@@ -177,7 +177,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v7 2026-11-10";
+  const CLIENT = "lantern v8 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -377,7 +377,7 @@
                                              industry_filter: state.industry, country_filter: state.country, region_filter: state.region,
                                              typed: $("q").value.trim() });
       const s = ((performance.now() - t0) / 1000).toFixed(1);
-      if (!rows.length) setStatus(state.q ? `No page holds ${state.q.includes('"') ? "that phrase" : "those words, even one or two of them,"}${anyFilter ? " with these filters" : ""}. (${s} s)` : `No document matches these filters. (${s} s)`);
+      if (!rows.length) setStatus(state.q ? (state.q.includes('"') ? `No page found with that phrase${anyFilter ? " and these filters" : ""}. A phrase of very common words is checked on a sample of pages: add a company, a year or another word. (${s} s)` : `No page holds those words, even one or two of them${anyFilter ? ", with these filters" : ""}. (${s} s)`) : `No document matches these filters. (${s} s)`);
       else if (!state.q) setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} documents, newest first. (${s} s)`);
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       if (state.typeWords && !more) {                       // the type was read from the words typed: offer the other reading
