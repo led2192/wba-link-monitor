@@ -31,6 +31,9 @@ class Reply(unittest.TestCase):
         self.assertEqual(T.parse_reply("I cannot tell"), (None, None, None))
         self.assertEqual(T.parse_reply('{"type": "UNKNOWN"}')[0], "UNKNOWN")
 
+    def test_a_title_with_stray_quotes_still_gives_the_type(self):
+        self.assertEqual(T.parse_reply('{"type": "Annual Report", "confidence": "low", "title": "Rapport "annuel" 2023"}'), ("Annual Report", "low", ""))
+
     def test_read_type_uses_the_reader_call(self):
         seen = {}
 
@@ -40,7 +43,7 @@ class Reply(unittest.TestCase):
             return '{"type": "Interim Reports", "confidence": "high", "title": "Q3 2024"}'
         usage = collections.Counter()
         self.assertEqual(T.read_type("Quarterly report Q3 2024", usage, call=call), ("Interim Reports", "high", "Q3 2024"))
-        self.assertEqual(seen["system"], T.SYSTEM); self.assertEqual(seen["max_tokens"], 120)
+        self.assertEqual(seen["system"], T.SYSTEM); self.assertEqual(seen["max_tokens"], 200)
         self.assertIn("Quarterly report Q3 2024", seen["prompt"]); self.assertEqual(usage["calls"], 1)
 
 

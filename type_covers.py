@@ -62,13 +62,17 @@ SYSTEM = ("You classify company documents into one document type from a fixed li
 def prompt(cover):
     lines = ["Which type of document is this? The types:"]
     lines += [f"- {t}: {d}" for t, d in TYPES.items()]
-    lines += [f"- {UNKNOWN}: none of the above (a web page, a brochure, a form, a press release, a product sheet, a notice, a prospectus supplement)",
+    lines += [f"- {UNKNOWN}: none of the above (a web page, a brochure, a form, a press release, a product sheet, a magazine, a speech)",
               "",
               "Rules: the type is what the document is as a whole, not a topic it mentions. A yearly report with a sustainability "
               "chapter is an Annual Report (Integrated Report only when it calls itself integrated). A report named sustainability, "
-              "ESG or CSR takes that name. A document covering a quarter or half year is Interim Reports whatever it is called. "
-              "Slides are Company Presentations whatever their subject. Text in Japanese, Chinese, Korean, Spanish, French, German "
-              "or any other language is typed by the same rules.",
+              "ESG or CSR takes that name. A quarterly or half-year report or results release is Interim Reports; slides are Company "
+              "Presentations even when they present quarterly results. Anything issued for shareholders or a regulator about the "
+              "company as a legal entity (meeting notices, resolutions, bylaws, charters, prospectuses and their supplements, listing "
+              "documents, capital notices) is Statutory Documents, not UNKNOWN. A document that states what the company commits to "
+              "on one topic is Policy Documents even when it is short or called a statement, position or guideline. Use UNKNOWN only "
+              "when no listed type fits. Text in Japanese, Chinese, Korean, Spanish, French, German or any other language is typed by "
+              "the same rules.",
               "", "First pages:", "<cover>", (cover or "")[:COVER_CHARS], "</cover>", "",
               'Reply with JSON: {"type": "<one type exactly as listed>", "confidence": "high" or "low", '
               '"title": "<the document title as printed, in its language, up to 120 characters, or empty>"}']
@@ -82,8 +86,12 @@ def parse_reply(text):
         return None, None, None
     try:
         j = json.loads(m.group(0))
-    except ValueError:
-        return None, None, None
+    except ValueError:                                           # a title with stray quotes: read the type and confidence by regex
+        t = re.search(r'"type"\s*:\s*"([^"]*)"', m.group(0))
+        c = re.search(r'"confidence"\s*:\s*"([^"]*)"', m.group(0))
+        if not t:
+            return None, None, None
+        j = {"type": t.group(1), "confidence": c.group(1) if c else "high", "title": ""}
     t = str(j.get("type") or "").strip()
     if t not in TYPES and t != UNKNOWN:
         low = {k.lower(): k for k in list(TYPES) + [UNKNOWN]}
@@ -94,11 +102,16 @@ def parse_reply(text):
     return t, conf, str(j.get("title") or "").strip()[:120]
 
 
+LAST_REPLY = None
+
+
 def read_type(cover, usage, call=None):
     """One call: (type, confidence, title). None type when the model gave no usable reply."""
+    global LAST_REPLY
     import model_reader
     call = call or model_reader.call
-    text = call([{"role": "user", "content": prompt(cover)}], usage, system=SYSTEM, max_tokens=120)
+    text = call([{"role": "user", "content": prompt(cover)}], usage, system=SYSTEM, max_tokens=200)
+    LAST_REPLY = text
     return parse_reply(text)
 
 
@@ -198,6 +211,8 @@ def main():
             t, conf, title = read_type(f.get("cover_text") or "", usage)
             if t is None:
                 usage["unusable replies"] += 1
+                if usage["unusable replies"] <= 5:                # the first few, to see why (10 Nov 2026: 153 of 300 in the first check)
+                    print(f"  unusable reply for {f.get('library_id')}: {(LAST_REPLY or '')[:300]!r}", flush=True)
                 continue
             typed[t] += 1
             by_lang[f.get("doc_language") or "(no language)"] += 1
