@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 Evidence database load `functions_only`: applies search.sql in seconds, without the schema, the documents refresh (two hours) or the pages; the way to change a search function during the day (#365)
 - 2026-11-10 lanterN with filters and no words ("Nike code of conduct" is a company and a type) lists the matching documents, newest first, one row each at its first page (#364)
 - 2026-11-10 The loader applies the schema with `lock_timeout = 30s`: a schema statement that cannot get its lock fails instead of queueing behind a cancelled job's statement and blocking every reader of the table (pitfall) (#363)
 - 2026-11-10 lanterN's placeholder fits the box again (#361)
