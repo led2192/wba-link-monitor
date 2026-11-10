@@ -728,6 +728,7 @@ declare
   split boolean;
   capped boolean := false;
   lvl_q tsquery;
+  yeq int;
   loose_q tsquery;
   lim int;
   np int;
@@ -813,6 +814,10 @@ begin
   -- With no company and no year filter the level is two statements, the last three years first, so a common word
   -- fills the pool with recent pages. Nothing is cut by the clock: the same search gives the same pages.
   split := ids is null and year_from is null and year_to is null;
+  -- A year: one year is asked of the word index (an equality it answers well); a span of years, and "recent", are
+  -- checked on the rows instead ("p.year + 0" keeps them out of the index): the index answers a span by listing every
+  -- page of every year in it, millions of them (Unilever scope 1 2024 took 6.7 s with 2024 written as a span).
+  yeq := case when year_from is not null and year_from = year_to then year_from end;
   <<levels>>
   for drop_n in 0..least(2, greatest(nw - 1, 0)) loop
     lvl_q := null;
@@ -840,15 +845,16 @@ begin
             and p.wba_id <> ''
             and (types is null or p.doc_type = any(types))
             and (ids is null or p.wba_id = any(ids))
-            and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
-            and (not split or (pass = 1 and p.year >= recent_from) or (pass = 2 and (p.year < recent_from or p.year is null)))
+            and (yeq is null or p.year = yeq)
+            and (yeq is not null or ((year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)))
+            and (not split or (pass = 1 and p.year + 0 >= recent_from) or (pass = 2 and (p.year + 0 < recent_from or p.year is null)))
           limit lim
         on conflict do nothing;
       else
         -- A quoted phrase: the index knows which pages hold its words, not whether they stand together; that is
         -- checked on each page's word list, read from disk. A rare phrase of common words ("ACT Core") had every
         -- page holding both words read and ran into the statement timeout. So the check is bounded by pages read
-        -- (4,000 a statement), not by the clock: such a phrase is searched in a sample, the same one every time.
+        -- (3,000 a statement), not by the clock: such a phrase is searched in a sample, the same one every time.
         insert into find_cand
           select x.library_id, x.page, x.words, x.year, x.doc_type
           from (select p.library_id, p.page, p.words, p.year, p.doc_type
@@ -857,9 +863,10 @@ begin
                   and p.wba_id <> ''
                   and (types is null or p.doc_type = any(types))
                   and (ids is null or p.wba_id = any(ids))
-                  and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
-                  and (not split or (pass = 1 and p.year >= recent_from) or (pass = 2 and (p.year < recent_from or p.year is null)))
-                limit 4000) x
+                  and (yeq is null or p.year = yeq)
+                  and (yeq is not null or ((year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)))
+                  and (not split or (pass = 1 and p.year + 0 >= recent_from) or (pass = 2 and (p.year + 0 < recent_from or p.year is null)))
+                limit 3000) x
           where x.words @@ lvl_q
           limit lim
         on conflict do nothing;
@@ -886,8 +893,9 @@ begin
                   and p.wba_id <> ''
                   and (types is null or p.doc_type = any(types))
                   and (ids is null or p.wba_id = any(ids))
-                  and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
-                  and (not split or p.year >= recent_from)
+                  and (yeq is null or p.year = yeq)
+                  and (yeq is not null or ((year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)))
+                  and (not split or p.year + 0 >= recent_from)
                 limit 3000 / np) x
           where x.words @@ pair_qs[i]
           limit 120
