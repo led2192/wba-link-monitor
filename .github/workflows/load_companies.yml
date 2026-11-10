@@ -1,0 +1,41 @@
+# The company profiles (industry, country, region) from Airtable into the evidence database, for Lantern's
+# filters (load_companies.py). Nightly after the Evidence database load, and by hand. Dry run on a PR.
+name: Company profiles
+
+on:
+  workflow_run:
+    workflows: ["Evidence database load"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "commit"
+  pull_request:
+    paths: [load_companies.py, .github/workflows/load_companies.yml]
+
+concurrency:
+  group: load-companies
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Load
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.mode }}" = "dry_run" ]; then python load_companies.py
+          else python load_companies.py --commit; fi
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

@@ -26,6 +26,8 @@ Supabase project `wba-evidence` (managed Postgres, region Frankfurt, Pro plan, S
 | `value_versions` | grows with each committed Propose values run | Every figure the model reader found, since 1 Nov 2026: one row per company, attribute, year, document and method (`version_id` = sha1 of those), with value, unit, as printed, scale, column heading, Scope 2 basis, page, the year asked, first and last seen. A 2023 figure printed in the 2023, 2024 and 2025 reports is three rows; attribute_values shows one and lists the others in `other_reports`. Restatements and how a company's figures change from report to report are read here. |
 | `datapoints` | 0 | Extracted values: as printed and normalized, unit, period, scope, document, page, quote, `method` (stated or calculated), extractor, confidence, who validated. |
 | `chunks`, `chunk_docs` | 384 | The semantic index (semantic_index.py, 10 Nov 2026): the main reports from 2024 on in passages of about 120 words with a multilingual-e5-small embedding, and the documents done. Owner's decision: by passage, not by page; annual, integrated, sustainability, ESG and CSR reports only; merged into the search only once measured against the validated answers. |
+
+| `companies` | | The company profiles from Airtable (load_companies.py, nightly, 10 Nov 2026): wba_id, name, WBA industry, headquarters country, World Bank region, website. Lantern's industry, country and region filters read them. |
 | `load_log`, `load_state` | | Which store files are in, and where a long job (the words backfill) stands. |
 | `search_access` | | Addresses outside WBA allowed to search. |
 
