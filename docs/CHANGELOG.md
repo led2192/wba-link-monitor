@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 lanterN home screen: the lamp and the name sit over the middle of the search box (the faint beam's tail no longer counts as part of the mark). (#395)
 - 2026-11-10 lanterN "+ Add a source" (beside "+ Add a value" on a company's panel, and "Missing a document? Add its link" at the foot of any results): a signed-in WBA address gives up to 20 links for a company, with an optional year and note (`add_sources`, table `source_submissions`); a link the library already holds is said so and not kept. New `source_submissions.py` and the hourly `Source submissions` workflow paste the new links into the company's `add_link` box, so the inbox watcher fetches, attaches and labels them with the harvester's duplicate guards; a link passed on is worth three points. The values panel has a thin scrollbar. (#394)
 - 2026-11-10 lanterN ranking in three tiers: pages where the words asked stand together ("living wage") first, then pages with every word, then pages with some; the excerpt shows the lines where they stand together. (#393)
 - 2026-11-10 lanterN ranking: recent years count more (a quarter less for each year of age instead of 15% in the divisor; a document with no year counts as three years old, not as this year's) and a word repeated on a page counts less (square root of the density), after "living wage Nike" put a 2021 page that only repeats "wage" first. Pages that hold every word asked now come before pages that hold only some. (#392)
