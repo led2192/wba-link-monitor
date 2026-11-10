@@ -33,6 +33,8 @@ SEARCHES = [
     ("find: Unilever scope 1, 2024", "find", ("scope 1", "Unilever", 2024, 2024)),
     ("find, little words: the scope 1 emissions of Nike in 2025", "find", ("the scope 1 emissions of Nike in 2025",)),
     ("find, relaxed: grievance mechanism remediation outcomes 2025 suppliers", "find", ("grievance mechanism remediation outcomes 2025 suppliers",)),
+    ("find, synonym and industry: wba in Oil & Gas", "find_industry", ("wba", "Oil & Gas")),
+    ("find, documents only: Nike code of conduct", "find", ("", "Nike", None, None, "Code of Conduct")),
 ]
 
 
@@ -62,6 +64,10 @@ def run(cur, fn, args, exact_companies=False):
     if fn == "find":
         a = list(args) + [None] * (5 - len(args))
         cur.execute("select company, year, page from public.find_pages(null, %s, %s, %s, %s, %s, 50, 'search_check')", a)
+        rows = cur.fetchall()
+        return None, rows, 0.0, time.time() - t0, None
+    if fn == "find_industry":
+        cur.execute("select company, year, page from public.find_pages(null, %s, max_rows => 50, client => 'search_check', industry_filter => %s)", list(args))
         rows = cur.fetchall()
         return None, rows, 0.0, time.time() - t0, None
     if fn == "documents":
@@ -102,7 +108,7 @@ def main():
         for label, fn, args in SEARCHES:
             if fn == "documents" and not docs_ok:
                 continue
-            if fn == "find" and not find_ok:
+            if fn in ("find", "find_industry") and not find_ok:
                 continue
             try:
                 s, rows, tc, tr, exact = run(cur, fn, args, exact_ok)

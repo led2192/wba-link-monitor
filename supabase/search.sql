@@ -448,7 +448,8 @@ grant execute on function public.can_search() to authenticated;
 -- it against search_keys (sha256 of the key; the key itself is never stored). Every query and every
 -- click is logged (search_log, search_clicks): the log is the training data the robot's page ranking
 -- lacks for the attributes without validated answers, and the record of what the organisation looks for.
--- Pages are ranked by relevance, not newest first: ts_rank_cd over the stored words (cover density,
+-- A company name, an industry, a country or a region typed in the box become filters (profile_matching over
+-- public.companies). Pages are ranked by relevance, not newest first: ts_rank_cd over the stored words (cover density,
 -- normalised by page length), weighted by document type and discounted by age, at most 3 pages of one
 -- document, over at most 600 candidate pages per year, newest years first (a common word still answers
 -- in seconds; the ranking then orders what was fetched, so a one-word query leans to recent years).
@@ -538,7 +539,13 @@ declare
     'sus','lo','le','les','des','du','et','ou','à','au','aux','dans','sur','pour','par','est','sont','ce','cette','ces','une',
     'der','die','das','den','dem','ein','eine','einer','eines','und','oder','im','am','auf','für','mit','von','zu','zur','zum',
     'ist','sind','nicht','os','um','uma','do','da','dos','das','nos','nas','com','il','gli','di','della','dei','delle','ed','che',
-    'è','het','een','van','op','voor','met','zijn','te','bij','om','niet'];
+    'è','het','een','van','op','voor','met','zijn','te','bij','om','niet',
+    -- the words of asking, not of content: "companies that mention WBA" is a filter and a term
+    'companies','company','empresas','empresa','compañías','compañía','compania','companias','firms','mention','mentions','mentioned',
+    'mentioning','mencionan','menciona','mencionen','cite','cites','cited','citing','citan','cita','citen','refer','refers','referring',
+    'documents','documentos','document','documento','reports','informes','informe','pages','page','página','páginas','find','show',
+    'list','which','who','where','qué','que','cuáles','cuales','cuántas','cuantas','cuántos','cuantos','many','does','say','says',
+    'dicen','dice','hablan','habla','sobre','acerca','their','its','whose'];
 begin
   phrases := coalesce(array(select btrim(m[1]) from regexp_matches(coalesce(q, ''), '"([^"]+)"', 'g') m where btrim(m[1]) <> ''), '{}');
   rest := regexp_replace(coalesce(q, ''), '"[^"]*"', ' ', 'g');
@@ -553,18 +560,95 @@ begin
 end;
 $$;
 
--- One word as a tsquery: a prefix match from 4 letters, exact below (to_tsquery lower-cases).
+-- Query synonyms (10 Nov 2026): a word typed in the box also finds its alternatives ("wba" finds "World
+-- Benchmarking Alliance"). Editable in the SQL editor: insert into search_synonyms (term, alternatives) values
+-- ('term', array['alternative one', 'another']); the term is one lower-case word, an alternative may be a phrase.
+-- The log's click patterns will propose more; the semantic index covers meaning beyond this list.
+create table if not exists public.search_synonyms (
+  term          text primary key,
+  alternatives  text[] not null,
+  note          text
+);
+alter table public.search_synonyms enable row level security;
+insert into public.search_synonyms (term, alternatives, note) values
+  ('wba', array['world benchmarking alliance'], 'our own name'),
+  ('ghg', array['greenhouse gas', 'greenhouse gases'], null),
+  ('co2', array['carbon dioxide', 'co2e'], null),
+  ('co2e', array['co2', 'carbon dioxide equivalent'], null),
+  ('esg', array['environmental social governance', 'environmental, social and governance'], null),
+  ('csr', array['corporate social responsibility'], null),
+  ('tcfd', array['task force on climate-related financial disclosures'], null),
+  ('sbti', array['science based targets'], null),
+  ('cdp', array['carbon disclosure project'], null),
+  ('gri', array['global reporting initiative'], null),
+  ('sasb', array['sustainability accounting standards board'], null),
+  ('issb', array['international sustainability standards board'], null),
+  ('csrd', array['corporate sustainability reporting directive'], null),
+  ('esrs', array['european sustainability reporting standards'], null),
+  ('hrdd', array['human rights due diligence'], null),
+  ('dei', array['diversity equity inclusion', 'diversity, equity and inclusion'], null),
+  ('headcount', array['employees', 'workforce', 'number of employees'], null),
+  ('employees', array['headcount', 'workforce', 'empleados', 'plantilla'], null),
+  ('workforce', array['employees', 'headcount'], null),
+  ('plantilla', array['employees', 'empleados', 'headcount'], 'es'),
+  ('empleados', array['employees', 'plantilla'], 'es'),
+  ('emisiones', array['emissions'], 'es'),
+  ('emissions', array['emisiones', 'émissions', 'emissionen'], null),
+  ('ingresos', array['revenue', 'revenues'], 'es'),
+  ('revenue', array['revenues', 'turnover', 'net sales', 'ingresos'], null),
+  ('turnover', array['revenue', 'net sales'], null),
+  ('capex', array['capital expenditure', 'capital expenditures'], null),
+  ('opex', array['operating expenses', 'operating expenditure'], null),
+  ('salario', array['wage', 'wages', 'salary'], 'es'),
+  ('wage', array['wages', 'salary', 'salario'], null),
+  ('agua', array['water'], 'es'),
+  ('residuos', array['waste'], 'es'),
+  ('biodiversidad', array['biodiversity'], 'es'),
+  ('proveedores', array['suppliers'], 'es'),
+  ('suppliers', array['supplier', 'supply chain', 'proveedores'], null)
+on conflict (term) do nothing;
+
+-- One word as a tsquery: a prefix match from 4 letters, exact below (to_tsquery lower-cases), or-ed with the
+-- word's synonyms (a phrase alternative as a phrase).
 create or replace function public.find_word_query(w text) returns tsquery
-  language sql immutable
-  as $$ select to_tsquery('simple', case when length(w) >= 4 then w || ':*' else w end) $$;
+language plpgsql stable
+as $$
+declare
+  tq tsquery := to_tsquery('simple', case when length(w) >= 4 then w || ':*' else w end);
+  alt text;
+begin
+  for alt in select unnest(s.alternatives) from public.search_synonyms s where s.term = lower(w) loop
+    if btrim(alt) <> '' then
+      tq := tq || phraseto_tsquery('simple', alt);
+    end if;
+  end loop;
+  return tq;
+end;
+$$;
 
 alter table public.search_log add column if not exists relaxed int;        -- words dropped to find results (0 = all words)
+alter table public.search_log add column if not exists profile text;        -- industry / country / region filters, as typed
 alter table public.search_log add column if not exists terms text;          -- the words and phrases the engine read
+
+-- The companies a profile filter means: industries, countries (ISO 3-letter) or regions, each a ";" list, matched
+-- against public.companies (load_companies.py). Null when no filter; [''] when a filter matches no company.
+create or replace function public.profile_matching(industry_filter text, country_filter text, region_filter text) returns text[]
+  language sql stable security definer set search_path = public
+  as $$
+    select case when coalesce(btrim(industry_filter), '') = '' and coalesce(btrim(country_filter), '') = '' and coalesce(btrim(region_filter), '') = '' then null
+                when to_regclass('public.companies') is null then array['']::text[]
+                else coalesce((select array_agg(c.wba_id) from public.companies c
+                               where (coalesce(btrim(industry_filter), '') = '' or lower(c.industry) = any(array(select lower(btrim(x)) from unnest(string_to_array(industry_filter, ';')) x)))
+                                 and (coalesce(btrim(country_filter), '') = '' or upper(c.country) = any(array(select upper(btrim(x)) from unnest(string_to_array(country_filter, ';')) x)))
+                                 and (coalesce(btrim(region_filter), '') = '' or lower(c.region) = any(array(select lower(btrim(x)) from unnest(string_to_array(region_filter, ';')) x)))),
+                              array['']::text[]) end
+  $$;
 
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text);
 create or replace function public.find_pages(
   key text, q text, company_filter text default null, year_from int default null, year_to int default null,
-  type_filter text default null, max_rows int default 50, client text default null)
+  type_filter text default null, max_rows int default 50, client text default null,
+  industry_filter text default null, country_filter text default null, region_filter text default null)
 returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
                label text, url text, page int, score real, excerpt text)
 language plpgsql security definer
@@ -585,8 +669,8 @@ declare
   together_q tsquery := null;       -- the words as one phrase, in order: a page printing them together ranks higher
   sub_q tsquery;
   need int := least(greatest(coalesce(max_rows, 50), 1), 200);
-  per_year int := 600;
-  cap int := 2400;
+  per_year int := 400;
+  cap int := 1600;
   got int := 0;
   n int;
   y int;
@@ -597,10 +681,15 @@ declare
   t0 timestamptz := clock_timestamp();
   lid bigint;
   ids text[] := public.companies_matching(company_filter);
+  pids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
   types text[] := public.types_matching(type_filter);
 begin
   if k is null then
     raise exception 'not allowed to search' using errcode = '42501';
+  end if;
+  if pids is not null then                                        -- a profile filter narrows the company filter, or stands alone
+    ids := case when ids is null then pids else array(select unnest(ids) intersect select unnest(pids)) end;
+    if coalesce(array_length(ids, 1), 0) = 0 then ids := array['']::text[]; end if;
   end if;
   if k <> 'owner' and (select count(*) from public.search_log l where l.key_name = k and l.at > now() - interval '1 minute') >= 60 then
     raise exception 'too many searches in a minute' using errcode = '53400';
@@ -619,9 +708,13 @@ begin
     if ids is null and types is null and year_from is null and year_to is null then
       return;
     end if;
-    insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms)
+    if ids is not null and ids = array['']::text[] then
+      return;
+    end if;
+    insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile)
       values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), 0,
-              extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), 0, '(documents only)')
+              extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), 0, '(documents only)',
+              left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200))
       returning id into lid;
     return query
       select lid, (row_number() over (order by d.year desc nulls last, d.company, d.library_id))::int, d.library_id, d.company, d.wba_id,
@@ -684,10 +777,11 @@ begin
     end loop;
     exit levels when got >= need;
   end loop;
-  insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms)
+  insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile)
     values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), got,
             extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), drop_n,
-            left(array_to_string(words, ' ') || case when coalesce(array_length(phrases, 1), 0) > 0 then ' "' || array_to_string(phrases, '" "') || '"' else '' end, 300))
+            left(array_to_string(words, ' ') || case when coalesce(array_length(phrases, 1), 0) > 0 then ' "' || array_to_string(phrases, '" "') || '"' else '' end, 300),
+            left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200))
     returning id into lid;
   return query
     with scored as (
@@ -713,7 +807,7 @@ begin
       order by r.score desc, r.year desc, r.library_id, r.page
       limit need)
     select lid, t2.rk::int, t2.library_id, d.company, d.wba_id, t2.year, t2.doc_type, d.label, d.url, t2.page, t2.score,
-           ts_headline('simple', left(p.body, 200000), or_q,
+           ts_headline('simple', left(p.body, 20000), or_q,
                        'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
     from top t2
     join public.documents d on d.library_id = t2.library_id
@@ -762,8 +856,9 @@ revoke all on function public.search_key_name(text) from public, anon, authentic
 revoke all on function public.type_weight(text) from public, anon, authenticated;
 revoke all on function public.find_terms(text) from public, anon, authenticated;
 revoke all on function public.find_word_query(text) from public, anon, authenticated;
-revoke all on function public.find_pages(text, text, text, int, int, text, int, text) from public;
-grant execute on function public.find_pages(text, text, text, int, int, text, int, text) to anon, authenticated;
+revoke all on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text) from public;
+grant execute on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text) to anon, authenticated;
+revoke all on function public.profile_matching(text, text, text) from public, anon, authenticated;
 revoke all on function public.find_click(text, bigint, text, int, int) from public;
 grant execute on function public.find_click(text, bigint, text, int, int) to anon, authenticated;
 revoke all on function public.find_companies(text) from public;

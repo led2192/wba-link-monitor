@@ -84,7 +84,11 @@
   .filters input, .filters select { font: inherit; font-size: 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
                                     background: var(--box); color: var(--fg); min-width: 0; }
   @media (max-width: 560px) { .filters .row { grid-template-columns: 1fr 1fr; } }
-  .status { color: var(--muted); font-size: 14px; margin: 6px 0 14px; min-height: 20px; }
+  .status { color: var(--muted); font-size: 14px; margin: 6px 0 10px; min-height: 20px; }
+  .strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; font-size: 13px; }
+  .strip .lbl { color: var(--muted); margin-right: 4px; }
+  .strip .co { font: inherit; font-size: 13px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--box); color: var(--fg); cursor: pointer; }
+  .strip .co:hover { border-color: var(--accent); color: var(--accent); }
   .result { padding: 14px 0; border-top: 1px solid var(--line); }
   .result .doc { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 10px; }
   .result .doc .co { color: var(--fg); font-weight: 500; }
@@ -136,6 +140,7 @@
     </div>
   </div>
   <div class="status" id="status"></div>
+  <div class="strip" id="strip"></div>
   <div id="results"></div>
   <div id="notice"></div>
   <footer id="foot"></footer>
@@ -144,7 +149,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v2a 2026-11-10";
+  const CLIENT = "lantern v3 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -152,6 +157,27 @@
   const TYPE_WORDS = { "annual report": "Annual Report", "integrated report": "Integrated Report", "sustainability report": "Sustainability Report",
     "esg report": "ESG Report", "csr report": "CSR Report", "climate report": "Climate Report", "10-k": "10K Form", "10k": "10K Form",
     "code of conduct": "Code of Conduct", "policy": "Policy Documents", "presentation": "Company Presentations" };
+  // Headquarters countries as the profiles hold them (ISO 3-letter), with the names people type (English and Spanish).
+  const COUNTRIES = { AGO: ["Angola"], ARE: ["United Arab Emirates", "UAE", "Emiratos Árabes Unidos"], ARG: ["Argentina"], AUS: ["Australia"], AUT: ["Austria"],
+    AZE: ["Azerbaijan", "Azerbaiyán"], BEL: ["Belgium", "Bélgica"], BGD: ["Bangladesh"], BMU: ["Bermuda", "Bermudas"], BRA: ["Brazil", "Brasil"], CAN: ["Canada", "Canadá"],
+    CHE: ["Switzerland", "Suiza"], CHL: ["Chile"], CHN: ["China"], CIV: ["Ivory Coast", "Côte d'Ivoire", "Costa de Marfil"], COD: ["DR Congo", "Congo"], COL: ["Colombia"],
+    CZE: ["Czech Republic", "Czechia", "Chequia"], DEU: ["Germany", "Alemania"], DNK: ["Denmark", "Dinamarca"], DZA: ["Algeria", "Argelia"], ECU: ["Ecuador"], EGY: ["Egypt", "Egipto"],
+    ESP: ["Spain", "España"], EST: ["Estonia"], ETH: ["Ethiopia", "Etiopía"], FIN: ["Finland", "Finlandia"], FRA: ["France", "Francia"], GBR: ["United Kingdom", "UK", "Britain", "Reino Unido"],
+    GRC: ["Greece", "Grecia"], HKG: ["Hong Kong"], HUN: ["Hungary", "Hungría"], IDN: ["Indonesia"], IND: ["India"], IRL: ["Ireland", "Irlanda"], IRN: ["Iran", "Irán"], IRQ: ["Iraq", "Irak"],
+    ISR: ["Israel"], ITA: ["Italy", "Italia"], JAM: ["Jamaica"], JPN: ["Japan", "Japón"], KAZ: ["Kazakhstan", "Kazajistán"], KEN: ["Kenya", "Kenia"], KOR: ["South Korea", "Korea", "Corea"],
+    KWT: ["Kuwait"], LBY: ["Libya", "Libia"], LIE: ["Liechtenstein"], LUX: ["Luxembourg", "Luxemburgo"], MAR: ["Morocco", "Marruecos"], MEX: ["Mexico", "México"], MUS: ["Mauritius", "Mauricio"],
+    MYS: ["Malaysia", "Malasia"], NGA: ["Nigeria"], NLD: ["Netherlands", "Holland", "Países Bajos", "Holanda"], NOR: ["Norway", "Noruega"], NPL: ["Nepal"], NZL: ["New Zealand", "Nueva Zelanda"],
+    OMN: ["Oman", "Omán"], PAK: ["Pakistan", "Pakistán"], PER: ["Peru", "Perú"], PHL: ["Philippines", "Filipinas"], POL: ["Poland", "Polonia"], PRT: ["Portugal"], PSE: ["Palestine", "Palestina"],
+    QAT: ["Qatar", "Catar"], RUS: ["Russia", "Rusia"], SAU: ["Saudi Arabia", "Arabia Saudita", "Arabia Saudí"], SDN: ["Sudan", "Sudán"], SGP: ["Singapore", "Singapur"], SWE: ["Sweden", "Suecia"],
+    THA: ["Thailand", "Tailandia"], TKM: ["Turkmenistan", "Turkmenistán"], TUR: ["Turkey", "Türkiye", "Turquía"], TWN: ["Taiwan", "Taiwán"], TZA: ["Tanzania"], UKR: ["Ukraine", "Ucrania"],
+    URY: ["Uruguay"], USA: ["United States", "USA", "US", "America", "Estados Unidos", "EEUU"], VEN: ["Venezuela"], VNM: ["Vietnam"], ZAF: ["South Africa", "Sudáfrica"], ZWE: ["Zimbabwe"] };
+  const REGION_ALIASES = { "East Asia & Pacific": ["Asia Pacific", "Asia", "APAC", "Asia-Pacific", "Asia y Pacífico"], "Europe & Central Asia": ["Europe", "Europa", "EMEA"],
+    "North America": ["North America", "Norteamérica", "América del Norte"], "Latin America & Caribbean": ["Latin America", "LatAm", "Latinoamérica", "América Latina", "Caribbean"],
+    "South Asia": ["South Asia", "Asia del Sur"], "Middle East & North Africa": ["Middle East", "MENA", "Oriente Medio", "North Africa"], "Sub-Saharan Africa": ["Africa", "África", "Sub-Saharan Africa"] };
+  const INDUSTRY_ALIASES = { "Oil & Gas": ["oil and gas", "oil y gas", "petróleo y gas", "petroleo y gas", "oil", "gas"], "Metals & Mining": ["mining", "minería", "metals and mining"],
+    "Apparel & Footwear": ["apparel", "fashion", "footwear", "moda"], "Food Production": ["food producers", "food production", "alimentación"], "Food Retailers": ["food retail", "supermarkets", "supermercados"],
+    "Motor Vehicles & Parts": ["automotive", "carmakers", "automóviles", "cars"], "Banks": ["banking", "banca", "bancos"], "Utilities": ["electric utilities", "eléctricas"],
+    "Telecommunications": ["telecom", "telecoms", "telecomunicaciones"], "Construction & Engineering": ["construction", "construcción"], "Pension Funds": ["pensions", "pension funds", "pensiones"] };
   const $ = id => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
@@ -169,7 +195,8 @@
   }
 
   let companies = [];
-  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, rows: 50, logId: null };
+  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null };
+  let industries = [], regions = [];
 
   async function rpc(fn, body) {
     const r = await fetch(`${CONFIG.url}/rest/v1/rpc/${fn}`, {
@@ -187,6 +214,8 @@
   async function loadCompanies() {
     try {
       companies = await rpc("find_companies", { key });
+      industries = [...new Set(companies.map(c => c.industry).filter(Boolean))].sort();
+      regions = [...new Set(companies.map(c => c.region).filter(Boolean))].sort();
       const dl = $("companies"); dl.innerHTML = "";
       for (const c of companies) { const o = document.createElement("option"); o.value = c.name; dl.appendChild(o); }
     } catch (e) { setStatus(`Could not load the company list: ${e.message}`); }
@@ -197,8 +226,16 @@
   // year named (one, a span 2022-2024, or several: the earliest to the latest), a document type.
   function parse(text) {
     let q = " " + text.trim().replace(/\s+/g, " ") + " ";
-    const found = { company: null, companyName: null, from: null, to: null, type: null };
+    const found = { company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null };
     const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const take = (names) => { for (const n of names) { const re = new RegExp("\\s" + esc(n) + "\\s", "i"); if (re.test(q)) { q = q.replace(re, " "); return true; } } return false; };
+    // profiles first (an industry name like "Oil & Gas" or a country must not be read as words), longest names first
+    for (const ind of [...industries].sort((a, b) => b.length - a.length)) {
+      const names = [ind, ind.replace(/ & /g, " and "), ind.replace(/ & /g, " y "), ...(INDUSTRY_ALIASES[ind] || [])];
+      if (take(names)) { found.industry = ind; break; }
+    }
+    for (const [code, names] of Object.entries(COUNTRIES)) { if (take([...names, code])) { found.country = code; found.countryName = names[0]; break; } }
+    for (const reg of regions) { if (take([reg, reg.replace(/ & /g, " and "), ...(REGION_ALIASES[reg] || [])])) { found.region = reg; break; } }
     const hits = [];
     const byLength = companies.filter(c => (c.name || "").length >= 4).sort((a, b) => b.name.length - a.name.length);
     for (const c of byLength) {
@@ -229,6 +266,9 @@
     if (state.company) add(state.company.includes(";") ? "Companies" : "Company", state.companyName || state.company, () => { state.company = state.companyName = null; $("fCompany").value = ""; });
     if (state.from || state.to) add("Years", state.from === state.to ? String(state.from) : `${state.from || ""}–${state.to || ""}`, () => { state.from = state.to = null; $("fFrom").value = $("fTo").value = ""; });
     if (state.type) add("Type", state.type, () => { state.type = null; $("fType").value = ""; });
+    if (state.industry) add("Industry", state.industry, () => { state.industry = null; });
+    if (state.country) add("Country", state.countryName || state.country, () => { state.country = state.countryName = null; });
+    if (state.region) add("Region", state.region, () => { state.region = null; });
   }
 
   function excerptHtml(t) {
@@ -242,9 +282,24 @@
     return /\.pdf(\?|$)/i.test(u) || !/#/.test(u) ? `${u}#page=${row.page}` : u;
   }
 
+  function renderStrip(rows) {
+    const strip = $("strip"); strip.innerHTML = "";
+    const by = new Map();
+    for (const r of rows) { const k = r.wba_id || r.company; const e = by.get(k) || { name: r.company || r.wba_id, id: r.wba_id, n: 0 }; e.n++; by.set(k, e); }
+    if (by.size < 2) return;
+    const items = [...by.values()].sort((a, b) => b.n - a.n);
+    strip.append(el("span", "lbl", `${items.length} companies:`));
+    for (const it of items.slice(0, 12)) {
+      const b = el("button", "co", `${it.name} ${it.n}`); b.title = `Only ${it.name}`;
+      b.onclick = () => { state.company = it.id; state.companyName = it.name; $("fCompany").value = it.name; search(true); };
+      strip.appendChild(b);
+    }
+    if (items.length > 12) strip.append(el("span", "lbl", `and ${items.length - 12} more`));
+  }
+
   function render(rows, append) {
     const box = $("results");
-    if (!append) box.innerHTML = "";
+    if (!append) { box.innerHTML = ""; renderStrip(rows); }
     for (const r of rows) {
       const d = el("div", "result");
       const doc = el("div", "doc");
@@ -273,18 +328,21 @@
       state.from = parsed.from || (+$("fFrom").value || null);
       state.to = parsed.to || (+$("fTo").value || null);
       state.type = parsed.type || ($("fType").value || null);
+      state.industry = parsed.industry; state.country = parsed.country; state.countryName = parsed.countryName; state.region = parsed.region;
       state.rows = 50;
     } else if (!more) { state.rows = 50; }
-    if (!state.q && !more && !(state.company || state.type || state.from || state.to)) { setStatus("Type a word or a phrase."); return; }
+    const anyFilter = state.company || state.type || state.from || state.to || state.industry || state.country || state.region;
+    if (!state.q && !more && !anyFilter) { setStatus("Type a word or a phrase."); return; }
     $("head").classList.remove("home");
     renderChips();
     setStatus("Searching…");
     const t0 = performance.now();
     try {
       const rows = await rpc("find_pages", { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
-                                             type_filter: state.type, max_rows: state.rows, client: CLIENT });
+                                             type_filter: state.type, max_rows: state.rows, client: CLIENT,
+                                             industry_filter: state.industry, country_filter: state.country, region_filter: state.region });
       const s = ((performance.now() - t0) / 1000).toFixed(1);
-      if (!rows.length) setStatus(state.q ? `No page holds ${state.q.includes('"') ? "that phrase" : "those words, even one or two of them,"}${state.company || state.type || state.from ? " with these filters" : ""}. (${s} s)` : `No document matches these filters. (${s} s)`);
+      if (!rows.length) setStatus(state.q ? `No page holds ${state.q.includes('"') ? "that phrase" : "those words, even one or two of them,"}${anyFilter ? " with these filters" : ""}. (${s} s)` : `No document matches these filters. (${s} s)`);
       else if (!state.q) setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} documents, newest first. (${s} s)`);
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
