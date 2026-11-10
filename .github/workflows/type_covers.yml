@@ -25,6 +25,9 @@ on:
       max_usd:
         description: "stop at this estimated cost; what was read is written"
         default: "5"
+      model:
+        description: "the model that types: a Claude model name, or a Gemini one (gemini-...; GEMINI_API_KEY, the free credits)"
+        default: "claude-haiku-5-5"
 
 concurrency:
   group: type-covers
@@ -52,6 +55,8 @@ jobs:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          READER_MODEL: ${{ inputs.model }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
       - name: Keep the report
