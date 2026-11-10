@@ -491,3 +491,23 @@ class WholeDocument(unittest.TestCase):
         short = [("A", p, "x") for p in range(1, 4)]                 # 16 pages or fewer: today's lines, unchanged
         self.assertEqual(len(M.adjacent_notes(short)), 2)
         self.assertTrue(M.adjacent_notes(short)[0].startswith("P2 is the page right after P1"))
+
+
+class DocumentChunks(unittest.TestCase):
+    """--escalate whole (10 Nov 2026): the whole document in consecutive chunks that fit the model's window."""
+
+    def test_pages_are_cut_into_consecutive_chunks_by_characters(self):
+        import extract_eval as X, model_reader as M
+        pages = [(0.0, None, "A", p, "x" * 100) for p in range(1, 8)]
+        chunks = X.document_chunks(pages, 250)
+        self.assertEqual([[t[3] for t in c] for c in chunks], [[1, 2], [3, 4], [5, 6], [7]])
+        long = [(0.0, None, "A", 1, "y" * (M.PAGE_CHARS + 1000)), (0.0, None, "A", 2, "z" * 100)]
+        self.assertEqual(len(X.document_chunks(long, M.PAGE_CHARS + 50)), 2)      # a page counts PAGE_CHARS at most
+        self.assertEqual(X.document_chunks([], 1000), [])
+
+    def test_the_escalation_measure_reads_the_page_body(self):
+        import extract_eval as X
+        more = [(1.0, "A", 3, "Scope 1 emissions 12,345 tCO2e", {"value": 1})]
+        forms = X.printed_forms(12345.0, X.EMISSION_SCALES)
+        hits = [X.found_on(b, v) for _, _, _, b, _ in more for v, *_ in forms]
+        self.assertTrue(any(hits))
