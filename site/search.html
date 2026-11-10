@@ -52,6 +52,21 @@
                  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
   .box .funnel:hover, .box .funnel[aria-expanded="true"] { color: var(--accent); border-color: var(--line); background: var(--box); }
   .box .funnel svg { width: 20px; height: 20px; }
+  .boxwrap { position: relative; width: 100%; }
+  header.home ~ .boxwrap { max-width: 640px; margin: 26px auto 10px; }
+  header.home ~ .boxwrap form.box { margin: 0; }
+  .history { position: absolute; left: 0; right: 54px; top: calc(100% + 6px); background: var(--box); border: 1px solid var(--line); border-radius: 16px;
+             box-shadow: 0 10px 30px rgba(0, 25, 75, .12); z-index: 5; padding: 6px 0; display: none; }
+  .history.open { display: block; }
+  .history .h { display: flex; align-items: center; gap: 10px; padding: 7px 14px; cursor: pointer; font-size: 15px; }
+  .history .h:hover, .history .h.on { background: var(--chip); }
+  .history .h svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
+  .history .h span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history .h small { color: var(--muted); font-size: 12px; }
+  .history .h button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 0 2px; visibility: hidden; }
+  .history .h:hover button { visibility: visible; }
+  .history .foot { display: flex; justify-content: flex-end; padding: 4px 14px 2px; font-size: 12px; color: var(--muted); }
+  .history .foot button { border: 0; background: none; color: inherit; cursor: pointer; font: inherit; text-decoration: underline; }
   .box input { flex: 1; min-width: 0; font: inherit; font-size: 18px; padding: 12px 16px; border: 1px solid var(--line);
                border-right: 0; border-radius: 24px 0 0 24px; background: var(--box); color: var(--fg); outline: none; }
   .box input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
@@ -100,6 +115,7 @@
       </svg>
     </a>
   </header>
+  <div class="boxwrap" id="boxwrap">
   <form class="box" id="form" autocomplete="off">
     <input id="q" type="search" placeholder="e.g. Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
     <button type="submit">Search</button>
@@ -107,6 +123,8 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>
     </button>
   </form>
+  <div class="history" id="history" role="listbox" aria-label="Your recent searches"></div>
+  </div>
   <div class="chips" id="chips"></div>
   <div class="filters" id="filters" hidden>
     <div class="row">
@@ -126,7 +144,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v1d 2026-11-10";
+  const CLIENT = "lantern v1e 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -146,7 +164,7 @@
   } catch (e) { key = null; }
   if (!key) {
     $("notice").innerHTML = '<div class="notice"><b>Open the link you were given.</b><br>This page works from a shared link that carries its key; ask the data team for it. Nothing else is needed, no account and no password.</div>';
-    $("form").style.display = "none"; $("filters").hidden = true;
+    $("boxwrap").style.display = "none"; $("filters").hidden = true;
     return;
   }
 
@@ -270,6 +288,7 @@
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
+      if (!more && $("q").value.trim()) history_.add($("q").value.trim());
     } catch (e) {
       setStatus(e.message.includes("not allowed") ? "This link no longer works; ask for a new one." : `Search failed: ${e.message}`);
       $("results").innerHTML = "";
@@ -277,7 +296,36 @@
   }
   function companyId(name) { const c = companies.find(x => (x.name || "").toLowerCase() === name.toLowerCase()); return c ? c.id : name; }
 
-  $("form").addEventListener("submit", e => { e.preventDefault(); search(false); });
+  // Your recent searches, in this browser only (the link's key is shared, so the database cannot tell people apart).
+  const HIST = "find_history", HIST_MAX = 30;
+  const history_ = { load() { try { return JSON.parse(localStorage.getItem(HIST) || "[]"); } catch (e) { return []; } },
+                     save(h) { try { localStorage.setItem(HIST, JSON.stringify(h.slice(0, HIST_MAX))); } catch (e) {} },
+                     add(q) { const h = this.load().filter(x => x.q !== q); h.unshift({ q, at: Date.now() }); this.save(h); },
+                     remove(q) { this.save(this.load().filter(x => x.q !== q)); }, clear() { this.save([]); } };
+  const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? "now" : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d`; };
+  function renderHistory() {
+    const box = $("history"), typed = $("q").value.trim().toLowerCase();
+    const items = history_.load().filter(x => !typed || x.q.toLowerCase().includes(typed)).slice(0, 10);
+    box.innerHTML = "";
+    if (!items.length) { box.classList.remove("open"); return; }
+    for (const it of items) {
+      const row = el("div", "h"); row.setAttribute("role", "option");
+      row.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+      const t = el("span", null, it.q); const when = el("small", null, ago(it.at)); const x = el("button", null, "×"); x.title = "Forget this search";
+      x.onclick = ev => { ev.stopPropagation(); history_.remove(it.q); renderHistory(); };
+      row.append(t, when, x);
+      row.onmousedown = ev => { ev.preventDefault(); $("q").value = it.q; closeHistory(); search(false); };
+      box.appendChild(row);
+    }
+    const f = el("div", "foot"); const c = el("button", null, "Clear my searches"); c.onmousedown = ev => { ev.preventDefault(); history_.clear(); renderHistory(); }; f.appendChild(c); box.appendChild(f);
+    box.classList.add("open");
+  }
+  function closeHistory() { $("history").classList.remove("open"); }
+  $("q").addEventListener("focus", renderHistory);
+  $("q").addEventListener("input", renderHistory);
+  $("q").addEventListener("blur", () => setTimeout(closeHistory, 120));
+  $("q").addEventListener("keydown", e => { if (e.key === "Escape") closeHistory(); });
+  $("form").addEventListener("submit", e => { e.preventDefault(); closeHistory(); search(false); });
   $("funnel").addEventListener("click", () => { const f = $("filters"); f.hidden = !f.hidden; $("funnel").setAttribute("aria-expanded", String(!f.hidden)); if (!f.hidden) $("fCompany").focus(); });
   for (const id of ["fCompany", "fFrom", "fTo", "fType"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) search(false); });
   $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches and the pages opened are logged, without names, to improve the ranking.';
