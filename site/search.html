@@ -75,6 +75,8 @@
   /* Enter searches; on the home screen two plain buttons sit under the box (10 Nov 2026: the owner asked for the
      familiar layout of a web search, and the button beside the box is gone) */
   .homebtns { display: none; }
+  header.home ~ div #luckyWrap { display: none; }          /* on the home screen the button under the box is the way in */
+  #luckyWrap:has(+ #mine:empty) .sep { display: none; }
   header.home ~ .homebtns { display: flex; justify-content: center; gap: 12px; margin: 18px auto 0; flex-wrap: wrap; }
   .homebtns button { font: inherit; font-size: 14.5px; padding: 9px 18px; border: 1px solid transparent; border-radius: 8px; background: var(--chip);
                      color: var(--fg); cursor: pointer; }
@@ -683,7 +685,7 @@
     const mine = await authed("my_reviews", { max_rows: 100 }); const slot = $("mine");
     if (!mine) { slot.textContent = ""; showMe(null); return; }
     showMe(mine.score);
-    slot.innerHTML = ""; slot.append(document.createTextNode("· ")); const a = el("a", null, `Your reviews: ${mine.total} (${mine.ok} ✓, ${mine.wrong} ✗)`); a.href = "#";
+    slot.innerHTML = ""; const a = el("a", null, `Your reviews: ${mine.total} (${mine.ok} ✓, ${mine.wrong} ✗)`); a.href = "#";
     a.onclick = ev => { ev.preventDefault(); showMine(true); }; slot.append(a);
     if (!open) return;
     const panel = $("values"); panel.innerHTML = ""; const sum = el("summary"); sum.innerHTML = `<b>Your reviews</b> · ${mine.total} · ${mine.reviewer}`; panel.appendChild(sum);
@@ -824,7 +826,7 @@
   $("form").addEventListener("submit", e => { e.preventDefault(); closeHistory(); search(false); });
   $("funnel").addEventListener("click", () => { const f = $("filters"); f.hidden = !f.hidden; $("funnel").setAttribute("aria-expanded", String(!f.hidden)); if (!f.hidden) $("fCompany").focus(); });
   for (const id of ["fCompany", "fFrom", "fTo", "fType"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) search(false); });
-  $("foot").insertAdjacentHTML("beforebegin", '<div style="text-align:center;font-size:13px;margin-top:auto;padding-top:40px"><a href="#" id="lucky">I’m feeling lucky</a> <span id="mine"></span></div>');
+  $("foot").insertAdjacentHTML("beforebegin", '<div style="text-align:center;font-size:13px;margin-top:auto;padding-top:40px"><span id="luckyWrap"><a href="#" id="lucky">I’m feeling lucky</a><span class="sep"> · </span></span><span id="mine"></span></div>');
   $("goSearch").onclick = () => { closeHistory(); search(false); };
   $("goLucky").onclick = () => $("lucky").click();
   $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; if (deck.at >= 0 && deck.cards.length) { deck.at--; } lucky("next"); window.scrollTo(0, 0); };
