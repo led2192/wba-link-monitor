@@ -1186,6 +1186,23 @@ $$;
 revoke all on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) from public, anon;
 grant execute on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) to authenticated;
 
+-- How many pages each of a list of documents has, for the results on screen ("264 pages in all"): asked after the
+-- results are shown, so the search's own answer keeps its shape. At most 200 documents a question.
+create or replace function public.doc_pages(key text, ids text[]) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_object_agg(d.library_id, d.pages), '{}'::jsonb)
+          from public.documents d where d.library_id = any(ids[1:200]) and coalesce(d.pages, 0) > 0);
+end;
+$$;
+revoke all on function public.doc_pages(text, text[]) from public;
+grant execute on function public.doc_pages(text, text[]) to anon, authenticated;
+
 -- "Ask" (10 Nov 2026, the owner: like a web search's answer box, three questions a day a person). A signed-in
 -- WBA address asks a question; the search finds the pages (find_pages, the same ranking as the results under
 -- it); the first lines of the best six pages go to the reader model with the question, and the model answers

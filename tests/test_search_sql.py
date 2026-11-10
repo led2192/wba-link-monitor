@@ -107,3 +107,8 @@ def test_documents_come_in_the_order_the_types_were_asked():
     assert FIND.count("coalesce(array_position(types, d.doc_type), 99)") == 2
     page = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
     assert 'ANNUAL = "10K Form;Annual Report;Integrated Report"' in page and "TYPE_ALONE[alone]" in page
+
+
+def test_document_sizes_need_the_key_and_are_bounded():
+    dp = SQL[SQL.index("create or replace function public.doc_pages("):SQL.index("-- \"Ask\" (10 Nov 2026")]
+    assert "public.search_key_name(key) is null" in dp and "ids[1:200]" in dp
