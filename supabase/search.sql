@@ -931,8 +931,13 @@ begin
       from find_cand c
       join public.documents d on d.library_id = c.library_id),
     weighted as (
-      select s.*, (s.rel * public.type_weight(s.doc_type)
-                   / (1 + 0.15 * greatest(this_year - coalesce(nullif(s.year, 0), this_year), 0))
+      -- Two corrections of 10 Nov 2026, from "living wage Nike" (a 2021 page that says "wage" eleven times stood first,
+      -- above recent pages that print "living wage"). Repeating a word counts less: the square root of the density, so
+      -- holding every word and holding them together decide. And recent years count more: a quarter less for each year
+      -- of age (a 2021 page weighs about a quarter of a 2026 one; it was 57%), a document with no year as three years old
+      -- (it counted as this year's). A year typed in the box is a filter, so older pages stay one word away.
+      select s.*, (power(s.rel, 0.5) * public.type_weight(s.doc_type)
+                   * power(0.75, least(greatest(this_year - coalesce(nullif(s.year, 0), this_year - 3), 0), 12))
                    * power((s.matched + 0.5) / (greatest(nw, 1) + 0.5), 2)
                    * case when s.together then 1.5 else 1.0 end
                    * (1 + 1.5 * s.pairs)
@@ -944,15 +949,18 @@ begin
       select w.*, row_number() over (partition by w.co, w.year, w.lexemes, w.rel order by w.score desc, w.library_id, w.page) as dup
       from weighted w),
     ranked as (
-      select w.*, row_number() over (partition by w.library_id order by w.score desc, w.page) as in_doc
+      -- the pages that hold every word asked come before those that hold only some, whatever their score: a page
+      -- with one of the words many times is not a better answer than one with all of them (10 Nov 2026)
+      select w.*, (w.matched >= nw) as complete,
+             row_number() over (partition by w.library_id order by (w.matched >= nw) desc, w.score desc, w.page) as in_doc
       from single w
       where w.dup = 1),
     top as (
       select r.library_id, r.page, r.year, r.doc_type, r.score,
-             row_number() over (order by r.score desc, r.year desc, r.library_id, r.page) as rk
+             row_number() over (order by r.complete desc, r.score desc, r.year desc, r.library_id, r.page) as rk
       from ranked r
       where r.in_doc <= 3
-      order by r.score desc, r.year desc, r.library_id, r.page
+      order by r.complete desc, r.score desc, r.year desc, r.library_id, r.page
       limit need)
     select lid, t2.rk::int, t2.library_id, d.company, d.wba_id, t2.year, t2.doc_type, d.label, d.url, t2.page, t2.score,
            ts_headline('simple', left(p.body, 20000), or_q,
