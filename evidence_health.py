@@ -6,7 +6,8 @@ base_health.py watches the Airtable base; nothing watched the evidence database,
 years (9 Nov 2026: 2% to 5% of the evaluation answers had a map) or a bulk-filled date were found hours later by
 the evaluations, not by a look at the tables. This job looks at the tables every day and after every build:
   1. rows per table (exact for the small tables, the planner's estimate for pages and passages, which are millions);
-  2. documents: by text status, with and without pages, by year bucket, without a year or a type;
+  2. documents: by text status, with and without pages, by year bucket, without a year or a type; the 20 newest with
+     text_status ok and no page, with their pages, chars and text part (10 Nov 2026: 271 of them, unexplained);
   3. page_map: lines, with an embedding, documents mapped, lines by the document's year, lines written in 24 hours;
   4. value_versions: by method, in 24 hours; model_reads: in 24 hours and the found share;
   5. checks, each a plain sentence when it fails and a DATA_CHECK failure in Pipeline QA (key = the check's name):
@@ -56,6 +57,9 @@ def documents(cur):
          "no_type": one(cur, "select count(*) from public.documents where coalesce(doc_type, '') = ''"),
          "by_year": {name: one(cur, f"select count(*) from public.documents where {cond}") for name, cond in YEAR_BUCKETS}}
     d["ok_without_pages"] = one(cur, "select count(*) from public.documents d where text_status = 'ok' and not exists (select 1 from public.pages p where p.library_id = d.library_id)")
+    d["ok_without_pages_sample"] = rows(cur, "select library_id, year, coalesce(doc_type, ''), coalesce(pages, 0), coalesce(chars, 0), coalesce(text_part, ''), "
+                                            "coalesce(extracted_at, ''), loaded_at::date::text from public.documents d where text_status = 'ok' "
+                                            "and not exists (select 1 from public.pages p where p.library_id = d.library_id) order by loaded_at desc limit 20")
     return d
 
 
@@ -115,6 +119,9 @@ def report_md(counts, docs, pmap, vals, unindexed, failed, today):
            f"{docs['total']:,} documents; {docs['with_pages']:,} with pages; {docs['no_type']:,} without a type; {docs['ok_without_pages']:,} with text_status ok and no page.", "",
            "| Text status | Documents |", "| --- | --: |"] + [f"| {s} | {n:,} |" for s, n in docs["by_status"].items()]
     md += ["", "| Year | Documents |", "| --- | --: |"] + [f"| {y} | {n:,} |" for y, n in docs["by_year"].items()]
+    if docs.get("ok_without_pages_sample"):                   # what they are, so that the fix is read off the report (10 Nov 2026)
+        md += ["", "The newest documents with text_status ok and no page (library_id, year, type, pages, chars, text part, extracted, loaded):", ""]
+        md += [f"- {lid} | {y} | {t or '(no type)'} | {p:,} | {c:,} | {part or '(none)'} | {ex or '?'} | {ld}" for lid, y, t, p, c, part, ex, ld in docs["ok_without_pages_sample"]]
     md += ["", "## Page map", "",
            f"{pmap['lines']:,} lines ({pmap['embedded']:,} with an embedding) over {pmap['documents']:,} documents; {pmap['last_24h']:,} lines written in the last 24 hours.", "",
            "| Document year | Lines |", "| --- | --: |"] + [f"| {y or 'no year'} | {n:,} |" for y, n in pmap["by_year"].items()]
