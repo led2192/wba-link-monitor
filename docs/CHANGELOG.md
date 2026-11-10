@@ -4,6 +4,7 @@ Newest first. One line per change, with the pull request. Every pull request add
 
 ## November 2026
 - 2026-11-10 `semantic_index.py` and the `Semantic index` workflow (manual, dry run by default, partition k/N): the main reports from 2024 on cut into 120-word passages and embedded with multilingual-e5-small into `chunks` (HNSW index) with `chunk_docs` as the done-marker (#356)
+- 2026-11-10 lanterN shows your recent searches under the box (this browser only, the last 30, narrowed as you type, each removable, all clearable) (#358)
 - 2026-11-10 lanterN: the mark with WBA's colour bands and a soft beam towards the name, each letter in a brand colour (a small l, a capital N under the widening beam, the owner's choice); the header holds only the mark, the hint and the tagline leave the top, the filters open from a funnel beside the box, the footer carries the tagline and the Powered by line once (#357)
 - 2026-11-10 Lantern reads every company and every year typed in the box ("Scope 1 emissions 2024 2025 Nike Unilever" filters both companies and the span), not the first of each (#355)
 - 2026-11-10 Lantern in WBA's brand colours (navy 00194B, blue 1E64CC, yellow FAC300, from the branding guide's theme); "World Benchmarking Alliance" links to the website (#354)
