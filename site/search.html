@@ -271,7 +271,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v17 2026-11-10";
+  const CLIENT = "lantern v18 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -907,7 +907,7 @@
       j = await r.json().catch(() => ({})); if (!r.ok) j = { error: j.message || `HTTP ${r.status}` };
     } catch (e) { j = { error: e.message }; }
     const left = typeof j.left === "number" ? `${j.left} of ${j.per_day || 3} questions left today` : ""; cap.lastChild.textContent = left;
-    if (j.off) { note.textContent = "Ask is not switched on yet: the model key is not in the database’s vault."; return; }
+    if (j.off) { note.textContent = `Ask is not switched on yet: ${j.why || "the model key is not in the database’s vault"}.`; return; }
     if (j.limit) { note.textContent = `You have asked today’s ${j.per_day || 3} questions. They come back at midnight UTC; the search below still works.`; return; }
     if (j.none) { note.textContent = "No page was found for this question. Try other words, or name the company and the year."; return; }
     if (j.error || !j.answer) { note.textContent = `No answer: ${j.error || "the model returned nothing"}. This one does not count.`; return; }

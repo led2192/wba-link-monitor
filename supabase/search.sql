@@ -1232,6 +1232,7 @@ declare
   asked text := btrim(coalesce(question, ''));
   used int;
   api_key text;
+  vault_err text;
   t0 timestamptz := clock_timestamp();
   r record;
   n int := 0;
@@ -1259,10 +1260,14 @@ begin
   begin
     select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;
   exception when others then
-    api_key := null;
+    api_key := null; vault_err := sqlerrm;
   end;
   if api_key is null or to_regproc('extensions.http_post') is null then
-    return jsonb_build_object('off', true, 'left', per_day - used, 'per_day', per_day);
+    -- which of the two is missing, so that the person switching it on knows what to fix (never the key itself)
+    return jsonb_build_object('off', true, 'left', per_day - used, 'per_day', per_day,
+                              'why', case when to_regproc('extensions.http_post') is null then 'the http extension is not installed in the database'
+                                          when vault_err is not null then 'the vault could not be read: ' || left(vault_err, 120)
+                                          else 'no secret named anthropic_api_key in the vault' end);
   end if;
   -- the pages: the search's own best six, the first 3,000 characters of each
   for r in
