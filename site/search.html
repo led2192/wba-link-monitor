@@ -5,26 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Lantern</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Crect x='13' y='4' width='18' height='5' rx='2' fill='%2314213D'/%3E%3Cpath d='M11 12h22l-3 24H14z' fill='%23E07A2F'/%3E%3Crect x='18' y='18' width='8' height='11' rx='1' fill='%23FBFBF8'/%3E%3Crect x='20' y='21' width='4' height='1.6' fill='%23E07A2F'/%3E%3Crect x='20' y='24' width='4' height='1.6' fill='%23E07A2F'/%3E%3Crect x='10' y='36' width='24' height='4' rx='2' fill='%2314213D'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Crect x='13' y='4' width='18' height='5' rx='2' fill='%2300194B'/%3E%3Cpath d='M11 12h22l-3 24H14z' fill='%23FAC300'/%3E%3Crect x='18' y='18' width='8' height='11' rx='1' fill='%23FBFBF8'/%3E%3Crect x='20' y='21' width='4' height='1.6' fill='%23FAC300'/%3E%3Crect x='20' y='24' width='4' height='1.6' fill='%23FAC300'/%3E%3Crect x='10' y='36' width='24' height='4' rx='2' fill='%2300194B'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* Brand colours: --brand (dark), --accent (buttons, links), --flame (the lantern's light). Swap these three for
      WBA's own hex codes; everything else follows. */
+  /* WBA brand (branding guide, theme colours): navy 00194B, blue 2378FF and 1E64CC, yellow FAC300, green 4BB42D,
+     red FF3C23, teal 0FC8BE. The lantern's light is the brand yellow; buttons and links the deeper blue (contrast). */
   :root {
-    --brand: #14213D; --accent: #2A7F9E; --flame: #E07A2F;
-    --bg: #FBFBF8; --fg: var(--brand); --muted: #5B6472; --line: #E3E6E4; --box: #FFFFFF;
-    --accent-2: var(--flame); --mark: #FFF1C2; --chip: #EEF3F2;
+    --brand: #00194B; --accent: #1E64CC; --flame: #FAC300; --blue: #2378FF;
+    --bg: #FBFBF8; --fg: var(--brand); --muted: #4F5B70; --line: #E1E5EC; --box: #FFFFFF;
+    --accent-2: var(--flame); --mark: #FFF3B8; --chip: #EDF2FA;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #10172A; --fg: #ECEFF4; --muted: #A4ADBB; --line: #273149; --box: #172036;
-      --accent: #6FB7D0; --accent-2: #F0A066; --mark: #4A3F12; --chip: #1F2A45;
+      --bg: #0B1630; --fg: #ECEFF4; --muted: #A4ADBB; --line: #24324F; --box: #132042;
+      --accent: #6FA8FF; --accent-2: #FAC300; --mark: #4A3F12; --chip: #1C2A4A;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #10172A; --fg: #ECEFF4; --muted: #A4ADBB; --line: #273149; --box: #172036;
-    --accent: #6FB7D0; --accent-2: #F0A066; --mark: #4A3F12; --chip: #1F2A45;
+    --bg: #0B1630; --fg: #ECEFF4; --muted: #A4ADBB; --line: #24324F; --box: #132042;
+    --accent: #6FA8FF; --accent-2: #FAC300; --mark: #4A3F12; --chip: #1C2A4A;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 Inter, system-ui, sans-serif; }
@@ -47,7 +49,7 @@
   header.home + form.box { max-width: 640px; margin: 22px auto 10px; }
   .box input { flex: 1; min-width: 0; font: inherit; font-size: 18px; padding: 12px 16px; border: 1px solid var(--line);
                border-right: 0; border-radius: 24px 0 0 24px; background: var(--box); color: var(--fg); outline: none; }
-  .box input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+  .box input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
   .box button { font: inherit; font-weight: 500; padding: 0 20px; border: 1px solid var(--accent); background: var(--accent);
                 color: #fff; border-radius: 0 24px 24px 0; cursor: pointer; }
   .hint { color: var(--muted); font-size: 14px; text-align: center; }
@@ -91,7 +93,7 @@
     <input id="q" type="search" placeholder="e.g. Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
     <button type="submit">Search</button>
   </form>
-  <p class="hint" id="hint">Words find pages that hold all of them; quotes find the exact phrase; a company name or a year in the box becomes a filter.</p>
+  <p class="hint" id="hint">Type it as you would in a web search. The pages that hold most of your words come first; quotes keep an exact phrase; a company name or a year in the box becomes a filter.</p>
   <div class="chips" id="chips"></div>
   <details class="filters" id="filters">
     <summary>Filters</summary>
@@ -112,7 +114,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v1 2026-11-10";
+  const CLIENT = "lantern v2 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -248,8 +250,8 @@
       const rows = await rpc("find_pages", { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
                                              type_filter: state.type, max_rows: state.rows, client: CLIENT });
       const s = ((performance.now() - t0) / 1000).toFixed(1);
-      if (!rows.length) setStatus(`No page holds ${state.q.includes('"') ? "that phrase" : "all those words"}${state.company || state.type || state.from ? " with these filters" : ""}. (${s} s)`);
-      else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three per document. (${s} s)`);
+      if (!rows.length) setStatus(`No page holds ${state.q.includes('"') ? "that phrase" : "those words"}${state.company || state.type || state.from ? " with these filters" : ""}. (${s} s)`);
+      else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
     } catch (e) {
