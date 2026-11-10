@@ -1,0 +1,64 @@
+# The semantic index of the main reports (semantic_index.py): passages of about 120 words of the annual,
+# integrated, sustainability, ESG and CSR reports from 2024 on, embedded with an open multilingual model on
+# the runner's CPU (no API, no cost) and written to the evidence database. Manual. Dry run unless commit is
+# true. Several runs may share the work with partition k/N (each takes one database connection).
+name: Semantic index
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "write the chunks and embeddings (false = read, embed and print, write nothing)"
+        type: boolean
+        default: false
+      limit:
+        description: "documents this run (0 = all that are left in the slice)"
+        default: "20"
+      minutes:
+        description: "stop cleanly after this many minutes (the job is killed at 360)"
+        default: "330"
+      partition:
+        description: "k/N: this run takes slice k of N of the documents (empty = everything)"
+        default: ""
+      years:
+        description: "reporting years in scope: 2024- or 2023-2024"
+        default: "2024-"
+
+concurrency:
+  group: semantic-index-${{ inputs.partition || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-e5-small-${{ runner.os }}-v1
+      - run: pip install -r requirements.txt sentence-transformers
+      - name: Index
+        run: |
+          ARGS="--limit ${{ inputs.limit }} --minutes ${{ inputs.minutes }} --years ${{ inputs.years }}"
+          [ -n "${{ inputs.partition }}" ] && ARGS="$ARGS --partition ${{ inputs.partition }}"
+          [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          echo "python semantic_index.py $ARGS"
+          python semantic_index.py $ARGS
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          TOKENIZERS_PARALLELISM: "false"
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-index-${{ github.run_id }}
+          path: semantic_index.md
+          if-no-files-found: ignore

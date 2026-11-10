@@ -128,6 +128,32 @@ create table if not exists public.page_map (
 );
 create index if not exists page_map_words on public.page_map using gin (words);
 
+-- The semantic index (semantic_index.py, 10 Nov 2026): the main reports (annual, integrated, sustainability, ESG,
+-- CSR) from 2024 on, cut into passages of about 120 words by sentences, never across pages, each with a
+-- multilingual sentence embedding (intfloat/multilingual-e5-small, 384 dimensions, computed on GitHub's
+-- runners). chunk_docs marks a document done, so a stopped run continues where it was. The HNSW index is
+-- created with the table and grows with the inserts (a build over 5 million rows at once would not fit the
+-- database's memory).
+create table if not exists public.chunks (
+  library_id  text not null references public.documents (library_id),
+  page        int  not null,
+  n           int  not null,               -- passage number on the page
+  body        text not null,
+  embedding   extensions.vector(384),
+  model       text,
+  written     timestamptz not null default now(),
+  primary key (library_id, page, n)
+);
+create index if not exists chunks_embedding on public.chunks using hnsw (embedding extensions.vector_cosine_ops) with (m = 16, ef_construction = 64);
+create table if not exists public.chunk_docs (
+  library_id  text primary key references public.documents (library_id),
+  chunks      int  not null,
+  model       text,
+  written     timestamptz not null default now()
+);
+alter table public.chunks enable row level security;
+alter table public.chunk_docs enable row level security;
+
 -- Extracted values, one per company x attribute x period. Empty until the extraction pilot.
 create table if not exists public.datapoints (
   id            bigint generated always as identity primary key,
