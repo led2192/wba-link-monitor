@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 lanterN "+ Add a value": the link sits at the top of the values panel as a small button and its form opens under it; units are a closed list per attribute with "other" (14 currencies; tCO2e; employees), and money and emissions take the scale the report prints (millions, thousand tonnes), stored in full. (#377)
 - 2026-11-10 lanterN: "+ Add a value" at the foot of the values panel, also when nothing is held for one company: attribute from the list, the field its kind asks for (number with unit, yes/no, options), reporting year, source link and page, a note; signed with the WBA email code and stored in the new `value_submissions` table with status `new` (`add_value`; one row per person, company, attribute and year). The documents-only list shows a document held twice once. (#376)
 - 2026-11-10 Measured `--escalate whole` (the whole document on doubtful answers): +3.9 points over 254 paired answers (61% to 65%, p 0.041), every pilot attribute up, about $3.25 a run. Recorded in `docs/decisions.md`; it stays an option until a run with the held-out attributes. (#375)
 - 2026-11-10 A word-pair index for exact phrases: `semantic_index.py` writes each page's neighbouring-word pairs (`scope_1`, `act_core`) to the new `page_pairs` table in the same pass as the passages (main reports from 2024 on); the table arrives with the next full Evidence database load. lanterN does not read it yet. (#374)

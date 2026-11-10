@@ -105,6 +105,13 @@
   .values .fix { grid-column: 1 / -1; display: grid; gap: 6px; margin-top: 4px; }
   .values .fix input:not([type=checkbox]), .values .fix select, .values .fix textarea, .values .sign input { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
   .values .fix .two { display: grid; grid-template-columns: 1fr 80px; gap: 6px; }
+  .values .fix .three { display: grid; grid-template-columns: minmax(0, 1fr) 104px 76px; gap: 6px; }
+  .values .fix .three > input:last-child, .values .fix .two > input:nth-child(3) { grid-column: 1 / -1; }
+  .values .fix .unit { align-self: center; color: var(--muted); font-size: 13px; }
+  .values .fix.add { padding: 10px; margin: 2px 0 10px; border: 1px solid var(--line); border-radius: 10px; }
+  .values .addrow { margin: 8px 0 4px; }
+  .values .addlink { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--accent); text-decoration: none; background: var(--bg); }
+  .values .addlink:hover { border-color: var(--accent); }
   .values .fix button, .values .sign button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; justify-self: start; }
   .values .sign { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: grid; gap: 6px; }
   .values .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
@@ -177,7 +184,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v9 2026-11-10";
+  const CLIENT = "lantern v10 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -459,8 +466,13 @@
   }
   // A value the person adds (10 Nov 2026): the attribute from the list, the field its kind asks for (a number with its
   // unit, yes or no, or options), the source and its page. Signed like a review; the team checks it before it counts.
-  const ATTR_FORM = Object.fromEntries(ATTRS.map(a => [a[0], EMISSIONS.includes(a[0]) ? { kind: "number", unit: "tCO2e" }
-                                                              : a[0] === "GMC_02526.1" ? { kind: "number", unit: "employees" } : { kind: "number", unit: "USD" }]));
+  // Units are a closed list per attribute, with "other" as the way out: a free unit box gets "usd m", "US$", "mio" and
+  // the team cannot compare them. Money also takes the scale the report prints ("Dollars in millions"), so the person
+  // types the figure as printed and the page stores it in full.
+  const MONEY = { kind: "number", units: ["USD", "EUR", "GBP", "JPY", "CNY", "CHF", "KRW", "INR", "BRL", "CAD", "AUD", "HKD", "TWD", "SEK"],
+                  scales: [["millions", 1e6], ["billions", 1e9], ["thousands", 1e3], ["units", 1]] };
+  const TONNES = { kind: "number", units: ["tCO2e"], scales: [["tonnes", 1], ["thousand tonnes", 1e3], ["million tonnes", 1e6]] };
+  const ATTR_FORM = Object.fromEntries(ATTRS.map(a => [a[0], EMISSIONS.includes(a[0]) ? TONNES : a[0] === "GMC_02526.1" ? { kind: "number", units: ["employees"] } : MONEY]));
   function readNumber(text) {                                // "51,400,000,000" or "51400000000.5"; null when it is not a number
     const t = String(text || "").replace(/[\s,]/g, ""); if (!/^-?\d+(\.\d+)?$/.test(t)) return null;
     return Number(t);
@@ -473,7 +485,8 @@
     return j;
   }
   function addValueLink(panel, attrs) {
-    const wrap = el("div", "note"); const a = el("a", null, "+ Add a value"); a.href = "#"; wrap.appendChild(a); panel.appendChild(wrap);
+    const wrap = el("div", "addrow"); const a = el("a", "addlink", "+ Add a value"); a.href = "#"; a.title = "Add a value the robot does not hold, with its source";
+    wrap.appendChild(a); const sum = panel.querySelector("summary"); sum ? sum.after(wrap) : panel.appendChild(wrap);
     a.onclick = ev => {
       ev.preventDefault(); if (panel.querySelector(".add")) return;
       const opened = Date.now(); const f = el("div", "fix add");
@@ -491,9 +504,19 @@
           const boxes = (k.options || []).map(o => { const l = el("label"); const c = el("input"); c.type = "checkbox"; c.value = o; l.append(c, document.createTextNode(" " + o)); field.appendChild(l); return c; });
           read = () => { const picked = boxes.filter(c => c.checked).map(c => c.value); return picked.length ? { kind: "choice", answer: picked.join("; ") } : null; };
         } else {
-          field.className = "two"; const num = el("input"); num.placeholder = "The figure in full, e.g. 51400000000"; num.inputMode = "decimal";
-          const unit = el("input"); unit.placeholder = "Unit"; unit.value = k.unit || ""; field.append(num, unit);
-          read = () => { const n = readNumber(num.value); return n === null ? null : { kind: "number", value: n, unit: unit.value }; };
+          const num = el("input"); num.placeholder = k.scales ? "The figure as printed, e.g. 46,309" : "The figure, e.g. 77,800"; num.inputMode = "decimal";
+          const pick = (items) => { const s = el("select"); for (const it of items) { const o = el("option", null, Array.isArray(it) ? it[0] : it); o.value = Array.isArray(it) ? it[1] : it; s.appendChild(o); } return s; };
+          const scale = k.scales ? pick(k.scales) : null;
+          const units = (k.units || []).length > 1 ? pick([...k.units, "other"]) : null;
+          const other = el("input"); other.placeholder = "Unit"; other.style.display = "none";
+          if (units) units.onchange = () => { other.style.display = units.value === "other" ? "" : "none"; if (units.value === "other") other.focus(); };
+          const fixed = !units && (k.units || [])[0] ? el("span", "unit", k.units[0]) : null;
+          const parts = [num, scale, units, fixed].filter(Boolean);
+          field.className = parts.length === 3 ? "three" : "two"; field.append(...parts); if (units) field.appendChild(other);
+          read = () => { const n = readNumber(num.value); if (n === null) return null;
+                         const u = units ? (units.value === "other" ? other.value.trim() : units.value) : (k.units || [""])[0];
+                         if (!u) return null;
+                         return { kind: "number", value: n * (scale ? Number(scale.value) : 1), unit: u }; };
         }
       };
       sel.onchange = draw; draw();
@@ -503,7 +526,7 @@
       const go = el("button", null, "Add the value");
       const send = async () => {
         const v = read(); const y = parseInt(yr.value, 10);
-        if (!v) { msg.textContent = "Give the value (a number in full, digits only)."; return; }
+        if (!v) { msg.textContent = "Give the value as a number (digits, with or without commas) and its unit."; return; }
         if (!y) { msg.textContent = "Give the reporting year."; return; }
         if (!/^https?:\/\//i.test(link.value.trim())) { msg.textContent = "Give the link to the document, so the team can check it."; return; }
         try {
@@ -515,7 +538,7 @@
       go.onclick = send;
       const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
       const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
-      f.append(head, sel, yr, field, two, why, msg, acts); panel.appendChild(f); yr.value ? field.querySelector("input, select").focus() : yr.focus();
+      f.append(head, sel, yr, field, two, why, msg, acts); wrap.after(f); yr.value ? field.querySelector("input, select").focus() : yr.focus();
     };
   }
   async function loadValues() {
