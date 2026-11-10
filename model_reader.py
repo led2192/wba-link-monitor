@@ -427,7 +427,11 @@ def call(messages, usage, sess=None, model=None, system=None, max_tokens=None):
         usage["output_tokens"] += j.get("usage", {}).get("output_tokens", 0)
         if j.get("stop_reason") == "max_tokens":
             usage["cut_at_token_limit"] += 1
-        return "".join(c.get("text", "") for c in j.get("content", []) if c.get("type") == "text")
+        text = "".join(c.get("text", "") for c in j.get("content", []) if c.get("type") == "text")
+        if not text:                                             # 10 Nov 2026: a third of short-answer calls came back with tokens spent and no text
+            usage["replies_without_text"] += 1
+            usage["reply blocks: " + ",".join(sorted({c.get("type", "?") for c in j.get("content", [])}) or ["none"]) + f"; stop {j.get('stop_reason')}"] += 1
+        return text
     return ""
 
 
