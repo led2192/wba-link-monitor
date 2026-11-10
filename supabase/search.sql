@@ -1190,13 +1190,17 @@ grant execute on function public.add_value(text, text, int, text, numeric, text,
 -- among the companies scored in that benchmark and among those of its own industry, and the measurement areas.
 -- Places are counted here, not stored. One company only; an empty list when the tables are not there yet.
 -- Only the benchmarks listed in published_benchmarks are shown (the owner, 10 Nov 2026: the published ones only;
--- the Data API also serves results that are not public yet). The list starts empty: nothing shows until a
--- benchmark is added to it here.
+-- the Data API could also serve results that are not public yet). A benchmark shows once it is added to the
+-- list here; a new benchmark in the API stays hidden until then.
 create table if not exists public.published_benchmarks (
   benchmark_id text primary key,
   added        timestamptz not null default now()
 );
 alter table public.published_benchmarks enable row level security;
+-- The owner, 10 Nov 2026: the twelve benchmarks the Data API serves for 2025 are all published.
+insert into public.published_benchmarks (benchmark_id)
+  values ('ACO'), ('CHR'), ('CSI'), ('DIB'), ('FAB'), ('GEA'), ('GEB'), ('JST'), ('NAB'), ('OCE'), ('RDR'), ('URB')
+  on conflict (benchmark_id) do nothing;
 
 create or replace function public.find_scores(key text, company text) returns jsonb
 language plpgsql stable security definer

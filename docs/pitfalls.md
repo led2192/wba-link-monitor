@@ -294,3 +294,6 @@ A statement on `pages_search` (GIN on words, year, doc_type, wba_id) builds the 
 ## A sample row is someone's data: print columns, not rows (10 Nov 2026)
 The first `load_scores.py` printed one sample row of two Data API datasets to see their shape. The rows carry a contact person per company, so two colleagues' work addresses went into the log of a public repository's workflow run. Since then the script asks the API only for the columns it names (`include`), and prints counts. When looking at an unknown source from a workflow, print the column names and types; never a row.
 
+## A check that searches holds the tables the install needs (10 Nov 2026)
+`search.sql` alters `search_log` and a few other tables each time it is applied (add column if not exists, enable row level security), which needs the table to itself for an instant. `search_check.py` runs its searches in one open transaction, and every search writes a row to `search_log`: while it ran (minutes), the functions-only install waited 30 seconds and failed with "lock timeout". Since both were started by the same pull request, they collided every time. The check is manual now; cancel a running one before installing functions.
+

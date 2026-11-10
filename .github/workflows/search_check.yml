@@ -1,8 +1,9 @@
 name: Search check
 
 # Read-only check of the evidence database's search functions (search_check.py): each sample search's
-# companies, documents and pages found, and how long it takes. Runs after the Evidence database load on
-# pull requests that touch the search functions (so they are in place), and by hand.
+# companies, documents and pages found, and how long it takes. By hand only since 10 Nov 2026: run on every
+# pull request that touched the search functions, its connection kept search_log busy for minutes and the
+# functions-only install on the same branch failed on its lock timeout, twice.
 on:
   workflow_dispatch:
     inputs:
@@ -11,8 +12,6 @@ on:
         type: choice
         options: [check, timing]
         default: check
-  pull_request:
-    paths: [search_check.py, supabase/search.sql, .github/workflows/search_check.yml]
 
 jobs:
   check:
