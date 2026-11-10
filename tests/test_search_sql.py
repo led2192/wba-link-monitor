@@ -117,3 +117,7 @@ def test_document_sizes_need_the_key_and_are_bounded():
 def test_recent_pages_and_whole_matches_come_first():
     assert "power(0.75, least(greatest(this_year - coalesce(nullif(s.year, 0), this_year - 3), 0), 12))" in FIND     # a quarter less a year; undated = 3 years
     assert "power(s.rel, 0.5)" in FIND                                                                                 # repetition counts less
+
+
+def test_pages_with_every_word_come_before_pages_with_some():
+    assert FIND.count("r.complete desc, r.score desc") == 2
