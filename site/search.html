@@ -177,14 +177,20 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v4 2026-11-10";
+  const CLIENT = "lantern v5 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
     "Policy Documents", "Code of Conduct", "Human Rights Policy", "Certifications", "UNKNOWN"];
-  const TYPE_WORDS = { "annual report": "Annual Report", "integrated report": "Integrated Report", "sustainability report": "Sustainability Report",
-    "esg report": "ESG Report", "csr report": "CSR Report", "climate report": "Climate Report", "10-k": "10K Form", "10k": "10K Form",
-    "code of conduct": "Code of Conduct", "policy": "Policy Documents", "presentation": "Company Presentations" };
+  const TYPE_WORDS = { "annual report": "Annual Report", "informe anual": "Annual Report", "memoria anual": "Annual Report", "rapport annuel": "Annual Report",
+    "integrated report": "Integrated Report", "informe integrado": "Integrated Report",
+    "sustainability report": "Sustainability Report", "informe de sostenibilidad": "Sustainability Report", "memoria de sostenibilidad": "Sustainability Report",
+    "esg report": "ESG Report", "informe esg": "ESG Report", "csr report": "CSR Report", "climate report": "Climate Report", "informe climático": "Climate Report",
+    "10-k": "10K Form", "10k": "10K Form",
+    "code of conduct": "Code of Conduct", "code of ethics": "Code of Conduct", "código de conducta": "Code of Conduct", "codigo de conducta": "Code of Conduct",
+    "código de comportamiento": "Code of Conduct", "codigo de comportamiento": "Code of Conduct", "código ético": "Code of Conduct", "código de ética": "Code of Conduct", "code de conduite": "Code of Conduct",
+    "human rights policy": "Human Rights Policy", "política de derechos humanos": "Human Rights Policy",
+    "policy": "Policy Documents", "política": "Policy Documents", "presentation": "Company Presentations", "presentación": "Company Presentations" };
   // Headquarters countries as the profiles hold them (ISO 3-letter), with the names people type (English and Spanish).
   const COUNTRIES = { AGO: ["Angola"], ARE: ["United Arab Emirates", "UAE", "Emiratos Árabes Unidos"], ARG: ["Argentina"], AUS: ["Australia"], AUT: ["Austria"],
     AZE: ["Azerbaijan", "Azerbaiyán"], BEL: ["Belgium", "Bélgica"], BGD: ["Bangladesh"], BMU: ["Bermuda", "Bermudas"], BRA: ["Brazil", "Brasil"], CAN: ["Canada", "Canadá"],
@@ -278,7 +284,7 @@
     if (years.length) { found.from = Math.min(...years); found.to = Math.max(...years); }
     for (const [w, t] of Object.entries(TYPE_WORDS)) {
       const re = new RegExp("\\s" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "s?\\s", "i");
-      if (re.test(q)) { found.type = t; q = q.replace(re, " "); break; }
+      if (re.test(q)) { found.type = t; found.typeWords = w; q = q.replace(re, " "); break; }
     }
     return { q: q.trim(), ...found };
   }
@@ -355,7 +361,7 @@
       state.companyName = parsed.companyName || ($("fCompany").value || null);
       state.from = parsed.from || (+$("fFrom").value || null);
       state.to = parsed.to || (+$("fTo").value || null);
-      state.type = parsed.type || ($("fType").value || null);
+      state.type = parsed.type || ($("fType").value || null); state.typeWords = parsed.type ? parsed.typeWords : null;
       state.industry = parsed.industry; state.country = parsed.country; state.countryName = parsed.countryName; state.region = parsed.region;
       state.rows = 50;
     } else if (!more) { state.rows = 50; }
@@ -368,11 +374,17 @@
     try {
       const rows = await rpc("find_pages", { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
                                              type_filter: state.type, max_rows: state.rows, client: CLIENT,
-                                             industry_filter: state.industry, country_filter: state.country, region_filter: state.region });
+                                             industry_filter: state.industry, country_filter: state.country, region_filter: state.region,
+                                             typed: $("q").value.trim() });
       const s = ((performance.now() - t0) / 1000).toFixed(1);
       if (!rows.length) setStatus(state.q ? `No page holds ${state.q.includes('"') ? "that phrase" : "those words, even one or two of them,"}${anyFilter ? " with these filters" : ""}. (${s} s)` : `No document matches these filters. (${s} s)`);
       else if (!state.q) setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} documents, newest first. (${s} s)`);
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
+      if (state.typeWords && !more) {                       // the type was read from the words typed: offer the other reading
+        const st = $("status"); const a = el("a", null, `Search the words “${state.typeWords}” inside the documents instead`); a.href = "#";
+        a.onclick = ev => { ev.preventDefault(); state.q = (state.q + ` "${state.typeWords}"`).trim(); state.type = null; state.typeWords = null; $("fType").value = ""; search(true); };
+        st.append(document.createTextNode(" · "), a);
+      }
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues();
