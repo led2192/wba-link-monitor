@@ -43,7 +43,7 @@ class Reply(unittest.TestCase):
             return '{"type": "Interim Reports", "confidence": "high", "title": "Q3 2024"}'
         usage = collections.Counter()
         self.assertEqual(T.read_type("Quarterly report Q3 2024", usage, call=call), ("Interim Reports", "high", "Q3 2024"))
-        self.assertEqual(seen["system"], T.SYSTEM); self.assertEqual(seen["max_tokens"], 200)
+        self.assertEqual(seen["system"], T.SYSTEM); self.assertEqual(seen["max_tokens"], 1000)
         self.assertIn("Quarterly report Q3 2024", seen["prompt"]); self.assertEqual(usage["calls"], 1)
 
 

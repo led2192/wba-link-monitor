@@ -110,7 +110,7 @@ def read_type(cover, usage, call=None):
     global LAST_REPLY
     import model_reader
     call = call or model_reader.call
-    text = call([{"role": "user", "content": prompt(cover)}], usage, system=SYSTEM, max_tokens=200)
+    text = call([{"role": "user", "content": prompt(cover)}], usage, system=SYSTEM, max_tokens=1000)
     LAST_REPLY = text
     return parse_reply(text)
 
@@ -239,8 +239,12 @@ def main():
     n = sum(typed.values())
     md = [f"# Document types from the first pages ({'check' if a.check else 'written' if a.commit else 'dry run'})", "",
           f"{n:,} documents read in {time.time() - t0:.0f}s; {usage['calls']:,} calls, {usage['input_tokens']:,} in / {usage['output_tokens']:,} out tokens, "
-          f"${model_reader.cost(usage):.2f}{model_reader.cost_note()}; {usage['unusable replies']:,} unusable replies."
-          + (f" {stopped}." if stopped else ""), ""]
+          f"${model_reader.cost(usage):.2f}{model_reader.cost_note()}; {usage['unusable replies']:,} unusable replies"
+          + (f" ({usage['replies_without_text']:,} with no text block, {usage['cut_at_token_limit']:,} cut at the token limit)" if usage["replies_without_text"] or usage["cut_at_token_limit"] else "")
+          + "." + (f" {stopped}." if stopped else ""), ""]
+    odd = {k: v for k, v in usage.items() if k.startswith("reply blocks: ")}
+    if odd:
+        md += ["Replies without text, by block types and stop reason: " + "; ".join(f"{k[14:]} {v:,}" for k, v in sorted(odd.items(), key=lambda x: -x[1])), ""]
     if a.check:
         share, by, dis = agreement(pairs)
         md += [f"Agreement with the type already set: {share:.0%} of {len(pairs):,}.", "", "| Their type | Documents | Agree |", "| --- | --: | --: |"]
