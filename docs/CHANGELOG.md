@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 lanterN's placeholder fits the box again (#PRNUM)
 - 2026-11-10 `load_companies.py` and the `Company profiles` workflow (nightly after the Evidence database load): industry, country, region and website of the 2,000 companies from Airtable into `public.companies`, for Lantern's filters (#360)
 - 2026-11-10 lanterN's lantern carries eleven thin bands in WBA's colours, closer to the stripes of WBA's own mark (#359)
 - 2026-11-10 lanterN shows your recent searches under the box (this browser only, the last 30, narrowed as you type, each removable, all clearable) (#358)
