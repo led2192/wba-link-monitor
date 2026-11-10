@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-10 `model_reader.call` counts replies that come back with tokens spent and no text block, by block types and stop reason (a third of the Type covers calls did, at 200 output tokens); Type covers allows 1,000 output tokens and reports those counts (#PRNUM)
+- 2026-11-10 `model_reader.call` counts replies that come back with tokens spent and no text block, by block types and stop reason (a third of the Type covers calls did, at 200 output tokens); Type covers allows 1,000 output tokens and reports those counts (#342)
 - 2026-11-10 Type covers, after the first check (79 % agreement on 147 of 300; 153 replies unusable): the rules send meeting notices, prospectuses and listing documents to Statutory Documents and short commitments to Policy Documents, slides stay Company Presentations even for quarterly results, UNKNOWN only when nothing fits; a title with stray quotes no longer loses the type; the first unusable replies are printed (#341)
 - 2026-11-10 `Type covers` workflow input `model`: a Gemini model types the covers on the Google credits once the key works (#340)
 - 2026-11-10 `type_covers.py` and the `Type covers` workflow (manual): the model reader's model types, from cover_text, the live documents with no type at all (about 45,000 on 10 Nov, 28,500 of them in languages the Airtable AI field never types), into source_type_check where empty; `--check N` measures the agreement with the rows already typed first; writes in batches of 100 so a cost cap or a refusal loses nothing (#339)
