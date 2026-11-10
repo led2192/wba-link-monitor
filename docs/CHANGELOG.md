@@ -4,6 +4,7 @@ Newest first. One line per change, with the pull request. Every pull request add
 
 ## November 2026
 - 2026-11-10 `semantic_index.py` and the `Semantic index` workflow (manual, dry run by default, partition k/N): the main reports from 2024 on cut into 120-word passages and embedded with multilingual-e5-small into `chunks` (HNSW index) with `chunk_docs` as the done-marker (#356)
+- 2026-11-10 lanterN with filters and no words ("Nike code of conduct" is a company and a type) lists the matching documents, newest first, one row each at its first page (#364)
 - 2026-11-10 The loader applies the schema with `lock_timeout = 30s`: a schema statement that cannot get its lock fails instead of queueing behind a cancelled job's statement and blocking every reader of the table (pitfall) (#363)
 - 2026-11-10 lanterN's placeholder fits the box again (#361)
 - 2026-11-10 `load_companies.py` and the `Company profiles` workflow (nightly after the Evidence database load): industry, country, region and website of the 2,000 companies from Airtable into `public.companies`, for Lantern's filters (#360)
