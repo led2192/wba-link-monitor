@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-10 Evidence health's docs_without_pages check leaves out documents loaded in the last 12 hours: the 271 of 9 Nov were that night's load caught between the document row and its pages (0 on 10 Nov) (#PRNUM)
+- 2026-11-10 Evidence health's docs_without_pages check leaves out documents loaded in the last 12 hours: the 271 of 9 Nov were that night's load caught between the document row and its pages (0 on 10 Nov) (#337)
 - 2026-11-10 Evidence health lists the 20 newest documents with text_status ok and no page (271 on 9 Nov, unexplained) with their pages, chars and text part; Base room no longer tries the cheap `fields[]=` count, which answered 422 on every table (#336)
 - 2026-11-10 `--select rerank` read 0 answers after training (run 42731781063): the training pass had marked the gold answers as seen and the evaluation's pass got none. `value_eval.reset_seen()` after the pairs; a run with nothing to read now fails instead of printing zeros; the trained model is cached between runs (#335)
 - 2026-11-10 Gemini reader: HTTP 402 (the key's project has no working billing; the probe 42731761965 got it on every call) stops the run as a refusal instead of failing call by call (#334)
