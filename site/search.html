@@ -110,6 +110,17 @@
   .status { color: var(--muted); font-size: 14px; margin: 6px 0 10px; min-height: 20px; }
   .values { border: 1px solid var(--line); background: var(--box); border-radius: 12px; padding: 10px 12px; margin: 0 0 14px; font-size: 13px; }
   .values[hidden] { display: none; }
+  /* a thin, quiet scrollbar for the side panel (the default one, with its arrows, stood out more than the values) */
+  .values { scrollbar-width: thin; scrollbar-color: var(--line) transparent; scrollbar-gutter: stable; }
+  .values::-webkit-scrollbar { width: 8px; }
+  .values::-webkit-scrollbar-track { background: transparent; }
+  .values::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; border: 2px solid var(--box); }
+  .values::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  .values::-webkit-scrollbar-button { display: none; height: 0; }
+  .missing { margin: 18px 0 6px; font-size: 13px; }
+  .missing a { color: var(--muted); }
+  .missing .values { border: 0; padding: 0; margin-top: 8px; display: block; position: static; width: auto; max-width: 420px; max-height: none; overflow: visible; }
+  .me { max-width: calc(100vw - 36px); }
   .values summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
   .values summary::-webkit-details-marker { display: none; }
   .values summary b { color: var(--fg); font-weight: 500; }
@@ -273,7 +284,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v21 2026-11-10";
+  const CLIENT = "lantern v22 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -473,9 +484,14 @@
     }
     docSizes(rows);
     const old = document.querySelector(".more"); if (old) old.remove();
+    const oldM = document.querySelector(".missing"); if (oldM) oldM.remove();
     if (rows.length && state.rows < 200 && rows.length >= state.rows - (append ? 50 : 0)) {
       const m = el("button", "more", "More results"); m.onclick = () => { state.rows += 50; search(true, true); }; box.appendChild(m);
     }
+    // at the foot of any list: the way to tell us what is missing
+    const miss = el("div", "missing"); const ml = el("a", null, "Missing a document? Add its link"); ml.href = "#";
+    ml.onclick = ev => { ev.preventDefault(); const hold = miss.querySelector(".values") || miss.appendChild(el("div", "values")); addSourceForm(hold, state.company && !state.company.includes(";") ? state.company : null); };
+    miss.appendChild(ml); box.appendChild(miss);
   }
 
   async function search(fromChips, more) {
@@ -602,9 +618,40 @@
     if (!r.ok) throw new Error(j.message || `${r.status}`);
     return j;
   }
+  // A source the library does not hold: one or several links for a company, signed; they go to the pipeline's inbox within the hour.
+  function addSourceForm(holder, companyIdNow) {
+    if (holder.querySelector(".addsrc")) return; const f = el("div", "fix add addsrc"); const lab = t => el("label", "lab", t);
+    const co = el("input"); co.setAttribute("list", "companies"); co.placeholder = "Company";
+    const c0 = companies.find(x => x.id === companyIdNow); if (c0) co.value = c0.name;
+    const links = el("textarea"); links.rows = 3; links.placeholder = "https://…  (one link per line, up to 20)";
+    const yr = el("input"); yr.placeholder = "Reporting year (optional)"; yr.inputMode = "numeric";
+    const why = el("textarea"); why.rows = 2; why.placeholder = "Optional";
+    const msg = el("div", "what", ""); const go = el("button", null, "Add the source");
+    const send = async () => {
+      const urls = links.value.split(/\s+/).map(x => x.trim()).filter(Boolean); const id = companyId(co.value.trim());
+      if (!companies.some(x => x.id === id)) { msg.textContent = "Choose the company from the list."; return; }
+      if (!urls.length) { msg.textContent = "Paste at least one link."; return; }
+      const t = await token(); if (!t) { signInBox(holder, send); return; }
+      try {
+        const r = await fetch(`${CONFIG.url}/rest/v1/rpc/add_sources`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ company: id, urls: urls.slice(0, 20), year: parseInt(yr.value, 10) || null, note: why.value, client: CLIENT }) });
+        const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+        const parts = [j.added ? `${j.added} added: the robot fetches ${j.added === 1 ? "it" : "them"} within the hour` : "", j.known ? `${j.known} already in the library` : "",
+                       j.again ? `${j.again} you had already added` : "", j.invalid ? `${j.invalid} not a link` : ""].filter(Boolean);
+        f.innerHTML = ""; f.append(el("div", "what", (j.added ? "Thank you. " : "") + parts.join(" · ") + "."));
+      } catch (e) { msg.textContent = `Not saved: ${e.message}`; }
+    };
+    go.onclick = send;
+    const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
+    const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
+    f.append(el("div", "what", "A document we do not hold"), lab("Company"), co, lab("Links to the documents"), links, lab("Reporting year"), yr, lab("A note for the team"), why, msg, acts);
+    holder.appendChild(f); (co.value ? links : co).focus();
+  }
   function addValueLink(panel, attrs) {
     const wrap = el("div", "addrow"); const a = el("a", "addlink", "+ Add a value"); a.href = "#"; a.title = "Add a value the robot does not hold, with its source";
-    wrap.appendChild(a); const sum = panel.querySelector("summary"); sum ? sum.after(wrap) : panel.appendChild(wrap);
+    const sa = el("a", "addlink", "+ Add a source"); sa.href = "#"; sa.title = "Add a link to a document we do not hold"; sa.style.marginLeft = "6px";
+    sa.onclick = ev => { ev.preventDefault(); const hold = wrap.querySelector(".srchold") || wrap.appendChild(el("div", "srchold")); addSourceForm(hold, state.company); };
+    wrap.append(a, sa); const sum = panel.querySelector("summary"); sum ? sum.after(wrap) : panel.appendChild(wrap);
     a.onclick = ev => {
       ev.preventDefault(); if (panel.querySelector(".add")) return;
       const opened = Date.now(); const f = el("div", "fix add");
