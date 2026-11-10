@@ -644,6 +644,55 @@ create or replace function public.profile_matching(industry_filter text, country
                               array['']::text[]) end
   $$;
 
+-- The companies a company filter means, for lanterN: companies_matching reads every document's company name
+-- (287,000 rows, 2 seconds a search on 10 Nov 2026). The page sends WBA ids, and public.companies holds the
+-- 2,000 names: an id or a name is looked up there first; only a part unknown there falls back to the documents.
+create or replace function public.find_company_ids(company_filter text) returns text[]
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  part text;
+  found text[];
+  ids text[] := '{}';
+begin
+  if company_filter is null or btrim(company_filter) = '' then
+    return null;
+  end if;
+  if to_regclass('public.companies') is null then
+    return public.companies_matching(company_filter);
+  end if;
+  foreach part in array string_to_array(company_filter, ';') loop
+    part := btrim(part);
+    continue when part = '';
+    found := array(select c.wba_id from public.companies c where c.wba_id = part);
+    if coalesce(array_length(found, 1), 0) = 0 then
+      found := array(select c.wba_id from public.companies c where c.name ilike '%' || replace(replace(part, '%', ''), '_', ' ') || '%');
+    end if;
+    if coalesce(array_length(found, 1), 0) = 0 then
+      found := array(select x from unnest(public.companies_matching(part)) x where x <> '');
+    end if;
+    ids := ids || found;
+  end loop;
+  return case when coalesce(array_length(ids, 1), 0) = 0 then array['']::text[] else ids end;
+end;
+$$;
+
+-- Other names a document type goes by, so that a word asked matches the documents that are about it:
+-- "sustainability" is also an Impact, ESG or CSR report; "annual" is also a 10-K.
+create or replace function public.type_words(doc_type text) returns text
+  language sql immutable
+  as $$
+    select case
+      when doc_type in ('Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Integrated Report')
+        then 'sustainability sustainable esg csr impact responsibility sostenibilidad sustentabilidad durabilite nachhaltigkeit'
+      when doc_type in ('Annual Report', '10K Form', 'Registration Document')
+        then 'annual anual annuel 10k 10-k 20-f'
+      when doc_type in ('Climate Report', 'CDP Report') then 'climate clima tcfd cdp carbon'
+      when doc_type in ('Environmental Reports') then 'environment environmental'
+      when doc_type in ('Code of Conduct') then 'ethics conducta'
+      else '' end
+  $$;
+
 alter table public.search_log add column if not exists typed text;          -- what the person typed, before the box read filters out of it
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text);
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text, text, text, text);
@@ -673,8 +722,14 @@ declare
   pair_qs tsquery[] := '{}';        -- each two neighbouring words as a phrase ("act core", "benchmarking alliance")
   sub_q tsquery;
   need int := least(greatest(coalesce(max_rows, 50), 1), 200);
-  per_year int := 400;
-  cap int := 1600;
+  cap int := 1200;                 -- pages in the pool
+  recent_cap int := 800;           -- of them, from the last three years when nothing narrows the search
+  recent_from int := extract(year from now())::int - 2;
+  split boolean;
+  capped boolean := false;
+  lvl_q tsquery;
+  lim int;
+  np int;
   got int := 0;
   n int;
   y int;
@@ -684,7 +739,7 @@ declare
   this_year int := extract(year from now())::int;
   t0 timestamptz := clock_timestamp();
   lid bigint;
-  ids text[] := public.companies_matching(company_filter);
+  ids text[] := public.find_company_ids(company_filter);
   pids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
   types text[] := public.types_matching(type_filter);
 begin
@@ -749,94 +804,113 @@ begin
   end if;
   create temp table if not exists find_cand (library_id text, page int, words tsvector, year int, doc_type text, primary key (library_id, page)) on commit drop;
   truncate find_cand;
-  -- first the pages that print two neighbouring words together ("ACT Core", "just transition"): with common words
-  -- they would never enter a pool capped per year, and they are what the person means (10 Nov 2026)
-  -- Bounded: per year, newest first, the phrase is checked on at most 4,000 pages that hold both words, and the whole
-  -- pass takes at most 2.5 seconds (two common words as a phrase, "act core", otherwise scan every page holding both).
-  <<pairs>>
-  for y in select distinct coalesce(d.year, 0) from public.documents d
-            where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
-            order by 1 desc
-  loop
-    for i in 1..coalesce(array_length(pair_qs, 1), 0) loop
-      insert into find_cand
-        select x.library_id, x.page, x.words, x.year, x.doc_type
-        from (select p.library_id, p.page, p.words, p.year, p.doc_type
-              from public.pages p
-              where p.words @@ (case when phrase_q is null then tqs[i] && tqs[i + 1] else phrase_q && tqs[i] && tqs[i + 1] end)
-                and p.year = y
-                and p.wba_id <> ''
-                and (types is null or p.doc_type = any(types))
-                and (ids is null or p.wba_id = any(ids))
-              limit 4000) x
-        where x.words @@ pair_qs[i]
-        limit 150
-      on conflict do nothing;
-      get diagnostics n = row_count;
-      got := got + n;
-      exit pairs when clock_timestamp() - t0 > interval '2.5 seconds';
-    end loop;
-  end loop;
-  -- level 0: every word; then every subset missing one word, then missing two, until enough pages are found
-  -- or six seconds have gone (a long query of common words otherwise ran into the statement timeout)
+  -- The pool of candidate pages (redesigned 10 Nov 2026 after search_timing.py). Every statement against the word
+  -- index costs about the same whatever it returns (0.2 to 1.3 s: the index lists every page holding the words before
+  -- the first row comes back), so the old pool, one statement per year (31 years) and per subset of words, took 4 to
+  -- 97 seconds and was cut by the clock: the same search answered differently under load. Now a level is ONE
+  -- statement: level 0 every word; level 1 any subset missing one word, or-ed into one query; level 2 missing two.
+  -- With no company and no year filter the level is two statements, the last three years first, so a common word
+  -- fills the pool with recent pages. Nothing is cut by the clock: the same search gives the same pages.
+  split := ids is null and year_from is null and year_to is null;
   <<levels>>
   for drop_n in 0..least(2, greatest(nw - 1, 0)) loop
+    lvl_q := null;
     for mask in 0..(case when nw = 0 then 0 else (1 << nw) - 1 end) loop
-      -- the subset is the words whose bit is set; it must drop exactly drop_n words
       continue when nw > 0 and (nw - (select count(*) from generate_series(0, nw - 1) b where (mask >> b) & 1 = 1)) <> drop_n;
-      sub_q := phrase_q;
+      sub_q := null;
       for i in 1..nw loop
         if (mask >> (i - 1)) & 1 = 1 then
           sub_q := coalesce(sub_q && tqs[i], tqs[i]);
         end if;
       end loop;
       continue when sub_q is null;
-      for y in select distinct coalesce(d.year, 0) from public.documents d
-                where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
-                order by 1 desc
-      loop
+      lvl_q := coalesce(lvl_q || sub_q, sub_q);
+    end loop;
+    lvl_q := case when lvl_q is null then phrase_q when phrase_q is null then lvl_q else phrase_q && lvl_q end;
+    exit levels when lvl_q is null;
+    for pass in 1..(case when split then 2 else 1 end) loop
+      lim := case when split and pass = 1 then recent_cap when drop_n = 0 then greatest(cap - got, 1) else cap end;
+      insert into find_cand
+        select p.library_id, p.page, p.words, p.year, p.doc_type
+        from public.pages p
+        where p.words @@ lvl_q
+          and p.wba_id <> ''
+          and (types is null or p.doc_type = any(types))
+          and (ids is null or p.wba_id = any(ids))
+          and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
+          and (not split or (pass = 1 and p.year >= recent_from) or (pass = 2 and (p.year < recent_from or p.year is null)))
+        limit lim
+      on conflict do nothing;
+      get diagnostics n = row_count;
+      got := got + n;
+      if drop_n = 0 and n >= lim then
+        capped := true;                                -- more pages hold every word than the pool takes
+      end if;
+      exit when got >= cap;
+    end loop;
+    -- The pages that print two neighbouring words together ("ACT Core", "just transition"): when the pool could not
+    -- take every page holding the words, they may have stayed out, and they are what the person means. Bounded by
+    -- pages read, not by the clock: for at most three pairs, 5,000 pages holding both words in all (recent years
+    -- first when nothing narrows the search) are checked for the phrase, 150 kept a pair.
+    if drop_n = 0 and capped and coalesce(array_length(pair_qs, 1), 0) > 0 then
+      np := least(array_length(pair_qs, 1), 3);
+      for i in 1..np loop
         insert into find_cand
-          select p.library_id, p.page, p.words, p.year, p.doc_type
-          from public.pages p
-          where p.words @@ sub_q
-            and p.year = y
-            and p.wba_id <> ''
-            and (types is null or p.doc_type = any(types))
-            and (ids is null or p.wba_id = any(ids))
-          limit least(per_year, cap - got)
+          select x.library_id, x.page, x.words, x.year, x.doc_type
+          from (select p.library_id, p.page, p.words, p.year, p.doc_type
+                from public.pages p
+                where p.words @@ (case when phrase_q is null then tqs[i] && tqs[i + 1] else phrase_q && tqs[i] && tqs[i + 1] end)
+                  and p.wba_id <> ''
+                  and (types is null or p.doc_type = any(types))
+                  and (ids is null or p.wba_id = any(ids))
+                  and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
+                  and (not split or p.year >= recent_from)
+                limit 5000 / np) x
+          where x.words @@ pair_qs[i]
+          limit 150
         on conflict do nothing;
         get diagnostics n = row_count;
         got := got + n;
-        exit when got >= cap or clock_timestamp() - t0 > interval '6 seconds';
       end loop;
-      exit levels when got >= cap or clock_timestamp() - t0 > interval '6 seconds';
-    end loop;
+    end if;
     exit levels when got >= need;
   end loop;
   insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile, typed)
     values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), got,
-            extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), drop_n,
+            extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60), drop_n,
             left(array_to_string(words, ' ') || case when coalesce(array_length(phrases, 1), 0) > 0 then ' "' || array_to_string(phrases, '" "') || '"' else '' end, 300),
             left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200), left(typed, 500))
     returning id into lid;
   return query
     with scored as (
-      select c.library_id, c.page, c.year, c.doc_type,
+      select c.library_id, c.page, c.year, c.doc_type, d.wba_id as co, length(c.words) as lexemes,
              (select count(*) from unnest(tqs) tq where c.words @@ tq)::int as matched,
              ts_rank_cd(c.words, or_q, 5) as rel,
              (together_q is not null and c.words @@ together_q) as together,
-             (select count(*) from unnest(pair_qs) pq where c.words @@ pq)::int as pairs
-      from find_cand c),
+             (select count(*) from unnest(pair_qs) pq where c.words @@ pq)::int as pairs,
+             -- the words asked that the document itself is about: its type, its title, and the other names of its
+             -- type ("Nike sustainability" means the Impact Report before a 10-K's risk factors)
+             (select count(*) from unnest(tqs) tq
+              where to_tsvector('simple', coalesce(c.doc_type, '') || ' ' || coalesce(d.label, '') || ' ' || public.type_words(c.doc_type)) @@ tq)::int as in_title
+      from find_cand c
+      join public.documents d on d.library_id = c.library_id),
     weighted as (
       select s.*, (s.rel * public.type_weight(s.doc_type)
                    / (1 + 0.15 * greatest(this_year - coalesce(nullif(s.year, 0), this_year), 0))
                    * power((s.matched + 0.5) / (greatest(nw, 1) + 0.5), 2)
                    * case when s.together then 1.5 else 1.0 end
-                   * (1 + 1.5 * s.pairs))::real as score
+                   * (1 + 1.5 * s.pairs)
+                   * (1 + 2.0 * s.in_title / greatest(nw, 1)))::real as score
       from scored s),
+    single as (
+      -- the same page held twice (a report filed under two types, or harvested twice) shows once: same company and
+      -- year, same number of distinct words and same relevance is the same text
+      select w.*, row_number() over (partition by w.co, w.year, w.lexemes, w.rel order by w.score desc, w.library_id, w.page) as dup
+      from weighted w),
     ranked as (
       select w.*, row_number() over (partition by w.library_id order by w.score desc, w.page) as in_doc
-      from weighted w),
+      from single w
+      where w.dup = 1),
     top as (
       select r.library_id, r.page, r.year, r.doc_type, r.score,
              row_number() over (order by r.score desc, r.year desc, r.library_id, r.page) as rk
@@ -851,6 +925,7 @@ begin
     join public.documents d on d.library_id = t2.library_id
     join public.pages p on p.library_id = t2.library_id and p.page = t2.page
     order by t2.rk;
+  update public.search_log l set ms = extract(epoch from clock_timestamp() - t0)::numeric * 1000 where l.id = lid;   -- the whole search, ranking and excerpts included
 end;
 $$;
 
@@ -931,7 +1006,7 @@ set search_path = public, extensions
 set statement_timeout = '15s'
 as $$
 declare
-  ids text[] := public.companies_matching(company_filter);
+  ids text[] := public.find_company_ids(company_filter);
   attrs text[] := public.types_matching(attribute_filter);
 begin
   if public.search_key_name(key) is null then
@@ -1036,6 +1111,8 @@ revoke all on function public.review_value(text, text, text, text, text, int, in
 grant execute on function public.review_value(text, text, text, text, text, int, int, bigint, text) to authenticated;
 revoke all on function public.search_key_name(text) from public, anon, authenticated;
 revoke all on function public.type_weight(text) from public, anon, authenticated;
+revoke all on function public.type_words(text) from public, anon, authenticated;
+revoke all on function public.find_company_ids(text) from public, anon, authenticated;
 revoke all on function public.find_terms(text) from public, anon, authenticated;
 revoke all on function public.find_word_query(text) from public, anon, authenticated;
 revoke all on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text, text) from public;
