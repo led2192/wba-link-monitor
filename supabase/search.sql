@@ -1185,6 +1185,40 @@ $$;
 revoke all on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) from public, anon;
 grant execute on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) to authenticated;
 
+-- The values people have added for the companies searched, beside the robot's (10 Nov 2026: after adding Nike's
+-- 2025 revenue the panel still said "none", so the same person, or a colleague, could add it again without knowing).
+-- No names: "mine" says whether the caller added it (when the page sends the person's session).
+create or replace function public.find_submissions(
+  key text, company_filter text, year_from int default null, year_to int default null, attribute_filter text default null)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  ids text[] := public.find_company_ids(company_filter);
+  attrs text[] := public.types_matching(attribute_filter);
+  who text := lower(auth.jwt() ->> 'email');
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if ids is null or coalesce(array_length(ids, 1), 0) = 0 or array_length(ids, 1) > 5 then
+    return '[]'::jsonb;
+  end if;
+  return (select coalesce(jsonb_agg(x.j order by x.attribute, x.year desc, x.at desc), '[]'::jsonb) from (
+    select v.attribute, v.year, v.at,
+           jsonb_build_object('id', v.id, 'wba_id', v.wba_id, 'company', coalesce(c.name, v.wba_id), 'attribute', v.attribute, 'year', v.year,
+                              'kind', v.kind, 'value', v.value, 'unit', v.unit, 'answer', v.answer, 'url', v.source_url, 'page', v.source_page,
+                              'at', v.at, 'status', v.status, 'mine', (who is not null and v.reviewer = who)) as j
+    from public.value_submissions v left join public.companies c on c.wba_id = v.wba_id
+    where v.wba_id = any(ids) and (attrs is null or v.attribute = any(attrs)) and v.status <> 'rejected'
+      and (year_from is null or v.year >= year_from) and (year_to is null or v.year <= year_to)
+    order by v.at desc limit 40) x);
+end;
+$$;
+revoke all on function public.find_submissions(text, text, int, int, text) from public;
+grant execute on function public.find_submissions(text, text, int, int, text) to anon, authenticated;
+
 -- "I'm feeling lucky" (10 Nov 2026): one value to review at a time, for a signed-in person. lucky_value picks,
 -- among the values the person has not reviewed, one of those with the fewest reviews, at random, and returns it
 -- with its source and the person's score. The score counts reviews, a review made in under four seconds as a

@@ -71,3 +71,9 @@ def test_the_review_game_is_signed_and_names_no_one():
 
 def test_the_company_card_has_the_website():
     assert "'website', c.website" in SQL
+
+
+def test_added_values_are_shown_without_names():
+    sub = SQL[SQL.index("create or replace function public.find_submissions("):SQL.index("-- \"I'm feeling lucky\"")]
+    assert "public.search_key_name(key) is null" in sub and "'mine'" in sub
+    assert "'reviewer'" not in sub and "to anon, authenticated;" in sub
