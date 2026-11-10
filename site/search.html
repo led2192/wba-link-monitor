@@ -124,6 +124,15 @@
   .values .card { padding: 8px 0 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
   .values .card .name { font-weight: 600; font-size: 15px; color: var(--brand); }
   .values .card a { color: var(--accent); text-decoration: none; }
+  .values .scores { margin-top: 8px; }
+  .values .scores .cap { font-size: 11.5px; color: var(--muted); margin-bottom: 2px; }
+  .values .scores details { font-size: 12.5px; padding: 2px 0; }
+  .values .scores summary { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; list-style: none; }
+  .values .scores summary::-webkit-details-marker { display: none; }
+  .values .scores summary .bn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .values .scores .pl { color: var(--muted); font-size: 11.5px; }
+  .values .scores .ar { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11.5px; padding-left: 10px; }
+  .values .scores details:not([open]) .pl { display: block; }
   .values .subhead { font-size: 12px; color: var(--muted); text-transform: none; padding: 10px 0 2px; border-top: 1px solid var(--line); margin-top: 6px; }
   .lucky { max-width: 760px; margin: 28px auto 0; padding: 26px 30px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--box); box-shadow: 0 6px 24px rgba(0, 25, 75, .06); }
   .lucky .top { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
@@ -139,6 +148,11 @@
   .lucky .verdict { display: flex; gap: 12px; justify-content: center; margin-bottom: 10px; }
   .lucky .verdict button { font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--box); color: var(--fg); cursor: pointer; }
   .lucky .verdict .yes.on { background: #4BB42D; border-color: #4BB42D; color: #fff; } .lucky .verdict .no.on { background: #FF3C23; border-color: #FF3C23; color: #fff; }
+  .lucky .extra { margin: 4px auto 6px; max-width: 520px; font-size: 13px; }
+  .lucky .extra summary { cursor: pointer; color: var(--accent); text-align: center; list-style: none; padding: 4px 0; }
+  .lucky .extra summary::-webkit-details-marker { display: none; }
+  .lucky .extra input, .lucky .extra textarea { font: inherit; font-size: 13.5px; width: 100%; box-sizing: border-box; padding: 8px 10px; margin-top: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); }
+  .lucky .extra .two { display: grid; grid-template-columns: 1fr 90px; gap: 6px; }
   .lucky .nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 12px 0 10px; }
   .lucky .nav button { font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--box); color: var(--fg); cursor: pointer; }
   .lucky .nav .save { background: var(--accent); border-color: var(--accent); color: #fff; padding: 9px 34px; font-weight: 600; }
@@ -237,7 +251,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v15 2026-11-10";
+  const CLIENT = "lantern v16 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -628,6 +642,21 @@
       if (c.website) { const u = /^https?:\/\//i.test(c.website) ? c.website : "https://" + c.website; let host = u; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
                        const a = el("a", null, host + " ↗"); a.href = u; a.target = "_blank"; a.rel = "noopener"; box.append(a); }
       const sum = panel.querySelector("summary"); sum ? sum.after(box) : panel.appendChild(box);
+      // its benchmark results, small, under the card's facts: score, place in the benchmark, place in its industry
+      rpc("find_scores", { key, company: state.company }).then(rows => {
+        if (!rows || !rows.length || !box.isConnected) return;
+        const wrapS = el("div", "scores"); wrapS.append(el("div", "cap", `WBA benchmarks${rows[0].year ? " · " + rows[0].year : ""}`));
+        const ord = n => Number(n).toLocaleString("en");
+        for (const r of rows) {
+          const d = el("details"); const s = el("summary");
+          s.append(el("span", "bn", r.benchmark || r.benchmark_id), el("b", null, r.score !== null && r.score !== undefined ? String(Math.round(Number(r.score) * 10) / 10) : (r.category || "")));
+          const place = [r.rank ? `#${ord(r.rank)} of ${ord(r.of)}` : "", r.industry_rank && r.industry_of > 1 ? `#${ord(r.industry_rank)} of ${ord(r.industry_of)} in ${r.industry}` : ""].filter(Boolean).join(" · ");
+          d.append(s); if (place) d.append(el("div", "pl", place));
+          for (const a of (r.areas || [])) { const line = el("div", "ar"); line.append(el("span", null, a.name || ""), el("span", null, a.score === null || a.score === undefined ? "" : String(Math.round(Number(a.score) * 10) / 10))); d.append(line); }
+          wrapS.append(d);
+        }
+        box.append(wrapS);
+      }).catch(() => {});
     };
     if (!vals || !vals.length) {                             // nothing held: one company still gets the way to add a value
       if (!single && !subs.length) return;
@@ -770,16 +799,30 @@
     if (v.excerpt) { const ex = el("div", "excerpt"); let t = escH(v.excerpt); if (v.needle) t = t.split(escH(v.needle)).join(`<mark>${escH(v.needle)}</mark>`);
                      ex.innerHTML = `<div class="cap">${v.needle ? "The page, around the figure" : "The page (the figure was not found as printed; open the source)"}</div>… ${t} …`; c.appendChild(ex); }
     const verdict = el("div", "verdict"); const yes = el("button", "yes", "✓ Right"), no = el("button", "no", "✗ Wrong"); verdict.append(yes, no); c.appendChild(verdict);
+    // optional help for the team: a note with either verdict; with "wrong", the right value and where it is. Never required.
+    card.extra = card.extra || { correct_value: "", source_url: "", source_page: "", comment: "" };
+    const more = el("details", "extra"); more.open = !!(card.extra.correct_value || card.extra.source_url || card.extra.comment);
+    const moreSum = el("summary", null, "Add a note"); more.appendChild(moreSum);
+    const bind = (node, k) => { node.value = card.extra[k]; node.oninput = () => { card.extra[k] = node.value; if (card.saved) { save.disabled = !card.pick; } }; return node; };
+    const rightV = bind(el("input"), "correct_value"); rightV.placeholder = "The right value, if you know it";
+    const twoX = el("div", "two"); const linkX = bind(el("input"), "source_url"); linkX.placeholder = "Link to the document that has it"; const pgX = bind(el("input"), "source_page"); pgX.placeholder = "Page"; pgX.inputMode = "numeric"; twoX.append(linkX, pgX);
+    const whyX = bind(el("textarea"), "comment"); whyX.rows = 2; whyX.placeholder = "A note for the team";
+    more.append(rightV, twoX, whyX); c.appendChild(more);
     const msg = el("div", "what", card.saved ? `Saved as ${card.saved === "ok" ? "right" : "wrong"}. You can change it and save again.` : "");
     const nav = el("div", "nav"); const prev = el("button", "ghost", "← Previous"), save = el("button", "save", "Save"), next = el("button", "ghost", card.saved ? "Next →" : "Skip →");
     prev.disabled = deck.at <= 0; nav.append(prev, save, next);
-    const paint = () => { yes.classList.toggle("on", card.pick === "ok"); no.classList.toggle("on", card.pick === "wrong"); save.disabled = !card.pick || card.pick === card.saved; };
+    const paint = () => { yes.classList.toggle("on", card.pick === "ok"); no.classList.toggle("on", card.pick === "wrong"); save.disabled = !card.pick || card.pick === card.saved;
+                          const wrong = card.pick === "wrong"; rightV.style.display = twoX.style.display = wrong ? "" : "none";
+                          moreSum.textContent = wrong ? "Add the right value, where it is, or a note (optional)" : "Add a note (optional)"; };
     if (!card.pick && card.saved) card.pick = card.saved; paint();
     yes.onclick = () => { card.pick = card.pick === "ok" ? null : "ok"; paint(); }; no.onclick = () => { card.pick = card.pick === "wrong" ? null : "wrong"; paint(); };
     prev.onclick = () => lucky("prev"); next.onclick = () => lucky("next");
     save.onclick = async () => {
       save.disabled = true;
-      try { const first = !card.saved; await review({ version_id: v.version_id, verdict: card.pick, seconds: Math.round((Date.now() - shownAt) / 1000), client: CLIENT + " lucky" });
+      try { const first = !card.saved; const wrong = card.pick === "wrong", x = card.extra;
+            await review({ version_id: v.version_id, verdict: card.pick, seconds: Math.round((Date.now() - shownAt) / 1000), client: CLIENT + " lucky",
+                           comment: x.comment || null, correct_value: wrong ? (x.correct_value || null) : null, source_url: wrong ? (x.source_url || null) : null,
+                           source_page: wrong ? (parseInt(x.source_page, 10) || null) : null });
             card.saved = card.pick; if (first) { deck.score = Object.assign({}, deck.score, { points: Number(deck.score.points || 0) + 1, reviews: Number(deck.score.reviews || 0) + 1 }); } showMine(false); lucky("next"); }
       catch (e) { msg.textContent = `Not saved: ${e.message}`; paint(); }
     };
@@ -788,7 +831,7 @@
     c.append(msg, nav, foot); box.appendChild(c);
   }
   document.addEventListener("keydown", e => {
-    if (deck.at < 0 || !document.querySelector("#results .lucky") || /INPUT|TEXTAREA|SELECT/.test((e.target || {}).tagName || "")) return;
+    if (deck.at < 0 || !document.querySelector("#results .lucky") || /INPUT|TEXTAREA|SELECT/.test((e.target || {}).tagName || "")) return;   // typing in the note moves nothing
     if (e.key === "ArrowLeft") lucky("prev"); else if (e.key === "ArrowRight") lucky("next");
   });
 
