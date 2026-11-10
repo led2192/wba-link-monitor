@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 The nightly Propose values reads doubtful answers with the whole document (`propose_values.py --escalate whole`, now the default) and its cap goes from 1.5 to 5 USD a night: the owner's decision after +3.9 points on the pilots and +7.7 on held-out attributes, none worse. The pull-request dry run keeps `--escalate none`. (#383)
 - 2026-11-10 lanterN's home screen: the Search button beside the box is gone (Enter searches); two buttons sit under the box, "Search with lanterN" and "I'm feeling lucky"; the filter funnel stays. (#381)
 - 2026-11-10 lanterN "I'm feeling lucky" is a card in the middle of the page (the home screen sits lower, the box exactly centred): company with industry and country, attribute and year, the value large and in full, how it was read (as printed, column heading), the document and a link to its page, how many other readings agree or differ, and the lines of the page around the figure (`lucky_value` returns `excerpt` and `needle`). A verdict is chosen, then saved with Save; Previous and Skip/Next (and the arrow keys) move through the session's cards, and a saved verdict can be changed. No adding of values from the card. (#381)
 - 2026-11-10 Measured `--escalate whole` on the held-out number attributes (runs 42852910575 and 42852932865, both stopped early when the model credit ran out): 91 paired answers, 24% to 32%, 7 fixed and none broken, +7.7 points (p 0.016). Recorded in `docs/decisions.md`. (#381)

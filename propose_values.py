@@ -333,12 +333,23 @@ def parse_months(text):
 REFUSED = []      # the API's refusal, when one stopped the model reader (written first, then the run fails)
 
 
+def set_reader_options(a):
+    """The reader options this run asked for, set on extract_eval (read_values reads them as module settings).
+    --escalate whole is the default since 10 Nov 2026: a doubtful answer (no figure, or a figure printed on one
+    page only) gets the whole document in chunks. Measured +3.9 points on the pilot attributes and +7.7 on held-out
+    ones, none worse; it costs several times more per doubtful answer, so the nightly cap went from 1.5 to 5 USD."""
+    import extract_eval
+    extract_eval.ESCALATE = getattr(a, "escalate", "whole") or "none"
+    return extract_eval.ESCALATE
+
+
 def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
     """Model-reader proposals for the companies, attributes and years asked. Revenue is skipped for a
     company and year that already has a SEC or ESEF row: the filing is the better source."""
     import psycopg
     from extract_eval import read_values, proposal_consensus
     from model_reader import cost
+    c[f"model reader: second level {set_reader_options(a)}"] += 0
     if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
         c["model reader: no ANTHROPIC_API_KEY"] += 1
         return []
@@ -577,6 +588,8 @@ def main():
     ap.add_argument("--fy-months", default="", help="model reader: only companies whose fiscal year ends in these months, "
                     "e.g. 1-6 or 3,6 (blank = every company); for the re-read after the fiscal-year fix of 2 Nov 2026")
     ap.add_argument("--fill-links", action="store_true", help="only give existing model-reader rows their evidence_link, then stop")
+    ap.add_argument("--escalate", choices=["none", "whole"], default="whole", help="model reader: a doubtful answer (no figure, or one printed on "
+                    "one page only) gets the whole document in chunks (default since 10 Nov 2026); none = the 16 pages only")
     ap.add_argument("--shard", default="", help="i/N: only the i-th of N slices of the companies (parallel jobs)")
     a = ap.parse_args()
     shard_i, shard_n = (int(x) for x in a.shard.split("/")) if a.shard else (1, 1)
