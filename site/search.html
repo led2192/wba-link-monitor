@@ -105,8 +105,10 @@
   .values .fix { grid-column: 1 / -1; display: grid; gap: 6px; margin-top: 4px; }
   .values .fix input:not([type=checkbox]), .values .fix select, .values .fix textarea, .values .sign input { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
   .values .fix .two { display: grid; grid-template-columns: 1fr 80px; gap: 6px; }
-  .values .fix .three { display: grid; grid-template-columns: minmax(0, 1fr) 104px 76px; gap: 6px; }
-  .values .fix .three > input:last-child, .values .fix .two > input:nth-child(3) { grid-column: 1 / -1; }
+  .values .fix .three { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .values .fix .three > input { grid-column: 1 / -1; }
+  .values .fix .two > input:nth-child(3) { grid-column: 1 / -1; }
+  .values .fix .lab { font-size: 12px; color: var(--muted); margin: 4px 0 -3px; }
   .values .fix .unit { align-self: center; color: var(--muted); font-size: 13px; }
   .values .fix.add { padding: 10px; margin: 2px 0 10px; border: 1px solid var(--line); border-radius: 10px; }
   .values .addrow { margin: 8px 0 4px; }
@@ -188,7 +190,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v11 2026-11-10";
+  const CLIENT = "lantern v12 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -497,7 +499,8 @@
       const head = el("div", "what", `A value for ${state.companyName || state.company}`);
       const sel = el("select"); for (const [code, name] of ATTRS) { const o = el("option", null, name); o.value = code; sel.appendChild(o); }
       if (attrs.length) sel.value = attrs[0];
-      const yr = el("input"); yr.placeholder = "Reporting year"; yr.inputMode = "numeric"; if (state.from && state.from === state.to) yr.value = state.from;
+      const lab = t => el("label", "lab", t);
+      const yr = el("input"); yr.placeholder = "e.g. 2025"; yr.inputMode = "numeric"; if (state.from && state.from === state.to) yr.value = state.from;
       const field = el("div"); let read = () => null;
       const draw = () => {
         field.innerHTML = ""; field.className = ""; const k = ATTR_FORM[sel.value] || { kind: "number" };
@@ -508,7 +511,7 @@
           const boxes = (k.options || []).map(o => { const l = el("label"); const c = el("input"); c.type = "checkbox"; c.value = o; l.append(c, document.createTextNode(" " + o)); field.appendChild(l); return c; });
           read = () => { const picked = boxes.filter(c => c.checked).map(c => c.value); return picked.length ? { kind: "choice", answer: picked.join("; ") } : null; };
         } else {
-          const num = el("input"); num.placeholder = k.scales ? "The figure as printed, e.g. 46,309" : "The figure, e.g. 77,800"; num.inputMode = "decimal";
+          const num = el("input"); num.placeholder = k.scales ? "e.g. 46,309" : "e.g. 77,800"; num.inputMode = "decimal";
           const pick = (items) => { const s = el("select"); for (const it of items) { const o = el("option", null, Array.isArray(it) ? it[0] : it); o.value = Array.isArray(it) ? it[1] : it; s.appendChild(o); } return s; };
           const scale = k.scales ? pick(k.scales) : null;
           const units = (k.units || []).length > 1 ? pick([...k.units, "other"]) : null;
@@ -524,8 +527,8 @@
         }
       };
       sel.onchange = draw; draw();
-      const two = el("div", "two"); const link = el("input"); link.placeholder = "Link to the document that prints it"; const pg = el("input"); pg.placeholder = "Page"; pg.inputMode = "numeric"; two.append(link, pg);
-      const why = el("textarea"); why.rows = 2; why.placeholder = "A note for the team (optional)";
+      const two = el("div", "two"); const link = el("input"); link.placeholder = "https://…"; const pg = el("input"); pg.placeholder = "Page"; pg.inputMode = "numeric"; two.append(link, pg);
+      const why = el("textarea"); why.rows = 2; why.placeholder = "Optional";
       const msg = el("div", "what", "");
       const go = el("button", null, "Add the value");
       const send = async () => {
@@ -542,7 +545,7 @@
       go.onclick = send;
       const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
       const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
-      f.append(head, sel, yr, field, two, why, msg, acts); wrap.after(f); yr.value ? field.querySelector("input, select").focus() : yr.focus();
+      f.append(head, lab("Attribute"), sel, lab("Reporting year"), yr, lab("Value, as the document prints it"), field, lab("Link to the document that prints it, and the page"), two, lab("A note for the team"), why, msg, acts); wrap.after(f); yr.value ? field.querySelector("input, select").focus() : yr.focus();
     };
   }
   async function loadValues() {
@@ -647,7 +650,7 @@
     if (!got) { panel.append(el("div", "note", "Could not fetch a value. Try again in a moment.")); return; }
     const sc = got.score || {}; const pts = Number(sc.points || 0);
     const next = BADGES.slice().reverse().find(b => pts < b[0]);
-    panel.append(el("div", "score", `${pts % 1 ? pts.toFixed(2) : pts} points · ${badge(pts)}` + (sc.reviewers > 1 && sc.reviews ? ` · #${sc.rank} of ${sc.reviewers} reviewers` : "") + (next ? ` · ${Math.ceil(next[0] - pts)} to ${next[1]}` : "")));
+    panel.append(el("div", "score", `${pts % 1 ? pts.toFixed(2) : pts} ${pts === 1 ? "point" : "points"} · ${badge(pts)}` + (sc.reviewers > 1 && sc.reviews ? ` · #${sc.rank} of ${sc.reviewers} reviewers` : "") + (next ? ` · ${Math.ceil(next[0] - pts)} to ${next[1]}` : "")));
     const v = got.value;
     if (!v) { panel.append(el("div", "note", "You have reviewed every value we hold. Thank you.")); showMine(false); return; }
     const shownAt = Date.now(); const row = el("div", "v"); const left = el("div");
