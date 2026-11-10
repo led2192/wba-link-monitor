@@ -5,6 +5,12 @@ name: Search check
 # pull requests that touch the search functions (so they are in place), and by hand.
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = the sample searches; timing = where a lanterN search spends its time (search_timing.py)"
+        type: choice
+        options: [check, timing]
+        default: check
   pull_request:
     paths: [search_check.py, supabase/search.sql, .github/workflows/search_check.yml]
 
@@ -27,7 +33,8 @@ jobs:
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           QA_COMMIT: "true"
-        run: python search_check.py
+        run: |
+          if [ "${{ inputs.mode }}" = "timing" ]; then python search_timing.py; else python search_check.py; fi
       - name: Post the result on the pull request
         if: github.event_name == 'pull_request' && always()
         run: |
