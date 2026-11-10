@@ -17,6 +17,12 @@ no API, no cost) and writes them to public.chunks with their embedding; public.c
 done, so a run stopped by its time cap loses nothing and the next run continues. The e5 models want the text
 prefixed "passage: " when indexed and "query: " when searched; both are here (embed_passages, embed_query).
 
+In the same pass (the pages are read once) it writes each page's neighbouring-word pairs to public.page_pairs
+("scope 1" -> scope_1, "act core" -> act_core), with a word index on them. lanterN's word index knows which
+pages hold two words, not whether they stand together: a phrase had to be checked page by page, a millisecond
+each from disk, so a rare phrase of two common words ("ACT Core") was searched in a sample and could find
+nothing (10 Nov 2026). With the pairs, a phrase is one index question. Same scope as the passages.
+
     python semantic_index.py [--commit] [--limit N] [--minutes M] [--partition k/N] [--years 2024-] [--batch 64]
 
 Dry run by default: reads --limit documents (20), cuts and embeds them, prints counts, throughput and
@@ -84,6 +90,32 @@ def chunk_pages(pages):
     return out
 
 
+PAIR_WORD = __import__("re").compile(r"[^\W_]+", __import__("re").UNICODE)
+MAX_PAIR_WORD = 40                           # a longer run of letters is a broken extraction, not a word
+
+
+def pair_lexemes(text):
+    """The neighbouring-word pairs of a page, as lexemes 'word_word' in lower case, sorted and unique.
+    Words are runs of letters and digits, as the 'simple' text configuration cuts them ("Scope 1" -> scope_1)."""
+    words = PAIR_WORD.findall((text or "").lower())
+    return sorted({f"{a}_{b}" for a, b in zip(words, words[1:]) if len(a) <= MAX_PAIR_WORD and len(b) <= MAX_PAIR_WORD})
+
+
+def pairs_literal(lexemes):
+    """A tsvector literal from lexemes (letters, digits and '_' only, so quoting is enough)."""
+    return " ".join("'" + x.replace("'", "") + "'" for x in lexemes)
+
+
+def pair_rows(pages):
+    """[(page, tsvector literal)] for one document's [(page, text)]; pages without two words are left out."""
+    out = []
+    for page, text in pages:
+        lex = pair_lexemes(text)
+        if lex:
+            out.append((page, pairs_literal(lex)))
+    return out
+
+
 def vector_literal(v):
     """A pgvector literal from a sequence of floats."""
     return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
@@ -106,8 +138,13 @@ class Embedder:
         return self.model.encode(["query: " + text], normalize_embeddings=True, show_progress_bar=False)[0]
 
 
-def write_document(cur, lid, chunks, vectors, model):
-    """The document's chunks with their embeddings, then its done-marker. One transaction per document (the caller commits)."""
+def write_document(cur, lid, chunks, vectors, model, pairs=None):
+    """The document's chunks with their embeddings, its pages' word pairs (pairs: [(page, tsvector literal)], when the
+    page_pairs table exists), then its done-marker. One transaction per document (the caller commits)."""
+    for i in range(0, len(pairs or []), INSERT_BATCH):
+        cur.executemany("insert into public.page_pairs (library_id, page, pairs) values (%s, %s, %s::tsvector) "
+                        "on conflict (library_id, page) do update set pairs = excluded.pairs",
+                        [(lid, page, lit) for page, lit in pairs[i:i + INSERT_BATCH]])
     rows = [(lid, page, n, body, vector_literal(v), model) for (page, n, body), v in zip(chunks, vectors)]
     for i in range(0, len(rows), INSERT_BATCH):
         cur.executemany("insert into public.chunks (library_id, page, n, body, embedding, model) values (%s, %s, %s, %s, %s::extensions.vector, %s) "
@@ -136,11 +173,13 @@ def main():
     t0 = time.time()
     years, partition = parse_years(a.years), parse_partition(a.partition)
     emb = Embedder(a.model, a.batch)
-    done, n_chunks, n_pages, examples, stopped = 0, 0, 0, [], None
+    done, n_chunks, n_pages, n_pairs, examples, stopped = 0, 0, 0, 0, [], None
     embed_s = 0.0
     with evidence_db.connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '120s'")
+        cur.execute("select to_regclass('public.page_pairs') is not null")
+        has_pairs = cur.fetchone()[0]                          # the table arrives with a full Evidence database load
         docs = documents_to_index(cur, years, partition, a.limit if a.limit else 1_000_000)
         print(f">>> {len(docs):,} documents to index (years {a.years}, slice {partition[0]}/{partition[1]}), model {a.model}", flush=True)
         for lid, year, dtype, pages_n in docs:
@@ -158,10 +197,11 @@ def main():
             t1 = time.time()
             vectors = emb.embed_passages([c[2] for c in chunks])
             embed_s += time.time() - t1
+            prs = pair_rows(pages)
             if a.commit:
-                write_document(cur, lid, chunks, vectors, a.model)
+                write_document(cur, lid, chunks, vectors, a.model, prs if has_pairs else None)
                 conn.commit()
-            done += 1; n_chunks += len(chunks); n_pages += len(pages)
+            done += 1; n_chunks += len(chunks); n_pages += len(pages); n_pairs += sum(p.count(" ") + 1 for _, p in prs)
             if len(examples) < 5:
                 examples.append((lid, year, dtype, len(pages), len(chunks), chunks[min(2, len(chunks) - 1)][2][:140]))
             if done % 50 == 0:
@@ -170,6 +210,7 @@ def main():
     md = [f"### Semantic index ({'written' if a.commit else 'dry run'})", "",
           f"{done:,} documents, {n_pages:,} pages, {n_chunks:,} chunks in {secs / 60:.1f} min ({n_chunks / max(embed_s, 1e-9):.0f} chunks/s embedding, "
           f"{n_chunks / max(secs, 1e-9):.0f} chunks/s in all); model {a.model}, {DIMS} dimensions; years {a.years}, slice {partition[0]}/{partition[1]}."
+          + f" Word pairs: {n_pairs:,} ({n_pairs / max(n_pages, 1):.0f} a page){'' if has_pairs else '; the page_pairs table is not there yet, none written'}."
           + (f" {stopped}." if stopped else ""), ""]
     if examples:
         md += ["Examples (library_id, year, type, pages, chunks, a chunk):", ""] + [f"- {l} | {y} | {t} | {p} | {c} | {x}" for l, y, t, p, c, x in examples]
@@ -179,7 +220,7 @@ def main():
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(out + "\n")
     run.finish("ok", rows_in=done, rows_out=n_chunks if a.commit else 0,
-               counters={"documents": done, "pages": n_pages, "chunks": n_chunks, "chunks_per_s": round(n_chunks / max(embed_s, 1e-9)),
+               counters={"documents": done, "pages": n_pages, "chunks": n_chunks, "pairs": n_pairs, "chunks_per_s": round(n_chunks / max(embed_s, 1e-9)),
                          "minutes": round(secs / 60, 1), "slice": a.partition or "0/1", "years": a.years},
                notes=stopped or ("written" if a.commit else "dry run"))
     return 0
