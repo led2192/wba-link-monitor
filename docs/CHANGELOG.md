@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-10 Propose values runs after the night's Evidence database load (workflow_run, about 02:20 UTC; the evening load and a failed load are skipped); the 05:07 UTC cron stays as a fallback. GitHub had not fired the cron by 07:00 on its first night (#PRNUM)
+- 2026-11-10 Propose values runs after the night's Evidence database load (workflow_run, about 02:20 UTC; the evening load and a failed load are skipped); the 05:07 UTC cron stays as a fallback. GitHub had not fired the cron by 07:00 on its first night (#346)
 - 2026-11-10 Reranker measured (run 42751149675): -0.8 points against the hand ranking, chance; closed with the map and navigation; the seven-ideas round is closed (decisions.md). Pitfalls: empty replies from a short output limit; GitHub schedules hours late (#345)
 - 2026-11-10 Type covers rules after reading the disagreements of the fourth check: full-year results releases are Financial Statement, earnings call transcripts Interim Reports, modern slavery statements, exchange announcements and regulatory disclosures Statutory Documents, slides Company Presentations whatever the title (#344)
 - 2026-11-10 Type covers `--check` lists the first 30 disagreements with both types, the title and the start of the cover, so that a person can say which reader is right (third check: 69 % agreement on 300, 0 unusable replies once the output limit was 1,000 tokens) (#343)
