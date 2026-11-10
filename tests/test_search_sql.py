@@ -4,6 +4,7 @@ import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 SQL = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase", "search.sql"), encoding="utf-8").read()
+PAGE = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
 FIND = SQL[SQL.index("create or replace function public.find_pages("):SQL.index("-- A click on a result")]
 
 
@@ -130,3 +131,18 @@ def test_added_sources_are_signed_checked_and_one_per_person():
     assert "on conflict on constraint source_submissions_one_per_person do nothing" in src
     assert "to authenticated;" in src and "from public, anon;" in src
     assert "select ss.reviewer, 3, 0 from public.source_submissions ss where ss.status = 'queued'" in SQL   # three points once passed on
+
+
+def test_company_names_are_read_without_accents_and_with_separators():
+    parse = PAGE[PAGE.index("function parse(text)"):PAGE.index("function setStatus")]
+    assert 'normalize("NFD")' in parse and "fold(c.name)" in parse                # "Nestlé" is the company "Nestle"
+    assert "(?:'s)?[;,]?(?=\\\\s)" in parse                                        # "Unilever; Nestlé living wage"
+
+
+def test_no_grey_globe_for_a_company_without_an_icon():
+    icon = PAGE[PAGE.index("function companyIcon"):PAGE.index("function companyIcon") + 1400]
+    assert "img.naturalWidth < 32" in icon and "img.remove()" in icon
+
+
+def test_longer_documents_first_within_a_year_and_type():
+    assert FIND.count("coalesce(array_position(types, d.doc_type), 99), coalesce(d.pages, 0) desc, d.company") == 2

@@ -285,7 +285,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v23 2026-11-10";
+  const CLIENT = "lantern v24 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -384,13 +384,24 @@
     }
     for (const [code, names] of Object.entries(COUNTRIES)) { if (take([...names, code])) { found.country = code; found.countryName = names[0]; break; } }
     for (const reg of regions) { if (take([reg, reg.replace(/ & /g, " and "), ...(REGION_ALIASES[reg] || [])])) { found.region = reg; break; } }
+    // Company names are matched without accents and whatever the case ("Nestlé" is the company "Nestle", "Loreal" is
+    // "L'Oréal": 10 Nov 2026), and a name may be followed by a comma or a semicolon ("Unilever; Nestlé living wage").
+    const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     const hits = [];
     const byLength = companies.filter(c => (c.name || "").length >= 4).sort((a, b) => b.name.length - a.name.length);
+    let fq = fold(q); const sameLength = () => fq.length === q.length;
+    if (!sameLength()) { q = fq; }                                      // a letter that folds to two: search the folded text
     for (const c of byLength) {
-      const re = new RegExp("\\s" + esc(c.name) + "(?:'s)?\\s", "i");
-      if (re.test(q)) { hits.push(c); q = q.replace(re, " "); }
+      const name = fold(c.name).toLowerCase();
+      if (!fq.toLowerCase().includes(name)) continue;      // the cheap test first: 2,000 names a keystroke
+      const m = new RegExp("\\s" + esc(name) + "(?:'s)?[;,]?(?=\\s)", "i").exec(fq);
+      if (!m) continue;
+      hits.push(c);
+      q = q.slice(0, m.index) + " " + q.slice(m.index + m[0].length);
+      fq = fq.slice(0, m.index) + " " + fq.slice(m.index + m[0].length);
       if (hits.length >= 6) break;
     }
+    if (hits.length) q = q.replace(/\s[;,](?=\s)/g, " ");
     if (hits.length) { found.company = hits.map(c => c.id).join(";"); found.companyName = hits.map(c => c.name).join(", "); }
     const years = [];
     q = q.replace(/\s(20[0-3]\d)\s*[-–]\s*(20[0-3]\d)(?=\s)/g, (m, a, b) => { years.push(+a, +b); return " "; });
@@ -454,7 +465,10 @@
     let host = ""; try { host = new URL(/^https?:\/\//i.test(c.website) ? c.website : "https://" + c.website).hostname.replace(/^www\./, ""); } catch (e) { return null; }
     if (!host) return null;
     const img = el("img", "ico"); img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer"; img.width = img.height = 18;
-    img.src = `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`; img.onerror = () => img.remove();
+    // (the service answers a site it has no icon for with a small grey globe, not an error: that one is 16 pixels
+    // wide where a real icon asked for at 64 is larger, and it is taken away. 10 Nov 2026: four grey globes in a list)
+    img.src = `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(host)}`;
+    img.onerror = () => img.remove(); img.onload = () => { if (img.naturalWidth < 32) img.remove(); };
     return img;
   }
   // How long each document is: one small question for the documents on screen, answered after the results are shown.
