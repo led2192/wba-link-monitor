@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 lanterN Ask finds the http extension in whatever schema it is installed (it was enabled in this project outside `extensions`, so Ask reported it missing). (#389)
 - 2026-11-10 lanterN Ask says why it is not switched on (the http extension missing, the vault unreadable, or no secret of that name). (#388)
 - 2026-11-10 lanterN "Ask" (a button inside the search box): a signed-in WBA address asks a question, the database finds the pages with the search's own ranking, sends the first 3,000 characters of the best six to the reader model (Haiku) and returns an answer of at most 120 words that cites them, shown above the results with its sources. Three answered questions a day a person (UTC), counted in `ask_log` with the tokens. The call is made from the database (`http` extension) with a key read from Supabase Vault (`anthropic_api_key`); until the owner adds that secret, Ask says it is not switched on. (#387)
 - 2026-11-10 lanterN's company card shows the benchmark results: the twelve benchmarks of 2025 are in `published_benchmarks` (the owner: all are published). The Search check workflow runs by hand only: on pull requests it held `search_log` and made the functions-only install fail on its lock timeout. (#386)
