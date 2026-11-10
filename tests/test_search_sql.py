@@ -112,3 +112,8 @@ def test_documents_come_in_the_order_the_types_were_asked():
 def test_document_sizes_need_the_key_and_are_bounded():
     dp = SQL[SQL.index("create or replace function public.doc_pages("):SQL.index("-- \"Ask\" (10 Nov 2026")]
     assert "public.search_key_name(key) is null" in dp and "ids[1:200]" in dp
+
+
+def test_recent_pages_and_whole_matches_come_first():
+    assert "power(0.75, least(greatest(this_year - coalesce(nullif(s.year, 0), this_year - 3), 0), 12))" in FIND     # a quarter less a year; undated = 3 years
+    assert "power(s.rel, 0.5)" in FIND                                                                                 # repetition counts less
