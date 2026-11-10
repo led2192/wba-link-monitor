@@ -77,3 +77,8 @@ def test_added_values_are_shown_without_names():
     sub = SQL[SQL.index("create or replace function public.find_submissions("):SQL.index("-- \"I'm feeling lucky\"")]
     assert "public.search_key_name(key) is null" in sub and "'mine'" in sub
     assert "'reviewer'" not in sub and "to anon, authenticated;" in sub
+
+
+def test_my_reviews_carries_the_score_for_the_level():
+    mine = SQL[SQL.index("create or replace function public.my_reviews("):]
+    assert "'score', public.review_score(who)" in mine[:1500]
