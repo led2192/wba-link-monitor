@@ -236,22 +236,9 @@ def main():
     from urllib.parse import quote
 
     def count_rows(table):
-        """Rows of a table, fetched with no fields at all (fields[]=''), the cheap count base_health uses; a full-record
-        sweep of monitored_links timed out six times in a row on 9 Nov 2026 (run 42653341821). Some tables answer 422
-        to the empty field (webpage_library, run 42655198793): those fall back to the full sweep, and a count that
-        still fails is reported as 0 with a note rather than failing the report."""
-        n, offset = 0, None
-        try:
-            while True:
-                p = [("pageSize", "100"), ("fields[]", "")] + ([("offset", offset)] if offset else [])
-                j = req("GET", f"{API}/{BASE}/{quote(table)}", params=p).json()
-                n += len(j.get("records", []))
-                offset = j.get("offset")
-                if not offset:
-                    return n
-                time.sleep(0.12)
-        except Exception as e:
-            print(f"    cheap count of {table} failed ({type(e).__name__}); counting the full records", flush=True)
+        """Rows of a table, counted from a sweep with no fields. The cheap count with fields[]='' that base_health uses
+        answered 422 on every table here (9 Nov 2026, runs 42655198793 and 42707648767), so it is not tried; a count
+        that fails is reported as 0 with a note rather than failing the report."""
         try:
             return sum(1 for _ in sweep(table, []))
         except Exception as e:

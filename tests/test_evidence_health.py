@@ -33,6 +33,12 @@ class EvidenceHealth(unittest.TestCase):
         md = E.report_md({"documents": 100}, DOCS, PMAP, VALS, 0, [("map_years", "x")], date(2026, 11, 9))
         self.assertIn("1 check(s) failed", md); self.assertIn("**map_years**", md); self.assertNotIn("—", md)
 
+    def test_the_documents_without_pages_are_listed(self):
+        docs = dict(DOCS, ok_without_pages=1, ok_without_pages_sample=[("PT_1-abc", 2024, "", 0, 0, "", "", "2026-11-09")])
+        md = E.report_md({"documents": 100}, docs, PMAP, VALS, 0, [], date(2026, 11, 10))
+        self.assertIn("- PT_1-abc | 2024 | (no type) | 0 | 0 | (none) | ? | 2026-11-09", md)
+        self.assertNotIn("newest documents", E.report_md({"documents": 100}, DOCS, PMAP, VALS, 0, [], date(2026, 11, 10)))
+
 
 if __name__ == "__main__":
     unittest.main()
