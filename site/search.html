@@ -144,7 +144,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v2 2026-11-10";
+  const CLIENT = "lantern v2a 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -275,7 +275,7 @@
       state.type = parsed.type || ($("fType").value || null);
       state.rows = 50;
     } else if (!more) { state.rows = 50; }
-    if (!state.q && !more) { setStatus("Type a word or a phrase."); return; }
+    if (!state.q && !more && !(state.company || state.type || state.from || state.to)) { setStatus("Type a word or a phrase."); return; }
     $("head").classList.remove("home");
     renderChips();
     setStatus("Searching…");
@@ -284,7 +284,8 @@
       const rows = await rpc("find_pages", { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
                                              type_filter: state.type, max_rows: state.rows, client: CLIENT });
       const s = ((performance.now() - t0) / 1000).toFixed(1);
-      if (!rows.length) setStatus(`No page holds ${state.q.includes('"') ? "that phrase" : "those words, even one or two of them,"}${state.company || state.type || state.from ? " with these filters" : ""}. (${s} s)`);
+      if (!rows.length) setStatus(state.q ? `No page holds ${state.q.includes('"') ? "that phrase" : "those words, even one or two of them,"}${state.company || state.type || state.from ? " with these filters" : ""}. (${s} s)` : `No document matches these filters. (${s} s)`);
+      else if (!state.q) setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} documents, newest first. (${s} s)`);
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
