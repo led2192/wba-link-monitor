@@ -48,6 +48,20 @@
   footer a:hover { color: var(--accent); }
   form.box { display: flex; gap: 0; width: 100%; margin: 14px 0 6px; align-items: stretch; }
   header.home + form.box { max-width: 640px; margin: 26px auto 10px; }
+  .box .qwrap { position: relative; flex: 1; display: flex; min-width: 0; }
+  .box .qwrap input[type=search] { padding-right: 96px; }
+  .box .askbtn { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 13.5px;
+                 padding: 6px 12px 6px 9px; border: 0; border-radius: 999px; background: var(--chip); color: var(--fg); cursor: pointer; }
+  .box .askbtn:hover { box-shadow: 0 0 0 1px var(--line); }
+  .box .askbtn svg { width: 16px; height: 16px; color: var(--accent); }
+  .answer { max-width: 760px; margin: 10px 0 14px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--box); }
+  .answer .cap { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .answer .text { font-size: 15px; line-height: 1.6; white-space: pre-wrap; }
+  .answer .text a { color: var(--accent); text-decoration: none; font-size: 12px; vertical-align: super; }
+  .answer ol { margin: 10px 0 0; padding-left: 20px; font-size: 12.5px; color: var(--muted); }
+  .answer ol a { color: var(--accent); text-decoration: none; }
+  .answer .what { font-size: 13.5px; color: var(--muted); }
+  .answer .values { border: 0; padding: 0; margin-top: 8px; display: block; position: static; width: auto; }
   .box .funnel { flex: none; margin-left: 10px; width: 44px; border: 1px solid transparent; background: none; color: var(--muted); border-radius: 22px;
                  cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
   .box .funnel:hover, .box .funnel[aria-expanded="true"] { color: var(--accent); border-color: var(--line); background: var(--box); }
@@ -218,7 +232,12 @@
   </header>
   <div class="boxwrap" id="boxwrap">
   <form class="box" id="form" autocomplete="off">
-    <input id="q" type="search" placeholder="Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
+    <span class="qwrap">
+      <input id="q" type="search" placeholder="Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
+      <button type="button" class="askbtn" id="askBtn" title="Ask: an answer written from the pages found, with its sources. Three questions a day.">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.900 5.300L19 10l-5.100 1.700L12 17l-1.900-5.300L5 10l5.100-1.700z" fill="currentColor"/><path d="M19 15l.8 2.200L22 18l-2.200.8L19 21l-.8-2.200L16 18l2.200-.8z" fill="currentColor"/></svg>Ask
+      </button>
+    </span>
     <button type="submit" hidden>Search</button>
     <button type="button" class="funnel" id="funnel" aria-expanded="false" aria-controls="filters" title="Filters: company, years, document type">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>
@@ -240,6 +259,7 @@
       <select id="fType"><option value="">Any document type</option></select>
     </div>
   </div>
+  <div id="answer"></div>
   <div class="status" id="status"></div>
   <details class="values" id="values" hidden open></details>
   <div class="strip" id="strip"></div>
@@ -251,7 +271,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v16 2026-11-10";
+  const CLIENT = "lantern v17 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -866,7 +886,39 @@
   $("q").addEventListener("input", renderHistory);
   $("q").addEventListener("blur", () => setTimeout(closeHistory, 120));
   $("q").addEventListener("keydown", e => { if (e.key === "Escape") closeHistory(); });
-  $("form").addEventListener("submit", e => { e.preventDefault(); closeHistory(); search(false); });
+  $("form").addEventListener("submit", e => { e.preventDefault(); closeHistory(); $("answer").innerHTML = ""; search(false); });
+  // Ask: the question goes to the database, which finds the pages (the same search), gives the first lines of the best six
+  // to the reader model and returns an answer that cites them. Signed in; three questions a day a person (counted there).
+  async function ask() {
+    const text = $("q").value.trim(), box = $("answer"); box.innerHTML = ""; const c = el("div", "answer"); box.appendChild(c);
+    const cap = el("div", "cap"); cap.append(el("span", null, "Ask · an answer written from the pages found"), el("span", null, "")); c.appendChild(cap);
+    const note = el("div", "what", ""); c.appendChild(note);
+    if (text.length < 8) { note.textContent = "Type a question in the box first, for example: What were Unilever’s scope 1 emissions in 2024?"; return; }
+    $("head").classList.remove("home"); closeHistory();
+    const t = await token();
+    if (!t) { note.textContent = "Ask answers from the pages lanterN finds and shows its sources. Three questions a day; sign in with your WBA address.";
+              const hold = el("div", "values"); c.appendChild(hold); signInBox(hold, ask); return; }
+    note.textContent = "Reading the pages…";
+    search(false);                                           // the results under the answer, as for any search; it also reads the filters in the box
+    let j = null;
+    try {
+      const r = await fetch(`${CONFIG.url}/rest/v1/rpc/ask`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ key, question: text, q: state.q || null, company_filter: state.company || null, year_from: state.from || null, year_to: state.to || null, type_filter: state.type || null, client: CLIENT }) });
+      j = await r.json().catch(() => ({})); if (!r.ok) j = { error: j.message || `HTTP ${r.status}` };
+    } catch (e) { j = { error: e.message }; }
+    const left = typeof j.left === "number" ? `${j.left} of ${j.per_day || 3} questions left today` : ""; cap.lastChild.textContent = left;
+    if (j.off) { note.textContent = "Ask is not switched on yet: the model key is not in the database’s vault."; return; }
+    if (j.limit) { note.textContent = `You have asked today’s ${j.per_day || 3} questions. They come back at midnight UTC; the search below still works.`; return; }
+    if (j.none) { note.textContent = "No page was found for this question. Try other words, or name the company and the year."; return; }
+    if (j.error || !j.answer) { note.textContent = `No answer: ${j.error || "the model returned nothing"}. This one does not count.`; return; }
+    note.remove(); const src = j.sources || [];
+    const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : m; });
+    c.appendChild(body);
+    const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; li.appendChild(a); ol.appendChild(li); }
+    c.append(ol, el("div", "what", "Written by a model from these pages only. Check the source before using a figure."));
+  }
+  const pageUrl = s => !s.url ? "#" : (/#/.test(s.url) ? s.url : `${s.url}#page=${s.page || 1}`);
+  $("askBtn").onclick = ask;
   $("funnel").addEventListener("click", () => { const f = $("filters"); f.hidden = !f.hidden; $("funnel").setAttribute("aria-expanded", String(!f.hidden)); if (!f.hidden) $("fCompany").focus(); });
   for (const id of ["fCompany", "fFrom", "fTo", "fType"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) search(false); });
   $("foot").insertAdjacentHTML("beforebegin", '<div style="text-align:center;font-size:13px;margin-top:auto;padding-top:40px"><span id="luckyWrap"><a href="#" id="lucky">I’m feeling lucky</a><span class="sep"> · </span></span><span id="mine"></span></div>');
