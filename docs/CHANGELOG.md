@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-10 lanterN reads industries, countries and regions typed in the box as filters (over `companies`), expands query synonyms from `search_synonyms` (35 seeded, editable), drops the words of asking, shows a strip of the companies found above the results, and cuts the highlighted extract to the first 20,000 characters (faster); the search check covers synonyms with an industry filter and the documents-only case (#PRNUM)
+- 2026-11-10 lanterN reads industries, countries and regions typed in the box as filters (over `companies`), expands query synonyms from `search_synonyms` (35 seeded, editable), drops the words of asking, shows a strip of the companies found above the results, and cuts the highlighted extract to the first 20,000 characters (faster); the search check covers synonyms with an industry filter and the documents-only case (#366)
 - 2026-11-10 `semantic_index.py` and the `Semantic index` workflow (manual, dry run by default, partition k/N): the main reports from 2024 on cut into 120-word passages and embedded with multilingual-e5-small into `chunks` (HNSW index) with `chunk_docs` as the done-marker (#356)
 - 2026-11-10 Evidence database load `functions_only`: applies search.sql in seconds, without the schema, the documents refresh (two hours) or the pages; the way to change a search function during the day (#365)
 - 2026-11-10 lanterN with filters and no words ("Nike code of conduct" is a company and a type) lists the matching documents, newest first, one row each at its first page (#364)
