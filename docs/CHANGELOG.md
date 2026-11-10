@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 Evidence health reports the main reports (annual, integrated, sustainability, ESG, CSR) with text by year: documents, pages, characters and about how many 120-word passages, the size of the semantic index to come (#PRNUM)
 - 2026-11-10 The one-box search is named Lantern: mark, favicon, "Powered by World Benchmarking Alliance"; the three brand colours are variables at the top of the stylesheet (#351)
 - 2026-11-10 `extract_eval --escalate whole` (option): a doubtful answer (no figure, or a figure printed once) gets its documents whole, in at most 4 chunks of `--whole-chars`, read until a figure appears. The escalation measure "pages hold the figure" read the candidate instead of the page text and always said no (the "0 %" of wave C was that bug; the +0.9 verdict stands) (#350)
 - 2026-11-10 The one-box search for analysts: `site/search.html` (one box, filters read from the words typed, results best first, opening the document at its page) and `find_pages`, `find_click`, `find_companies` in `supabase/search.sql` (relevance ranking by words, document type and age; access by a link that carries a key, checked against `search_keys`; every query and click logged in `search_log` and `search_clicks`). The Search page workflow publishes both pages; the search check covers find_pages (#349)

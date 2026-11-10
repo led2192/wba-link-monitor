@@ -9,7 +9,9 @@ the evaluations, not by a look at the tables. This job looks at the tables every
   2. documents: by text status, with and without pages, by year bucket, without a year or a type; the 20 newest with
      text_status ok and no page, loaded more than 12 hours ago (the loader writes the document row before its pages:
      the 271 of 9 Nov 2026 were that night's load caught half-written, and 0 the next morning);
-  3. page_map: lines, with an embedding, documents mapped, lines by the document's year, lines written in 24 hours;
+  3. the main reports (annual, integrated, sustainability, ESG, CSR) with text, by year: documents, pages, characters
+     and about how many 120-word passages they make (the size of anything built over them, 10 Nov 2026);
+  4. page_map: lines, with an embedding, documents mapped, lines by the document's year, lines written in 24 hours;
   4. value_versions: by method, in 24 hours; model_reads: in 24 hours and the found share;
   5. checks, each a plain sentence when it fails and a DATA_CHECK failure in Pipeline QA (key = the check's name):
        map_embeddings     page_map lines without an embedding after a build
@@ -65,6 +67,16 @@ def documents(cur):
     return d
 
 
+MAIN_TYPES = ("Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report")
+
+
+def main_reports(cur):
+    """The main reports by year, for sizing anything built over them (the semantic index, 10 Nov 2026): documents,
+    pages and characters, from the documents table's own counts (no scan of pages)."""
+    return rows(cur, "select coalesce(year, 0), count(*), coalesce(sum(pages), 0), coalesce(sum(chars), 0) from public.documents "
+                     "where doc_type = any(%s) and text_status = 'ok' group by 1 order by 1 desc", (list(MAIN_TYPES),))
+
+
 def page_map(cur):
     m = {"lines": one(cur, "select count(*) from public.page_map"),
          "embedded": one(cur, "select count(embedding) from public.page_map"),
@@ -111,7 +123,7 @@ def checks(docs, pmap, vals, unindexed, nightly_values=True):
     return out
 
 
-def report_md(counts, docs, pmap, vals, unindexed, failed, today):
+def report_md(counts, docs, pmap, vals, unindexed, failed, today, mains=None):
     md = [f"# Evidence database health ({today.isoformat()})", "",
           ("Every check passed." if not failed else f"{len(failed)} check(s) failed:"), ""]
     md += [f"- **{name}**: {text}" for name, text in failed]
@@ -124,6 +136,12 @@ def report_md(counts, docs, pmap, vals, unindexed, failed, today):
     if docs.get("ok_without_pages_sample"):                   # what they are, so that the fix is read off the report (10 Nov 2026)
         md += ["", "The newest documents with text_status ok and no page (library_id, year, type, pages, chars, text part, extracted, loaded):", ""]
         md += [f"- {lid} | {y} | {t or '(no type)'} | {p:,} | {c:,} | {part or '(none)'} | {ex or '?'} | {ld}" for lid, y, t, p, c, part, ex, ld in docs["ok_without_pages_sample"]]
+    if mains:
+        md += ["", "## Main reports (annual, integrated, sustainability, ESG, CSR) with text, by year", "",
+               "| Year | Documents | Pages | Characters | Passages of 120 words, about |", "| --- | --: | --: | --: | --: |"]
+        md += [f"| {y or 'no year'} | {n:,} | {pg:,} | {ch:,} | {int(ch / 700):,} |" for y, n, pg, ch in mains if y >= 2020 or not y]
+        tot = [sum(x[i] for x in mains if x[0] >= 2023) for i in (1, 2, 3)]
+        md += [f"| 2023 and later | {tot[0]:,} | {tot[1]:,} | {tot[2]:,} | {int(tot[2] / 700):,} |"]
     md += ["", "## Page map", "",
            f"{pmap['lines']:,} lines ({pmap['embedded']:,} with an embedding) over {pmap['documents']:,} documents; {pmap['last_24h']:,} lines written in the last 24 hours.", "",
            "| Document year | Lines |", "| --- | --: |"] + [f"| {y or 'no year'} | {n:,} |" for y, n in pmap["by_year"].items()]
@@ -153,10 +171,11 @@ def main():
         pmap = page_map(cur)
         vals = values(cur)
         unindexed = unindexed_pages(cur)
+        mains = main_reports(cur)
     failed = checks(docs, pmap, vals, unindexed, nightly_values=a.nightly_values)
     for name, text in failed:
         run.failure("DATA_CHECK", text, key=name, stage="evidence_health")
-    md = report_md(counts, docs, pmap, vals, unindexed, failed, today)
+    md = report_md(counts, docs, pmap, vals, unindexed, failed, today, mains)
     open("evidence_health.md", "w", encoding="utf-8").write(md)
     print(md)
     c = {"documents": docs["total"], "with_pages": docs["with_pages"], "map_lines": pmap["lines"], "map_embedded": pmap["embedded"],
