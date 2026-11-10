@@ -190,6 +190,8 @@ def main():
     ap.add_argument("--languages", choices=["other", "all"], default="other", help="other: not the English rows (the AI field types those)")
     ap.add_argument("--check", type=int, default=0, help="read N documents already typed and report the agreement; writes nothing")
     ap.add_argument("--max-usd", type=float, default=5.0, help="stop when the estimated cost reaches this (what was read is written)")
+    ap.add_argument("--minutes", type=int, default=280, help="stop cleanly after this many minutes (the workflow job is killed at 300)")
+    ap.add_argument("--workers", type=int, default=4, help="model calls in flight at once (300 documents took 8 minutes one at a time)")
     ap.add_argument("--out", default="type_covers")
     a = ap.parse_args()
     token, base = os.environ.get("AIRTABLE_TOKEN"), os.environ.get("AIRTABLE_BASE")
@@ -208,31 +210,54 @@ def main():
     typed, pairs, examples, stopped, written, by_lang = collections.Counter(), [], [], None, 0, collections.Counter()
     pending = []                                             # (record id, type) read and not yet written
     disagreements = []                                       # check mode: the first 30 rows where the two types differ
+    from concurrent.futures import ThreadPoolExecutor
+
+    def read_one(r):
+        """(row, type, confidence, title, this call's usage): one thread, its own counter, merged by the caller."""
+        u = collections.Counter()
+        t, conf, title = read_type(r.get("fields", {}).get("cover_text") or "", u)
+        return r, t, conf, title, u
+
+    def chunks(it, n=100):
+        buf = []
+        for x in it:
+            buf.append(x)
+            if len(buf) >= n:
+                yield buf; buf = []
+        if buf:
+            yield buf
+
+    pool = ThreadPoolExecutor(max_workers=max(1, a.workers))
     try:
-        for r in rows(token, base, formula, limit):
-            f = r.get("fields", {})
-            t, conf, title = read_type(f.get("cover_text") or "", usage)
-            if t is None:
-                usage["unusable replies"] += 1
-                if usage["unusable replies"] <= 5:                # the first few, to see why (10 Nov 2026: 153 of 300 in the first check)
-                    print(f"  unusable reply for {f.get('library_id')}: {(LAST_REPLY or '')[:300]!r}", flush=True)
-                continue
-            typed[t] += 1
-            by_lang[f.get("doc_language") or "(no language)"] += 1
-            if len(examples) < 40:
-                examples.append((f.get("library_id"), f.get("doc_language") or "", t, conf, title))
-            if a.check:
-                theirs = (f.get("source_type_check") or "").strip()
-                pairs.append((theirs, t))
-                if theirs != t and len(disagreements) < 30:
-                    disagreements.append((f.get("library_id"), f.get("doc_language") or "", theirs, t, conf, title, (f.get("cover_text") or "")[:160].replace("\n", " ")))
-            else:                                            # low confidence is written too: a type beats none, and people correct the field
-                pending.append((r["id"], t))
-            if a.commit and len(pending) >= 100:
+        for chunk in chunks(rows(token, base, formula, limit)):
+            results = list(pool.map(read_one, chunk))
+            for r, t, conf, title, u in results:
+                usage.update(u)
+                f = r.get("fields", {})
+                if t is None:
+                    usage["unusable replies"] += 1
+                    if usage["unusable replies"] <= 5:                # the first few, to see why (10 Nov 2026: 153 of 300 in the first check)
+                        print(f"  unusable reply for {f.get('library_id')}: {(LAST_REPLY or '')[:300]!r}", flush=True)
+                    continue
+                typed[t] += 1
+                by_lang[f.get("doc_language") or "(no language)"] += 1
+                if len(examples) < 40:
+                    examples.append((f.get("library_id"), f.get("doc_language") or "", t, conf, title))
+                if a.check:
+                    theirs = (f.get("source_type_check") or "").strip()
+                    pairs.append((theirs, t))
+                    if theirs != t and len(disagreements) < 30:
+                        disagreements.append((f.get("library_id"), f.get("doc_language") or "", theirs, t, conf, title, (f.get("cover_text") or "")[:160].replace("\n", " ")))
+                else:                                            # low confidence is written too: a type beats none, and people correct the field
+                    pending.append((r["id"], t))
+            if a.commit and pending:
                 written += write(token, base, pending); pending = []
-                print(f"  {written:,} rows written, ${model_reader.cost(usage):.2f}", flush=True)
+                print(f"  {written:,} rows written, ${model_reader.cost(usage):.2f}, {(time.time() - t0) / 60:.0f} min", flush=True)
             if model_reader.cost(usage) >= a.max_usd:
                 stopped = f"stopped at the cost cap of ${a.max_usd:.2f}"
+                break
+            if time.time() - t0 > a.minutes * 60:
+                stopped = f"stopped at the time cap of {a.minutes} minutes"
                 break
     except Exception as e:
         if type(e).__name__ == "ModelRefused":
@@ -240,6 +265,7 @@ def main():
         else:
             raise
     finally:
+        pool.shutdown(wait=False, cancel_futures=True)
         if a.commit and pending:
             written += write(token, base, pending); pending = []
     n = sum(typed.values())

@@ -28,6 +28,9 @@ on:
       model:
         description: "the model that types: a Claude model name, or a Gemini one (gemini-...; GEMINI_API_KEY, the free credits)"
         default: "claude-haiku-5-5"
+      workers:
+        description: "model calls in flight at once"
+        default: "4"
 
 concurrency:
   group: type-covers
@@ -46,7 +49,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Type
         run: |
-          ARGS="--limit ${{ inputs.limit }} --languages ${{ inputs.languages }} --max-usd ${{ inputs.max_usd }}"
+          ARGS="--limit ${{ inputs.limit }} --languages ${{ inputs.languages }} --max-usd ${{ inputs.max_usd }} --workers ${{ inputs.workers || '4' }}"
           [ "${{ inputs.check }}" != "0" ] && ARGS="$ARGS --check ${{ inputs.check }}"
           [ "${{ inputs.commit }}" = "true" ] && [ "${{ inputs.check }}" = "0" ] && ARGS="$ARGS --commit"
           echo "python type_covers.py $ARGS"
