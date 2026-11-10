@@ -116,7 +116,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v1b 2026-11-10";
+  const CLIENT = "lantern v1c 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -165,20 +165,24 @@
   }
   for (const t of TYPES) { const o = document.createElement("option"); o.value = t; o.textContent = t; $("fType").appendChild(o); }
 
-  // What the box says beyond words: a company name (the longest one found), a year or a span, a document type.
+  // What the box says beyond words: every company named (longest names first, so "Nike Inc" wins over "Nike"), every
+  // year named (one, a span 2022-2024, or several: the earliest to the latest), a document type.
   function parse(text) {
-    let q = " " + text.trim() + " ";
+    let q = " " + text.trim().replace(/\s+/g, " ") + " ";
     const found = { company: null, companyName: null, from: null, to: null, type: null };
-    const low = q.toLowerCase();
-    let best = null;
-    for (const c of companies) {
-      const name = (c.name || "").toLowerCase();
-      if (name.length >= 4 && low.includes(" " + name + " ") && (!best || name.length > best.name.toLowerCase().length)) best = c;
+    const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const hits = [];
+    const byLength = companies.filter(c => (c.name || "").length >= 4).sort((a, b) => b.name.length - a.name.length);
+    for (const c of byLength) {
+      const re = new RegExp("\\s" + esc(c.name) + "(?:'s)?\\s", "i");
+      if (re.test(q)) { hits.push(c); q = q.replace(re, " "); }
+      if (hits.length >= 6) break;
     }
-    if (best) { found.company = best.id; found.companyName = best.name; const re = new RegExp("\\s" + best.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s", "i"); q = q.replace(re, " "); }
-    const span = q.match(/\s(20[0-3]\d)\s*[-–]\s*(20[0-3]\d)\s/);
-    if (span) { found.from = +span[1]; found.to = +span[2]; q = q.replace(span[0], " "); }
-    else { const yr = q.match(/\s(20[0-3]\d)\s/); if (yr) { found.from = found.to = +yr[1]; q = q.replace(yr[0], " "); } }
+    if (hits.length) { found.company = hits.map(c => c.id).join(";"); found.companyName = hits.map(c => c.name).join(", "); }
+    const years = [];
+    q = q.replace(/\s(20[0-3]\d)\s*[-–]\s*(20[0-3]\d)(?=\s)/g, (m, a, b) => { years.push(+a, +b); return " "; });
+    q = q.replace(/\s(20[0-3]\d)(?=\s)/g, (m, a) => { years.push(+a); return " "; });
+    if (years.length) { found.from = Math.min(...years); found.to = Math.max(...years); }
     for (const [w, t] of Object.entries(TYPE_WORDS)) {
       const re = new RegExp("\\s" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "s?\\s", "i");
       if (re.test(q)) { found.type = t; q = q.replace(re, " "); break; }
@@ -194,7 +198,7 @@
       const c = el("span", "chip"); c.append(el("span", null, label + " "), el("b", null, value));
       const x = el("button", null, "×"); x.title = "Remove this filter"; x.onclick = () => { clear(); search(true); }; c.appendChild(x); box.appendChild(c);
     };
-    if (state.company) add("Company", state.companyName || state.company, () => { state.company = state.companyName = null; $("fCompany").value = ""; });
+    if (state.company) add(state.company.includes(";") ? "Companies" : "Company", state.companyName || state.company, () => { state.company = state.companyName = null; $("fCompany").value = ""; });
     if (state.from || state.to) add("Years", state.from === state.to ? String(state.from) : `${state.from || ""}–${state.to || ""}`, () => { state.from = state.to = null; $("fFrom").value = $("fTo").value = ""; });
     if (state.type) add("Type", state.type, () => { state.type = null; $("fType").value = ""; });
   }
