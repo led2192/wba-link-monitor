@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 `type_covers.py` and the `Type covers` workflow (manual): the model reader's model types, from cover_text, the live documents with no type at all (about 45,000 on 10 Nov, 28,500 of them in languages the Airtable AI field never types), into source_type_check where empty; `--check N` measures the agreement with the rows already typed first; writes in batches of 100 so a cost cap or a refusal loses nothing (#339)
 - 2026-11-10 `extract_eval --select whole` (option; default unchanged): no page choice, every page of the year's documents in one call, the document holding today's chosen pages first, up to `--whole-chars` (1,200,000 for a Gemini model, 600,000 for a Claude one); adjacency notes become one line per run of pages in calls of more than 16 pages; a Gemini call carrying more than 400,000 characters waits up to 600 s. To measure against the 16 pages once the Gemini key works (#338)
 - 2026-11-10 Evidence health's docs_without_pages check leaves out documents loaded in the last 12 hours: the 271 of 9 Nov were that night's load caught between the document row and its pages (0 on 10 Nov) (#337)
 - 2026-11-10 Evidence health lists the 20 newest documents with text_status ok and no page (271 on 9 Nov, unexplained) with their pages, chars and text part; Base room no longer tries the cheap `fields[]=` count, which answered 422 on every table (#336)
