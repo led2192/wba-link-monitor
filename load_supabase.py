@@ -142,11 +142,18 @@ def apply_schema(conn, commit):
     because the functions read the stored words and that index. Until then the functions already in the
     database keep working on the older index."""
     with conn.cursor() as c:
+        # A schema statement that waits for an exclusive lock blocks every new reader of the table while it waits,
+        # and a cancelled GitHub job leaves its statement waiting in Postgres (10 Nov 2026: two of them held the
+        # search and the web interface for half an hour). Wait at most 30 seconds for a lock, then fail; the
+        # next load applies the schema again.
+        c.execute("set lock_timeout = '30s'")
         c.execute(open(SCHEMA, encoding="utf-8").read())
     if has_auth(conn) and search_index_exists(conn):
         with conn.cursor() as c:
             c.execute(open(SEARCH_SQL, encoding="utf-8").read())
     (conn.commit if commit else conn.rollback)()
+    with conn.cursor() as c:
+        c.execute("set lock_timeout = 0")
 
 
 def get_state(conn, key):
