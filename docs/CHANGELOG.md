@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 lanterN's company card shows the company's WBA benchmark results (`find_scores`): per benchmark the score, its place among the companies scored and among those of its industry, and the measurement areas when the row is opened. First load of `company_scores`: 9,961 scores (7,961 with a number) for 2,000 companies in 12 benchmarks of 2025, and 27,183 measurement area scores. (#385)
 - 2026-11-10 lanterN shows the signed-in person at the top right: initials, a leaf with the level's number, "Level 1 · Seedling" and a bar toward the next level (Seedling, Sprout at 5 points, Sapling 15, Tree 40, Grove 100, Forest 250, Ecosystem 600); not interactive. The levels replace the earlier badge names on the lucky card; `my_reviews` returns the score. (#384)
 - 2026-11-10 The nightly Propose values reads doubtful answers with the whole document (`propose_values.py --escalate whole`, now the default) and its cap goes from 1.5 to 5 USD a night: the owner's decision after +3.9 points on the pilots and +7.7 on held-out attributes, none worse. The pull-request dry run keeps `--escalate none`. (#383)
 - 2026-11-10 lanterN's home screen: the Search button beside the box is gone (Enter searches); two buttons sit under the box, "Search with lanterN" and "I'm feeling lucky"; the filter funnel stays. (#381)

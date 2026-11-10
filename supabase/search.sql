@@ -1185,6 +1185,46 @@ $$;
 revoke all on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) from public, anon;
 grant execute on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) to authenticated;
 
+-- A company's benchmark results, for the card beside a search for that company (10 Nov 2026): for each benchmark
+-- it was scored in (company_scores, loaded nightly from the WBA Data API by load_scores.py), the score, its place
+-- among the companies scored in that benchmark and among those of its own industry, and the measurement areas.
+-- Places are counted here, not stored. One company only; an empty list when the tables are not there yet.
+create or replace function public.find_scores(key text, company text) returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  ids text[] := public.find_company_ids(company);
+  co text;
+  ind text;
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if to_regclass('public.company_scores') is null or ids is null or coalesce(array_length(ids, 1), 0) <> 1 or ids[1] = '' then
+    return '[]'::jsonb;
+  end if;
+  co := ids[1];
+  select c.industry into ind from public.companies c where c.wba_id = co;
+  return (select coalesce(jsonb_agg(x.j order by x.benchmark_name), '[]'::jsonb) from (
+    select s.benchmark_name,
+           jsonb_build_object('benchmark', s.benchmark_name, 'benchmark_id', s.benchmark_id, 'year', s.year, 'score', s.score, 'category', s.category,
+             'rank', case when s.score is null then null else 1 + (select count(*) from public.company_scores o where o.methodology_id = s.methodology_id and o.score > s.score) end,
+             'of', (select count(*) from public.company_scores o where o.methodology_id = s.methodology_id and o.score is not null),
+             'industry', ind,
+             'industry_rank', case when s.score is null or ind is null then null else 1 + (select count(*) from public.company_scores o join public.companies c on c.wba_id = o.wba_id
+                                           where o.methodology_id = s.methodology_id and c.industry = ind and o.score > s.score) end,
+             'industry_of', case when ind is null then null else (select count(*) from public.company_scores o join public.companies c on c.wba_id = o.wba_id
+                                           where o.methodology_id = s.methodology_id and c.industry = ind and o.score is not null) end,
+             'areas', (select coalesce(jsonb_agg(jsonb_build_object('name', a.area_name, 'score', a.score) order by a.area_id), '[]'::jsonb)
+                       from public.company_area_scores a where a.wba_id = co and a.methodology_id = s.methodology_id)) as j
+    from public.company_scores s
+    where s.wba_id = co and (s.score is not null or s.category is not null)) x);
+end;
+$$;
+revoke all on function public.find_scores(text, text) from public;
+grant execute on function public.find_scores(text, text) to anon, authenticated;
+
 -- The values people have added for the companies searched, beside the robot's (10 Nov 2026: after adding Nike's
 -- 2025 revenue the panel still said "none", so the same person, or a colleague, could add it again without knowing).
 -- No names: "mine" says whether the caller added it (when the page sends the person's session).
