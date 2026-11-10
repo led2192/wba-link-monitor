@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 Gemini reader: HTTP 402 (the key's project has no working billing; the probe 42731761965 got it on every call) stops the run as a refusal instead of failing call by call (#PRNUM)
 - 2026-11-10 Decisions recorded: the document map as a page selector -20.2 and navigation -4.5 on the four pilots with 93% to 96% map coverage (closed for number attributes; yes/no not measured); the first Gemini run measured nothing (all calls failed in silence) and the reranker failed on a late import, both fixed and rerun (#333)
 - 2026-11-10 Gemini reader: the API's error status and text are printed (the first run, 42694784774, failed all 237 calls in silence) and a reply without candidates counts as a failure; the reranker run needs `accelerate` (run 42705001779 failed after 2 hours of pair building): installed and imported first (#332)
 - 2026-11-09 Propose values runs nightly at 05:07 UTC: SEC and ESEF filings for every company, then the model reader on the five pilot attributes for 2025 and 2024, incremental (30 days) and capped at 1.5 USD; a refused call stops the reading and writes what was read. Evidence health now runs its stale_versions check (#331)
