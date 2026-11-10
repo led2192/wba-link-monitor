@@ -205,6 +205,7 @@ def main():
     limit = a.check or a.limit
     typed, pairs, examples, stopped, written, by_lang = collections.Counter(), [], [], None, 0, collections.Counter()
     pending = []                                             # (record id, type) read and not yet written
+    disagreements = []                                       # check mode: the first 30 rows where the two types differ
     try:
         for r in rows(token, base, formula, limit):
             f = r.get("fields", {})
@@ -219,7 +220,10 @@ def main():
             if len(examples) < 40:
                 examples.append((f.get("library_id"), f.get("doc_language") or "", t, conf, title))
             if a.check:
-                pairs.append(((f.get("source_type_check") or "").strip(), t))
+                theirs = (f.get("source_type_check") or "").strip()
+                pairs.append((theirs, t))
+                if theirs != t and len(disagreements) < 30:
+                    disagreements.append((f.get("library_id"), f.get("doc_language") or "", theirs, t, conf, title, (f.get("cover_text") or "")[:160].replace("\n", " ")))
             else:                                            # low confidence is written too: a type beats none, and people correct the field
                 pending.append((r["id"], t))
             if a.commit and len(pending) >= 100:
@@ -250,6 +254,8 @@ def main():
         md += [f"Agreement with the type already set: {share:.0%} of {len(pairs):,}.", "", "| Their type | Documents | Agree |", "| --- | --: | --: |"]
         md += [f"| {t} | {v[0]:,} | {v[1] / v[0]:.0%} |" for t, v in sorted(by.items(), key=lambda x: -x[1][0])]
         md += ["", "Commonest disagreements (theirs, ours): " + ", ".join(f"{a_} > {b} {c}" for (a_, b), c in dis.most_common(12)), ""]
+        md += ["Disagreements, the first 30 (library_id, language, theirs, ours, confidence, title, start of the cover):", ""]
+        md += [f"- {lid} | {lang} | {theirs} | {ours} | {conf} | {title} | {cover}" for lid, lang, theirs, ours, conf, title, cover in disagreements]
     else:
         md += [("Written: " if a.commit else "Would write: ") + f"{written if a.commit else len(pending):,} rows (source_type_check).", "",
                "| Type | Documents |", "| --- | --: |"] + [f"| {t} | {c:,} |" for t, c in typed.most_common()]
