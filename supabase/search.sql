@@ -751,19 +751,31 @@ begin
   truncate find_cand;
   -- first the pages that print two neighbouring words together ("ACT Core", "just transition"): with common words
   -- they would never enter a pool capped per year, and they are what the person means (10 Nov 2026)
-  for i in 1..coalesce(array_length(pair_qs, 1), 0) loop
-    insert into find_cand
-      select p.library_id, p.page, p.words, p.year, p.doc_type
-      from public.pages p
-      where p.words @@ (case when phrase_q is null then pair_qs[i] else phrase_q && pair_qs[i] end)
-        and p.wba_id <> ''
-        and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
-        and (types is null or p.doc_type = any(types))
-        and (ids is null or p.wba_id = any(ids))
-      limit 300
-    on conflict do nothing;
-    get diagnostics n = row_count;
-    got := got + n;
+  -- Bounded: per year, newest first, the phrase is checked on at most 4,000 pages that hold both words, and the whole
+  -- pass takes at most 2.5 seconds (two common words as a phrase, "act core", otherwise scan every page holding both).
+  <<pairs>>
+  for y in select distinct coalesce(d.year, 0) from public.documents d
+            where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+            order by 1 desc
+  loop
+    for i in 1..coalesce(array_length(pair_qs, 1), 0) loop
+      insert into find_cand
+        select x.library_id, x.page, x.words, x.year, x.doc_type
+        from (select p.library_id, p.page, p.words, p.year, p.doc_type
+              from public.pages p
+              where p.words @@ (case when phrase_q is null then tqs[i] && tqs[i + 1] else phrase_q && tqs[i] && tqs[i + 1] end)
+                and p.year = y
+                and p.wba_id <> ''
+                and (types is null or p.doc_type = any(types))
+                and (ids is null or p.wba_id = any(ids))
+              limit 4000) x
+        where x.words @@ pair_qs[i]
+        limit 150
+      on conflict do nothing;
+      get diagnostics n = row_count;
+      got := got + n;
+      exit pairs when clock_timestamp() - t0 > interval '2.5 seconds';
+    end loop;
   end loop;
   -- level 0: every word; then every subset missing one word, then missing two, until enough pages are found
   -- or six seconds have gone (a long query of common words otherwise ran into the statement timeout)

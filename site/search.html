@@ -490,7 +490,9 @@
         const why = el("textarea"); why.rows = 2; why.placeholder = "Why, in a line (optional)";
         const go = el("button", null, "Send correction");
         go.onclick = async () => { if (await send("wrong", { correct_value: right.value, source_url: link.value, source_page: parseInt(pg.value, 10) || null, comment: why.value })) { f.innerHTML = ""; f.append(el("div", "what", "Thank you. The team reviews corrections before anything changes.")); } };
-        f.append(right, two, why, go); row.appendChild(f); right.focus();
+        const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
+        const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
+        f.append(right, two, why, acts); row.appendChild(f); right.focus();
       };
       row.append(left, btns, ev); panel.appendChild(row);
     }
