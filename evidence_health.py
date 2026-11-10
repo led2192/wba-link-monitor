@@ -7,13 +7,14 @@ years (9 Nov 2026: 2% to 5% of the evaluation answers had a map) or a bulk-fille
 the evaluations, not by a look at the tables. This job looks at the tables every day and after every build:
   1. rows per table (exact for the small tables, the planner's estimate for pages and passages, which are millions);
   2. documents: by text status, with and without pages, by year bucket, without a year or a type; the 20 newest with
-     text_status ok and no page, with their pages, chars and text part (10 Nov 2026: 271 of them, unexplained);
+     text_status ok and no page, loaded more than 12 hours ago (the loader writes the document row before its pages:
+     the 271 of 9 Nov 2026 were that night's load caught half-written, and 0 the next morning);
   3. page_map: lines, with an embedding, documents mapped, lines by the document's year, lines written in 24 hours;
   4. value_versions: by method, in 24 hours; model_reads: in 24 hours and the found share;
   5. checks, each a plain sentence when it fails and a DATA_CHECK failure in Pipeline QA (key = the check's name):
        map_embeddings     page_map lines without an embedding after a build
        map_years          page_map lines whose document year is 2025 or later outnumber 2023 and 2024 (the build order bug)
-       docs_without_pages documents with text_status ok and no page
+       docs_without_pages documents with text_status ok, loaded over 12 hours ago, and no page
        pages_unindexed    pages whose words are null (the index backfill behind)
        stale_versions     no value_versions in 3 days (only with --nightly-values: Propose values runs by hand today)
        orphan_versions    value_versions whose library_id is not in documents
@@ -56,10 +57,11 @@ def documents(cur):
          "with_pages": one(cur, "select count(*) from public.documents d where exists (select 1 from public.pages p where p.library_id = d.library_id)"),
          "no_type": one(cur, "select count(*) from public.documents where coalesce(doc_type, '') = ''"),
          "by_year": {name: one(cur, f"select count(*) from public.documents where {cond}") for name, cond in YEAR_BUCKETS}}
-    d["ok_without_pages"] = one(cur, "select count(*) from public.documents d where text_status = 'ok' and not exists (select 1 from public.pages p where p.library_id = d.library_id)")
+    d["ok_without_pages"] = one(cur, "select count(*) from public.documents d where text_status = 'ok' and loaded_at < now() - interval '12 hours' "
+                                     "and not exists (select 1 from public.pages p where p.library_id = d.library_id)")
     d["ok_without_pages_sample"] = rows(cur, "select library_id, year, coalesce(doc_type, ''), coalesce(pages, 0), coalesce(chars, 0), coalesce(text_part, ''), "
                                             "coalesce(extracted_at, ''), loaded_at::date::text from public.documents d where text_status = 'ok' "
-                                            "and not exists (select 1 from public.pages p where p.library_id = d.library_id) order by loaded_at desc limit 20")
+                                            "and loaded_at < now() - interval '12 hours' and not exists (select 1 from public.pages p where p.library_id = d.library_id) order by loaded_at desc limit 20")
     return d
 
 

@@ -275,3 +275,6 @@ The first Gemini reader run made 237 calls, every one failed, and the run finish
 
 ## A module-level "seen" set outlives the pass it was meant for (10 Nov 2026)
 `value_eval.gold_values` skips answer ids it has already returned, so that the SDG2000 base does not repeat the ACT Core answers within one pass over the bases. The reranker's training called it first (300 answers), and the evaluation's own call then got 0 answers for the same attributes: 98 minutes of training, a table of zeros, and a run marked successful. `reset_seen()` now sits between the two passes, and an evaluation with nothing to read fails. State kept at module level must say which pass it belongs to, and a run that finds nothing to do must not look like a run that did everything.
+
+## A health check that reads a table while its loader runs sees the loader's half-written state (10 Nov 2026)
+Evidence health's first report counted 271 documents with text_status ok and no page. The next morning there were 0: the full-text loader writes the documents row first and its pages after, and the 06:41 UTC report had read the night's load mid-way. A check of "A exists without B" must leave out rows younger than the time the loader takes to write B (12 hours here), or it reports the loader's progress as a defect.
