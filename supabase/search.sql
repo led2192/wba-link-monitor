@@ -728,6 +728,7 @@ declare
   split boolean;
   capped boolean := false;
   lvl_q tsquery;
+  pair_or tsquery;
   yeq int;
   loose_q tsquery;
   lim int;
@@ -806,7 +807,8 @@ begin
   if nw >= 2 then
     together_q := phraseto_tsquery('simple', array_to_string(words, ' '));
     for i in 1..nw - 1 loop
-      pair_qs := pair_qs || phraseto_tsquery('simple', words[i] || ' ' || words[i + 1]);
+      -- the second word also in its longer forms ("living wages"), as single words are matched
+      pair_qs := pair_qs || to_tsquery('simple', quote_literal(words[i]) || ' <-> ' || quote_literal(words[i + 1]) || case when length(words[i + 1]) >= 4 then ':*' else '' end);
     end loop;
   end if;
   create temp table if not exists find_cand (library_id text, page int, words tsvector, year int, doc_type text, primary key (library_id, page)) on commit drop;
@@ -917,6 +919,12 @@ begin
             left(array_to_string(words, ' ') || case when coalesce(array_length(phrases, 1), 0) > 0 then ' "' || array_to_string(phrases, '" "') || '"' else '' end, 300),
             left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200), left(typed, 500))
     returning id into lid;
+  if coalesce(array_length(pair_qs, 1), 0) > 0 then
+    select pq into pair_or from (select pair_qs[1] as pq) x;
+    for i in 2..array_length(pair_qs, 1) loop
+      pair_or := pair_or || pair_qs[i];
+    end loop;
+  end if;
   return query
     with scored as (
       select c.library_id, c.page, c.year, c.doc_type, d.wba_id as co, length(c.words) as lexemes,
@@ -951,19 +959,24 @@ begin
     ranked as (
       -- the pages that hold every word asked come before those that hold only some, whatever their score: a page
       -- with one of the words many times is not a better answer than one with all of them (10 Nov 2026)
-      select w.*, (w.matched >= nw) as complete,
-             row_number() over (partition by w.library_id order by (w.matched >= nw) desc, w.score desc, w.page) as in_doc
+      -- and before both, the pages where the words stand together: someone who types "living wage" means the living
+      -- wage, not a page that says "wage" here and "living" there (the owner, 10 Nov 2026). Three tiers: together,
+      -- every word, some words; the score orders within a tier.
+      select w.*, (w.matched >= nw) as complete, (w.pairs > 0 or w.together) as joined,
+             row_number() over (partition by w.library_id order by (w.pairs > 0 or w.together) desc, (w.matched >= nw) desc, w.score desc, w.page) as in_doc
       from single w
       where w.dup = 1),
     top as (
-      select r.library_id, r.page, r.year, r.doc_type, r.score,
-             row_number() over (order by r.complete desc, r.score desc, r.year desc, r.library_id, r.page) as rk
+      select r.library_id, r.page, r.year, r.doc_type, r.score, r.pairs,
+             row_number() over (order by r.joined desc, r.complete desc, r.score desc, r.year desc, r.library_id, r.page) as rk
       from ranked r
       where r.in_doc <= 3
-      order by r.complete desc, r.score desc, r.year desc, r.library_id, r.page
+      order by r.joined desc, r.complete desc, r.score desc, r.year desc, r.library_id, r.page
       limit need)
     select lid, t2.rk::int, t2.library_id, d.company, d.wba_id, t2.year, t2.doc_type, d.label, d.url, t2.page, t2.score,
-           ts_headline('simple', left(p.body, 20000), or_q,
+           -- the excerpt shows the words together when the page has them together (the lines that say "living wage",
+           -- not the first lines that say "wage")
+           ts_headline('simple', left(p.body, 20000), case when t2.pairs > 0 and pair_or is not null then pair_or else or_q end,
                        'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
     from top t2
     join public.documents d on d.library_id = t2.library_id

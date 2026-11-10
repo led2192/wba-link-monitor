@@ -120,4 +120,4 @@ def test_recent_pages_and_whole_matches_come_first():
 
 
 def test_pages_with_every_word_come_before_pages_with_some():
-    assert FIND.count("r.complete desc, r.score desc") == 2
+    assert FIND.count("r.joined desc, r.complete desc, r.score desc") == 2      # together, then every word, then some
