@@ -1189,6 +1189,15 @@ grant execute on function public.add_value(text, text, int, text, numeric, text,
 -- it was scored in (company_scores, loaded nightly from the WBA Data API by load_scores.py), the score, its place
 -- among the companies scored in that benchmark and among those of its own industry, and the measurement areas.
 -- Places are counted here, not stored. One company only; an empty list when the tables are not there yet.
+-- Only the benchmarks listed in published_benchmarks are shown (the owner, 10 Nov 2026: the published ones only;
+-- the Data API also serves results that are not public yet). The list starts empty: nothing shows until a
+-- benchmark is added to it here.
+create table if not exists public.published_benchmarks (
+  benchmark_id text primary key,
+  added        timestamptz not null default now()
+);
+alter table public.published_benchmarks enable row level security;
+
 create or replace function public.find_scores(key text, company text) returns jsonb
 language plpgsql stable security definer
 set search_path = public, extensions
@@ -1219,7 +1228,8 @@ begin
              'areas', (select coalesce(jsonb_agg(jsonb_build_object('name', a.area_name, 'score', a.score) order by a.area_id), '[]'::jsonb)
                        from public.company_area_scores a where a.wba_id = co and a.methodology_id = s.methodology_id)) as j
     from public.company_scores s
-    where s.wba_id = co and (s.score is not null or s.category is not null)) x);
+    where s.wba_id = co and (s.score is not null or s.category is not null)
+      and exists (select 1 from public.published_benchmarks pb where pb.benchmark_id = s.benchmark_id)) x);
 end;
 $$;
 revoke all on function public.find_scores(text, text) from public;

@@ -88,3 +88,4 @@ def test_scores_for_one_company_with_places_counted():
     sc = SQL[SQL.index("create or replace function public.find_scores("):SQL.index("-- The values people have added")]
     assert "public.search_key_name(key) is null" in sc and "array_length(ids, 1), 0) <> 1" in sc
     assert "'industry_rank'" in sc and "'areas'" in sc and "to_regclass('public.company_scores') is null" in sc
+    assert "from public.published_benchmarks pb where pb.benchmark_id = s.benchmark_id" in sc      # the published ones only
