@@ -1,0 +1,40 @@
+# The links people add in lanterN ("+ Add a source"), passed on to each company's inbox box in Airtable
+# (source_submissions.py); the Scan now watcher does the rest. Hourly, and by hand. Dry run on a PR.
+name: Source submissions
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "commit"
+  pull_request:
+    paths: [source_submissions.py, .github/workflows/source_submissions.yml]
+
+concurrency:
+  group: source-submissions
+  cancel-in-progress: false
+
+jobs:
+  pass-on:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Pass on
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.mode }}" = "dry_run" ]; then python source_submissions.py
+          else python source_submissions.py --commit; fi
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

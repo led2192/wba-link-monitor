@@ -121,3 +121,12 @@ def test_recent_pages_and_whole_matches_come_first():
 
 def test_pages_with_every_word_come_before_pages_with_some():
     assert FIND.count("r.joined desc, r.complete desc, r.score desc") == 2      # together, then every word, then some
+
+
+def test_added_sources_are_signed_checked_and_one_per_person():
+    src = SQL[SQL.index("create or replace function public.add_sources("):SQL.index("-- \"I'm feeling lucky\"")]
+    assert "public.email_may_search(who)" in src and "array_length(urls, 1) > 20" in src
+    assert "exists (select 1 from public.documents d where d.url = u)" in src                    # a link the library holds is not kept
+    assert "on conflict on constraint source_submissions_one_per_person do nothing" in src
+    assert "to authenticated;" in src and "from public, anon;" in src
+    assert "select ss.reviewer, 3, 0 from public.source_submissions ss where ss.status = 'queued'" in SQL   # three points once passed on

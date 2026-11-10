@@ -52,6 +52,8 @@ A search for a company alone shows a small card above the values: name, industry
 
 A signed-in person can also add a value the robot does not hold ("+ Add a value" at the foot of the panel, shown for one company): `add_value` writes it to `value_submissions` with its source link and page and status `new`. It is a lead for the team and for the reader (the page to read), not a value: nothing reads the table into `value_versions` yet, and the check that the cited page prints the figure is still to be written. The attribute list in the page holds public attributes only.
 
+A signed-in person can also add sources: "+ Add a source" on a company's panel, or "Missing a document? Add its link" under any results. `add_sources` keeps up to 20 links for a company in `source_submissions` (those already in `documents` by address are refused); `source_submissions.py` passes them to the company's inbox box in Airtable every hour.
+
 "I'm feeling lucky" (footer) is the same review as a game: `lucky_value` hands a signed-in person one value they have not reviewed, those with the fewest reviews first; `review_score` gives points (one a review, a quarter when made in under four seconds), and a rank among reviewers that names no one. Levels are by points: Seedling, Sprout (5), Sapling (15), Tree (40), Grove (100), Forest (250), Ecosystem (600); the signed-in person sees theirs at the top right with a bar toward the next. Still to build: validated values mixed in unannounced (about one in five) so that the rank counts right answers; it needs the validated values loaded into the evidence database first.
 
 ### Who may search
