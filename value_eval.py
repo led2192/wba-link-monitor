@@ -155,6 +155,13 @@ def has_words(text, words):
 _SEEN_IDS = set()
 
 
+def reset_seen():
+    """Forgets the answer ids gold_values has returned, so a second pass over the same codes (the evaluation after
+    the reranker's training read them, 10 Nov 2026) gets its answers again. The dedupe is meant across the bases
+    of one pass, not across passes."""
+    _SEEN_IDS.clear()
+
+
 def gold_values(token, base, codes, sources=False):
     """Validated answers with a value: [{id, wba, attribute, year, value, unit}]. No quote needed.
     An answer id already returned from another base in the same run is skipped: the SDG2000 base repeats

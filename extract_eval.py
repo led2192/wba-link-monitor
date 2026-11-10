@@ -1192,6 +1192,10 @@ def main():
     queues = [by[c][:limit] if limit else by[c] for c in codes]
     todo = [q[i] for i in range(max((len(q) for q in queues), default=0)) for q in queues if i < len(q)]
     print(f">>> {len(todo):,} answers to read ({', '.join(f'{c} {len(q)}' for c, q in zip(codes, queues))})", flush=True)
+    if not todo:                                 # a run with nothing to read is a failure to see, not a table of zeros (10 Nov 2026)
+        open("extract_eval.md", "w").write("### Extraction: no validated answers to read for these attributes; check the gold bases and the options.\n")
+        print(">>> nothing to read: the gold bases returned no answers for these attributes", flush=True)
+        return 1
 
     stats = {c: collections.Counter() for c in codes}
     declined = []

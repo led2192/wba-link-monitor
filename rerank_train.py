@@ -108,6 +108,8 @@ def ensure_model(cur, token, spec, bases, out_dir, X, skip=100, per_attribute=40
     import sentence_transformers, datasets, torch, accelerate  # noqa: F401  fail in the first second, not after the hours of pair building (9 Nov 2026; accelerate: run 42705001779)
     t0 = time.time()
     pairs, counts = build_pairs(cur, token, spec, bases, skip, per_attribute, X)
+    from value_eval import reset_seen
+    reset_seen()                   # the evaluation reads the same answers next; without this it got 0 of them (run 42731781063, 10 Nov 2026)
     pos = sum(1 for _, _, y in pairs if y)
     print(f">>> reranker: {len(pairs):,} pairs ({pos:,} positive) from {sum(counts.values()):,} answers in {time.time() - t0:.0f}s", flush=True)
     if pos < 50:
