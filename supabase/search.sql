@@ -644,11 +644,14 @@ create or replace function public.profile_matching(industry_filter text, country
                               array['']::text[]) end
   $$;
 
+alter table public.search_log add column if not exists typed text;          -- what the person typed, before the box read filters out of it
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text);
+drop function if exists public.find_pages(text, text, text, int, int, text, int, text, text, text, text);
 create or replace function public.find_pages(
   key text, q text, company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null, max_rows int default 50, client text default null,
-  industry_filter text default null, country_filter text default null, region_filter text default null)
+  industry_filter text default null, country_filter text default null, region_filter text default null,
+  typed text default null)
 returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
                label text, url text, page int, score real, excerpt text)
 language plpgsql security definer
@@ -712,10 +715,10 @@ begin
     if ids is not null and ids = array['']::text[] then
       return;
     end if;
-    insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile)
+    insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile, typed)
       values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), 0,
               extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), 0, '(documents only)',
-              left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200))
+              left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200), left(typed, 500))
       returning id into lid;
     return query
       select lid, (row_number() over (order by d.year desc nulls last, d.company, d.library_id))::int, d.library_id, d.company, d.wba_id,
@@ -798,11 +801,11 @@ begin
     end loop;
     exit levels when got >= need;
   end loop;
-  insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile)
+  insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile, typed)
     values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), got,
             extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), drop_n,
             left(array_to_string(words, ' ') || case when coalesce(array_length(phrases, 1), 0) > 0 then ' "' || array_to_string(phrases, '" "') || '"' else '' end, 300),
-            left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200))
+            left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200), left(typed, 500))
     returning id into lid;
   return query
     with scored as (
@@ -997,8 +1000,8 @@ revoke all on function public.search_key_name(text) from public, anon, authentic
 revoke all on function public.type_weight(text) from public, anon, authenticated;
 revoke all on function public.find_terms(text) from public, anon, authenticated;
 revoke all on function public.find_word_query(text) from public, anon, authenticated;
-revoke all on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text) from public;
-grant execute on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text) to anon, authenticated;
+revoke all on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text, text) from public;
+grant execute on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text, text) to anon, authenticated;
 revoke all on function public.profile_matching(text, text, text) from public, anon, authenticated;
 revoke all on function public.find_click(text, bigint, text, int, int) from public;
 grant execute on function public.find_click(text, bigint, text, int, int) to anon, authenticated;
