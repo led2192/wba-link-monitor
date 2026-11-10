@@ -722,12 +722,13 @@ declare
   pair_qs tsquery[] := '{}';        -- each two neighbouring words as a phrase ("act core", "benchmarking alliance")
   sub_q tsquery;
   need int := least(greatest(coalesce(max_rows, 50), 1), 200);
-  cap int := 1200;                 -- pages in the pool
-  recent_cap int := 800;           -- of them, from the last three years when nothing narrows the search
+  cap int := 800;                -- pages in the pool
+  recent_cap int := 500;           -- of them, from the last three years when nothing narrows the search
   recent_from int := extract(year from now())::int - 2;
   split boolean;
   capped boolean := false;
   lvl_q tsquery;
+  loose_q tsquery;
   lim int;
   np int;
   got int := 0;
@@ -828,19 +829,41 @@ begin
     end loop;
     lvl_q := case when lvl_q is null then phrase_q when phrase_q is null then lvl_q else phrase_q && lvl_q end;
     exit levels when lvl_q is null;
+    loose_q := regexp_replace(lvl_q::text, '<[0-9-]+>', '&', 'g')::tsquery;     -- the same words, anywhere on the page
     for pass in 1..(case when split then 2 else 1 end) loop
       lim := case when split and pass = 1 then recent_cap when drop_n = 0 then greatest(cap - got, 1) else cap end;
-      insert into find_cand
-        select p.library_id, p.page, p.words, p.year, p.doc_type
-        from public.pages p
-        where p.words @@ lvl_q
-          and p.wba_id <> ''
-          and (types is null or p.doc_type = any(types))
-          and (ids is null or p.wba_id = any(ids))
-          and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
-          and (not split or (pass = 1 and p.year >= recent_from) or (pass = 2 and (p.year < recent_from or p.year is null)))
-        limit lim
-      on conflict do nothing;
+      if phrase_q is null then
+        insert into find_cand
+          select p.library_id, p.page, p.words, p.year, p.doc_type
+          from public.pages p
+          where p.words @@ lvl_q
+            and p.wba_id <> ''
+            and (types is null or p.doc_type = any(types))
+            and (ids is null or p.wba_id = any(ids))
+            and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
+            and (not split or (pass = 1 and p.year >= recent_from) or (pass = 2 and (p.year < recent_from or p.year is null)))
+          limit lim
+        on conflict do nothing;
+      else
+        -- A quoted phrase: the index knows which pages hold its words, not whether they stand together; that is
+        -- checked on each page's word list, read from disk. A rare phrase of common words ("ACT Core") had every
+        -- page holding both words read and ran into the statement timeout. So the check is bounded by pages read
+        -- (4,000 a statement), not by the clock: such a phrase is searched in a sample, the same one every time.
+        insert into find_cand
+          select x.library_id, x.page, x.words, x.year, x.doc_type
+          from (select p.library_id, p.page, p.words, p.year, p.doc_type
+                from public.pages p
+                where p.words @@ loose_q
+                  and p.wba_id <> ''
+                  and (types is null or p.doc_type = any(types))
+                  and (ids is null or p.wba_id = any(ids))
+                  and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
+                  and (not split or (pass = 1 and p.year >= recent_from) or (pass = 2 and (p.year < recent_from or p.year is null)))
+                limit 4000) x
+          where x.words @@ lvl_q
+          limit lim
+        on conflict do nothing;
+      end if;
       get diagnostics n = row_count;
       got := got + n;
       if drop_n = 0 and n >= lim then
@@ -850,8 +873,8 @@ begin
     end loop;
     -- The pages that print two neighbouring words together ("ACT Core", "just transition"): when the pool could not
     -- take every page holding the words, they may have stayed out, and they are what the person means. Bounded by
-    -- pages read, not by the clock: for at most three pairs, 5,000 pages holding both words in all (recent years
-    -- first when nothing narrows the search) are checked for the phrase, 150 kept a pair.
+    -- pages read, not by the clock: for at most three pairs, 3,000 pages holding both words in all (recent years
+    -- first when nothing narrows the search) are checked for the phrase, 120 kept a pair.
     if drop_n = 0 and capped and coalesce(array_length(pair_qs, 1), 0) > 0 then
       np := least(array_length(pair_qs, 1), 3);
       for i in 1..np loop
@@ -865,15 +888,15 @@ begin
                   and (ids is null or p.wba_id = any(ids))
                   and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
                   and (not split or p.year >= recent_from)
-                limit 5000 / np) x
+                limit 3000 / np) x
           where x.words @@ pair_qs[i]
-          limit 150
+          limit 120
         on conflict do nothing;
         get diagnostics n = row_count;
         got := got + n;
       end loop;
     end if;
-    exit levels when got >= need;
+    exit levels when got >= least(need, 10);       -- ten pages holding every word are an answer: fewer words would only add noise (and seconds)
   end loop;
   insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile, typed)
     values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), got,
