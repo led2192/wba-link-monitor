@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 The loader applies the schema with `lock_timeout = 30s`: a schema statement that cannot get its lock fails instead of queueing behind a cancelled job's statement and blocking every reader of the table (pitfall) (#PRNUM)
 - 2026-11-10 lanterN's placeholder fits the box again (#361)
 - 2026-11-10 `load_companies.py` and the `Company profiles` workflow (nightly after the Evidence database load): industry, country, region and website of the 2,000 companies from Airtable into `public.companies`, for Lantern's filters (#360)
 - 2026-11-10 lanterN's lantern carries eleven thin bands in WBA's colours, closer to the stripes of WBA's own mark (#359)
