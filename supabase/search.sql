@@ -777,15 +777,19 @@ begin
               extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), 0, '(documents only)',
               left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200), left(typed, 500))
       returning id into lid;
+    -- (a document held twice, the same title for the same company and year, shows once: 10 Nov 2026, the same
+    -- committee charter stood twice under "Nike")
     return query
       select lid, (row_number() over (order by d.year desc nulls last, d.company, d.library_id))::int, d.library_id, d.company, d.wba_id,
              d.year, d.doc_type, d.label, d.url, 1, 0::real, left(regexp_replace(coalesce(p.body, ''), '\s+', ' ', 'g'), 300)
-      from public.documents d
+      from (select distinct on (d0.wba_id, d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id))) d0.*
+            from public.documents d0
+            where d0.wba_id is not null and d0.wba_id <> ''
+              and (ids is null or d0.wba_id = any(ids))
+              and (types is null or d0.doc_type = any(types))
+              and (year_from is null or d0.year >= year_from) and (year_to is null or d0.year <= year_to)
+            order by d0.wba_id, d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)), d0.library_id) d
       left join public.pages p on p.library_id = d.library_id and p.page = 1
-      where d.wba_id is not null and d.wba_id <> ''
-        and (ids is null or d.wba_id = any(ids))
-        and (types is null or d.doc_type = any(types))
-        and (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
       order by d.year desc nulls last, d.company, d.library_id
       limit need;
     return;
@@ -1109,6 +1113,77 @@ begin
                             'mine', (select count(*) from public.value_reviews r where r.reviewer = who));
 end;
 $$;
+
+-- A value a person adds (10 Nov 2026): the robot holds nothing for a company, attribute and year, or the person has
+-- the figure in front of them. Signed like a review (a WBA address), with the source and its page, so the team
+-- can check it later and the reader can be pointed at that page. One row per person, company, attribute and year:
+-- adding again corrects the person's own row. Nothing here becomes a value by itself: status starts at 'new'.
+create table if not exists public.value_submissions (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  reviewer    text not null,
+  wba_id      text not null,
+  attribute   text not null,
+  year        int  not null,
+  kind        text not null,               -- number, yes_no, choice
+  value       numeric,                     -- kind number
+  unit        text,
+  answer      text,                        -- kind yes_no (yes, no) or choice (the options picked, separated by "; ")
+  source_url  text,
+  source_page int,
+  comment     text,
+  seconds     int,
+  log_id      bigint,
+  client      text,
+  status      text not null default 'new',
+  constraint value_submissions_one_per_person unique (reviewer, wba_id, attribute, year)
+);
+alter table public.value_submissions enable row level security;
+
+create or replace function public.add_value(
+  company text, attribute text, year int, kind text, value numeric default null, unit text default null, answer text default null,
+  source_url text default null, source_page int default null, comment text default null, seconds int default null,
+  log_id bigint default null, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(company);
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to add a value' using errcode = '42501';
+  end if;
+  if kind not in ('number', 'yes_no', 'choice') then
+    raise exception 'kind must be number, yes_no or choice' using errcode = '22023';
+  end if;
+  if (kind = 'number' and value is null) or (kind <> 'number' and coalesce(btrim(answer), '') = '') then
+    raise exception 'the value is missing' using errcode = '22023';
+  end if;
+  if kind = 'yes_no' and lower(btrim(answer)) not in ('yes', 'no') then
+    raise exception 'answer yes or no' using errcode = '22023';
+  end if;
+  if year is null or year < 1990 or year > extract(year from now())::int + 1 then
+    raise exception 'that year is out of range' using errcode = '22023';
+  end if;
+  if coalesce(btrim(attribute), '') = '' or not exists (select 1 from public.documents d where d.wba_id = co) then
+    raise exception 'unknown company or attribute' using errcode = '22023';
+  end if;
+  insert into public.value_submissions (reviewer, wba_id, attribute, year, kind, value, unit, answer, source_url, source_page, comment, seconds, log_id, client)
+    values (who, co, left(btrim(attribute), 40), year, kind, case when kind = 'number' then value end, nullif(left(btrim(unit), 40), ''),
+            case when kind <> 'number' then left(btrim(answer), 500) end, nullif(left(btrim(source_url), 1000), ''), source_page,
+            nullif(left(btrim(comment), 1000), ''), seconds, log_id, left(client, 60))
+    on conflict on constraint value_submissions_one_per_person do update
+      set at = now(), kind = excluded.kind, value = excluded.value, unit = excluded.unit, answer = excluded.answer, source_url = excluded.source_url,
+          source_page = excluded.source_page, comment = excluded.comment, seconds = excluded.seconds, log_id = excluded.log_id,
+          client = excluded.client, status = 'new';
+  return jsonb_build_object('added', (select count(*) from public.value_submissions v where v.reviewer = who));
+end;
+$$;
+revoke all on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) from public, anon;
+grant execute on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) to authenticated;
 
 -- The signed-in person's own reviews, newest first, with the totals: what they have reviewed stays visible to them
 -- (and is what the review game will count).

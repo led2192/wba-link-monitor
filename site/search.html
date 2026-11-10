@@ -103,7 +103,7 @@
   .values .btns .yes.on { background: #4BB42D; border-color: #4BB42D; color: #fff; }
   .values .btns .no.on { background: #FF3C23; border-color: #FF3C23; color: #fff; }
   .values .fix { grid-column: 1 / -1; display: grid; gap: 6px; margin-top: 4px; }
-  .values .fix input, .values .fix textarea, .values .sign input { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
+  .values .fix input:not([type=checkbox]), .values .fix select, .values .fix textarea, .values .sign input { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); width: 100%; }
   .values .fix .two { display: grid; grid-template-columns: 1fr 80px; gap: 6px; }
   .values .fix button, .values .sign button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; justify-self: start; }
   .values .sign { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: grid; gap: 6px; }
@@ -177,7 +177,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v8 2026-11-10";
+  const CLIENT = "lantern v9 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -457,6 +457,67 @@
     ok.onclick = async () => { try { const j = await authCall("verify", { type: "email", email: mail.value.trim(), token: code.value.trim() }); auth.set({ access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at, email: mail.value.trim() }); box.remove(); then(); } catch (e) { msg.textContent = `That code did not work: ${e.message}`; } };
     box.append(msg, mail, send, code, ok); panel.appendChild(box); mail.focus();
   }
+  // A value the person adds (10 Nov 2026): the attribute from the list, the field its kind asks for (a number with its
+  // unit, yes or no, or options), the source and its page. Signed like a review; the team checks it before it counts.
+  const ATTR_FORM = Object.fromEntries(ATTRS.map(a => [a[0], EMISSIONS.includes(a[0]) ? { kind: "number", unit: "tCO2e" }
+                                                              : a[0] === "GMC_02526.1" ? { kind: "number", unit: "employees" } : { kind: "number", unit: "USD" }]));
+  function readNumber(text) {                                // "51,400,000,000" or "51400000000.5"; null when it is not a number
+    const t = String(text || "").replace(/[\s,]/g, ""); if (!/^-?\d+(\.\d+)?$/.test(t)) return null;
+    return Number(t);
+  }
+  async function addValue(body) {
+    const t = await token(); if (!t) throw new Error("sign in");
+    const r = await fetch(`${CONFIG.url}/rest/v1/rpc/add_value`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.message || `${r.status}`);
+    return j;
+  }
+  function addValueLink(panel, attrs) {
+    const wrap = el("div", "note"); const a = el("a", null, "+ Add a value"); a.href = "#"; wrap.appendChild(a); panel.appendChild(wrap);
+    a.onclick = ev => {
+      ev.preventDefault(); if (panel.querySelector(".add")) return;
+      const opened = Date.now(); const f = el("div", "fix add");
+      const head = el("div", "what", `A value for ${state.companyName || state.company}`);
+      const sel = el("select"); for (const [code, name] of ATTRS) { const o = el("option", null, name); o.value = code; sel.appendChild(o); }
+      if (attrs.length) sel.value = attrs[0];
+      const yr = el("input"); yr.placeholder = "Reporting year"; yr.inputMode = "numeric"; if (state.from && state.from === state.to) yr.value = state.from;
+      const field = el("div"); let read = () => null;
+      const draw = () => {
+        field.innerHTML = ""; field.className = ""; const k = ATTR_FORM[sel.value] || { kind: "number" };
+        if (k.kind === "yes_no") {
+          const yn = el("select"); for (const o of ["yes", "no"]) { const x = el("option", null, o); x.value = o; yn.appendChild(x); } field.appendChild(yn);
+          read = () => ({ kind: "yes_no", answer: yn.value });
+        } else if (k.kind === "choice") {
+          const boxes = (k.options || []).map(o => { const l = el("label"); const c = el("input"); c.type = "checkbox"; c.value = o; l.append(c, document.createTextNode(" " + o)); field.appendChild(l); return c; });
+          read = () => { const picked = boxes.filter(c => c.checked).map(c => c.value); return picked.length ? { kind: "choice", answer: picked.join("; ") } : null; };
+        } else {
+          field.className = "two"; const num = el("input"); num.placeholder = "The figure in full, e.g. 51400000000"; num.inputMode = "decimal";
+          const unit = el("input"); unit.placeholder = "Unit"; unit.value = k.unit || ""; field.append(num, unit);
+          read = () => { const n = readNumber(num.value); return n === null ? null : { kind: "number", value: n, unit: unit.value }; };
+        }
+      };
+      sel.onchange = draw; draw();
+      const two = el("div", "two"); const link = el("input"); link.placeholder = "Link to the document that prints it"; const pg = el("input"); pg.placeholder = "Page"; pg.inputMode = "numeric"; two.append(link, pg);
+      const why = el("textarea"); why.rows = 2; why.placeholder = "A note for the team (optional)";
+      const msg = el("div", "what", "");
+      const go = el("button", null, "Add the value");
+      const send = async () => {
+        const v = read(); const y = parseInt(yr.value, 10);
+        if (!v) { msg.textContent = "Give the value (a number in full, digits only)."; return; }
+        if (!y) { msg.textContent = "Give the reporting year."; return; }
+        if (!/^https?:\/\//i.test(link.value.trim())) { msg.textContent = "Give the link to the document, so the team can check it."; return; }
+        try {
+          await addValue(Object.assign({ company: state.company, attribute: sel.value, year: y, source_url: link.value.trim(), source_page: parseInt(pg.value, 10) || null,
+                                         comment: why.value, seconds: Math.round((Date.now() - opened) / 1000), log_id: state.logId, client: CLIENT }, v));
+          f.innerHTML = ""; f.append(el("div", "what", "Thank you. The team checks an added value against its source before it counts."));
+        } catch (e) { if (/sign in|JWT|401|42501/.test(e.message)) signInBox(panel, send); else msg.textContent = `Not saved: ${e.message}`; }
+      };
+      go.onclick = send;
+      const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
+      const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
+      f.append(head, sel, yr, field, two, why, msg, acts); panel.appendChild(f); yr.value ? field.querySelector("input, select").focus() : yr.focus();
+    };
+  }
   async function loadValues() {
     const panel = $("values"); panel.hidden = true; panel.innerHTML = "";
     if (!state.company) return;
@@ -466,7 +527,12 @@
     let vals;
     try { vals = await rpc("find_values", { key, company_filter: state.company, year_from: state.from, year_to: state.to, attribute_filter: attrs.length ? attrs.join(";") : null }); }
     catch (e) { return; }                                    // the panel is an extra: a failure never touches the search
-    if (!vals || !vals.length) return;
+    const single = state.company && !state.company.includes(";");
+    if (!vals || !vals.length) {                             // nothing held: one company still gets the way to add a value
+      if (!single) return;
+      const none = el("summary"); none.innerHTML = "<b>Values we hold</b> · none for this search"; panel.appendChild(none);
+      addValueLink(panel, attrs); panel.hidden = false; panel.open = true; return;
+    }
     const shownAt = Date.now();
     const sum = el("summary"); sum.innerHTML = `<b>Values we hold</b> · ${vals.length} · read by the robot, yours to confirm`; panel.appendChild(sum);
     for (const v of vals.slice(0, 40)) {
@@ -502,6 +568,7 @@
       row.append(left, btns, ev); panel.appendChild(row);
     }
     panel.append(el("div", "note", "Agreement between documents says a figure is printed more than once, not that it is the right one."));
+    if (single) addValueLink(panel, attrs);
     panel.hidden = false; panel.open = window.matchMedia("(min-width: 1180px)").matches || vals.length <= 3;
   }
 
