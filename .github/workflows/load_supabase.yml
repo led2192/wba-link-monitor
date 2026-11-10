@@ -21,8 +21,12 @@ on:
         description: "at most this many pages files (0 = all waiting)"
         default: "0"
       minutes:
-        description: "time budget in minutes (0 = install the search functions and refresh documents only, no pages: quick)"
+        description: "time budget in minutes (0 = install the search functions and refresh documents only, no pages: the documents refresh takes about two hours)"
         default: "300"
+      functions_only:
+        description: "true = apply search.sql (the search functions) and stop: seconds, no schema, no documents, no pages"
+        type: boolean
+        default: false
   pull_request:
     paths: [load_supabase.py, supabase/schema.sql, .github/workflows/load_supabase.yml]
 
@@ -63,7 +67,8 @@ jobs:
                ARGS="--commit --index --minutes $LEFT"
           elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS=""
           else ARGS="--parts ${{ inputs.parts }} --minutes ${{ inputs.minutes }}"
-               [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit --index"; fi
+               [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit --index"
+               [ "${{ inputs.functions_only }}" = "true" ] && ARGS="$ARGS --functions-only"; fi
           python load_supabase.py $ARGS --max-gb "$MAX_GB"
       - name: Post the result on the pull request
         if: github.event_name == 'pull_request' && always()
