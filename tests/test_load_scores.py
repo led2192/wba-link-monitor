@@ -28,10 +28,28 @@ class Api(unittest.TestCase):
             L.get("/datasets", "secret-key", session=s, sleep=lambda x: None)
         self.assertIn("401", str(e.exception)); self.assertIn("Not authenticated", str(e.exception)); self.assertNotIn("secret-key", str(e.exception))
 
-    def test_columns_in_either_shape(self):
-        self.assertEqual(L.describe([{"name": "a", "type": "str"}]), ["a (str)"])
-        self.assertEqual(L.describe({"cols": [{"name": "b", "type": "float"}]}), ["b (float)"])
-        self.assertEqual(L.rows_of([{"x": 1}]), ([{"x": 1}], {}))
+    def test_the_contact_column_is_never_asked_for(self):
+        for cols in (L.BENCH_COLS, L.AREA_COLS):
+            self.assertFalse([c for c in cols if "poc" in c or "contact" in c or "name" == c])
+        src = open(L.__file__, encoding="utf-8").read()
+        self.assertNotIn("json.dumps(rows", src)             # no row content in the output
+
+    def test_pages_until_a_short_one_with_only_the_named_columns(self):
+        class Paged:
+            def __init__(self): self.calls = []
+            def get(self, url, headers=None, params=None, timeout=None):
+                self.calls.append(params); n = 1000 if params["page"] == 1 else 3
+                return Resp(200, {"data": [{"benchmark_score_id": f"s{params['page']}-{i}", "company_id": "PT_1"} for i in range(n)], "meta": {}})
+        s = Paged(); rows = L.fetch_all("benchmarks", L.BENCH_COLS, "k", "benchmark_score_id", session=s, sleep=lambda x: None)
+        self.assertEqual(len(rows), 1003); self.assertEqual(len(s.calls), 2)
+        self.assertEqual(s.calls[0]["include"], ",".join(L.BENCH_COLS)); self.assertEqual(s.calls[0]["per_page"], 1000)
+
+    def test_rows_keep_the_id_the_company_and_the_number(self):
+        r = L.bench_rows([{"benchmark_score_id": "PT_1-CSI-2025", "company_id": "PT_1", "benchmark_id": "CSI", "benchmark_name": "Social Benchmark",
+                           "methodology_id": "CSI-2025", "methodology_year": "2025", "benchmark_score_numerical": 23.6}, {"company_id": "PT_2"}])
+        self.assertEqual(len(r), 1); self.assertEqual(r[0][:2], ("PT_1-CSI-2025", "PT_1")); self.assertEqual(r[0][5], 2025); self.assertEqual(r[0][7], 23.6)
+        a = L.area_rows([{"measurement_area_score_id": "PT_1-NAB-2025_C", "company_id": "PT_1", "methodology_year": "2025", "measurement_area_score_numerical": "0.0"}])
+        self.assertEqual(a[0][4], 2025); self.assertEqual(a[0][7], 0.0); self.assertIsNone(L.num("n/a")); self.assertIsNone(L.year_of(None))
 
 
 if __name__ == "__main__":

@@ -1,20 +1,29 @@
-# The companies' benchmark results from the WBA Data API, for lanterN's company card (load_scores.py).
-# First step: a look at what the API serves (datasets, columns, a sample row). By hand, and on a PR that touches it.
+# The companies' benchmark results from the WBA Data API into the evidence database, for lanterN's company card
+# (load_scores.py). Nightly after the Evidence database load, and by hand. Dry run on a PR that touches it.
 name: Benchmark scores
 
 on:
+  workflow_run:
+    workflows: ["Evidence database load"]
+    types: [completed]
   workflow_dispatch:
     inputs:
-      datasets:
-        description: "datasets whose columns and a sample row are printed"
-        default: "benchmarks,measurementareas"
+      mode:
+        description: "dry_run or commit"
+        default: "commit"
   pull_request:
     paths: [load_scores.py, .github/workflows/load_scores.yml]
 
+concurrency:
+  group: load-scores
+  cancel-in-progress: false
+
 jobs:
-  look:
+  load:
+    # after a load, only the scheduled night one (a manual functions-only load during the day does not need it)
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,7 +31,12 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Look
-        run: python load_scores.py --datasets "${{ inputs.datasets || 'benchmarks,measurementareas' }}"
+      - name: Load
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.mode }}" = "dry_run" ]; then python load_scores.py
+          else python load_scores.py --commit; fi
         env:
           WBA_DATA_API_KEY: ${{ secrets.WBA_DATA_API_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

@@ -1243,19 +1243,55 @@ set search_path = public, extensions
 as $$
 declare
   who text := lower(auth.jwt() ->> 'email');
+  p public.value_versions%rowtype;
   j jsonb;
+  body text;
+  num numeric;
+  needle text := null;
+  pos int := 0;
+  cand text;
 begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to review' using errcode = '42501';
   end if;
-  select jsonb_build_object('version_id', p.version_id, 'wba_id', p.wba_id, 'company', coalesce(c.name, d.company, p.wba_id), 'attribute', p.attribute,
-                            'year', p.year, 'value', p.value, 'unit', p.unit, 'printed', p.printed, 'basis', p.basis, 'page', p.page,
-                            'url', d.url, 'label', d.label, 'doc_type', d.doc_type)
+  select vv.* into p from public.value_versions vv
+    where not exists (select 1 from public.value_reviews r where r.version_id = vv.version_id and r.reviewer = who)
+    order by (select count(*) from public.value_reviews r where r.version_id = vv.version_id), random()
+    limit 1;
+  if not found then
+    return jsonb_build_object('value', null, 'score', public.review_score(who));
+  end if;
+  -- the lines of the source page around the figure, so the card can be judged before opening the document: the
+  -- figure is looked for as printed, then with thousands separators (comma, dot, space), then as plain digits
+  select pg.body into body from public.pages pg where pg.library_id = p.library_id and pg.page = p.page;
+  if body is not null then
+    begin
+      num := nullif(regexp_replace(coalesce(p.printed, ''), '[^0-9.]', '', 'g'), '')::numeric;
+    exception when others then
+      num := null;
+    end;
+    foreach cand in array array[p.printed,
+                                case when num is not null then to_char(trunc(num), 'FM999,999,999,999,999,999') end,
+                                case when num is not null then replace(to_char(trunc(num), 'FM999,999,999,999,999,999'), ',', '.') end,
+                                case when num is not null then replace(to_char(trunc(num), 'FM999,999,999,999,999,999'), ',', ' ') end,
+                                case when num is not null then trunc(num)::text end] loop
+      continue when cand is null or length(cand) < 2;
+      pos := position(cand in body);
+      if pos > 0 then needle := cand; exit; end if;
+    end loop;
+  end if;
+  select jsonb_build_object('version_id', p.version_id, 'wba_id', p.wba_id, 'company', coalesce(c.name, d.company, p.wba_id), 'industry', c.industry,
+                            'country', c.country, 'attribute', p.attribute, 'year', p.year, 'value', p.value, 'unit', p.unit, 'printed', p.printed,
+                            'basis', p.basis, 'column_label', p.column_label, 'page', p.page, 'url', d.url, 'label', d.label, 'doc_type', d.doc_type,
+                            'doc_year', d.year, 'needle', needle,
+                            'excerpt', case when body is null then null
+                                            else regexp_replace(substring(body from greatest(pos - 450, 1) for 1000), '\s+', ' ', 'g') end,
+                            'others', (select count(*) from public.value_versions o where o.wba_id = p.wba_id and o.attribute = p.attribute and o.year = p.year
+                                         and o.version_id <> p.version_id and o.value = p.value),
+                            'differ', (select count(*) from public.value_versions o where o.wba_id = p.wba_id and o.attribute = p.attribute and o.year = p.year
+                                         and o.value <> p.value))
     into j
-  from (select vv.* from public.value_versions vv
-        where not exists (select 1 from public.value_reviews r where r.version_id = vv.version_id and r.reviewer = who)
-        order by (select count(*) from public.value_reviews r where r.version_id = vv.version_id), random()
-        limit 1) p
+  from (select 1) one
   left join public.documents d on d.library_id = p.library_id
   left join public.companies c on c.wba_id = p.wba_id;
   return jsonb_build_object('value', j, 'score', public.review_score(who));
