@@ -186,6 +186,8 @@
   .me .bar { height: 5px; border-radius: 3px; background: var(--chip); margin: 3px 0 2px; overflow: hidden; }
   .me .bar i { display: block; height: 100%; background: #4BB42D; border-radius: 3px; }
   @media (max-width: 760px) { .me .lv { display: none; } .me { padding: 4px; } }
+  .result .doc .ico { width: 18px; height: 18px; border-radius: 4px; vertical-align: -4px; margin-right: 2px; background: var(--box); }
+  .result .doc .size:empty { display: none; }
   .values .score { font-size: 12.5px; color: var(--muted); padding: 6px 0; }
   .values .addlink { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--accent); text-decoration: none; background: var(--bg); }
   .values .addlink:hover { border-color: var(--accent); }
@@ -271,7 +273,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v20 2026-11-10";
+  const CLIENT = "lantern v21 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -433,13 +435,33 @@
     if (items.length > 12) strip.append(el("span", "lbl", `and ${items.length - 12} more`));
   }
 
+  // The company's own site icon beside a result, as a web search shows the source's (10 Nov 2026). It comes from an icon
+  // service by the site's domain, so that service sees which company's results are on screen; nothing else. No icon, no gap.
+  function companyIcon(wbaId) {
+    const c = companies.find(x => x.id === wbaId); if (!c || !c.website) return null;
+    let host = ""; try { host = new URL(/^https?:\/\//i.test(c.website) ? c.website : "https://" + c.website).hostname.replace(/^www\./, ""); } catch (e) { return null; }
+    if (!host) return null;
+    const img = el("img", "ico"); img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer"; img.width = img.height = 18;
+    img.src = `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`; img.onerror = () => img.remove();
+    return img;
+  }
+  // How long each document is: one small question for the documents on screen, answered after the results are shown.
+  const sizeOf = {};
+  async function docSizes(rows) {
+    const paint = () => document.querySelectorAll("#results .size[data-doc]").forEach(s => { const n = sizeOf[s.dataset.doc]; if (n && !s.textContent) s.textContent = `${n.toLocaleString("en")} pages in all`; });
+    const ask = [...new Set(rows.map(r => r.library_id))].filter(id => !(id in sizeOf));
+    if (ask.length) { try { const got = await rpc("doc_pages", { key, ids: ask }); for (const id of ask) sizeOf[id] = (got && got[id]) || 0; } catch (e) { return; } }
+    paint();
+  }
   function render(rows, append) {
     const box = $("results");
     if (!append) { box.innerHTML = ""; renderStrip(rows); }
     for (const r of rows) {
       const d = el("div", "result");
       const doc = el("div", "doc");
-      doc.append(el("span", "co", r.company || r.wba_id), el("span", null, r.year ? String(r.year) : "no year"), el("span", null, r.doc_type || "untyped document"), el("span", null, `page ${r.page}`));
+      const ico = companyIcon(r.wba_id); if (ico) doc.appendChild(ico);
+      const size = el("span", "size", ""); size.dataset.doc = r.library_id;        // "264 pages", filled once the sizes arrive
+      doc.append(el("span", "co", r.company || r.wba_id), el("span", null, r.year ? String(r.year) : "no year"), el("span", null, r.doc_type || "untyped document"), el("span", null, `page ${r.page}`), size);
       const h = el("h3");
       const href = pageLink(r);
       const a = el("a", null, r.label || r.library_id);
@@ -449,6 +471,7 @@
       const p = el("p"); p.innerHTML = excerptHtml(r.excerpt);
       d.append(doc, h, p); box.appendChild(d);
     }
+    docSizes(rows);
     const old = document.querySelector(".more"); if (old) old.remove();
     if (rows.length && state.rows < 200 && rows.length >= state.rows - (append ? 50 : 0)) {
       const m = el("button", "more", "More results"); m.onclick = () => { state.rows += 50; search(true, true); }; box.appendChild(m);
