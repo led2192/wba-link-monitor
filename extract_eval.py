@@ -383,6 +383,7 @@ PAGE_ORDER = "today"     # "reversed" (--order): the model reads the same pages 
 SLOTS = "off"            # --slots on (9 Nov 2026): attributes with "slots" in attributes.json are read variant by variant
                          # (model_reader.read_slots); the proposal is the first slot present; every slot is scored
 ESCALATE_STEPS = 1       # --escalate-steps N: how many times the second level may read the next pages while the answer stays empty
+WHOLE_STEPS = 4          # --escalate whole: at most this many document chunks (whole_chars() each) read for one doubtful answer
 ESCALATE = "none"        # --escalate (9 Nov 2026): "empty" reads the NEXT ranked pages when the first read gives no figure;
                          # "disagree" also when the reads of --reads N disagree. The second level is the same model on
                          # pages 17 and on, never a larger model on the same pages (Sonnet on the same pages: +1.9, chance)
@@ -458,6 +459,21 @@ def whole_chars():
     import model_reader
     model = os.environ.get("READER_MODEL") or model_reader.DEFAULT_MODEL
     return 1_200_000 if model_reader.is_gemini(model) else 600_000
+
+
+def document_chunks(pages, chunk_chars):
+    """Consecutive runs of page tuples whose bodies (each counted up to model_reader.PAGE_CHARS, as the prompt cuts
+    them) fit chunk_chars: the whole document for a model whose window is smaller than the document (--escalate whole)."""
+    import model_reader
+    out, cur_chunk, used = [], [], 0
+    for t in pages:
+        n = min(len(t[4] or ""), model_reader.PAGE_CHARS)
+        if cur_chunk and used + n > chunk_chars:
+            out.append(cur_chunk); cur_chunk, used = [], 0
+        cur_chunk.append(t); used += n
+    if cur_chunk:
+        out.append(cur_chunk)
+    return out
 
 
 def whole_document_pages(cur, docs, best_pages, budget):
@@ -1017,19 +1033,24 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
             r["reads"] = values
             r["agree"] = all(same_value(v, values[0]) for v in values[1:])
             r["any_right"] = any(right(v, g["value"]) for v in values if v)
-        once = ESCALATE == "once" and got is not None and consensus(cur, ids, got["value"], scales)[0] < 2   # printed on one page only
+        once = ESCALATE in ("once", "whole") and got is not None and consensus(cur, ids, got["value"], scales)[0] < 2   # printed on one page only
         if ESCALATE != "none" and (got is None or once or (ESCALATE == "disagree" and READS > 1 and not r.get("agree", True))):
             r["escalated_once"] = once
-            used = {(lid, page) for _, _, lid, page, _ in best_pages}
-            ladder = [x for x in keep_pages(rows, n=len(rows), per_doc=PER_DOC * 3) if (x[1], x[2]) not in used]
-            r["escalated"] = bool(ladder[:MODEL_PAGES])
+            if ESCALATE == "whole":                       # the doubtful answer gets the whole document, in chunks (10 Nov 2026)
+                chunks = document_chunks(whole_document_pages(cur, docs, best_pages, 10 ** 9), whole_chars())[:WHOLE_STEPS]
+                steps = [[(0.0, lid, page, body, None) for _, _, lid, page, body in ch] for ch in chunks]
+                r["whole_pages"] = sum(len(ch) for ch in chunks)
+            else:
+                used = {(lid, page) for _, _, lid, page, _ in best_pages}
+                ladder = [x for x in keep_pages(rows, n=len(rows), per_doc=PER_DOC * 3) if (x[1], x[2]) not in used]
+                steps = [ladder[k * MODEL_PAGES:(k + 1) * MODEL_PAGES] for k in range(ESCALATE_STEPS)]
+            r["escalated"] = bool(steps and steps[0])
             r["escalation_steps"] = 0
-            for step in range(ESCALATE_STEPS):            # the ladder: the next MODEL_PAGES pages, again while still empty
-                more = ladder[step * MODEL_PAGES:(step + 1) * MODEL_PAGES]
+            for more in steps:                            # the ladder: the next pages (or the next chunk), again while still empty
                 if not more:
                     break
                 r["escalation_steps"] += 1
-                r["escalation_pages_hold"] = r.get("escalation_pages_hold") or any(found_on(b, v) for *_, b in more for v, _, _ in forms)
+                r["escalation_pages_hold"] = r.get("escalation_pages_hold") or any(found_on(b, v) for _, _, _, b, _ in more for v, _, _ in forms)   # the body is the 4th element, not the last (fixed 10 Nov 2026: the measure read the candidate and always said no)
                 second = read_years(dict(g, hint=hints(memory, anchor, g["year"], attr), fy_month=fy_end_month(cur, g["wba"])), attr,
                                     [(lid, page, read_text(lid, page, body)) for _, lid, page, body, _ in more], usage, note={})
                 e2 = next((e for e in second if e["year"] == g["year"]), None)
@@ -1087,7 +1108,7 @@ def main():
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
-    ap.add_argument("--escalate", choices=["none", "empty", "disagree", "once"], default="none", help="second level (9 Nov 2026): when the first read gives no figure (empty), or also when the reads of --reads disagree, or also when the figure is printed on one page only (once: figures the report repeats were right 76% to 88%, printed once 50% to 77%), the same model reads the next ranked pages; with once the second level's figure replaces the first only when the report prints it on 2+ pages")
+    ap.add_argument("--escalate", choices=["none", "empty", "disagree", "once", "whole"], default="none", help="second level (9 Nov 2026): when the first read gives no figure (empty), or also when the reads of --reads disagree, or also when the figure is printed on one page only (once: figures the report repeats were right 76% to 88%, printed once 50% to 77%), the same model reads the next ranked pages; with once the second level's figure replaces the first only when the report prints it on 2+ pages")
     ap.add_argument("--with-known", action="store_true", help="only answers whose company has a validated value for another year: the answers where the anchor and the memory can act (9 Nov 2026: the anchor found a value for 26 of 341 answers, revenue and low-carbon capex only, because the other attributes have one validated year per company)")
     ap.add_argument("--escalate-steps", type=int, default=1, help="with --escalate: how many times the second level may read the next pages while the answer stays empty (8 + 8 + 16 with --model-pages 8 --escalate-steps 2: the adaptive budget)")
     ap.add_argument("--slots", choices=["off", "on"], default="off", help="read the attributes that have slots in attributes.json variant by variant (model_reader.read_slots); the first variant present is the proposal and every variant is scored, to learn which the analysts use (9 Nov 2026)")
@@ -1525,9 +1546,9 @@ def main():
                 md.append(f"| {k} | {s[f'slot {k} present'] / n:.0%} | {s[f'slot {k} right'] / n:.0%} |")
             md.append("")
     if ESCALATE != "none":
-        md += [f"Second level (--escalate {ESCALATE}, 9 Nov 2026): when the first read gave no figure" + (" or the reads disagreed" if ESCALATE == "disagree" else "") + (" or the figure was printed on one page only" if ESCALATE == "once" else "")
-               + f", the same model read the next {MODEL_PAGES} ranked pages. Answers escalated, how often those pages hold the figure, "
-               "how often the second level gave a figure, and how often it was right:", "",
+        md += [f"Second level (--escalate {ESCALATE}, 9 Nov 2026): when the first read gave no figure" + (" or the reads disagreed" if ESCALATE == "disagree" else "") + (" or the figure was printed on one page only" if ESCALATE in ("once", "whole") else "")
+               + (f", the same model read the whole document in chunks of {whole_chars():,} characters (at most {WHOLE_STEPS}). Answers escalated, how often the document holds the figure, " if ESCALATE == "whole" else f", the same model read the next {MODEL_PAGES} ranked pages. Answers escalated, how often those pages hold the figure, ")
+               + "how often the second level gave a figure, and how often it was right:", "",
                "| Attribute | Escalated | Next pages hold the figure | Second level gave a figure | Second level right |", "| --- | --: | --: | --: | --: |"]
         for c in codes:
             s = stats[c]; n = s["escalated"]
