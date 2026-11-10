@@ -1314,6 +1314,7 @@ begin
   end if;
   return jsonb_build_object(
     'reviewer', who,
+    'score', public.review_score(who),            -- points, reviews, rank, reviewers: the level shown beside the person's initials
     'total', (select count(*) from public.value_reviews r where r.reviewer = who),
     'ok', (select count(*) from public.value_reviews r where r.reviewer = who and r.verdict = 'ok'),
     'wrong', (select count(*) from public.value_reviews r where r.reviewer = who and r.verdict = 'wrong'),
