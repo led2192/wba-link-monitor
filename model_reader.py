@@ -33,6 +33,7 @@ class ModelRefused(RuntimeError):
     """The API refused the call for a reason a retry won't fix (key, credit, model name): stop the run."""
 DEFAULT_MODEL = "claude-haiku-5-5"
 PAGE_CHARS = 8000                       # per page; a long page is cut, tables sit near the top in practice
+LONG_RUN = 16                           # more pages than this in one call (--select whole) and the adjacency notes are per run, not per pair
 MAX_TOKENS = 2500                   # 300 cut replies off before their JSON (average reply 236 tokens, 29 Oct 2026); with one
                                     # entry per year the replies averaged 785 tokens and 1,500 cut 1 in 10 (31 Oct 2026)
 SCALES = {"units": 1, "thousands": 1e3, "ten thousands": 1e4, "lakhs": 1e5, "millions": 1e6, "crores": 1e7, "hundred millions": 1e8,
@@ -47,8 +48,17 @@ FIRST_YEAR, LAST_YEAR = 2010, time.gmtime().tm_year
 def adjacent_notes(pages):
     """Lines telling the model which pages follow each other in the same document, so a table that runs
     from one page to the next is read as one (1 Nov 2026). pages: [(library_id, page, body)]."""
-    where = {(lid, page): i for i, (lid, page, _) in enumerate(pages, 1)}
     out = []
+    if len(pages) > LONG_RUN:          # --select whole (10 Nov 2026): one line per run of consecutive pages, not one per pair
+        runs = []
+        for i, (lid, page, _) in enumerate(pages, 1):
+            if runs and runs[-1][0] == lid and runs[-1][1] == page - 1:
+                runs[-1][1], runs[-1][3] = page, i
+            else:
+                runs.append([lid, page, i, i])
+        return [f"P{i0} to P{i1} are consecutive pages of one document, in order: a table may run from one to the next."
+                for _, _, i0, i1 in runs if i1 > i0]
+    where = {(lid, page): i for i, (lid, page, _) in enumerate(pages, 1)}
     for (lid, page), i in sorted(where.items(), key=lambda x: x[1]):
         j = where.get((lid, page + 1))
         if j:
@@ -350,7 +360,9 @@ def call_gemini(messages, usage, sess, model, system, max_tokens):
     headers = {"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip(), "content-type": "application/json"}
     thinking = True
     for attempt in range(6):
-        r = sess.post(url, headers=headers, json=gemini_body(messages, system, max_tokens, thinking), timeout=180)
+        body = gemini_body(messages, system, max_tokens, thinking)
+        long_call = sum(len(m.get("content") or "") for m in messages) > 400_000      # --select whole: a document in one call
+        r = sess.post(url, headers=headers, json=body, timeout=600 if long_call else 180)
         if r.status_code in (429, 500, 503) and attempt < 5:
             try:
                 wait = float((getattr(r, "headers", None) or {}).get("retry-after") or 0)
