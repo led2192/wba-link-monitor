@@ -382,6 +382,7 @@ def main():
     ap.add_argument("--minutes", type=float, default=300, help="time budget for loading pages")
     ap.add_argument("--parts", type=int, default=0, help="at most this many pages files (0 = all pending)")
     ap.add_argument("--max-gb", type=float, default=6.0, help="stop loading pages at this database size")
+    ap.add_argument("--functions-only", action="store_true", help="apply search.sql (the search functions) with --commit and stop: no schema, no documents, no pages (10 Nov 2026: a function change during the day without the two-hour documents refresh)")
     ap.add_argument("--index", action="store_true", help="fill the stored words of older pages and build the search index when it is missing and no pages file is left")
     a = ap.parse_args()
     if a.commit:
@@ -389,6 +390,17 @@ def main():
     t0 = time.time()
     run = qa.Run("load_supabase.py")
 
+    if a.functions_only:
+        conn = connect(os.environ["SUPABASE_DB_URL"])
+        if not (has_auth(conn) and search_index_exists(conn)):
+            sys.exit("the search functions need the auth schema and the pages_search index")
+        with conn.cursor() as c:
+            c.execute("set lock_timeout = '30s'")
+            c.execute(open(SEARCH_SQL, encoding="utf-8").read())
+        (conn.commit if a.commit else conn.rollback)()
+        print(f"search.sql {'applied' if a.commit else 'checked and rolled back'}", flush=True)
+        run.finish("ok", rows_in=0, rows_out=0, counters={"functions_only": True, "committed": a.commit}, notes="search functions only")
+        return 0
     store = tc.open_store()
     listing = store.assets()
     conn = connect(os.environ["SUPABASE_DB_URL"])
