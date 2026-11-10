@@ -612,9 +612,29 @@ begin
     words := coalesce(array(select lower(regexp_replace(w, '[^[:alnum:]]', '', 'g')) from regexp_split_to_table(coalesce(q, ''), '\s+') w
                             where length(regexp_replace(w, '[^[:alnum:]]', '', 'g')) >= 1 limit 8), '{}');
     nw := coalesce(array_length(words, 1), 0);
-    if nw = 0 then
+  end if;
+  if nw = 0 then
+    -- no words, only filters ("Nike code of conduct" is a company and a type): the documents themselves, newest first,
+    -- one row each at its first page, so the person can open them (10 Nov 2026)
+    if ids is null and types is null and year_from is null and year_to is null then
       return;
     end if;
+    insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms)
+      values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), 0,
+              extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60), 0, '(documents only)')
+      returning id into lid;
+    return query
+      select lid, (row_number() over (order by d.year desc nulls last, d.company, d.library_id))::int, d.library_id, d.company, d.wba_id,
+             d.year, d.doc_type, d.label, d.url, 1, 0::real, left(regexp_replace(coalesce(p.body, ''), '\s+', ' ', 'g'), 300)
+      from public.documents d
+      left join public.pages p on p.library_id = d.library_id and p.page = 1
+      where d.wba_id is not null and d.wba_id <> ''
+        and (ids is null or d.wba_id = any(ids))
+        and (types is null or d.doc_type = any(types))
+        and (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+      order by d.year desc nulls last, d.company, d.library_id
+      limit need;
+    return;
   end if;
   for i in 1..coalesce(array_length(phrases, 1), 0) loop
     phrase_q := coalesce(phrase_q && phraseto_tsquery('simple', phrases[i]), phraseto_tsquery('simple', phrases[i]));
