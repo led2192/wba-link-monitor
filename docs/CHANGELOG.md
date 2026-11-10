@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 lanterN: the values panel lists everything held for a company only when the search is the company alone (years allowed); a search that named a document type ("Nike code of conduct") still showed it. The link "Search the words … inside the documents instead" now rewrites the box with the words in quotes, so the box, the log and the history say what was searched. (#372)
 - 2026-11-10 lanterN: a signed-in reviewer sees "Your reviews: N" in the footer and the list of what they reviewed (`my_reviews`); the values panel shows only when the search names an attribute or only a company (it sat beside "Nike código de conducta") (#371)
 - 2026-11-10 lanterN: the neighbouring-words pass is bounded (per year, 4,000 pages checked, 2.5 seconds in all): two common words as a phrase ("ACT Core") had scanned every page holding both and timed out; a Cancel button on the correction form (#370)
 - 2026-11-10 lanterN logs what the person typed (`search_log.typed`) beside what the box read out of it; document types are recognised in Spanish and French too (código de conducta, código de comportamiento, informe anual, memoria de sostenibilidad...); when a type was read from the words, a link offers to search those words inside the documents instead (#369)

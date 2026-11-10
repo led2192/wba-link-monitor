@@ -177,7 +177,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v6 2026-11-10";
+  const CLIENT = "lantern v7 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -382,7 +382,10 @@
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       if (state.typeWords && !more) {                       // the type was read from the words typed: offer the other reading
         const st = $("status"); const a = el("a", null, `Search the words “${state.typeWords}” inside the documents instead`); a.href = "#";
-        a.onclick = ev => { ev.preventDefault(); state.q = (state.q + ` "${state.typeWords}"`).trim(); state.type = null; state.typeWords = null; $("fType").value = ""; search(true); };
+        a.onclick = ev => { ev.preventDefault(); const w = state.typeWords;      // the box says what is searched: the words in quotes are a phrase, not a type
+                             const re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "s?", "i");
+                             $("q").value = re.test($("q").value) ? $("q").value.replace(re, m => `"${m}"`) : ($("q").value + ` "${w}"`).trim();
+                             $("fType").value = ""; search(); };
         st.append(document.createTextNode(" · "), a);
       }
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
@@ -458,7 +461,8 @@
     const panel = $("values"); panel.hidden = true; panel.innerHTML = "";
     if (!state.company) return;
     const attrs = attrsIn($("q").value);
-    if (!attrs.length && state.q) return;                    // the search is about something else (a policy, a phrase): no values beside it
+    // every value we hold for a company only when the search is the company alone (years allowed); otherwise only the attributes named
+    if (!attrs.length && (state.q || state.type || state.industry || state.country || state.region)) return;
     let vals;
     try { vals = await rpc("find_values", { key, company_filter: state.company, year_from: state.from, year_to: state.to, attribute_filter: attrs.length ? attrs.join(";") : null }); }
     catch (e) { return; }                                    // the panel is an extra: a failure never touches the search
