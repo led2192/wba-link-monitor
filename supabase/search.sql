@@ -1437,6 +1437,76 @@ $$;
 revoke all on function public.find_submissions(text, text, int, int, text) from public;
 grant execute on function public.find_submissions(text, text, int, int, text) to anon, authenticated;
 
+-- Sources people add (10 Nov 2026, the owner: the analyst who searches and does not find is the one who knows
+-- which document is missing). A signed-in WBA address gives one or several links for a company; a link the
+-- library already holds is said so and not kept; the rest wait here with status 'new' until source_submissions.py
+-- (hourly) passes them to the pipeline's own inbox (companies.add_link), which applies the harvester's duplicate
+-- guards and attaches, reads and labels the document. One row per person and link.
+create table if not exists public.source_submissions (
+  id        bigint generated always as identity primary key,
+  at        timestamptz not null default now(),
+  reviewer  text not null,
+  wba_id    text not null,
+  url       text not null,
+  year      int,
+  note      text,
+  status    text not null default 'new',     -- new, queued (sent to the inbox), orphan (company not in the base)
+  result    text,
+  client    text,
+  constraint source_submissions_one_per_person unique (reviewer, url)
+);
+alter table public.source_submissions enable row level security;
+
+create or replace function public.add_sources(
+  company text, urls text[], year int default null, note text default null, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+  u text;
+  added int := 0;
+  known int := 0;
+  invalid int := 0;
+  again int := 0;
+  n int;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to add a source' using errcode = '42501';
+  end if;
+  if co = '' or not exists (select 1 from public.documents d where d.wba_id = co) then
+    raise exception 'choose the company the document belongs to' using errcode = '22023';
+  end if;
+  if coalesce(array_length(urls, 1), 0) = 0 or array_length(urls, 1) > 20 then
+    raise exception 'one to twenty links' using errcode = '22023';
+  end if;
+  if year is not null and (year < 1990 or year > extract(year from now())::int + 1) then
+    raise exception 'that year is out of range' using errcode = '22023';
+  end if;
+  foreach u in array urls loop
+    u := btrim(coalesce(u, ''));
+    continue when u = '';
+    if u !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(u) > 1000 then
+      invalid := invalid + 1;
+    elsif exists (select 1 from public.documents d where d.url = u) then
+      known := known + 1;
+    else
+      insert into public.source_submissions (reviewer, wba_id, url, year, note, client)
+        values (who, co, u, year, nullif(left(btrim(note), 500), ''), left(client, 60))
+        on conflict on constraint source_submissions_one_per_person do nothing;
+      get diagnostics n = row_count;
+      if n = 1 then added := added + 1; else again := again + 1; end if;
+    end if;
+  end loop;
+  return jsonb_build_object('added', added, 'known', known, 'invalid', invalid, 'again', again);
+end;
+$$;
+revoke all on function public.add_sources(text, text[], int, text, text) from public, anon;
+grant execute on function public.add_sources(text, text[], int, text, text) to authenticated;
+
 -- "I'm feeling lucky" (10 Nov 2026): one value to review at a time, for a signed-in person. lucky_value picks,
 -- among the values the person has not reviewed, one of those with the fewest reviews, at random, and returns it
 -- with its source and the person's score. The score counts reviews, a review made in under four seconds as a
@@ -1445,8 +1515,12 @@ grant execute on function public.find_submissions(text, text, int, int, text) to
 create or replace function public.review_score(who text) returns jsonb
 language sql stable security definer set search_path = public
 as $$
-  with pts as (select r.reviewer, sum(case when r.seconds is not null and r.seconds < 4 then 0.25 else 1 end) as points, count(*) as reviews
-               from public.value_reviews r where r.verdict in ('ok', 'wrong') group by r.reviewer)
+  with pts as (select u.reviewer, sum(u.p) as points, sum(u.r) as reviews
+               from (select r.reviewer, case when r.seconds is not null and r.seconds < 4 then 0.25 else 1 end as p, 1 as r
+                     from public.value_reviews r where r.verdict in ('ok', 'wrong')
+                     union all
+                     select ss.reviewer, 3, 0 from public.source_submissions ss where ss.status = 'queued') u   -- a source passed on to the pipeline: three points
+               group by u.reviewer)
   select jsonb_build_object(
     'points', coalesce((select p.points from pts p where p.reviewer = who), 0),
     'reviews', coalesce((select p.reviews from pts p where p.reviewer = who), 0),
