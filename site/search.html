@@ -37,7 +37,8 @@
   header.home { justify-content: center; padding-top: 24vh; }
   .brand { display: block; line-height: 0; }
   .brand svg { width: 232px; height: 50px; display: block; }
-  header.home .brand svg { width: 460px; max-width: 92vw; height: auto; }
+  /* the lamp and the name, not the drawing with its faint beam, sit over the middle of the box: the beam's tail is empty space on the right */
+  header.home .brand svg { width: 460px; max-width: 92vw; height: auto; transform: translateX(12.1%); }
   .brand .lamp { fill: var(--brand); } .brand .glass { fill: var(--bg); } .brand .flame { fill: var(--flame); }
   .brand .l1 { fill: var(--brand); } .brand .l7 { fill: #1E64CC; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .brand .lamp, :root:not([data-theme="light"]) .brand .l1 { fill: #ECEFF4; }
@@ -284,7 +285,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v22 2026-11-10";
+  const CLIENT = "lantern v23 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
