@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 lanterN: a quoted phrase alone searches again (the documents-only branch had swallowed it: "ACT Core" and "Just Transition" in quotes found nothing); pages printing two neighbouring words together enter the pool first and rank higher (ACT Core without quotes ranked pages full of "core"); the relaxation stops after six seconds instead of running into the timeout (#368)
 - 2026-11-10 lanterN shows the values the robot has read for the companies searched (`find_values`), with their evidence and source page, and takes reviews: ✓ or ✗ with an optional right value, source link, page and comment (`review_value` into `value_reviews`), signed by a WBA address through a code by email (#367)
 - 2026-11-10 lanterN reads industries, countries and regions typed in the box as filters (over `companies`), expands query synonyms from `search_synonyms` (35 seeded, editable), drops the words of asking, shows a strip of the companies found above the results, and cuts the highlighted extract to the first 20,000 characters (faster); the search check covers synonyms with an industry filter and the documents-only case (#366)
 - 2026-11-10 `semantic_index.py` and the `Semantic index` workflow (manual, dry run by default, partition k/N): the main reports from 2024 on cut into 120-word passages and embedded with multilingual-e5-small into `chunks` (HNSW index) with `chunk_docs` as the done-marker (#356)

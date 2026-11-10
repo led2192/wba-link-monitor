@@ -667,6 +667,7 @@ declare
   phrase_q tsquery := null;         -- every phrase, required always
   or_q tsquery := null;             -- every word or phrase, for the ranking
   together_q tsquery := null;       -- the words as one phrase, in order: a page printing them together ranks higher
+  pair_qs tsquery[] := '{}';        -- each two neighbouring words as a phrase ("act core", "benchmarking alliance")
   sub_q tsquery;
   need int := least(greatest(coalesce(max_rows, 50), 1), 200);
   per_year int := 400;
@@ -702,7 +703,7 @@ begin
                             where length(regexp_replace(w, '[^[:alnum:]]', '', 'g')) >= 1 limit 8), '{}');
     nw := coalesce(array_length(words, 1), 0);
   end if;
-  if nw = 0 then
+  if nw = 0 and coalesce(array_length(phrases, 1), 0) = 0 then   -- (a quoted phrase alone is a search, not a list of documents: 10 Nov 2026, "ACT Core" in quotes found nothing)
     -- no words, only filters ("Nike code of conduct" is a company and a type): the documents themselves, newest first,
     -- one row each at its first page, so the person can open them (10 Nov 2026)
     if ids is null and types is null and year_from is null and year_to is null then
@@ -739,10 +740,30 @@ begin
   end loop;
   if nw >= 2 then
     together_q := phraseto_tsquery('simple', array_to_string(words, ' '));
+    for i in 1..nw - 1 loop
+      pair_qs := pair_qs || phraseto_tsquery('simple', words[i] || ' ' || words[i + 1]);
+    end loop;
   end if;
   create temp table if not exists find_cand (library_id text, page int, words tsvector, year int, doc_type text, primary key (library_id, page)) on commit drop;
   truncate find_cand;
+  -- first the pages that print two neighbouring words together ("ACT Core", "just transition"): with common words
+  -- they would never enter a pool capped per year, and they are what the person means (10 Nov 2026)
+  for i in 1..coalesce(array_length(pair_qs, 1), 0) loop
+    insert into find_cand
+      select p.library_id, p.page, p.words, p.year, p.doc_type
+      from public.pages p
+      where p.words @@ (case when phrase_q is null then pair_qs[i] else phrase_q && pair_qs[i] end)
+        and p.wba_id <> ''
+        and (year_from is null or p.year >= year_from) and (year_to is null or p.year <= year_to)
+        and (types is null or p.doc_type = any(types))
+        and (ids is null or p.wba_id = any(ids))
+      limit 300
+    on conflict do nothing;
+    get diagnostics n = row_count;
+    got := got + n;
+  end loop;
   -- level 0: every word; then every subset missing one word, then missing two, until enough pages are found
+  -- or six seconds have gone (a long query of common words otherwise ran into the statement timeout)
   <<levels>>
   for drop_n in 0..least(2, greatest(nw - 1, 0)) loop
     for mask in 0..(case when nw = 0 then 0 else (1 << nw) - 1 end) loop
@@ -771,9 +792,9 @@ begin
         on conflict do nothing;
         get diagnostics n = row_count;
         got := got + n;
-        exit when got >= cap;
+        exit when got >= cap or clock_timestamp() - t0 > interval '6 seconds';
       end loop;
-      exit levels when got >= cap;
+      exit levels when got >= cap or clock_timestamp() - t0 > interval '6 seconds';
     end loop;
     exit levels when got >= need;
   end loop;
@@ -788,13 +809,15 @@ begin
       select c.library_id, c.page, c.year, c.doc_type,
              (select count(*) from unnest(tqs) tq where c.words @@ tq)::int as matched,
              ts_rank_cd(c.words, or_q, 5) as rel,
-             (together_q is not null and c.words @@ together_q) as together
+             (together_q is not null and c.words @@ together_q) as together,
+             (select count(*) from unnest(pair_qs) pq where c.words @@ pq)::int as pairs
       from find_cand c),
     weighted as (
       select s.*, (s.rel * public.type_weight(s.doc_type)
                    / (1 + 0.15 * greatest(this_year - coalesce(nullif(s.year, 0), this_year), 0))
                    * power((s.matched + 0.5) / (greatest(nw, 1) + 0.5), 2)
-                   * case when s.together then 1.5 else 1.0 end)::real as score
+                   * case when s.together then 1.5 else 1.0 end
+                   * (1 + 1.5 * s.pairs))::real as score
       from scored s),
     ranked as (
       select w.*, row_number() over (partition by w.library_id order by w.score desc, w.page) as in_doc
