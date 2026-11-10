@@ -34,7 +34,7 @@
   .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px 28px; min-height: 100vh; display: flex; flex-direction: column; }
   .wrap > :not(footer) { flex: none; }
   header { display: flex; align-items: center; padding: 24px 0 6px; }
-  header.home { justify-content: center; padding-top: 16vh; }
+  header.home { justify-content: center; padding-top: 24vh; }
   .brand { display: block; line-height: 0; }
   .brand svg { width: 232px; height: 50px; display: block; }
   header.home .brand svg { width: 460px; max-width: 92vw; height: auto; }
@@ -55,6 +55,8 @@
   .boxwrap { position: relative; width: 100%; }
   header.home ~ .boxwrap { max-width: 640px; margin: 26px auto 10px; }
   header.home ~ .boxwrap form.box { margin: 0; }
+  header.home ~ .boxwrap .funnel { position: absolute; left: calc(100% + 8px); top: 0; height: 100%; margin-left: 0; }   /* the box itself sits in the middle */
+  @media (max-width: 760px) { header.home ~ .boxwrap .funnel { position: static; margin-left: 10px; height: auto; } }
   .history { position: absolute; left: 0; right: 54px; top: calc(100% + 6px); background: var(--box); border: 1px solid var(--line); border-radius: 16px;
              box-shadow: 0 10px 30px rgba(0, 25, 75, .12); z-index: 5; padding: 6px 0; display: none; }
   .history.open { display: block; }
@@ -68,10 +70,15 @@
   .history .foot { display: flex; justify-content: flex-end; padding: 4px 14px 2px; font-size: 12px; color: var(--muted); }
   .history .foot button { border: 0; background: none; color: inherit; cursor: pointer; font: inherit; text-decoration: underline; }
   .box input { flex: 1; min-width: 0; font: inherit; font-size: 18px; padding: 12px 16px; border: 1px solid var(--line);
-               border-right: 0; border-radius: 24px 0 0 24px; background: var(--box); color: var(--fg); outline: none; }
+               border-radius: 24px; background: var(--box); color: var(--fg); outline: none; }
   .box input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent); }
-  .box button { font: inherit; font-weight: 500; padding: 0 20px; border: 1px solid var(--accent); background: var(--accent);
-                color: #fff; border-radius: 0 24px 24px 0; cursor: pointer; }
+  /* Enter searches; on the home screen two plain buttons sit under the box (10 Nov 2026: the owner asked for the
+     familiar layout of a web search, and the button beside the box is gone) */
+  .homebtns { display: none; }
+  header.home ~ .homebtns { display: flex; justify-content: center; gap: 12px; margin: 18px auto 0; flex-wrap: wrap; }
+  .homebtns button { font: inherit; font-size: 14.5px; padding: 9px 18px; border: 1px solid transparent; border-radius: 8px; background: var(--chip);
+                     color: var(--fg); cursor: pointer; }
+  .homebtns button:hover { border-color: var(--line); box-shadow: 0 1px 3px rgba(0, 25, 75, .12); }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; min-height: 8px; }
   .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; background: var(--chip); border: 1px solid var(--line);
           border-radius: 16px; padding: 3px 10px 3px 12px; }
@@ -116,6 +123,27 @@
   .values .card .name { font-weight: 600; font-size: 15px; color: var(--brand); }
   .values .card a { color: var(--accent); text-decoration: none; }
   .values .subhead { font-size: 12px; color: var(--muted); text-transform: none; padding: 10px 0 2px; border-top: 1px solid var(--line); margin-top: 6px; }
+  .lucky { max-width: 760px; margin: 28px auto 0; padding: 26px 30px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--box); box-shadow: 0 6px 24px rgba(0, 25, 75, .06); }
+  .lucky .top { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
+  .lucky .who { font-size: 14px; color: var(--muted); }
+  .lucky h2 { margin: 2px 0 6px; font-size: 22px; color: var(--brand); font-weight: 600; }
+  .lucky .big { font-size: 44px; font-weight: 700; color: var(--brand); line-height: 1.15; margin-bottom: 12px; }
+  .lucky .big small { font-size: 18px; font-weight: 500; color: var(--muted); }
+  .lucky dl { display: grid; grid-template-columns: 120px 1fr; gap: 6px 14px; margin: 0 0 14px; font-size: 14px; }
+  .lucky dt { color: var(--muted); } .lucky dd { margin: 0; overflow-wrap: anywhere; } .lucky dd a { color: var(--accent); }
+  .lucky .excerpt { font-size: 13.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-height: 190px; overflow: auto; margin-bottom: 16px; }
+  .lucky mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+  .lucky .excerpt .cap { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .lucky .verdict { display: flex; gap: 12px; justify-content: center; margin-bottom: 10px; }
+  .lucky .verdict button { font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--box); color: var(--fg); cursor: pointer; }
+  .lucky .verdict .yes.on { background: #4BB42D; border-color: #4BB42D; color: #fff; } .lucky .verdict .no.on { background: #FF3C23; border-color: #FF3C23; color: #fff; }
+  .lucky .nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 12px 0 10px; }
+  .lucky .nav button { font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--box); color: var(--fg); cursor: pointer; }
+  .lucky .nav .save { background: var(--accent); border-color: var(--accent); color: #fff; padding: 9px 34px; font-weight: 600; }
+  .lucky .nav button:disabled { opacity: .4; cursor: default; }
+  .lucky .what { font-size: 13px; color: var(--muted); min-height: 1em; }
+  .lucky .values { border: 0; padding: 0; margin-top: 10px; display: block; position: static; width: auto; }
+  @media (max-width: 600px) { .lucky { padding: 18px 16px; } .lucky .big { font-size: 34px; } .lucky dl { grid-template-columns: 1fr; gap: 0 0; } .lucky dd { margin-bottom: 6px; } }
   .values .score { font-size: 12.5px; color: var(--muted); padding: 6px 0; }
   .values .addlink { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--accent); text-decoration: none; background: var(--bg); }
   .values .addlink:hover { border-color: var(--accent); }
@@ -162,13 +190,17 @@
   </header>
   <div class="boxwrap" id="boxwrap">
   <form class="box" id="form" autocomplete="off">
-    <input id="q" type="search" placeholder="Unilever scope 1 2024, or &quot;living wage&quot;"Type it as you would in a web search: Unilever scope 1 2024, or &quot;living wage&quot;"quot;living wageplaceholder="Type it as you would in a web search: Unilever scope 1 2024, or &quot;living wage&quot;"quot;" aria-label="Search" autofocus>
-    <button type="submit">Search</button>
+    <input id="q" type="search" placeholder="Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
+    <button type="submit" hidden>Search</button>
     <button type="button" class="funnel" id="funnel" aria-expanded="false" aria-controls="filters" title="Filters: company, years, document type">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>
     </button>
   </form>
   <div class="history" id="history" role="listbox" aria-label="Your recent searches"></div>
+  </div>
+  <div class="homebtns" id="homebtns">
+    <button type="button" id="goSearch">Search with lanterN</button>
+    <button type="button" id="goLucky">I’m feeling lucky</button>
   </div>
   <div class="chips" id="chips"></div>
   <div class="filters" id="filters" hidden>
@@ -191,7 +223,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v13 2026-11-10";
+  const CLIENT = "lantern v14 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -659,32 +691,71 @@
   // among reviewers (no names). A review made in under four seconds counts a quarter.
   const BADGES = [[200, "Lighthouse"], [50, "Beacon"], [10, "Keeper"], [1, "First light"]];
   const badge = pts => (BADGES.find(b => pts >= b[0]) || [0, "No badge yet"])[1];
-  async function lucky() {
-    const panel = $("values"); panel.innerHTML = ""; panel.hidden = false; panel.open = true;
-    const sum = el("summary"); sum.innerHTML = "<b>I’m feeling lucky</b> · one value at a time"; panel.appendChild(sum);
-    if (!(await token())) { panel.append(el("div", "note", "Check a value the robot read against its source. Each review counts.")); signInBox(panel, lucky); return; }
-    const got = await authed("lucky_value", {});
-    if (!got) { panel.append(el("div", "note", "Could not fetch a value. Try again in a moment.")); return; }
-    const sc = got.score || {}; const pts = Number(sc.points || 0);
-    const next = BADGES.slice().reverse().find(b => pts < b[0]);
-    panel.append(el("div", "score", `${pts % 1 ? pts.toFixed(2) : pts} ${pts === 1 ? "point" : "points"} · ${badge(pts)}` + (sc.reviewers > 1 && sc.reviews ? ` · #${sc.rank} of ${sc.reviewers} reviewers` : "") + (next ? ` · ${Math.ceil(next[0] - pts)} to ${next[1]}` : "")));
-    const v = got.value;
-    if (!v) { panel.append(el("div", "note", "You have reviewed every value we hold. Thank you.")); showMine(false); return; }
-    const shownAt = Date.now(); const row = el("div", "v"); const left = el("div");
-    left.append(el("div", "what", `${v.company} · ${ATTR_NAME[v.attribute] || v.attribute} · ${v.year}`));
-    const num = el("div", "num", fmt(v.value) + " "); num.append(el("small", null, [v.unit, v.basis].filter(Boolean).join(", "))); left.appendChild(num);
-    const btns = el("div", "btns"); const yes = el("button", "yes", "✓"); yes.title = "This value is right"; const no = el("button", "no", "✗"); no.title = "This value is wrong"; btns.append(yes, no);
-    const ev = el("div", "ev"); if (v.printed) ev.append(document.createTextNode(`printed as ${String(v.printed).slice(0, 40)} · `));
-    if (v.url) { const a = el("a", null, `open the source, page ${v.page || "?"}`); a.href = /\.pdf(\?|$)/i.test(v.url) || !/#/.test(v.url) ? `${v.url}#page=${v.page || 1}` : v.url; a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); }
-    const send = async verdict => { yes.disabled = no.disabled = true;
-      try { await review({ version_id: v.version_id, verdict, seconds: Math.round((Date.now() - shownAt) / 1000), client: CLIENT + " lucky" }); showMine(false); lucky(); }
-      catch (e) { yes.disabled = no.disabled = false; ev.append(document.createTextNode(` · not saved: ${e.message}`)); } };
-    yes.onclick = () => send("ok"); no.onclick = () => send("wrong");
-    row.append(left, btns, ev); panel.appendChild(row);
-    const more = el("div", "note"); const skip = el("a", null, "Skip, another one"); skip.href = "#"; skip.onclick = e => { e.preventDefault(); lucky(); };
-    const stop = el("a", null, "Close"); stop.href = "#"; stop.onclick = e => { e.preventDefault(); panel.hidden = true; };
-    more.append(skip, document.createTextNode(" · "), stop); panel.appendChild(more);
+  // The card is central: the value, where it was read, the lines of the page around it, and three moves:
+  // a verdict then Save, or the arrows to go on without one and to come back (10 Nov 2026).
+  const deck = { cards: [], at: -1, score: {} };
+  const escH = s => String(s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  async function luckyDraw() {                               // one more card at the end of the deck; null when there is none
+    for (let tries = 0; tries < 4; tries++) {
+      const got = await authed("lucky_value", {}); if (!got) return null;
+      deck.score = got.score || deck.score; if (!got.value) return null;
+      if (!deck.cards.some(c => c.v.version_id === got.value.version_id)) { deck.cards.push({ v: got.value, pick: null, saved: null }); return got.value; }
+    }
+    return null;
   }
+  function luckyClose() { deck.at = -1; $("results").innerHTML = ""; setStatus(""); }
+  async function lucky(move) {
+    const box = $("results"); $("values").hidden = true; $("chips").innerHTML = ""; setStatus("");
+    if (!(await token())) {
+      box.innerHTML = ""; const c = el("div", "lucky"); c.append(el("h2", null, "I’m feeling lucky"), el("p", "what", "One value the robot read, with the page it came from. Say whether it is right. Each review counts."));
+      const hold = el("div", "values"); c.appendChild(hold); box.appendChild(c); signInBox(hold, lucky); return;
+    }
+    if (move === "prev" && deck.at > 0) deck.at--;
+    else if (move !== "prev") {
+      if (deck.at < deck.cards.length - 1) deck.at++;
+      else { box.style.opacity = ".5"; const v = await luckyDraw(); box.style.opacity = ""; if (v) deck.at = deck.cards.length - 1; else if (!deck.cards.length) { box.innerHTML = ""; const c = el("div", "lucky"); c.append(el("h2", null, "I’m feeling lucky"), el("p", "what", "Nothing left to review, or the value could not be fetched. Try again in a moment.")); box.appendChild(c); return; } }
+    }
+    const card = deck.cards[deck.at], v = card.v, shownAt = Date.now();
+    const sc = deck.score, pts = Number(sc.points || 0), nextB = BADGES.slice().reverse().find(b => pts < b[0]);
+    box.innerHTML = ""; const c = el("div", "lucky");
+    const top = el("div", "top"); top.append(el("span", null, "I’m feeling lucky"),
+      el("span", "score", `${pts % 1 ? pts.toFixed(2) : pts} ${pts === 1 ? "point" : "points"} · ${badge(pts)}` + (sc.reviewers > 1 && sc.reviews ? ` · #${sc.rank} of ${sc.reviewers}` : "") + (nextB ? ` · ${Math.ceil(nextB[0] - pts)} to ${nextB[1]}` : "")));
+    c.appendChild(top);
+    c.append(el("div", "who", [v.company, v.industry, v.country].filter(Boolean).join(" · ")));
+    c.append(el("h2", null, `${ATTR_NAME[v.attribute] || v.attribute} · ${v.year}`));
+    const big = el("div", "big", fmt(v.value) + " "); big.append(el("small", null, [v.unit, v.basis].filter(Boolean).join(", "))); c.appendChild(big);
+    const facts = el("dl");
+    const fact = (k, val) => { if (val === null || val === undefined || val === "") return; facts.append(el("dt", null, k), typeof val === "string" ? el("dd", null, val) : (() => { const d = el("dd"); d.appendChild(val); return d; })()); };
+    fact("In full", Number(v.value).toLocaleString("en", { maximumFractionDigits: 2 }) + (v.unit ? " " + v.unit : ""));
+    fact("Read as", v.printed ? String(v.printed).slice(0, 60) + (v.column_label ? `, under “${String(v.column_label).slice(0, 60)}”` : "") : "");
+    fact("Document", [v.label, v.doc_type].filter(Boolean).join(" · "));
+    if (v.url) { const a = el("a", null, `Open the source at page ${v.page || "?"} ↗`); a.href = /\.pdf(\?|$)/i.test(v.url) || !/#/.test(v.url) ? `${v.url}#page=${v.page || 1}` : v.url; a.target = "_blank"; a.rel = "noopener"; fact("Page", a); }
+    fact("Other readings", (v.others || v.differ) ? `${v.others || 0} more ${v.others === 1 ? "document gives" : "documents give"} this figure, ${v.differ || 0} give another` : "this is the only reading");
+    c.appendChild(facts);
+    if (v.excerpt) { const ex = el("div", "excerpt"); let t = escH(v.excerpt); if (v.needle) t = t.split(escH(v.needle)).join(`<mark>${escH(v.needle)}</mark>`);
+                     ex.innerHTML = `<div class="cap">${v.needle ? "The page, around the figure" : "The page (the figure was not found as printed; open the source)"}</div>… ${t} …`; c.appendChild(ex); }
+    const verdict = el("div", "verdict"); const yes = el("button", "yes", "✓ Right"), no = el("button", "no", "✗ Wrong"); verdict.append(yes, no); c.appendChild(verdict);
+    const msg = el("div", "what", card.saved ? `Saved as ${card.saved === "ok" ? "right" : "wrong"}. You can change it and save again.` : "");
+    const nav = el("div", "nav"); const prev = el("button", "ghost", "← Previous"), save = el("button", "save", "Save"), next = el("button", "ghost", card.saved ? "Next →" : "Skip →");
+    prev.disabled = deck.at <= 0; nav.append(prev, save, next);
+    const paint = () => { yes.classList.toggle("on", card.pick === "ok"); no.classList.toggle("on", card.pick === "wrong"); save.disabled = !card.pick || card.pick === card.saved; };
+    if (!card.pick && card.saved) card.pick = card.saved; paint();
+    yes.onclick = () => { card.pick = card.pick === "ok" ? null : "ok"; paint(); }; no.onclick = () => { card.pick = card.pick === "wrong" ? null : "wrong"; paint(); };
+    prev.onclick = () => lucky("prev"); next.onclick = () => lucky("next");
+    save.onclick = async () => {
+      save.disabled = true;
+      try { const first = !card.saved; await review({ version_id: v.version_id, verdict: card.pick, seconds: Math.round((Date.now() - shownAt) / 1000), client: CLIENT + " lucky" });
+            card.saved = card.pick; if (first) { deck.score = Object.assign({}, deck.score, { points: Number(deck.score.points || 0) + 1, reviews: Number(deck.score.reviews || 0) + 1 }); } showMine(false); lucky("next"); }
+      catch (e) { msg.textContent = `Not saved: ${e.message}`; paint(); }
+    };
+    const close = el("a", null, "Close"); close.href = "#"; close.onclick = e => { e.preventDefault(); luckyClose(); };
+    const foot = el("div", "what"); foot.style.textAlign = "center"; foot.append(document.createTextNode(`Card ${deck.at + 1} of ${deck.cards.length} this session · arrow keys move · `), close);
+    c.append(msg, nav, foot); box.appendChild(c);
+  }
+  document.addEventListener("keydown", e => {
+    if (deck.at < 0 || !document.querySelector("#results .lucky") || /INPUT|TEXTAREA|SELECT/.test((e.target || {}).tagName || "")) return;
+    if (e.key === "ArrowLeft") lucky("prev"); else if (e.key === "ArrowRight") lucky("next");
+  });
 
   function companyId(name) { const c = companies.find(x => (x.name || "").toLowerCase() === name.toLowerCase()); return c ? c.id : name; }
 
@@ -721,7 +792,9 @@
   $("funnel").addEventListener("click", () => { const f = $("filters"); f.hidden = !f.hidden; $("funnel").setAttribute("aria-expanded", String(!f.hidden)); if (!f.hidden) $("fCompany").focus(); });
   for (const id of ["fCompany", "fFrom", "fTo", "fType"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) search(false); });
   $("foot").insertAdjacentHTML("beforebegin", '<div style="text-align:center;font-size:13px;margin-top:auto;padding-top:40px"><a href="#" id="lucky">I’m feeling lucky</a> <span id="mine"></span></div>');
-  $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); lucky(); window.scrollTo(0, 0); };
+  $("goSearch").onclick = () => { closeHistory(); search(false); };
+  $("goLucky").onclick = () => $("lucky").click();
+  $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; if (deck.at >= 0 && deck.cards.length) { deck.at--; } lucky("next"); window.scrollTo(0, 0); };
   $("foot").style.cssText = "margin-top:8px;padding-top:0"; showMine(false);
   $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches and the pages opened are logged, without names, to improve the ranking.';
   loadCompanies().then(() => {
