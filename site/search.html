@@ -285,7 +285,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v24 2026-11-10";
+  const CLIENT = "lantern v25 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -460,15 +460,18 @@
 
   // The company's own site icon beside a result, as a web search shows the source's (10 Nov 2026). It comes from an icon
   // service by the site's domain, so that service sees which company's results are on screen; nothing else. No icon, no gap.
+  const iconOk = new Map();
   function companyIcon(wbaId) {
     const c = companies.find(x => x.id === wbaId); if (!c || !c.website) return null;
     let host = ""; try { host = new URL(/^https?:\/\//i.test(c.website) ? c.website : "https://" + c.website).hostname.replace(/^www\./, ""); } catch (e) { return null; }
     if (!host) return null;
-    const img = el("img", "ico"); img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer"; img.width = img.height = 18;
+    const src = `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(host)}`;
     // (the service answers a site it has no icon for with a small grey globe, not an error: that one is 16 pixels
-    // wide where a real icon asked for at 64 is larger, and it is taken away. 10 Nov 2026: four grey globes in a list)
-    img.src = `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(host)}`;
-    img.onerror = () => img.remove(); img.onload = () => { if (img.naturalWidth < 32) img.remove(); };
+    // wide where a real icon asked for at 64 is larger. Each site is asked once, before anything is shown, so a
+    // globe never appears, not even further down the list. 10 Nov 2026: four grey globes in a list)
+    if (!iconOk.has(host)) iconOk.set(host, new Promise(res => { const t = new Image(); t.referrerPolicy = "no-referrer"; t.onload = () => res(t.naturalWidth >= 32); t.onerror = () => res(false); t.src = src; }));
+    const img = el("img", "ico"); img.alt = ""; img.referrerPolicy = "no-referrer"; img.width = img.height = 18; img.hidden = true;
+    iconOk.get(host).then(ok => { if (ok) { img.src = src; img.hidden = false; } else img.remove(); });
     return img;
   }
   // How long each document is: one small question for the documents on screen, answered after the results are shown.
