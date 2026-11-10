@@ -1,0 +1,44 @@
+import os, sys, unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import semantic_index as S  # noqa: E402
+
+
+class Arguments(unittest.TestCase):
+    def test_partition(self):
+        self.assertEqual(S.parse_partition(""), (0, 1)); self.assertEqual(S.parse_partition("2/4"), (2, 4))
+        with self.assertRaises(ValueError):
+            S.parse_partition("4/4")
+
+    def test_years(self):
+        self.assertEqual(S.parse_years("2024-"), (2024, None)); self.assertEqual(S.parse_years("2023-2024"), (2023, 2024))
+        self.assertEqual(S.parse_years("2025"), (2025, 2025)); self.assertEqual(S.parse_years(None), (S.YEAR_MIN, None))
+
+
+class Chunks(unittest.TestCase):
+    def test_pages_become_passages_that_say_something(self):
+        long = " ".join(f"Sentence number {i} says that scope one emissions fell by three percent this year." for i in range(30))
+        out = S.chunk_pages([(1, long), (2, "12"), (3, "")])
+        self.assertTrue(out and all(p == 1 for p, _, _ in out))             # page 2 is a stub, page 3 empty
+        self.assertEqual([n for _, n, _ in out], list(range(len(out))))
+        self.assertTrue(all(8 <= len(t.split()) <= 200 for _, _, t in out)); self.assertEqual(len(out), 4)
+
+    def test_vector_literal(self):
+        self.assertEqual(S.vector_literal([0.5, -1, 0.123456789]), "[0.500000,-1.000000,0.123457]")
+
+
+class Writes(unittest.TestCase):
+    def test_one_document_is_one_transaction_of_rows_then_its_marker(self):
+        calls = []
+
+        class Cur:
+            def executemany(self, sql, rows): calls.append(("many", sql[:40], len(rows)))
+            def execute(self, sql, args=None): calls.append(("one", sql[:40], args))
+        chunks = [(1, 0, "a"), (1, 1, "b"), (2, 0, "c")]
+        S.write_document(Cur(), "PT_1-abc", chunks, [[0.0] * 3] * 3, "m")
+        self.assertEqual(calls[0][0], "many"); self.assertEqual(calls[0][2], 3)
+        self.assertEqual(calls[-1][0], "one"); self.assertIn("chunk_docs", calls[-1][1]); self.assertEqual(calls[-1][2], ("PT_1-abc", 3, "m"))
+
+
+if __name__ == "__main__":
+    unittest.main()
