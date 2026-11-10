@@ -105,7 +105,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            ARGS="--limit 30 --methods sec,esef,model --companies PT_02083,PT_00646,PT_02801 --model-years 2024 --max-usd 0.3"
+            ARGS="--limit 30 --methods sec,esef,model --companies PT_02083,PT_00646,PT_02801 --model-years 2024 --max-usd 0.3 --escalate none"
           elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
             if [ "${{ github.event_name }}" = "workflow_run" ]; then
               H=$(date -u -d "${{ github.event.workflow_run.run_started_at }}" +%H)
@@ -113,7 +113,7 @@ jobs:
                 echo "the load that finished was the evening one (started ${{ github.event.workflow_run.run_started_at }}) or did not succeed: nothing to do"; exit 0
               fi
             fi
-            ARGS="--years 2018- --methods sec,esef,model --model-years 2025,2024 --attributes GMC_00048.1,GMC_00001.1,GMC_00002.1,GMC_00003.1,GMC_02526.1 --max-usd 1.5 --fresh-days 30 --commit"
+            ARGS="--years 2018- --methods sec,esef,model --model-years 2025,2024 --attributes GMC_00048.1,GMC_00001.1,GMC_00002.1,GMC_00003.1,GMC_02526.1 --max-usd 5 --fresh-days 30 --commit"
           else
             ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }} --model-years ${{ inputs.model_years }} --max-usd ${{ inputs.max_usd }} --fresh-days ${{ inputs.fresh_days || '30' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"
