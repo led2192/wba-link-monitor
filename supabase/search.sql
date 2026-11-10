@@ -989,7 +989,7 @@ begin
   end if;
   if to_regclass('public.companies') is not null and (select count(*) from public.companies) > 0 then
     -- the profiles (load_companies.py): 2,000 rows, instant; industry, country and region for the box's filters
-    return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.name, 'industry', c.industry, 'country', c.country, 'region', c.region) order by c.name), '[]'::jsonb)
+    return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.name, 'industry', c.industry, 'country', c.country, 'region', c.region, 'website', c.website) order by c.name), '[]'::jsonb)
             from public.companies c where c.name is not null);
   end if;
   return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.company, 'documents', c.documents) order by c.company), '[]'::jsonb)
@@ -1184,6 +1184,51 @@ end;
 $$;
 revoke all on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) from public, anon;
 grant execute on function public.add_value(text, text, int, text, numeric, text, text, text, int, text, int, bigint, text) to authenticated;
+
+-- "I'm feeling lucky" (10 Nov 2026): one value to review at a time, for a signed-in person. lucky_value picks,
+-- among the values the person has not reviewed, one of those with the fewest reviews, at random, and returns it
+-- with its source and the person's score. The score counts reviews, a review made in under four seconds as a
+-- quarter (kept, and weighed as such); the rank is the person's place among reviewers, without names. Scoring by
+-- reviews that turn out right (validated values mixed in unannounced) waits for the validated values to be loaded.
+create or replace function public.review_score(who text) returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  with pts as (select r.reviewer, sum(case when r.seconds is not null and r.seconds < 4 then 0.25 else 1 end) as points, count(*) as reviews
+               from public.value_reviews r where r.verdict in ('ok', 'wrong') group by r.reviewer)
+  select jsonb_build_object(
+    'points', coalesce((select p.points from pts p where p.reviewer = who), 0),
+    'reviews', coalesce((select p.reviews from pts p where p.reviewer = who), 0),
+    'rank', 1 + (select count(*) from pts p where p.points > coalesce((select q.points from pts q where q.reviewer = who), 0)),
+    'reviewers', (select count(*) from pts))
+$$;
+revoke all on function public.review_score(text) from public, anon, authenticated;
+
+create or replace function public.lucky_value() returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  j jsonb;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to review' using errcode = '42501';
+  end if;
+  select jsonb_build_object('version_id', p.version_id, 'wba_id', p.wba_id, 'company', coalesce(c.name, d.company, p.wba_id), 'attribute', p.attribute,
+                            'year', p.year, 'value', p.value, 'unit', p.unit, 'printed', p.printed, 'basis', p.basis, 'page', p.page,
+                            'url', d.url, 'label', d.label, 'doc_type', d.doc_type)
+    into j
+  from (select vv.* from public.value_versions vv
+        where not exists (select 1 from public.value_reviews r where r.version_id = vv.version_id and r.reviewer = who)
+        order by (select count(*) from public.value_reviews r where r.version_id = vv.version_id), random()
+        limit 1) p
+  left join public.documents d on d.library_id = p.library_id
+  left join public.companies c on c.wba_id = p.wba_id;
+  return jsonb_build_object('value', j, 'score', public.review_score(who));
+end;
+$$;
+revoke all on function public.lucky_value() from public, anon;
+grant execute on function public.lucky_value() to authenticated;
 
 -- The signed-in person's own reviews, newest first, with the totals: what they have reviewed stays visible to them
 -- (and is what the review game will count).

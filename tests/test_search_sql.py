@@ -58,3 +58,16 @@ def test_added_values_are_signed_and_one_per_person():
 
 def test_the_documents_list_shows_a_document_held_twice_once():
     assert "select distinct on (d0.wba_id, d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)))" in FIND
+
+
+def test_the_review_game_is_signed_and_names_no_one():
+    lucky = SQL[SQL.index("create or replace function public.review_score("):SQL.index("-- The signed-in person's own reviews")]
+    assert "public.email_may_search(who)" in lucky and "grant execute on function public.lucky_value() to authenticated;" in lucky
+    assert "revoke all on function public.review_score(text) from public, anon, authenticated;" in lucky
+    assert "r.seconds < 4 then 0.25" in lucky
+    score = lucky[:lucky.index("create or replace function public.lucky_value")]
+    assert "'reviewer'" not in score and "email" not in score.split("as $$")[1]
+
+
+def test_the_company_card_has_the_website():
+    assert "'website', c.website" in SQL
