@@ -271,7 +271,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v18 2026-11-10";
+  const CLIENT = "lantern v19 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -353,7 +353,7 @@
   // What the box says beyond words: every company named (longest names first, so "Nike Inc" wins over "Nike"), every
   // year named (one, a span 2022-2024, or several: the earliest to the latest), a document type.
   function parse(text) {
-    let q = " " + text.trim().replace(/\s+/g, " ") + " ";
+    let q = " " + text.trim().replace(/[?¿!¡]+/g, " ").replace(/\s+/g, " ") + " ";      // a question's marks are not words ("in 2024?" is the year 2024)
     const found = { company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null };
     const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const take = (names) => { for (const n of names) { const re = new RegExp("\\s" + esc(n) + "\\s", "i"); if (re.test(q)) { q = q.replace(re, " "); return true; } } return false; };
@@ -912,7 +912,7 @@
     if (j.none) { note.textContent = "No page was found for this question. Try other words, or name the company and the year."; return; }
     if (j.error || !j.answer) { note.textContent = `No answer: ${j.error || "the model returned nothing"}. This one does not count.`; return; }
     note.remove(); const src = j.sources || [];
-    const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : m; });
+    const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : m; });
     c.appendChild(body);
     const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; li.appendChild(a); ol.appendChild(li); }
     c.append(ol, el("div", "what", "Written by a model from these pages only. Check the source before using a figure."));
