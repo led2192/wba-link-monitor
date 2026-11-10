@@ -439,3 +439,207 @@ revoke all on function public.types_matching(text) from public, anon, authentica
 grant execute on function public.search_summary(text, text, int, int, text) to authenticated;
 grant execute on function public.search_passages(text, text, text, int, int, int) to authenticated;
 grant execute on function public.can_search() to authenticated;
+
+
+-- ==============================================================================================
+-- Find (10 Nov 2026): the one-box search page, site/search.html. The analysts' side of the search
+-- engine the pipeline already is for the robot. No sign-in: the link people receive carries a key
+-- (#k=...), the page keeps it in the browser and sends it with every call, and the functions below check
+-- it against search_keys (sha256 of the key; the key itself is never stored). Every query and every
+-- click is logged (search_log, search_clicks): the log is the training data the robot's page ranking
+-- lacks for the attributes without validated answers, and the record of what the organisation looks for.
+-- Pages are ranked by relevance, not newest first: ts_rank_cd over the stored words (cover density,
+-- normalised by page length), weighted by document type and discounted by age, at most 3 pages of one
+-- document, over at most 600 candidate pages per year, newest years first (a common word still answers
+-- in seconds; the ranking then orders what was fetched, so a one-word query leans to recent years).
+-- The key's name is logged, not the key. A key may run 60 searches a minute.
+create extension if not exists pgcrypto with schema extensions;
+
+create table if not exists public.search_keys (
+  name      text primary key,
+  key_hash  text not null,                    -- sha256, hex
+  created   timestamptz not null default now(),
+  active    boolean not null default true
+);
+alter table public.search_keys enable row level security;
+-- The team's link (10 Nov 2026). To revoke: update search_keys set active = false where name = 'team';
+-- a new key: insert a new row with encode(digest('<key>', 'sha256'), 'hex') and send the new link.
+insert into public.search_keys (name, key_hash) values ('team', 'a6018fc9ce54a921d2e1540c77d6abfa2c912daa2103f56ad792f3acc01be207') on conflict (name) do nothing;
+
+create table if not exists public.search_log (
+  id         bigserial primary key,
+  at         timestamptz not null default now(),
+  key_name   text,
+  q          text,
+  company    text,
+  year_from  int,
+  year_to    int,
+  doc_type   text,
+  n          int,                             -- candidate pages fetched
+  ms         int,
+  client     text                             -- what the page says about itself (version), never the person
+);
+alter table public.search_log enable row level security;
+create index if not exists search_log_at on public.search_log (at);
+
+create table if not exists public.search_clicks (
+  id          bigserial primary key,
+  at          timestamptz not null default now(),
+  log_id      bigint,
+  library_id  text,
+  page        int,
+  rank        int
+);
+alter table public.search_clicks enable row level security;
+create index if not exists search_clicks_log on public.search_clicks (log_id);
+
+-- The key's name when it is an active key; null otherwise. The database owner (postgres) counts as the key
+-- 'owner', so the check script and Claude can call the functions from the connection string.
+create or replace function public.search_key_name(key text) returns text
+  language sql stable security definer set search_path = public, extensions
+  as $$
+    select case when session_user = 'postgres' then 'owner'
+                else (select k.name from public.search_keys k
+                      where k.active and k.key_hash = encode(extensions.digest(coalesce(key, ''), 'sha256'), 'hex') limit 1) end
+  $$;
+
+-- How much a page of each document type weighs in the ranking: the reports people cite first, then the
+-- filings and thematic reports, then policies, then slides and interim statements, then the rest.
+create or replace function public.type_weight(doc_type text) returns real
+  language sql immutable
+  as $$
+    select case doc_type
+      when 'Annual Report' then 1.0 when 'Integrated Report' then 1.0 when 'Sustainability Report' then 1.0
+      when 'ESG Report' then 1.0 when 'CSR Report' then 1.0
+      when '10K Form' then 0.9 when 'Registration Document' then 0.9 when 'Financial Statement' then 0.9
+      when 'Climate Report' then 0.9 when 'Environmental Reports' then 0.9 when 'Social Reports' then 0.9
+      when 'Impact Report' then 0.9 when 'CDP Report' then 0.9 when 'GRI' then 0.9 when 'SASB Index' then 0.9
+      when 'Policy Documents' then 0.8 when 'Code of Conduct' then 0.8 when 'Human Rights Policy' then 0.8
+      when 'Engagement Report' then 0.8
+      when 'Company Presentations' then 0.6 when 'Interim Reports' then 0.6
+      else 0.5 end::real
+  $$;
+
+drop function if exists public.find_pages(text, text, text, int, int, text, int, text);
+create or replace function public.find_pages(
+  key text, q text, company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 50, client text default null)
+returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
+               label text, url text, page int, score real, excerpt text)
+language plpgsql security definer
+set search_path = public, extensions
+set work_mem = '128MB'
+set statement_timeout = '25s'
+set plan_cache_mode = 'force_custom_plan'
+as $$
+declare
+  k text := public.search_key_name(key);
+  tsq tsquery := websearch_to_tsquery('simple', coalesce(q, ''));
+  need int := least(greatest(coalesce(max_rows, 50), 1), 200);
+  per_year int := 600;
+  cap int := 2400;
+  got int := 0;
+  n int;
+  y int;
+  this_year int := extract(year from now())::int;
+  t0 timestamptz := clock_timestamp();
+  lid bigint;
+  ids text[] := public.companies_matching(company_filter);
+  types text[] := public.types_matching(type_filter);
+begin
+  if k is null then
+    raise exception 'not allowed to search' using errcode = '42501';
+  end if;
+  if k <> 'owner' and (select count(*) from public.search_log l where l.key_name = k and l.at > now() - interval '1 minute') >= 60 then
+    raise exception 'too many searches in a minute' using errcode = '53400';
+  end if;
+  if numnode(tsq) = 0 then
+    return;
+  end if;
+  create temp table if not exists find_cand (library_id text, page int, words tsvector, year int, doc_type text) on commit drop;
+  truncate find_cand;
+  for y in select distinct coalesce(d.year, 0) from public.documents d
+            where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+            order by 1 desc
+  loop
+    insert into find_cand
+      select p.library_id, p.page, p.words, p.year, p.doc_type
+      from public.pages p
+      where p.words @@ tsq
+        and p.year = y
+        and p.wba_id <> ''
+        and (types is null or p.doc_type = any(types))
+        and (ids is null or p.wba_id = any(ids))
+      limit least(per_year, cap - got);
+    get diagnostics n = row_count;
+    got := got + n;
+    exit when got >= cap;
+  end loop;
+  insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client)
+    values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), got,
+            extract(milliseconds from clock_timestamp() - t0)::int, left(client, 60))
+    returning id into lid;
+  return query
+    with scored as (
+      select c.library_id, c.page, c.year, c.doc_type,
+             (ts_rank_cd(c.words, tsq, 5) * public.type_weight(c.doc_type)
+              / (1 + 0.15 * greatest(this_year - coalesce(nullif(c.year, 0), this_year), 0)))::real as score
+      from find_cand c),
+    ranked as (
+      select s.*, row_number() over (partition by s.library_id order by s.score desc, s.page) as in_doc
+      from scored s),
+    top as (
+      select r.library_id, r.page, r.year, r.doc_type, r.score,
+             row_number() over (order by r.score desc, r.year desc, r.library_id, r.page) as rk
+      from ranked r
+      where r.in_doc <= 3
+      order by r.score desc, r.year desc, r.library_id, r.page
+      limit need)
+    select lid, t.rk::int, t.library_id, d.company, d.wba_id, t.year, t.doc_type, d.label, d.url, t.page, t.score,
+           ts_headline('simple', left(p.body, 200000), tsq,
+                       'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
+    from top t
+    join public.documents d on d.library_id = t.library_id
+    join public.pages p on p.library_id = t.library_id and p.page = t.page
+    order by t.rk;
+end;
+$$;
+
+-- A click on a result: which page of which document, at which rank, of which search.
+create or replace function public.find_click(key text, log_id bigint, library_id text, page int, rank int default null)
+returns void
+language plpgsql security definer set search_path = public, extensions
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  insert into public.search_clicks (log_id, library_id, page, rank) values (log_id, left(library_id, 40), page, rank);
+end;
+$$;
+
+-- The companies, for the page to recognise a company name typed in the box: one JSON value (the web
+-- interface caps set-returning functions at 1,000 rows).
+create or replace function public.find_companies(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.company, 'documents', c.documents) order by c.company), '[]'::jsonb)
+          from (select d.wba_id, max(d.company) as company, count(*) as documents
+                from public.documents d
+                where d.wba_id is not null and d.wba_id <> '' and d.company is not null
+                group by d.wba_id) c);
+end;
+$$;
+
+revoke all on function public.search_key_name(text) from public, anon, authenticated;
+revoke all on function public.type_weight(text) from public, anon, authenticated;
+revoke all on function public.find_pages(text, text, text, int, int, text, int, text) from public;
+grant execute on function public.find_pages(text, text, text, int, int, text, int, text) to anon, authenticated;
+revoke all on function public.find_click(text, bigint, text, int, int) from public;
+grant execute on function public.find_click(text, bigint, text, int, int) to anon, authenticated;
+revoke all on function public.find_companies(text) from public;
+grant execute on function public.find_companies(text) to anon, authenticated;

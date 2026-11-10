@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 The one-box search for analysts: `site/search.html` (one box, filters read from the words typed, results best first, opening the document at its page) and `find_pages`, `find_click`, `find_companies` in `supabase/search.sql` (relevance ranking by words, document type and age; access by a link that carries a key, checked against `search_keys`; every query and click logged in `search_log` and `search_clicks`). The Search page workflow publishes both pages; the search check covers find_pages (#349)
 - 2026-11-10 Type covers reads four covers at once and stops cleanly at a time cap (280 minutes) as well as the cost cap, writing each 100 as it goes: 300 covers took 8 minutes one at a time, and the 28,500 of the queue would not fit in one job (#348)
 - 2026-11-10 Propose values runs after the night's Evidence database load (workflow_run, about 02:20 UTC; the evening load and a failed load are skipped); the 05:07 UTC cron stays as a fallback. GitHub had not fired the cron by 07:00 on its first night (#346)
 - 2026-11-10 Gemini 3.8 Flash measured on the same 16 pages (run 42764683407): +1.5 points against Haiku, chance, at five times the cost; Haiku stays the reader (decisions.md) (#347)
