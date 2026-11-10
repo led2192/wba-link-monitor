@@ -719,10 +719,16 @@ $$;
 -- interface caps set-returning functions at 1,000 rows).
 create or replace function public.find_companies(key text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
+set statement_timeout = '20s'
 as $$
 begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if to_regclass('public.companies') is not null and (select count(*) from public.companies) > 0 then
+    -- the profiles (load_companies.py): 2,000 rows, instant; industry, country and region for the box's filters
+    return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.name, 'industry', c.industry, 'country', c.country, 'region', c.region) order by c.name), '[]'::jsonb)
+            from public.companies c where c.name is not null);
   end if;
   return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.company, 'documents', c.documents) order by c.company), '[]'::jsonb)
           from (select d.wba_id, max(d.company) as company, count(*) as documents
