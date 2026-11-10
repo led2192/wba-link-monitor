@@ -361,10 +361,10 @@ def call_gemini(messages, usage, sess, model, system, max_tokens):
             thinking = False; continue
         if r.status_code != 200:
             usage["model_errors"] += 1
-            if r.status_code in (400, 401, 403, 404):
-                raise ModelRefused(f"Gemini API refused the call: HTTP {r.status_code} {r.text[:300]}")
+            if r.status_code in (400, 401, 402, 403, 404):                                # 402: the key's project has no working billing (10 Nov 2026)
+                raise ModelRefused(f"Gemini API refused the call: HTTP {r.status_code} {' '.join((r.text or '').split())[:300]}")
             if usage["model_errors"] <= 3 or usage["model_errors"] % 50 == 0:          # the first run failed 237 times in silence (9 Nov 2026)
-                print(f">>> Gemini API error {r.status_code} (failure {usage['model_errors']}): {(r.text or '')[:200]}", flush=True)
+                print(f">>> Gemini API error {r.status_code} (failure {usage['model_errors']}): {' '.join((r.text or '').split())[:200]}", flush=True)
             return ""
         j = r.json()
         if not j.get("candidates"):                                                      # a blocked or empty reply: no parts to read

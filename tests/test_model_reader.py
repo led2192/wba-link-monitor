@@ -463,6 +463,8 @@ class GeminiPath(unittest.TestCase):
         self.assertNotIn("thinkingConfig", s.sent[1][2]["generationConfig"])
         with self.assertRaises(M.ModelRefused):
             M.call([{"role": "user", "content": "x"}], usage, sess=self.GSess((403, "API key not valid")), model="gemini-3.8-flash")
+        with self.assertRaises(M.ModelRefused):                                   # 402: no working billing on the key's project (10 Nov 2026)
+            M.call([{"role": "user", "content": "x"}], usage, sess=self.GSess((402, "Payment Required")), model="gemini-3.8-flash")
         s = self.GSess((429, "quota"), (200, "ok"))
         self.assertEqual(M.call([{"role": "user", "content": "x"}], usage, sess=s, model="gemini-3.8-flash"), "ok")
         self.assertFalse(M.is_gemini("claude-haiku-5-5")); self.assertTrue(M.is_gemini("Gemini-3.8-flash-lite"))
