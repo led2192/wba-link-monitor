@@ -278,3 +278,9 @@ The first Gemini reader run made 237 calls, every one failed, and the run finish
 
 ## A health check that reads a table while its loader runs sees the loader's half-written state (10 Nov 2026)
 Evidence health's first report counted 271 documents with text_status ok and no page. The next morning there were 0: the full-text loader writes the documents row first and its pages after, and the 06:41 UTC report had read the night's load mid-way. A check of "A exists without B" must leave out rows younger than the time the loader takes to write B (12 hours here), or it reports the loader's progress as a defect.
+
+## A short output limit returns an empty reply, not a cut one (10 Nov 2026)
+Type covers asked the model for a one-line JSON with `max_tokens` 200 and a third of the replies came back as empty strings with HTTP 200 and about 220 output tokens spent: the model had used the whole allowance before any text block, and the script counted "unusable reply" without knowing why. `model_reader.call` now counts replies with no text block by block type and stop reason, and short-answer calls allow 1,000 output tokens (only what is produced is paid). A reply limit must leave room for whatever the model emits before the answer.
+
+## GitHub schedules in this repository run hours late (10 Nov 2026)
+On 9 Nov the 04:31 to 05:20 UTC crons ran at 13:10 to 13:57; on 10 Nov nothing scheduled fired between 04:12 and 07:00. A job that must run every night goes on a `workflow_run` chain after a job that does run (the monitor chain, the Evidence database load); a cron is a fallback, and a check that "the nightly job wrote" must allow for a night without it.
