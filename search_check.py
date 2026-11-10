@@ -31,6 +31,8 @@ SEARCHES = [
     ("find: climate", "find", ("climate",)),
     ("find: \"living wage\"", "find", ('"living wage"',)),
     ("find: Unilever scope 1, 2024", "find", ("scope 1", "Unilever", 2024, 2024)),
+    ("find, little words: the scope 1 emissions of Nike in 2025", "find", ("the scope 1 emissions of Nike in 2025",)),
+    ("find, relaxed: grievance mechanism remediation outcomes 2025 suppliers", "find", ("grievance mechanism remediation outcomes 2025 suppliers",)),
 ]
 
 
@@ -90,6 +92,10 @@ def main():
                 cur.execute("select count(*) filter (where active), count(*) filter (where key_hash = encode(extensions.digest('not-a-key', 'sha256'), 'hex')) from public.search_keys")
                 active, wrong = cur.fetchone()
                 md.append(f"| find: keys | {active} active; a wrong key {'matches none' if wrong == 0 else 'MATCHES A KEY'} | | | | | | |")
+                if has_function(cur, "find_terms"):
+                    cur.execute("select phrases, words from public.find_terms(%s)", ("the scope 1 emissions of Nike in 2025 \"living wage\"",))
+                    ph, wo = cur.fetchone()
+                    md.append(f"| find: terms of 'the scope 1 emissions of Nike in 2025 \"living wage\"' | words {wo}, phrases {ph} | | | | | | |")
             except Exception as e:
                 conn.rollback(); cur.execute("set statement_timeout = '120s'")
                 md.append(f"| find: a wrong key | failed: {type(e).__name__} | | | | | | |")

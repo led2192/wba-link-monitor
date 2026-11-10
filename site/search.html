@@ -117,7 +117,7 @@
   </header>
   <div class="boxwrap" id="boxwrap">
   <form class="box" id="form" autocomplete="off">
-    <input id="q" type="search" placeholder="e.g. Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
+    <input id="q" type="search" placeholder="Type it as you would in a web search: Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
     <button type="submit">Search</button>
     <button type="button" class="funnel" id="funnel" aria-expanded="false" aria-controls="filters" title="Filters: company, years, document type">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>
@@ -144,7 +144,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v1e 2026-11-10";
+  const CLIENT = "lantern v2 2026-11-10";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -284,7 +284,7 @@
       const rows = await rpc("find_pages", { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
                                              type_filter: state.type, max_rows: state.rows, client: CLIENT });
       const s = ((performance.now() - t0) / 1000).toFixed(1);
-      if (!rows.length) setStatus(`No page holds ${state.q.includes('"') ? "that phrase" : "those words"}${state.company || state.type || state.from ? " with these filters" : ""}. (${s} s)`);
+      if (!rows.length) setStatus(`No page holds ${state.q.includes('"') ? "that phrase" : "those words, even one or two of them,"}${state.company || state.type || state.from ? " with these filters" : ""}. (${s} s)`);
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
