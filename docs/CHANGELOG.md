@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 Lantern in WBA's brand colours (navy 00194B, blue 1E64CC, yellow FAC300, from the branding guide's theme); "World Benchmarking Alliance" links to the website (#PRNUM)
 - 2026-11-10 Evidence health reports the main reports (annual, integrated, sustainability, ESG, CSR) with text by year: documents, pages, characters and about how many 120-word passages, the size of the semantic index to come (#352)
 - 2026-11-10 The one-box search is named Lantern: mark, favicon, "Powered by World Benchmarking Alliance"; the three brand colours are variables at the top of the stylesheet (#351)
 - 2026-11-10 `extract_eval --escalate whole` (option): a doubtful answer (no figure, or a figure printed once) gets its documents whole, in at most 4 chunks of `--whole-chars`, read until a figure appears. The escalation measure "pages hold the figure" read the candidate instead of the page text and always said no (the "0 %" of wave C was that bug; the +0.9 verdict stands) (#350)
