@@ -779,10 +779,12 @@ begin
               left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200), left(typed, 500))
       returning id into lid;
     -- (within a year, in the order the types were asked: "annual" asks for the 10-K first, then the annual report)
+    -- (within a year and a type, the longest document first: the report itself is long, and a three-page letter, a
+    -- newsletter or a shareholders' guide typed as an annual report by mistake is short. 10 Nov 2026)
     -- (a document held twice, the same title for the same company and year, shows once: 10 Nov 2026, the same
     -- committee charter stood twice under "Nike")
     return query
-      select lid, (row_number() over (order by d.year desc nulls last, coalesce(array_position(types, d.doc_type), 99), d.company, d.library_id))::int, d.library_id, d.company, d.wba_id,
+      select lid, (row_number() over (order by d.year desc nulls last, coalesce(array_position(types, d.doc_type), 99), coalesce(d.pages, 0) desc, d.company, d.library_id))::int, d.library_id, d.company, d.wba_id,
              d.year, d.doc_type, d.label, d.url, 1, 0::real, left(regexp_replace(coalesce(p.body, ''), '\s+', ' ', 'g'), 300)
       from (select distinct on (d0.wba_id, d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id))) d0.*
             from public.documents d0
@@ -792,7 +794,7 @@ begin
               and (year_from is null or d0.year >= year_from) and (year_to is null or d0.year <= year_to)
             order by d0.wba_id, d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)), d0.library_id) d
       left join public.pages p on p.library_id = d.library_id and p.page = 1
-      order by d.year desc nulls last, coalesce(array_position(types, d.doc_type), 99), d.company, d.library_id
+      order by d.year desc nulls last, coalesce(array_position(types, d.doc_type), 99), coalesce(d.pages, 0) desc, d.company, d.library_id
       limit need;
     return;
   end if;
