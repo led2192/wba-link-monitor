@@ -79,6 +79,10 @@ jobs:
       - run: pip install -r requirements.txt
       - uses: actions/cache@v4
         with:
+          path: rerank_model
+          key: rerank-model-${{ hashFiles('attributes.json', 'rerank_train.py') }}-v1   # the trained reranker (98 minutes to build); a run with it skips the training
+      - uses: actions/cache@v4
+        with:
           path: ~/.cache/huggingface
           key: hf-models-${{ runner.os }}-v1
       - name: Install the embedding model's library (CPU), for the learned page choice

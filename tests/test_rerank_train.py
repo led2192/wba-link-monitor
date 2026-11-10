@@ -46,3 +46,11 @@ class Pairs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeenIds(unittest.TestCase):
+    def test_reset_seen_lets_a_second_pass_read_the_same_answers(self):
+        import value_eval as V
+        V._SEEN_IDS.add("PT_1-GMC_00048.1-2024")
+        V.reset_seen()
+        self.assertEqual(V._SEEN_IDS, set())
