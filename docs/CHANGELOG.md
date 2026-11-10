@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-10 lanterN ranking in three tiers: pages where the words asked stand together ("living wage") first, then pages with every word, then pages with some; the excerpt shows the lines where they stand together. (#393)
 - 2026-11-10 lanterN ranking: recent years count more (a quarter less for each year of age instead of 15% in the divisor; a document with no year counts as three years old, not as this year's) and a word repeated on a page counts less (square root of the density), after "living wage Nike" put a 2021 page that only repeats "wage" first. Pages that hold every word asked now come before pages that hold only some. (#392)
 - 2026-11-10 lanterN results show the company's site icon (from an icon service by the site's domain; no icon when there is none) and the document's length ("264 pages in all", `doc_pages`, asked after the results are shown). (#391)
 - 2026-11-10 lanterN reads document types as families: "annual report" (and "annual" alone after a company, as in "Nike annual") means the 10-K, the annual report and the integrated report; "sustainability" means sustainability, ESG, CSR, Impact and integrated reports. Such a search lists the documents, newest first and within a year in that order, with the link to search the words inside the documents instead. (#390)
