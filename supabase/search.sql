@@ -897,25 +897,34 @@ begin
     for pass in 1..(case when nw >= 3 then 2 else 1 end) loop
       lvl_q := case when pass = 1 then pp_all else pp_any end;
       lvl_q := case when lvl_q is null then pp_req when pp_req is null then lvl_q else pp_req && lvl_q end;
+      -- (the check of the phrase on the page stands outside a subquery closed with "offset 0": written beside the
+      -- join, the planner answered it from the word index, every page holding the phrase's words, and the quoted
+      -- searches took longer with the option than without: 11 Nov 2026, "ACT Core" 7.9 s to 15.4 s)
       insert into find_cand
-        select p.library_id, p.page, p.words, p.year, p.doc_type
-        from (select pp.library_id, pp.page from public.page_pairs pp where pp.pairs @@ lvl_q limit 3000) x
-        join public.pages p on p.library_id = x.library_id and p.page = x.page
-        where p.wba_id <> ''
-          and (types is null or p.doc_type = any(types))
-          and (year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)
-          and (phrase_q is null or p.words @@ phrase_q)
-          and (nw <> 1 or p.words @@ tqs[1])
+        select y.library_id, y.page, y.words, y.year, y.doc_type
+        from (select p.library_id, p.page, p.words, p.year, p.doc_type
+              from (select pp.library_id, pp.page from public.page_pairs pp where pp.pairs @@ lvl_q limit 3000) x
+              join public.pages p on p.library_id = x.library_id and p.page = x.page
+              where p.wba_id <> ''
+                and (types is null or p.doc_type = any(types))
+                and (year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)
+              offset 0) y
+        where (phrase_q is null or y.words @@ phrase_q)
+          and (nw <> 1 or y.words @@ tqs[1])
         limit 400
       on conflict do nothing;
       get diagnostics n = row_count;
       via_pairs := via_pairs + n;
     end loop;
     got := via_pairs;
+    -- (the list shows at most three pages a document: fifty pages of twelve documents are not a full list. The word
+    -- index is skipped only when the pair pages come from as many documents as rows were asked. 11 Nov 2026:
+    -- "living wage" gave 33 rows with the option where it gave 50 without)
+    select count(distinct c.library_id) into via_pairs from find_cand c;
   end if;
   <<levels>>
   for drop_n in 0..least(2, greatest(nw - 1, 0)) loop
-    exit levels when via_pairs >= need;                -- the pair index filled the list: the word index is not asked
+    exit levels when via_pairs >= need;                -- the pair index filled the list (documents, not pages): the word index is not asked
     lvl_q := null;
     for mask in 0..(case when nw = 0 then 0 else (1 << nw) - 1 end) loop
       continue when nw > 0 and (nw - (select count(*) from generate_series(0, nw - 1) b where (mask >> b) & 1 = 1)) <> drop_n;
@@ -1335,7 +1344,7 @@ grant execute on function public.doc_facts(text, text[]) to anon, authenticated;
 -- "Did you mean" (11 Nov 2026). A word typed wrong finds nothing, or only the pages that hold the other words.
 -- search_vocab is the list of words the library knows well: every word of a document's title or a company's name
 -- (company names weigh most), refreshed each time these functions are installed (nightly). A word asked that is
--- not in it, and that fewer than twenty pages hold, is compared with the list: the closest word (one letter
+-- not in it, and that fewer than two hundred pages hold (a misspelling is in the reports too: "emisions" stands on more than twenty pages), is compared with the list: the closest word (one letter
 -- changed, two for a long word), the most frequent first, is offered. Nothing is changed in the search itself:
 -- the page offers the corrected text and the person decides.
 create table if not exists public.search_vocab (word text primary key, n int not null);
@@ -1381,6 +1390,7 @@ create or replace function public.did_you_mean(key text, q text) returns text
 language plpgsql stable security definer
 set search_path = public, extensions
 set statement_timeout = '5s'
+set enable_seqscan = 'off'          -- "do twenty pages hold this word" must be asked of the word index: with a limit the planner read the table instead, and a word no page holds ran into the timeout (11 Nov 2026)
 as $$
 declare
   t record;
@@ -1401,7 +1411,7 @@ begin
   foreach w in array coalesce(t.words, '{}') loop
     continue when w !~ '^[[:alpha:]]{4,30}$';
     continue when exists (select 1 from public.search_vocab v where v.word = w);
-    continue when (select count(*) from (select 1 from public.pages p where p.words @@ quote_literal(w)::tsquery limit 20) x) >= 20;
+    continue when (select count(*) from (select 1 from public.pages p where p.words @@ quote_literal(w)::tsquery limit 200) x) >= 200;
     far := case when length(w) >= 8 then 2 else 1 end;
     execute format('select v.word from public.search_vocab v
                     where length(v.word) between $1 - $2 and $1 + $2 and %s.levenshtein_less_equal(v.word, $3, $2) <= $2
