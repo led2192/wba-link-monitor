@@ -24,8 +24,9 @@ Three conditions added by the owner on 9 Nov 2026 before any archiving:
   2. The text is kept. A candidate must have its text in the evidence database (documents.text_status = ok and
      at least one row of pages): what is archived can still be read and cited. Without SUPABASE_DB_URL nothing
      is a candidate.
-  3. The file is kept. The purge deletes the Airtable row and its attached PDF, so the PDF must be copied to
-     object storage first. That copy is not built yet: --commit refuses to run until it is (ARCHIVE_COPY_READY).
+  3. The file is kept. The purge deletes the Airtable row and its attached PDF, so the PDF is copied first to
+     lanterN's own storage (archive_copy.py, which writes where in `stored_file` once the upload is checked).
+     --commit ticks only the documents that have it; the others wait for their copy.
 Dry run by default: prints the counts by type, year and company, 20 examples, and writes
 archive_candidates.csv. --commit ticks the rows (10 per request). --limit caps a run.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE; AIRTABLE_QA_TOKEN for the run record.
@@ -36,7 +37,6 @@ from urllib.parse import quote
 
 ARCHIVE_REASON = "Archived: before 2022, not cited"
 NON_PERIODIC = {"Policy Documents", "Policy", "Code of Conduct", "Human Rights Policy", "Certifications", "Statutory Documents"}
-ARCHIVE_COPY_READY = False        # the copy of each PDF to object storage before the purge: not built (needs a bucket and its keys)
 BATCH = 10
 WRITE_PAUSE = 0.22
 
@@ -88,7 +88,8 @@ def report_md(cands, rule, today, committed=None, dropped=None):
           f"{len(cands):,} live documents meet rule {rule}: reporting year 2021 or earlier"
           + (", not a key type" if rule == "B" else "") + ", periodic (no policy, code, certification, statutory or untyped document), never cited by a value, "
           "verified, imported from the Source Library or a current key report, and with their text in the evidence database."
-          + (f" Left out: {dropped.get('not periodic', 0):,} not periodic or untyped, {dropped.get('no text', 0):,} without text in the evidence database." if dropped else ""), "",
+          + (f" Left out: {dropped.get('not periodic', 0):,} not periodic or untyped, {dropped.get('no text', 0):,} without text in the evidence database"
+             + (f", {dropped['no stored copy yet']:,} whose PDF is not copied yet." if 'no stored copy yet' in dropped else ".") if dropped else ""), "",
           f"Their attached files: {size_gb(cands):,.1f} GB (the size of the copy to object storage that must exist before any purge).", "",
           "| Type | Documents |", "| --- | --: |"] + [f"| {t} | {n:,} |" for t, n in by_type.most_common()]
     md += ["", "| Reporting year | Documents |", "| --- | --: |"] + [f"| {y} | {n:,} |" for y, n in sorted(by_year.items())]
@@ -97,7 +98,8 @@ def report_md(cands, rule, today, committed=None, dropped=None):
     for _, f in cands[:20]:
         md.append(f"- {f.get('library_id')} | {f.get('year')} | {f.get('source_type_check') or '(no type)'} | {(f.get('doc_label') or '')[:90]} | {f.get('document_url') or ''}")
     if committed is None:
-        md += ["", "Dry run: nothing written. The copy of the PDFs to object storage is not built yet, so --commit refuses to run." if not ARCHIVE_COPY_READY else "",
+        stored = sum(1 for _, f in cands if (f.get("stored_file") or "").strip())
+        md += ["", f"Dry run: nothing written. {stored:,} of these have their PDF in lanterN's storage (stored_file); --commit ticks only those.",
                "--commit ticks discard with the reason \"" + ARCHIVE_REASON + "\"; the purge job deletes them after 7 days (machine-only), archiving every field first."]
     else:
         md += ["", f"Written: discard ticked on {committed:,} rows with the reason \"{ARCHIVE_REASON}\". Untick to restore; the purge job deletes them after 7 days."]
@@ -120,6 +122,31 @@ def payloads(cands):
                "typecast": True}
 
 
+def select_candidates(rule, today):
+    """The documents that meet the rule and the owner's first two conditions (periodic and typed; text in the
+    evidence database), and how many each condition left out. Each is (record id, fields); fields include
+    stored_file, the third condition, which the caller applies. Used here and by archive_copy.py."""
+    from base_health import sweep
+    from base_room import DOC_FIELDS, key_types, rules_for
+    t0 = time.time()
+    cited = {rec.get("fields", {}).get("library_id") for rec in sweep("attribute_values", ["library_id"])} - {None}
+    docs = [(rec["id"], rec.get("fields", {}) | {"created_time": rec.get("createdTime")})
+            for rec in sweep("report_library", DOC_FIELDS + ["doc_label", "document_url", "stored_file"])]
+    print(f"  {len(docs):,} documents, {len(cited):,} cited, read in {time.time() - t0:.0f}s", flush=True)
+    by_rule = [(rid, f) for rid, f in docs if rule in rules_for(f, cited, key_types(), today)]
+    cands = candidates(docs, cited, key_types(), today, rule)
+    dropped = {"not periodic": len(by_rule) - len(cands)}
+    if os.environ.get("SUPABASE_DB_URL"):
+        import evidence_db
+        with evidence_db.connect() as conn:
+            have = with_text(conn.cursor(), [f.get("library_id") for _, f in cands])
+    else:
+        print("  SUPABASE_DB_URL not set: the text cannot be verified, so nothing is a candidate", flush=True)
+        have = set()
+    dropped["no text"] = sum(1 for _, f in cands if f.get("library_id") not in have)
+    return [(rid, f) for rid, f in cands if f.get("library_id") in have], dropped
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rule", choices=["A", "B"], default="B")
@@ -137,24 +164,12 @@ def main():
     run = qa.Run("archive_documents.py")
     today = datetime.now(timezone.utc).date()
     t0 = time.time()
-    cited = {rec.get("fields", {}).get("library_id") for rec in sweep("attribute_values", ["library_id"])} - {None}
-    docs = [(rec["id"], rec.get("fields", {}) | {"created_time": rec.get("createdTime")})
-            for rec in sweep("report_library", DOC_FIELDS + ["doc_label", "document_url"])]
-    print(f"  {len(docs):,} documents, {len(cited):,} cited, read in {time.time() - t0:.0f}s", flush=True)
-    if a.commit and not ARCHIVE_COPY_READY:
-        sys.exit("Refused: the PDFs must be copied to object storage before a purge can delete them, and that copy is not built yet (ARCHIVE_COPY_READY).")
-    by_rule = [(rid, f) for rid, f in docs if a.rule in __import__("base_room").rules_for(f, cited, key_types(), today)]
-    cands = candidates(docs, cited, key_types(), today, a.rule)
-    dropped = {"not periodic": len(by_rule) - len(cands)}
-    if os.environ.get("SUPABASE_DB_URL"):
-        import evidence_db
-        with evidence_db.connect() as conn:
-            have = with_text(conn.cursor(), [f.get("library_id") for _, f in cands])
-    else:
-        print("  SUPABASE_DB_URL not set: the text cannot be verified, so nothing is a candidate", flush=True)
-        have = set()
-    dropped["no text"] = sum(1 for _, f in cands if f.get("library_id") not in have)
-    cands = [(rid, f) for rid, f in cands if f.get("library_id") in have]
+    cands, dropped = select_candidates(a.rule, today)
+    if a.commit:
+        # the third condition: only a document whose PDF is safe in lanterN's own storage (stored_file, written by
+        # archive_copy.py after the upload is checked) may be ticked; the others wait for their copy
+        dropped["no stored copy yet"] = sum(1 for _, f in cands if not (f.get("stored_file") or "").strip())
+        cands = [(rid, f) for rid, f in cands if (f.get("stored_file") or "").strip()]
     cands.sort(key=lambda x: (str(x[1].get("year") or ""), x[1].get("wba_id") or "", x[1].get("library_id") or ""))
     if a.limit:
         cands = cands[:a.limit]
@@ -172,7 +187,7 @@ def main():
     md = report_md(cands, a.rule, today, committed, dropped)
     open(a.out + ".md", "w", encoding="utf-8").write(md)
     print(md)
-    run.finish("ok", rows_in=len(docs), rows_out=committed or 0,
+    run.finish("ok", rows_in=len(cands) + sum(dropped.values()), rows_out=committed or 0,
                counters={"candidates": len(cands), "rule": a.rule, "committed": committed or 0, "not_periodic": dropped["not periodic"],
                          "no_text": dropped["no text"], "files_gb": round(size_gb(cands), 1)},
                notes=f"rule {a.rule}: {len(cands):,} candidates" + (f", {committed:,} ticked" if committed else ", dry run"))

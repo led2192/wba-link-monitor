@@ -17,7 +17,7 @@ class SecondLevel(unittest.TestCase):
 
     def test_the_night_run_has_the_cap_the_owner_set(self):
         y = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".github", "workflows", "propose_values.yml")).read()
-        self.assertIn("--max-usd 5 --fresh-days 30 --commit", y); self.assertIn("--max-usd 0.3 --escalate none", y)
+        self.assertIn("--max-usd ${{ vars.READER_MAX_USD || '5' }} --fresh-days 30 --commit", y); self.assertIn("--max-usd 0.3 --escalate none", y)
 
 
 if __name__ == "__main__":

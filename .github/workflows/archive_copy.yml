@@ -1,0 +1,54 @@
+# The PDF of each document to be archived, copied to lanterN's own storage (the private bucket "archive") before
+# anything is deleted (archive_copy.py). Manual: a dry run counts what is left to copy; commit copies up to the
+# limit and the minutes given, and can be run again until nothing is left. Needs the secret SUPABASE_SERVICE_KEY.
+name: Archive copy
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run (count only) or commit (copy)"
+        type: choice
+        options: [dry_run, commit]
+        default: dry_run
+      rule:
+        description: "A = 2021 or earlier, B = 2021 or earlier and not a key type"
+        type: choice
+        options: [B, A]
+        default: B
+      limit:
+        description: "documents this run (0 = all that fit in the minutes)"
+        default: "0"
+      minutes:
+        description: "stop starting new batches after this many minutes"
+        default: "300"
+  pull_request:
+    paths: [archive_copy.py, .github/workflows/archive_copy.yml]
+
+concurrency:
+  group: archive-copy
+  cancel-in-progress: false
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Copy
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.mode }}" != "commit" ]; then python archive_copy.py --rule "${{ inputs.rule || 'B' }}"
+          else python archive_copy.py --commit --rule "${{ inputs.rule }}" --limit "${{ inputs.limit }}" --minutes "${{ inputs.minutes }}"; fi
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
