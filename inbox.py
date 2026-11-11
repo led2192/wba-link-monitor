@@ -277,6 +277,23 @@ def handle_company(rec, sess, tombs):
         elif kind == "blocked":
             if f.get("add_file"):
                 blocked_links.append(url)        # paired with a dropped file below
+            elif not HR.is_pdf_url(url) and k not in page_keys:
+                # A page, not a document, on a site that refuses cloud servers (11 Nov 2026: a company's reports
+                # page answered 403 and "nothing added" left the owner with no trace of the link). The page is
+                # kept and watched: the office-network fetch (pc_fetch.py) reads the pages marked blocked from an
+                # ordinary connection, every two hours, and its document links go to the nightly harvest.
+                typ = forced_type or guess_type(url)
+                m = re.search(r"\b(40[13]|429)\b", str(info))
+                out = write(LINKS, "POST", [{"fields": {
+                    "link_name": f"{name} — {LABEL.get(typ, 'Reports')}", "wba_id": wba,
+                    "company_name": name, "url": url, "type": typ, "monitor": True,
+                    "frequency": FREQ.get(typ, "mon_fri"), "is_pdf": False, "status": "blocked",
+                    "http_status": int(m.group(1)) if m else 403,
+                    "source": {"research": "research", "suggestion": "approved suggestion"}.get(how, "added by hand"),
+                    "companies": [rec["id"]]}}])
+                new_pages += [o["id"] for o in out]; page_keys[k] = typ
+                lines.append(f"The site refuses cloud servers ({info}). Page kept as {typ}: it is read from the office "
+                             f"network within the day, and the reports it lists follow from there: {short}")
             else:
                 lines.append(f"The site refused our robot ({info}), nothing added. Open it yourself, "
                              f"download the PDF and drop it in add_file together with this link: {short}")
