@@ -299,7 +299,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v29 2026-11-11";
+  const CLIENT = "lantern v30 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -386,6 +386,7 @@
 
   // What the box says beyond words: every company named (longest names first, so "Nike Inc" wins over "Nike"), every
   // year named (one, a span 2022-2024, or several: the earliest to the latest), a document type.
+  const WORD_NAMES = new Set("action apple block bolt canon dole grab liquid mars mosaic next target lumen orange shell visa oracle zoom subway snap vale meta amazon alphabet".split(" "));
   function parse(text) {
     let q = " " + text.trim().replace(/[?¿!¡]+/g, " ").replace(/\s+/g, " ") + " ";      // a question's marks are not words ("in 2024?" is the year 2024)
     const found = { company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null };
@@ -410,6 +411,13 @@
       if (!fq.toLowerCase().includes(name)) continue;      // the cheap test first: 2,000 names a keystroke
       const m = new RegExp("\\s" + esc(name) + "(?:'s)?[;,]?(?=\\s)", "i").exec(fq);
       if (!m) continue;
+      // A company whose name is an everyday word ("target", "shell", "orange"): the company when it is written as a
+      // name (a capital, or first in the box, or before a comma or semicolon), the word otherwise. 11 Nov 2026:
+      // "unilever scope 3 emissions target" searched the companies Unilever and Target for "scope 3 emissions".
+      if (WORD_NAMES.has(name)) {
+        const typed = q.slice(m.index + 1, m.index + 2);
+        if (!(typed !== typed.toLowerCase() || fold(text.trim()).toLowerCase().startsWith(name) || /[;,]$/.test(m[0]))) { found.maybe = found.maybe || { id: c.id, name: c.name, word: name }; continue; }
+      }
       hits.push(c);
       q = q.slice(0, m.index) + " " + q.slice(m.index + m[0].length);
       fq = fq.slice(0, m.index) + " " + fq.slice(m.index + m[0].length);
@@ -542,7 +550,7 @@
       state.companyName = parsed.companyName || ($("fCompany").value || null);
       state.from = parsed.from || (+$("fFrom").value || null);
       state.to = parsed.to || (+$("fTo").value || null);
-      state.type = parsed.type || ($("fType").value || null); state.typeWords = parsed.type ? parsed.typeWords : null;
+      state.type = parsed.type || ($("fType").value || null); state.typeWords = parsed.type ? parsed.typeWords : null; state.maybe = parsed.maybe || null;
       state.industry = parsed.industry; state.country = parsed.country; state.countryName = parsed.countryName; state.region = parsed.region;
       state.rows = 50;
     } else if (!more) { state.rows = 50; }
@@ -567,6 +575,11 @@
                              const re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "s?", "i");
                              $("q").value = re.test($("q").value) ? $("q").value.replace(re, m => `"${m}"`) : ($("q").value + ` "${w}"`).trim();
                              $("fType").value = ""; search(); };
+        st.append(document.createTextNode(" · "), a);
+      }
+      if (state.maybe && !more && !fromChips) {             // a word that is also a company's name was read as the word: offer the company
+        const st = $("status"), mb = state.maybe; const a = el("a", null, `Search the company ${mb.name} instead`); a.href = "#";
+        a.onclick = ev => { ev.preventDefault(); $("q").value = $("q").value.replace(new RegExp("(^|\\s)" + mb.word + "(?=\\s|$)", "i"), (m0, pre) => pre + mb.name + ";"); search(false); };
         st.append(document.createTextNode(" · "), a);
       }
       render(more ? rows.slice(state.rows - 50) : rows, !!more);

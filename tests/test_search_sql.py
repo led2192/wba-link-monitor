@@ -121,7 +121,7 @@ def test_recent_pages_and_whole_matches_come_first():
 
 
 def test_pages_with_every_word_come_before_pages_with_some():
-    assert FIND.count("r.joined desc, r.complete desc, r.score desc") == 2      # together, then every word, then some
+    assert FIND.count("(r.complete and r.joined) desc, r.complete desc, r.joined desc, r.score desc") == 2      # together, then every word, then some
 
 
 def test_added_sources_are_signed_checked_and_one_per_person():
@@ -187,3 +187,14 @@ def test_confidence_is_measured_against_validated_answers():
     assert "revoke all on function public.confidence_of(text, int, int) from public, anon, authenticated;" in conf
     assert "'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants)" in SQL
     assert "Readings like this were right" in PAGE
+
+
+def test_a_company_named_like_a_word_is_the_word_unless_written_as_a_name():
+    parse = PAGE[PAGE.index("const WORD_NAMES"):PAGE.index("function setStatus")]
+    assert "target" in parse.split("\n")[0] and "shell" in parse.split("\n")[0]
+    assert "typed !== typed.toLowerCase()" in parse and "startsWith(name)" in parse and "found.maybe" in parse
+    assert "Search the company ${mb.name} instead" in PAGE
+
+
+def test_the_excerpt_of_three_words_shows_where_they_all_meet():
+    assert "case when t2.complete and nw >= 3 and all_q is not null then all_q" in FIND
