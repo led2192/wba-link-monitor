@@ -157,3 +157,6 @@ Still to build for the measure (agreed 7 Nov 2026, in this order):
 4. A test set stratified by how documents fail: borderless tables, headers nested on several levels, tables split across two pages, merged cells, footnotes that change a figure's boundary, scans and tables saved as images.
 5. Per-gate measures: table cells read in the right row and column (Gate 1, column shifts), page recall at 1, 3, 5 and 10 and the reciprocal rank (Gate 2), table, unit and footnote together in what the model reads (Gate 3).
 6. Checks that need no answers, on unvalidated documents: accounting constraints (parts that should add up to a total, Scope 1 plus 2 against a stated total, off by more than 1%) and the same figure read the same at another scale.
+
+## Tests on a real database (11 Nov 2026)
+The Tests workflow starts an empty Postgres (image `pgvector/pgvector:pg16`) and sets `PG_SEARCH_TEST_URL`. `tests/pg_search.py` installs `schema.sql`, the loaders' tables and `search.sql` there and fills a small made-up library; `tests/test_search_db.py` runs the search functions on it. Every search that broke or misbehaved on the live page becomes a case in its list (`test_the_worst_a_person_can_type_comes_back`), as a labelled site failure becomes a regression case. Locally the same tests run with any Postgres 16 and `PG_SEARCH_TEST_URL` set, and are skipped without it.

@@ -13,6 +13,19 @@ jobs:
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # A real Postgres for the tests that run the database's own functions (tests/test_search_db.py; its own
+    # variable, PG_SEARCH_TEST_URL, because the older PG_TEST_URL cases each build their own tables and were written for a developer's database). 11 Nov 2026: the tests of the search functions only read their text, and a
+    # question typed into the page took the database down. Empty at each run; nothing of the real data is here.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PG_SEARCH_TEST_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
