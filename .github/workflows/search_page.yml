@@ -4,11 +4,12 @@ name: Search page
 # search, opened from a link that carries its key; 10 Nov 2026) on GitHub Pages, with the Supabase project
 # address and its publishable key filled in. The page holds no data: it signs people in with Supabase
 # and calls the search functions, which allow WBA addresses and the addresses in search_access only.
+# Also builds send-to-lantern.zip, the browser extension of extension/, with the same two values (11 Nov 2026).
 # Needs: Settings > Pages > Source = GitHub Actions; repository variable SUPABASE_PUBLISHABLE_KEY.
 on:
   push:
     branches: [main]
-    paths: [site/**, .github/workflows/search_page.yml]
+    paths: [site/**, extension/**, .github/workflows/search_page.yml]
   workflow_dispatch:
 
 permissions:
@@ -35,10 +36,19 @@ jobs:
         run: |
           test -n "$KEY" || { echo "Set the repository variable SUPABASE_PUBLISHABLE_KEY first"; exit 1; }
           mkdir -p public
-          for f in index.html search.html bot.html; do
+          for f in index.html search.html bot.html send-to-lantern.html; do
             sed -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" site/$f > public/$f
             grep -q "__SUPABASE_" public/$f && { echo "placeholders left in $f"; exit 1; } || true
           done
+      - name: Build the browser extension (Send to lanterN) with the same two values
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          mkdir -p build/send-to-lantern && cp extension/* build/send-to-lantern/
+          sed -i -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" build/send-to-lantern/config.js
+          grep -q "__SUPABASE_" build/send-to-lantern/config.js && { echo "placeholders left in the extension"; exit 1; } || true
+          (cd build && zip -qr ../public/send-to-lantern.zip send-to-lantern)
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

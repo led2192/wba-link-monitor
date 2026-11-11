@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Send to lanterN</title>
+<style>
+  body { margin: 0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1c2430; background: #fafbf8; }
+  main { max-width: 680px; margin: 0 auto; padding: 32px 16px 60px; }
+  h1 { font-size: 26px; margin: 0 0 6px; } h1 span { color: #1a56db; }
+  h2 { font-size: 18px; margin: 28px 0 8px; }
+  p, li { color: #2c3644; } .muted { color: #5b6675; font-size: 14px; }
+  a.get { display: inline-block; margin: 10px 0; padding: 10px 18px; background: #1a56db; color: #fff; border-radius: 8px; text-decoration: none; }
+  code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+  ol { padding-left: 22px; } li { margin: 6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Send to <span>lanterN</span></h1>
+  <p>A button for Chrome. On a page that lists a company's reports, it shows every PDF linked there; you tick the ones you want, choose the company, and they are downloaded with your own browser and sent to lanterN. It is for the sites that refuse our robot, where until now each report had to be saved by hand.</p>
+  <a class="get" href="send-to-lantern.zip">Download the extension (zip)</a>
+  <h2>Install it, once</h2>
+  <ol>
+    <li>Download the zip above and unzip it. Keep the folder <code>send-to-lantern</code> somewhere it will stay (Documents, for example).</li>
+    <li>In Chrome open <code>chrome://extensions</code> and switch on <b>Developer mode</b>, top right.</li>
+    <li>Click <b>Load unpacked</b> and choose the folder <code>send-to-lantern</code>.</li>
+    <li>Click the puzzle icon beside the address bar and pin <b>Send to lanterN</b>.</li>
+  </ol>
+  <h2>Use it</h2>
+  <ol>
+    <li>Open the company's page that lists its reports (or a PDF itself) and click the button.</li>
+    <li>The first time, enter your WBA email and the code that arrives by mail.</li>
+    <li>Check the company (it is filled in when the site is the company's own), tick the documents, and click <b>Send the ticked documents</b>.</li>
+    <li><b>Watch this page</b> adds the page itself, so lanterN looks at it for new documents.</li>
+  </ol>
+  <p class="muted">What it does with your browser: it reads the links of the tab you click it on, downloads the documents you tick, and stores them in lanterN's database under your address. It does nothing on any other tab and sends nothing anywhere else. Files up to 50 MB. A new version means downloading the zip again and pressing the reload arrow of the extension in <code>chrome://extensions</code>.</p>
+</main>
+</body>
+</html>

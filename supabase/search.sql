@@ -2114,3 +2114,142 @@ revoke all on function public.find_click(text, bigint, text, int, int) from publ
 grant execute on function public.find_click(text, bigint, text, int, int) to anon, authenticated;
 revoke all on function public.find_companies(text) from public;
 grant execute on function public.find_companies(text) to anon, authenticated;
+
+-- ==============================================================================================
+-- "Send to lanterN" (11 Nov 2026): documents sent from a person's own browser.
+-- Some sites refuse our robot from every network we have (one retailer's annual reports: 403 for weeks), and the
+-- owner downloaded 26 PDFs by hand, one by one, to get them in. The browser extension (extension/) lists the PDF
+-- links of the page the person is on, downloads the chosen ones with that browser and stores each in the private
+-- storage bucket `uploads`. browser_uploads is the list of what was sent: upload_begin registers a file (who,
+-- company, where it was downloaded from, size, SHA-256) and gives the place to store it; the storage rule lets a
+-- signed-in person write exactly that object and no other; upload_done says it is stored. browser_uploads.py
+-- (every 15 minutes) makes the report_library row, with the file, as the inbox does for a file dropped by hand.
+-- status: expected (registered), stored (the file is in the bucket), taken (now a row of the library), known
+-- (the library already held it), failed, orphan (the company is not in the base).
+create table if not exists public.browser_uploads (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  uploader    text not null,
+  wba_id      text not null,
+  source_url  text,                 -- where the browser downloaded it from
+  page_url    text,                 -- the page that listed it
+  filename    text not null,
+  bytes       bigint not null,
+  sha256      text not null,
+  path        text not null,        -- <wba_id>/<sha256>.pdf in the bucket
+  status      text not null default 'expected',
+  result      text,
+  client      text
+);
+alter table public.browser_uploads enable row level security;
+create unique index if not exists browser_uploads_one_file on public.browser_uploads (wba_id, sha256);
+
+create or replace function public.upload_companies() returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+declare
+  who text := lower(auth.jwt() ->> 'email');
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.name, 'website', c.website) order by c.name), '[]'::jsonb)
+          from public.companies c where c.name is not null);
+end;
+$$;
+revoke all on function public.upload_companies() from public, anon;
+grant execute on function public.upload_companies() to authenticated;
+
+create or replace function public.upload_begin(
+  company text, filename text, bytes bigint, sha256 text, source_url text default null, page_url text default null, client text default null)
+returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+  sha text := lower(btrim(coalesce(sha256, '')));
+  src text := nullif(btrim(coalesce(source_url, '')), '');
+  fn text := left(btrim(regexp_replace(coalesce(filename, ''), '[[:cntrl:]]', '', 'g')), 200);
+  row public.browser_uploads;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+  end if;
+  if co = '' or not exists (select 1 from public.companies c where c.wba_id = co) then
+    raise exception 'choose the company the document belongs to' using errcode = '22023';
+  end if;
+  if sha !~ '^[0-9a-f]{64}$' then
+    raise exception 'the file''s SHA-256 is missing' using errcode = '22023';
+  end if;
+  if bytes is null or bytes < 1000 or bytes > 52428800 then
+    raise exception 'a file of 1 KB to 50 MB' using errcode = '22023';
+  end if;
+  if src is not null and (src !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(src) > 1000) then
+    raise exception 'the address the file came from is not a link' using errcode = '22023';
+  end if;
+  if (select count(*) from public.browser_uploads u where u.uploader = who and u.at > now() - interval '1 day') >= 300 then
+    raise exception 'three hundred files a day at most' using errcode = '22023';
+  end if;
+  if src is not null and exists (select 1 from public.documents d where d.url = src and coalesce(d.pages, 0) > 0) then
+    return jsonb_build_object('known', true);                        -- the library holds this document, with its text
+  end if;
+  select * into row from public.browser_uploads u where u.wba_id = co and u.sha256 = sha;
+  if found and row.status <> 'expected' then
+    return jsonb_build_object('again', true);                        -- this very file was sent before
+  end if;
+  if not found then
+    insert into public.browser_uploads (uploader, wba_id, source_url, page_url, filename, bytes, sha256, path, client)
+      values (who, co, src, left(nullif(btrim(coalesce(page_url, '')), ''), 1000), coalesce(nullif(fn, ''), 'document.pdf'), bytes, sha,
+              co || '/' || sha || '.pdf', left(client, 60))
+      returning * into row;
+  elsif row.uploader <> who then
+    update public.browser_uploads u set uploader = who, at = now() where u.id = row.id returning * into row;   -- registered and never stored by someone else
+  end if;
+  return jsonb_build_object('id', row.id, 'path', row.path);
+end;
+$$;
+revoke all on function public.upload_begin(text, text, bigint, text, text, text, text) from public, anon;
+grant execute on function public.upload_begin(text, text, bigint, text, text, text, text) to authenticated;
+
+create or replace function public.upload_done(upload_id bigint) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  n int;
+begin
+  update public.browser_uploads u set status = 'stored' where u.id = upload_id and u.uploader = who and u.status = 'expected';
+  get diagnostics n = row_count;
+  return jsonb_build_object('stored', n = 1);
+end;
+$$;
+revoke all on function public.upload_done(bigint) from public, anon;
+grant execute on function public.upload_done(bigint) to authenticated;
+
+-- The storage rule asks this: is the signed-in person expected to store this object? (The rule cannot read
+-- browser_uploads itself: the table is closed to everyone but these functions.)
+create or replace function public.upload_expected(object_name text) returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.browser_uploads u
+                 where u.path = object_name and u.status = 'expected' and u.uploader = lower(auth.jwt() ->> 'email'))
+$$;
+revoke all on function public.upload_expected(text) from public, anon;
+grant execute on function public.upload_expected(text) to authenticated;
+
+-- The bucket and its one rule, where there is a storage (the evidence database; not the test database).
+do $do$
+begin
+  if to_regclass('storage.buckets') is not null and to_regclass('storage.objects') is not null then
+    insert into storage.buckets (id, name, public) values ('uploads', 'uploads', false) on conflict (id) do nothing;
+    if not exists (select 1 from pg_policies p where p.schemaname = 'storage' and p.tablename = 'objects' and p.policyname = 'lantern uploads: the expected file only') then
+      execute 'create policy "lantern uploads: the expected file only" on storage.objects for insert to authenticated '
+           || 'with check (bucket_id = ''uploads'' and public.upload_expected(name))';
+    end if;
+  end if;
+exception when insufficient_privilege then
+  raise notice 'the uploads bucket and its rule could not be made here (%): make them in the dashboard', sqlerrm;
+end
+$do$;

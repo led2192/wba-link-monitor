@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Send to lanterN",
+  "version": "0.1.0",
+  "description": "Sends the PDF documents of the page you are on to lanterN, downloaded with your own browser.",
+  "action": { "default_title": "Send to lanterN" },
+  "permissions": ["scripting", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "worker.js" }
+}

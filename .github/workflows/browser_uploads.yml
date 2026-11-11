@@ -1,0 +1,43 @@
+# The documents sent from a person's browser with the extension "Send to lanterN" (stored in the evidence
+# database's bucket `uploads`) become rows of report_library, with their file (browser_uploads.py).
+# Every 15 minutes, and by hand. Dry run on a PR.
+name: Browser uploads
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "commit"
+  pull_request:
+    paths: [browser_uploads.py, .github/workflows/browser_uploads.yml]
+
+concurrency:
+  group: browser-uploads
+  cancel-in-progress: false
+
+jobs:
+  take:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Take the files sent
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.mode }}" = "dry_run" ]; then python browser_uploads.py
+          else python browser_uploads.py --commit; fi
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
