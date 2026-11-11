@@ -205,7 +205,11 @@ def main():
             except Exception as e:
                 # The database dropped the connection (11 Nov 2026: two runs died an hour in, each with hours of work
                 # ahead). A new connection, and the next document: this one is not marked done, the next run takes it.
-                if type(e).__name__ != "OperationalError" or lost >= 5:
+                # Also a connection the driver itself gave up on (11 Nov 2026, 13:39 UTC: "lost synchronization with
+                # server", a DatabaseError, killed partition 6/8 six minutes in): closed or broken is lost, whatever
+                # the error is called.
+                gone = type(e).__name__ == "OperationalError" or bool(getattr(conn, "closed", False)) or bool(getattr(conn, "broken", False))
+                if not gone or lost >= 5:
                     raise
                 lost += 1
                 print(f"  connection lost ({str(e)[:80]}); reconnecting ({lost} of 5)", flush=True)
