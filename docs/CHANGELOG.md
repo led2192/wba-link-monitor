@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-11 `semantic_index.py` reconnects when the connection is closed or broken whatever the error is called: partition 6/8 died six minutes in on "lost synchronization with server", a DatabaseError the reconnect did not cover. (#421)
 - 2026-11-11 "+ Add a source" in lanterN takes links for a company that has no document yet (it checked `documents` only, so a company added that day was refused) and says that a page listing documents (a report hub) is accepted like a PDF link: the inbox keeps it as a watched page. Client v37. (#420)
 - 2026-11-11 Scan now: the watch starts even when the browser cannot be installed (the step is bounded to ten minutes and no longer fails the run); the inbox stood still for 20 minutes behind a failed and then a hanging install of system packages. (#419)
 - 2026-11-11 `inbox.py`: a refused page pasted together with a dropped file is kept as a page, and the file is not given the page's address (an annual accounts PDF had become "the document at" the company's reports page). (#418)
