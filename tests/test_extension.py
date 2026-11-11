@@ -50,6 +50,13 @@ class Extension(unittest.TestCase):
         self.assertIn("setTimeout(() => c.abort(), 15000)", js)
         self.assertIn('id="deeper"', read("extension", "send.html"))
 
+    def test_documents_with_no_pdf_in_their_address_are_listed(self):
+        js = read("extension", "send.js")
+        self.assertIn("static-files", js); self.assertIn("getattachment", js)             # the platforms monitor_core.DOC_ENDPOINTS knows
+        self.assertIn('img[src*="pdf" i]', js)                                            # or the PDF icon on the link
+        self.assertIn('method: "HEAD"', js)                                               # the site is asked what a doubtful link is, nothing downloaded
+        self.assertIn("await confirmMaybes(docs)", js)
+
     def test_the_site_builds_and_offers_it(self):
         wf = read(".github", "workflows", "search_page.yml")
         self.assertIn("extension/**", wf); self.assertIn("public/send-to-lantern.zip", wf)

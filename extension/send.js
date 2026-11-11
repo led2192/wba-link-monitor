@@ -70,7 +70,11 @@ function collectLinks() {
   for (const a of document.querySelectorAll("a[href]")) {
     const href = a.getAttribute("href") || "", text = a.innerText || a.textContent || a.getAttribute("title") || a.getAttribute("aria-label") || "";   // innerText keeps the space between "Download" and the title
     const sure = /\.pdf($|[?#])/i.test(href);
-    const maybe = !sure && (/pdf|download|descarga|t[eé]l[eé]charg|herunterladen/i.test(href + " " + text) || a.hasAttribute("download")) && !/^(#|javascript:|mailto:)/i.test(href);
+    // Documents served with no ".pdf" in their address (the platforms of half the investor sites: /static-files/<id>,
+    // /getattachment/, /files/<name>, ?documentId=): known by the address, or by the PDF icon or class on the link.
+    const endpoint = /\/static-files\/|\/getattachment\/|\/files\/[^/.]+\/?$|[?&](document|edition|asset|media|file)[-_]?id=/i.test(href);
+    const marked = /pdf/i.test((a.getAttribute("type") || "") + " " + (a.className || "")) || !!a.querySelector('img[src*="pdf" i], img[alt*="pdf" i], svg[class*="pdf" i], i[class*="pdf" i], span[class*="pdf" i]');
+    const maybe = !sure && (endpoint || marked || /pdf|download|descarga|t[eé]l[eé]charg|herunterladen/i.test(href + " " + text) || a.hasAttribute("download")) && !/^(#|javascript:|mailto:)/i.test(href);
     if (sure || maybe) add(href, better(a, text), sure);
   }
   for (const f of document.querySelectorAll("iframe[src], embed[src], object[data]")) {
@@ -106,12 +110,14 @@ async function collectDeeper(max) {
       const doc = new DOMParser().parseFromString(await r.text(), "text/html"); pages.push(p.url);
       const title = (doc.querySelector("h1") || doc.querySelector("title") || {}).textContent || "";
       for (const a of doc.querySelectorAll("a[href]")) {
-        const href = a.getAttribute("href") || ""; if (!isPdf(href)) continue;
+        const href = a.getAttribute("href") || "";
+        const likely = /\/static-files\/|\/getattachment\/|\/files\/[^/.]+\/?$|[?&](document|edition|asset|media|file)[-_]?id=/i.test(href) || !!a.querySelector('img[src*="pdf" i], img[alt*="pdf" i]');
+        if (!isPdf(href) && !likely) continue;
         let u; try { u = new URL(href, p.url); } catch (e) { continue; }
         u.hash = ""; if (got.has(u.href)) continue; got.add(u.href);
         let text = (a.textContent || a.getAttribute("title") || "").replace(/\s+/g, " ").trim();
         if (GENERIC.test(text)) text = (title.replace(/\s+/g, " ").trim() + " " + decodeURIComponent(u.pathname.split("/").pop() || "").replace(/\.pdf$/i, "").replace(/[-_+]+/g, " ")).trim();
-        out.push({ url: u.href, text: text.slice(0, 200), sure: true, from: p.url });
+        out.push({ url: u.href, text: text.slice(0, 200), sure: isPdf(href), from: p.url });
       }
     } catch (e) {}
   };
@@ -123,8 +129,8 @@ async function lookDeeper() {
   try {
     const [res] = await chrome.scripting.executeScript({ target: { tabId: TAB.id }, func: collectDeeper, args: [40] });
     const j = (res && res.result) || { pages: 0, links: [] }; const have = new Set(docs.map(d => d.url)); let n = 0;
-    for (const d of j.links) if (!have.has(d.url)) { have.add(d.url); docs.push(d); n++; }
-    await markHeld();
+    const fresh = []; for (const d of j.links) if (!have.has(d.url)) { have.add(d.url); docs.push(d); fresh.push(d); n++; }
+    await confirmMaybes(fresh); await markHeld();
     $("deeper").textContent = `${n} more document${n === 1 ? "" : "s"} found in ${j.pages} page${j.pages === 1 ? "" : "s"} this page links to` + (j.more > 0 ? ` (${j.more} other links were not opened)` : "") + ". Look again";
   } catch (e) { $("deeper").textContent = "This page could not be read one level deeper. Try again"; }
 }
@@ -142,7 +148,7 @@ async function listDocuments() {
 function nameOf(url, disposition, text) {
   const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition || "");
   let n = m ? m[1] : "";
-  if (!n) { try { n = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() || ""); } catch (e) {} }
+  if (!n && /\.pdf($|[?#])/i.test(url)) { try { n = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() || ""); } catch (e) {} }   // an address with no ".pdf" ends in an id: the link's title names the file better
   try { n = decodeURIComponent(n); } catch (e) {}
   if (!n || !/[a-z0-9]/i.test(n)) n = (text || "document").slice(0, 80);
   n = n.replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim();
@@ -209,6 +215,22 @@ async function sendOne(doc, company) {
   }
   await rpc("upload_done", { upload_id: j.id });
   return `sent (${(buf.byteLength / 1048576).toFixed(1)} MB)`;
+}
+
+// A link that may be a PDF is asked what it is (the headers only, nothing downloaded): the ones the site calls a PDF
+// are treated as the others. At most 80 links, six at a time.
+async function confirmMaybes(list) {
+  const doubt = list.filter(d => !d.sure).slice(0, 80);
+  const ask = async d => {
+    try {
+      const c = new AbortController(); const timer = setTimeout(() => c.abort(), 10000);
+      let r = await fetch(d.url, { method: "HEAD", credentials: "include", signal: c.signal });
+      if (r.status === 405 || r.status === 501) r = await fetch(d.url, { method: "GET", credentials: "include", signal: c.signal, headers: { Range: "bytes=0-0" } });
+      clearTimeout(timer);
+      if (r.ok && /application\/pdf/i.test(r.headers.get("content-type") || "")) d.sure = true;
+    } catch (e) {}
+  };
+  for (let i = 0; i < doubt.length; i += 6) await Promise.all(doubt.slice(i, i + 6).map(ask));
 }
 
 // ---- the window ---------------------------------------------------------------------------------------------------
@@ -282,7 +304,7 @@ async function start() {
   // its reports on one, its website on another)
   hostMemory = (await store.get("hosts")) || {};
   const guess = companyOfHost(hostOf(TAB.url)) || companies.find(c => c.id === hostMemory[hostOf(TAB.url)]); if (guess) $("company").value = guess.name;
-  docs = await listDocuments(); await markHeld();
+  docs = await listDocuments(); await confirmMaybes(docs); await markHeld();
   $("company").onchange = markHeld;
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };
