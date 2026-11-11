@@ -142,6 +142,17 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.upload_known('PT_00000', %s)", (["https://example.com/ar-2024.pdf", "https://example.com/never.pdf"],))
         self.assertEqual(cur.fetchone()[0], ["https://example.com/ar-2024.pdf"])                                    # sent before: not offered again
 
+    def test_documents_known_and_not_held_are_listed_for_their_company(self):
+        cur = self.conn.cursor()
+        cur.execute("delete from public.unheld_documents")
+        cur.execute("""insert into public.unheld_documents (library_id, wba_id, url, label, doc_type, status) values
+                       ('PT_00000-x1', 'PT_00000', 'https://example.com/ar-2024.pdf', '2024 | Unilever | Annual Report', 'Annual Report', 'blocked'),
+                       ('PT_00000-x2', 'PT_00000', 'https://example.com/old.pdf', '2019 | Unilever | Old', null, 'dead'),
+                       ('PT_99999-y', 'PT_99999', 'https://other.example/a.pdf', 'Other', null, 'blocked')""")
+        cur.execute("select public.unheld_documents('PT_00000')"); j = cur.fetchone()[0]
+        self.assertEqual((j["n"], j["blocked"]), (2, 1))
+        self.assertEqual([d["url"] for d in j["documents"]], ["https://example.com/ar-2024.pdf", "https://example.com/old.pdf"])   # newest label first
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:

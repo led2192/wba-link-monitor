@@ -33,6 +33,45 @@ def company_rows(records):
     return out
 
 
+UNHELD_FIELDS = ["library_id", "wba_id", "document_url", "doc_label", "effective_type", "file_status"]
+UNHELD_FORMULA = "AND({file}=BLANK(), {document_url}!='', NOT({discard}))"
+UNHELD_SQL = """create table if not exists public.unheld_documents (
+                  library_id text primary key, wba_id text not null, url text not null, label text, doc_type text,
+                  status text, updated timestamptz not null default now())"""
+
+
+def unheld_rows(records):
+    """The documents we know by their address and hold no file of (the site refused the robot, the link is dead):
+    [(library_id, wba_id, url, label, type, status)]. The search shows them under a company's documents, with the
+    link to the original, so that a person is not told "3 documents" where the library knows 12 (11 Nov 2026)."""
+    out = []
+    for rec in records:
+        f = rec.get("fields", {})
+        lid, wba, url = (f.get("library_id") or "").strip(), (f.get("wba_id") or "").strip(), (f.get("document_url") or "").strip()
+        if not (lid and wba and url.lower().startswith(("http://", "https://"))) or f.get("file"):
+            continue
+        st = f.get("file_status")
+        out.append((lid, wba, url, (f.get("doc_label") or "").strip() or None, (f.get("effective_type") or "").strip() or None,
+                    (st.get("name") if isinstance(st, dict) else st) or None))
+    return out
+
+
+def upsert_unheld(conn, rows):
+    """The table is the picture of today: rows of this run are written, rows of an earlier run are gone (a document
+    that got its file since, or was discarded). A derived table, rebuilt whole; nothing of the library is deleted."""
+    with conn.cursor() as c:
+        c.execute(UNHELD_SQL)
+        c.execute("alter table public.unheld_documents enable row level security")
+        c.execute("create index if not exists unheld_documents_company on public.unheld_documents (wba_id)")
+        c.execute("select now()"); started = c.fetchone()[0]
+        c.executemany("""insert into public.unheld_documents (library_id, wba_id, url, label, doc_type, status)
+                         values (%s, %s, %s, %s, %s, %s)
+                         on conflict (library_id) do update set wba_id = excluded.wba_id, url = excluded.url, label = excluded.label,
+                           doc_type = excluded.doc_type, status = excluded.status, updated = now()""", rows)
+        c.execute("delete from public.unheld_documents where updated < %s", (started,))
+    conn.commit()
+
+
 def upsert(conn, rows):
     with conn.cursor() as c:
         c.execute("""create table if not exists public.companies (
@@ -72,8 +111,14 @@ def main():
         with evidence_db.connect() as conn:
             upsert(conn, rows)
         print(f"  {len(rows):,} rows upserted into public.companies", flush=True)
+    unheld = unheld_rows(sweep("report_library", UNHELD_FIELDS + ["file", "discard"], UNHELD_FORMULA))
+    print(f"{len(unheld):,} documents known by their address with no file, of {len({r[1] for r in unheld}):,} companies", flush=True)
+    if a.commit:
+        with evidence_db.connect() as conn:
+            upsert_unheld(conn, unheld)
+        print(f"  {len(unheld):,} rows in public.unheld_documents", flush=True)
     run.finish("ok", rows_in=len(rows), rows_out=len(rows) if a.commit else 0,
-               counters={"companies": len(rows), "industries": len(by_ind), "regions": len(by_reg), "without_industry": by_ind.get("(none)", 0)},
+               counters={"companies": len(rows), "documents known with no file": len(unheld), "industries": len(by_ind), "regions": len(by_reg), "without_industry": by_ind.get("(none)", 0)},
                notes="written" if a.commit else "dry run")
     return 0
 
