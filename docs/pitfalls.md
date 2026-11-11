@@ -314,3 +314,6 @@ Eight Semantic index partitions writing together, with the nightly reader and an
 
 ## Paid work must be written when it is paid for (11 Nov 2026)
 The model reader kept everything it read in memory and wrote at the end. The database dropped every connection in the run's last minute; the run waited on a dead connection (no keepalive) until the job's time limit killed it, and about 2 USD of reads were lost. Three rules since: a paid result is written at once (`model_read_journal`) and reused by the next run; every database connection has keepalives; a writer that loses its connection opens another. The same had happened on 3 Nov with the API credit (fixed then for that cause only).
+
+## Two jobs on one box: the faster one answers first (11 Nov 2026)
+A new company was to be given its id by an hourly job and its links handled by the inbox watcher, which runs every few minutes. The watcher saw the row first, found no id, emptied the box and wrote that nothing could be added. And the hourly schedule of a workflow merged that morning did not fire for three hours. When two jobs act on the same row, the one that runs more often must do the first step itself or leave the row alone; and a new schedule on GitHub is not to be counted on for hours.

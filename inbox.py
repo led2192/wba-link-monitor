@@ -318,11 +318,40 @@ def handle_company(rec, sess, tombs):
     return lines, created_docs, new_pages
 
 
+def name_new_companies(recs):
+    """A row added by hand with a name, links and no id (a company outside WBA's list, add_companies.py) gets its
+    lanterN id here, at once, so its links are handled in this same pass. 11 Nov 2026: the first such row had its
+    box emptied with "This company has no wba_id: nothing could be added", because this watcher runs every few
+    minutes and the hourly job that gives ids had not passed yet. A row that cannot be a company (same LEI, name
+    or website as one we hold) keeps its box and gets the reason in intake_note; it is not looked at again until
+    a person changes it. Returns the records to handle."""
+    pending = [r for r in recs if not (r["fields"].get("wba_id") or "").strip()]
+    if not pending:
+        return recs
+    import add_companies as AC
+    existing = AC.index_existing(get(COMP, [("pageSize", "100")] + [("fields[]", x) for x in ("wba_id", "company_name", "website", "lei")]))
+    out = [r for r in recs if (r["fields"].get("wba_id") or "").strip()]
+    for rec in pending:
+        f = rec["fields"]
+        if (f.get("intake_note") or "").startswith("not added"):
+            continue                                              # already answered; the box is left as the person wrote it
+        what, cid, note = AC.decide(f.get("company_name"), f.get("website"), f.get("lei"), existing)
+        print(f">>> inbox: a row with no id: {what}{' ' + cid if cid else ''}", flush=True)
+        if what == "add":
+            write(COMP, "PATCH", [{"id": rec["id"], "fields": {"wba_id": cid, "intake_note": f"{note} ({stamp()})"}}])
+            f["wba_id"] = cid
+            out.append(rec)
+        else:
+            write(COMP, "PATCH", [{"id": rec["id"], "fields": {"intake_note": f"not added: {note} ({stamp()})"}}])
+    return out
+
+
 def run_links():
     formula = "OR({add_link}!='', {research_link}!='', {add_file}!='', {approve_suggestions})"
     recs = get(COMP, [("pageSize", "100"), ("filterByFormula", formula)] +
                [("fields[]", x) for x in ("wba_id", "company_name", "add_link", "research_link", "add_file", "add_result",
-                                           "approve_suggestions", "suggested_links")])
+                                           "approve_suggestions", "suggested_links", "website", "lei", "intake_note")])
+    recs = name_new_companies(recs)
     if not recs:
         return False
     from purge_discarded import load_tombstones
