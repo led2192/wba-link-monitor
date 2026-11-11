@@ -154,14 +154,26 @@ function render() {
   const list = $("list"); list.innerHTML = "";
   if (!docs.length) list.append(el("div", "empty", "No link to a PDF on this page. Open the page that lists the documents, or the PDF itself, and click the button again."));
   docs.forEach((d, i) => {
-    const row = el("label", "doc" + (d.sure ? "" : " maybe")); const box = el("input"); box.type = "checkbox"; box.checked = d.sure; box.dataset.i = i;
+    const row = el("label", "doc" + (d.sure ? "" : " maybe")); const box = el("input"); box.type = "checkbox"; box.checked = d.sure && looksReport(d) && !d.held; box.dataset.i = i;
     box.onchange = count;
     row.append(box, el("span", "t", d.text || d.url.split("/").pop()), el("span", "u", d.url)); const s = el("span", "s", ""); row.append(s); d.status = s; d.box = box;
+    if (d.held) { box.disabled = true; s.textContent = "already in lanterN"; s.className = "s ok"; }
     list.append(row);
   });
   count();
 }
-function count() { const n = docs.filter(d => d.box && d.box.checked).length; $("count").textContent = `${docs.length} document link${docs.length === 1 ? "" : "s"} on this page, ${n} ticked`; $("go").disabled = !n; }
+// Ticked from the start only when the link reads like a report or a policy: a home page also links magazines,
+// leaflets and terms of use, and those are for the person to tick, not for the button to send by default.
+const REPORT = /annual|report|informe|memoria|rapport|bericht|relat[oó]rio|bilan|sustainab|sostenib|nachhaltig|durab|esg|csr|rse|integrated|integrado|climat|clima|tcfd|cdp|gri|polic|pol[ií]tica|politique|code|c[oó]digo|conduct|ethic|[eé]tic|human.?rights|derechos|slavery|10-?k|20-?f|accounts|cuentas|financ|governance|gobierno|gouvernance|remunera|statement|universal.registration|proxy/i;
+const pathWords = u => { try { return decodeURIComponent(new URL(u).pathname).replace(/[-_+./]/g, " "); } catch (e) { return ""; } };
+const looksReport = d => REPORT.test(d.text + " " + pathWords(d.url));
+// Before anything is downloaded: the links lanterN already holds for the chosen company are shown as held, not offered.
+async function markHeld() {
+  const company = chosenCompany(); docs.forEach(d => { d.held = false; });
+  if (company && docs.length) { try { const held = new Set(await rpc("upload_known", { company: company.id, urls: docs.map(d => d.url) })); docs.forEach(d => { d.held = held.has(d.url); }); } catch (e) {} }
+  render();
+}
+function count() { const n = docs.filter(d => d.box && d.box.checked).length; const h = docs.filter(d => d.held).length; $("count").textContent = `${docs.length} document link${docs.length === 1 ? "" : "s"} on this page, ${n} ticked${h ? `, ${h} already in lanterN` : ""}`; $("go").disabled = !n; }
 async function start() {
   const over = await store.get("config"); if (over && over.url) conf = over;          // a test database, set by hand
   if (/__SUPABASE_/.test(conf.url)) { document.querySelector("main").textContent = "This copy of the extension was not built by the site: download it from the lanterN page."; return; }
@@ -172,8 +184,9 @@ async function start() {
   try { companies = await rpc("upload_companies"); } catch (e) { $("msg").textContent = `The companies could not be read: ${e.message}`; if (/sign in/.test(e.message)) showSignIn(); return; }
   const dl = $("companies"); for (const c of companies) { const o = el("option"); o.value = c.name; dl.append(o); }
   const guess = companyOfHost(hostOf(TAB.url)); if (guess) $("company").value = guess.name;
-  docs = await listDocuments(); render();
-  $("all").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = true); count(); };
+  docs = await listDocuments(); await markHeld();
+  $("company").onchange = markHeld;
+  $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };
   $("go").onclick = sendAll; $("watch").onclick = watchPage;
 }
@@ -191,7 +204,7 @@ function showSignIn() {
 }
 async function sendAll() {
   const company = chosenCompany(); if (!company) { $("msg").textContent = "Choose the company from the list first."; $("company").focus(); return; }
-  const todo = docs.filter(d => d.box.checked && !d.done); if (!todo.length) return;
+  const todo = docs.filter(d => d.box.checked && !d.done && !d.held); if (!todo.length) return;
   $("go").disabled = true; let ok = 0, bad = 0;
   for (const d of todo) {
     d.status.className = "s"; d.status.textContent = "downloading…";

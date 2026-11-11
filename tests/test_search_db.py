@@ -129,6 +129,8 @@ class SearchOnPostgres(unittest.TestCase):
             with self.assertRaises(Exception):
                 cur.execute("select public.upload_begin(%s, %s, %s, %s, %s)", bad)
         cur.execute("select jsonb_array_length(public.upload_companies()) > 0"); self.assertTrue(cur.fetchone()[0])
+        cur.execute("select public.upload_known('PT_00000', %s)", (["https://example.com/ar-2024.pdf", "https://example.com/never.pdf"],))
+        self.assertEqual(cur.fetchone()[0], ["https://example.com/ar-2024.pdf"])                                    # sent before: not offered again
 
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
