@@ -151,7 +151,8 @@ class SearchOnPostgres(unittest.TestCase):
                        ('PT_99999-y', 'PT_99999', 'https://other.example/a.pdf', 'Other', null, 'blocked')""")
         cur.execute("select public.unheld_documents('PT_00000')"); j = cur.fetchone()[0]
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
-        self.assertIn('rpc("unheld_documents", { company: co, key })', src)                 # the page asks with its key, as it searches
+        self.assertIn('/rest/v1/rpc/unheld_documents', src); self.assertIn("JSON.stringify({ company: co, key })", src)   # the page asks with its key, as it searches
+        self.assertNotIn('rpc("unheld_documents"', src)                                      # and not through rpc(), which forgets the key when refused
         self.assertEqual((j["n"], j["blocked"]), (2, 1))
         self.assertEqual([d["url"] for d in j["documents"]], ["https://example.com/ar-2024.pdf", "https://example.com/old.pdf"])   # newest label first
 
