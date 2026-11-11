@@ -58,3 +58,11 @@ class Decide(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Usable(unittest.TestCase):
+    def test_an_approved_company_is_told_to_the_search_at_once(self):
+        import os
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "add_companies.py"), encoding="utf-8").read()
+        self.assertIn("insert into public.companies (wba_id, name, website) values (%s, %s, %s) on conflict (wba_id) do nothing", src)
+

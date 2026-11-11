@@ -2174,8 +2174,16 @@ begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
   end if;
-  return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.name, 'website', c.website) order by c.name), '[]'::jsonb)
-          from public.companies c where c.name is not null);
+  -- the companies, and the ones this person has asked for that are not companies yet (REQ_<request>): the window
+  -- was closed and opened again, and the company just asked for was no longer there to choose (11 Nov 2026)
+  return (select coalesce(jsonb_agg(x.j order by x.name), '[]'::jsonb) from (
+            select c.name, jsonb_build_object('id', c.wba_id, 'name', c.name, 'website', c.website) as j
+            from public.companies c where c.name is not null
+            union all
+            select r.name, jsonb_build_object('id', 'REQ_' || r.id, 'name', r.name, 'website', r.website, 'asked', true)
+            from public.company_requests r
+            where r.requester = who and r.status in ('new', 'waiting')
+              and not exists (select 1 from public.companies c where lower(c.name) = lower(r.name))) x);
 end;
 $$;
 revoke all on function public.upload_companies() from public, anon;
