@@ -1,12 +1,11 @@
 # Companies that are not in WBA's list become companies of lanterN (add_companies.py): rows added by hand to
 # the companies table with no id, and requests from the page once a person has approved them. Each gets
 # lanterN's own id, and its website is searched for the report pages at once (discover_pages.py).
-# Hourly, and by hand. Dry run on a pull request.
+# Run by the Scan now watch about every 15 minutes (scan_now.side_jobs), and here by hand: no schedule, so that
+# two runs never add the same company at the same moment. Dry run on a pull request.
 name: Add companies
 
 on:
-  schedule:
-    - cron: "11,26,41,56 * * * *"
   workflow_dispatch:
     inputs:
       mode:

@@ -54,6 +54,12 @@ jobs:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           GITHUB_TOKEN: ${{ github.token }}
+          # for the watch's side jobs (add_companies.py, browser_uploads.py): GitHub's schedule does not start them in time
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
       - name: Start the next watch
         if: ${{ !cancelled() && (inputs.watch_minutes || '330') != '0' && vars.SCAN_CHAIN != 'off' }}
         run: gh workflow run scan_now.yml --repo "${{ github.repository }}" --ref main

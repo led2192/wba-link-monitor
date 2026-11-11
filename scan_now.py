@@ -315,6 +315,37 @@ def run_once():
     return True
 
 
+SIDE_EVERY = 5          # of the watch's checks: with --every 180, about every 15 minutes
+
+
+def side_jobs(run=subprocess.run):
+    """What must not wait for GitHub's schedule, done from the watch: the companies asked for (add_companies.py,
+    then discover_pages.py for the new ones) and the files sent from a browser (browser_uploads.py). On 11 Nov
+    2026 both had a 15-minute schedule and neither was started once in three hours. Each is its own process; one
+    that fails is reported and the watch goes on. Without the evidence database's address there is nothing to do."""
+    if not os.environ.get("SUPABASE_DB_URL"):
+        return []
+    done = []
+    ids_file = "new_company_ids.txt"
+    for name, cmd in (("add_companies", [sys.executable, "add_companies.py", "--commit", "--ids-file", ids_file]),
+                      ("browser_uploads", [sys.executable, "browser_uploads.py", "--commit"])):
+        try:
+            r = run(cmd, timeout=900)
+            done.append((name, getattr(r, "returncode", 0)))
+        except Exception as e:
+            print(f">>> {name} failed ({type(e).__name__}); the watch goes on.", flush=True)
+            done.append((name, -1))
+    try:
+        ids = open(ids_file).read().strip() if os.path.exists(ids_file) else ""
+        if ids:
+            r = run([sys.executable, "discover_pages.py", "--commit", "--max", "200", "--wba", ids], timeout=1800)
+            done.append(("discover_pages", getattr(r, "returncode", 0)))
+            os.remove(ids_file)
+    except Exception as e:
+        print(f">>> discover_pages failed ({type(e).__name__}); the watch goes on.", flush=True)
+    return done
+
+
 def main():
     """One pass by default. --watch MINUTES keeps checking every --every seconds for that long.
     GitHub starts scheduled runs late (hours, in October 2026), so a 10-minute schedule fired a
@@ -335,6 +366,8 @@ def main():
     checks = scans = errors = 0
     while time.time() < end:
         checks += 1
+        if checks % SIDE_EVERY == 1:
+            side_jobs()
         try:
             if run_once():
                 scans += 1

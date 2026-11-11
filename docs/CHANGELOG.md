@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-11 The Scan now watch runs `add_companies.py` (and `discover_pages.py` for the new companies) and `browser_uploads.py` about every 15 minutes: their own 15-minute schedules were not started once by GitHub in three hours. Their schedules are removed, so that two runs never write the same row at once; both workflows stay for a run by hand. (#428)
 - 2026-11-11 `browser_uploads.py`: its first run with a file to take died (a variable named `requests` hid the library of that name). Renamed, with a test. (#427)
 - 2026-11-11 `db_locks.py --orphans` (workflow Database locks, input `orphans`) ends the statements older than 6 hours 30 minutes, which no living job can own: the `insert into documents` of the load killed at 14:03 UTC was still running 7 hours after it began, holding its lock on `documents` (every install that added an index there failed on the lock) and the disk. (#426)
 - 2026-11-11 A company asked for stays usable: `upload_companies` also lists the person's own open requests (the window, opened again, had lost the company just asked for), and `add_companies.py` writes an approved company into the evidence database's `companies` at once (it waited for the nightly `load_companies.py`), so its documents and pages can be added a quarter of an hour after the approval. Extension 0.2.2. (#426)
