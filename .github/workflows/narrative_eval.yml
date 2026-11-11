@@ -46,7 +46,7 @@ on:
 jobs:
   evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 350          # --budget (95 minutes by default) decides; a wide measurement passes --budget 330 in options
     permissions:
       contents: read
       pull-requests: write
