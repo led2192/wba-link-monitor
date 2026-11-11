@@ -178,3 +178,12 @@ def test_the_review_game_counts_right_answers():
     lucky = SQL[SQL.index("create or replace function public.lucky_value()"):SQL.index("revoke all on function public.lucky_value()")]
     assert "if random() < 0.2 then" in lucky and "public.control_verdict(vv.value, t.value) is not null" in lucky
     assert "truth" not in lucky[lucky.index("select jsonb_build_object('version_id'"):]                              # a control card looks like any other
+
+
+def test_confidence_is_measured_against_validated_answers():
+    conf = SQL[SQL.index("create or replace function public.refresh_value_confidence()"):SQL.index("create or replace function public.find_values(")]
+    assert "join public.value_truth tr" in conf and "<= 0.005) as good" in conf
+    assert "where c.n >= 20" in conf                                                      # a group too small falls back to a wider one
+    assert "revoke all on function public.confidence_of(text, int, int) from public, anon, authenticated;" in conf
+    assert "'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants)" in SQL
+    assert "Readings like this were right" in PAGE
