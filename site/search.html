@@ -304,7 +304,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v32 2026-11-11";
+  const CLIENT = "lantern v33 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1111,7 +1111,7 @@
     const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : m; });
     c.appendChild(body);
     const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; li.appendChild(a); ol.appendChild(li); }
-    c.append(ol, el("div", "what", "Written by a model from these pages only. Check the source before using a figure."));
+    c.append(ol, el("div", "what", (j.keywords ? `Pages found by searching “${j.keywords.replace(/\s+/g, " ")}”. ` : "") + "Written by a model from these pages only. Check the source before using a figure."));
   }
   const pageUrl = s => !s.url ? "#" : (/#/.test(s.url) ? s.url : `${s.url}#page=${s.page || 1}`);
   $("askBtn").onclick = ask;
