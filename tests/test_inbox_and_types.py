@@ -34,6 +34,9 @@ class FakeResp:
         self.status_code = code
     def close(self):
         pass
+    headers = {}
+    def iter_content(self, n):
+        return iter([b""])
 
 
 class FakeSess:
@@ -72,6 +75,29 @@ class FileOntoExistingRow(unittest.TestCase):
         self.assertEqual([(t, m) for t, m, _ in writes], [(I.LIB, "PATCH")])
         self.assertEqual(writes[0][2][0]["id"], "recROW")
         self.assertIn("existing row", lines[0])
+
+
+class RefusedPage(unittest.TestCase):
+    def test_a_refused_page_is_kept_and_left_to_the_office_network(self):
+        # 11 Nov 2026: a company's reports page answered 403 and "nothing added" left no trace of the link
+        import inbox as I
+        writes = []
+        real = (I.company_state, I.write)
+        I.company_state = lambda wba: ([], [])
+        I.write = lambda table, method, recs: writes.append((table, method, recs)) or [{"id": "recPAGE"}]
+        try:
+            rec = {"id": "recCO", "fields": {"wba_id": "LN_350acc0e", "company_name": "Grupo Mutua",
+                                             "add_link": "https://www.grupomutua.es/sala-de-prensa/informes/\nhttps://www.grupomutua.es/x/report-2024.pdf"}}
+            lines, created, pages = I.handle_company(rec, FakeSess(403), set())
+        finally:
+            I.company_state, I.write = real
+        self.assertEqual([(t, m) for t, m, _ in writes], [(I.LINKS, "POST")])            # the page is kept; the PDF is not invented
+        f = writes[0][2][0]["fields"]
+        self.assertEqual((f["status"], f["http_status"], f["monitor"]), ("blocked", 403, True))
+        self.assertNotIn("scan_now", f)                                                   # a cloud scan would be refused again
+        self.assertEqual(pages, ["recPAGE"])
+        self.assertTrue(any("office network" in l for l in lines))
+        self.assertTrue(any("drop it in add_file" in l for l in lines))                   # the PDF: as before
 
 
 class ResearchLinks(unittest.TestCase):
