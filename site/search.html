@@ -308,7 +308,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v39 2026-11-11";
+  const CLIENT = "lantern v40 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -574,7 +574,13 @@
   // said "3 documents" for a company whose row counts 12 (11 Nov 2026).
   async function knownNotHeld(box, before) {
     const co = state.company; if (!co || co.includes(";") || state.q) return;
-    let j; try { j = await rpc("unheld_documents", { company: co, key }); } catch (e) { return; }
+    // asked on its own, not through rpc(): rpc() forgets the page's key when a call is refused, and an extra like
+    // this one must never be able to do that (its first version was refused, and the key was gone: 11 Nov 2026)
+    let j; try {
+      const r = await fetch(`${CONFIG.url}/rest/v1/rpc/unheld_documents`, { method: "POST",
+        headers: { apikey: CONFIG.key, Authorization: `Bearer ${CONFIG.key}`, "Content-Type": "application/json" }, body: JSON.stringify({ company: co, key }) });
+      if (!r.ok) return; j = await r.json();
+    } catch (e) { return; }
     if (!j || !j.n || state.company !== co || !before.isConnected) return;
     const w = el("div", "unheld");
     w.appendChild(el("div", "unheld-h", `${j.n} more document${j.n === 1 ? " is" : "s are"} known but not read` +
