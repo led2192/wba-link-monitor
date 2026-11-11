@@ -1422,6 +1422,68 @@ $$;
 revoke all on function public.doc_pages(text, text[]) from public;
 grant execute on function public.doc_pages(text, text[]) to anon, authenticated;
 
+-- "Missing a company? Ask for it" (11 Nov 2026). A company is in lanterN when it is in the companies table; until
+-- this day only WBA's list put one there. A signed-in person can ask for a company by name (website and LEI if
+-- known). It is a request, not a company: add_companies.py (hourly) copies it to a table a person reads, and only
+-- an approved request becomes a company whose pages are searched for. One request a person and name.
+create table if not exists public.company_requests (
+  id        bigint generated always as identity primary key,
+  at        timestamptz not null default now(),
+  requester text not null,
+  name      text not null,
+  website   text,
+  lei       text,
+  note      text,
+  status    text not null default 'new',     -- new, waiting (copied for a person to read), added, not added
+  result    text,
+  client    text
+);
+alter table public.company_requests enable row level security;
+create unique index if not exists company_requests_one_per_person on public.company_requests (requester, lower(name));
+
+create or replace function public.request_company(name text, website text default null, lei text default null, note text default null, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  nm text := btrim(regexp_replace(coalesce(name, ''), '\s+', ' ', 'g'));
+  site text := nullif(btrim(coalesce(website, '')), '');
+  code text := nullif(upper(regexp_replace(coalesce(lei, ''), '\s+', '', 'g')), '');
+  held text;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to ask for a company' using errcode = '42501';
+  end if;
+  if length(nm) < 2 or length(nm) > 120 then
+    raise exception 'the company''s name, 2 to 120 characters' using errcode = '22023';
+  end if;
+  if site is not null and (length(site) > 300 or site !~* '^(https?://)?[a-z0-9.-]+\.[a-z]{2,}(/.*)?$') then
+    raise exception 'the website does not look like a web address' using errcode = '22023';
+  end if;
+  if code is not null and code !~ '^[A-Z0-9]{18}[0-9]{2}$' then
+    raise exception 'an LEI has 20 characters' using errcode = '22023';
+  end if;
+  if (select count(*) from public.company_requests r where r.requester = who and r.at > now() - interval '1 day') >= 20 then
+    raise exception 'twenty requests a day at most' using errcode = '22023';
+  end if;
+  select c.name into held from public.companies c where lower(c.name) = lower(nm) limit 1;
+  if held is not null then
+    return jsonb_build_object('held', true, 'name', held);          -- already a company: search for it
+  end if;
+  if exists (select 1 from public.company_requests r where r.requester = who and lower(r.name) = lower(nm)) then
+    return jsonb_build_object('asked', false, 'again', true, 'name', nm);
+  end if;
+  insert into public.company_requests (requester, name, website, lei, note, client)
+    values (who, nm, site, code, nullif(left(btrim(coalesce(note, '')), 500), ''), left(client, 60));
+  return jsonb_build_object('asked', true, 'again', false, 'name', nm);
+end;
+$$;
+revoke all on function public.request_company(text, text, text, text, text) from public, anon;
+grant execute on function public.request_company(text, text, text, text, text) to authenticated;
+
 -- What the page shows beside a result apart from the search itself (11 Nov 2026): the document's length and the day
 -- the pipeline found it, as a web search shows a page's date. One question for the documents on screen. The day is
 -- read through to_jsonb so the function works before the nightly load has added the column.

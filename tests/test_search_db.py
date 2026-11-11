@@ -98,6 +98,18 @@ class SearchOnPostgres(unittest.TestCase):
         cur = self.conn.cursor(); cur.execute("select terms from public.search_log order by id desc limit 1")
         self.assertLessEqual(len((cur.fetchone()[0] or "").split()), 6)
 
+    def test_a_company_can_be_asked_for_once(self):
+        cur = self.conn.cursor()
+        cur.execute("delete from public.company_requests")
+        cur.execute("select public.request_company('Acme Robotics', 'acme.example.com', null, 'for 2027')")
+        self.assertTrue(cur.fetchone()[0]["asked"])
+        cur.execute("select public.request_company('acme robotics')"); self.assertTrue(cur.fetchone()[0]["again"])
+        cur.execute("select public.request_company('Unilever')"); self.assertTrue(cur.fetchone()[0]["held"])      # already a company
+        cur.execute("select name, website, status from public.company_requests"); self.assertEqual(cur.fetchall(), [("Acme Robotics", "acme.example.com", "new")])
+        for bad in (("X",), ("Beta", "not a site"), ("Gamma", None, "123")):
+            with self.assertRaises(Exception):
+                cur.execute("select public.request_company(%s, %s, %s)", (bad + (None, None))[:3])
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
