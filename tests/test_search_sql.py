@@ -212,3 +212,9 @@ def test_a_result_can_be_judged_from_the_list():
     assert "public.search_key_name(key) is null" in judge and "case when useful then 'useful' else 'not' end" in judge
     assert "add column if not exists kind text not null default 'open'" in SQL
     assert 'rpc("find_judge"' in PAGE and 'id="share"' in PAGE and "prompt(" not in PAGE
+
+
+def test_short_company_names_and_long_questions():
+    parse = PAGE[PAGE.index("function parse(text)"):PAGE.index("function setStatus")]
+    assert "const short = c.name.length < 4;" in parse and "length >= 2" in parse          # "BP", as written
+    assert "if nw > 6 and ids is null and year_from is null then" in FIND and "words := words[1:6];" in FIND

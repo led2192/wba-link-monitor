@@ -545,7 +545,10 @@ declare
     'mentioning','mencionan','menciona','mencionen','cite','cites','cited','citing','citan','cita','citen','refer','refers','referring',
     'documents','documentos','document','documento','reports','informes','informe','pages','page','página','páginas','find','show',
     'list','which','who','where','qué','que','cuáles','cuales','cuántas','cuantas','cuántos','cuantos','many','does','say','says',
-    'dicen','dice','hablan','habla','sobre','acerca','their','its','whose'];
+    'dicen','dice','hablan','habla','sobre','acerca','their','its','whose',
+    -- the filler of a question written in full (11 Nov 2026: a three-line question to Ask ran into the timeout)
+    'true','false','yes','using','while','only','several','including','include','includes','well','set','sets','been','being',
+    'whether','please','tell','give','between','during','them','than','both','either','very','just','still','yet','ever'];
 begin
   phrases := coalesce(array(select btrim(m[1]) from regexp_matches(coalesce(q, ''), '"([^"]+)"', 'g') m where btrim(m[1]) <> ''), '{}');
   rest := regexp_replace(coalesce(q, ''), '"[^"]*"', ' ', 'g');
@@ -796,6 +799,14 @@ begin
   select * into t from public.find_terms(q);
   phrases := t.phrases; words := t.words;
   nw := coalesce(array_length(words, 1), 0);
+  -- A question written in full, with no company to narrow it: eight words asked of every page, then every seven of
+  -- them, then every six, is more than the word index answers in the seconds a search has (11 Nov 2026: the gateway
+  -- cut the answer, the page said "Failed to fetch"). The first six words are searched; a company or a year typed
+  -- with the question makes it fast and keeps all eight.
+  if nw > 6 and ids is null and year_from is null then
+    words := words[1:6];
+    nw := 6;
+  end if;
   if nw = 0 and coalesce(array_length(phrases, 1), 0) = 0 then   -- only little words: take them as typed
     words := coalesce(array(select lower(regexp_replace(w, '[^[:alnum:]]', '', 'g')) from regexp_split_to_table(coalesce(q, ''), '\s+') w
                             where length(regexp_replace(w, '[^[:alnum:]]', '', 'g')) >= 1 limit 8), '{}');
