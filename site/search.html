@@ -121,6 +121,10 @@
   .values::-webkit-scrollbar-thumb:hover { background: var(--muted); }
   .values::-webkit-scrollbar-button { display: none; height: 0; }
   .missing { margin: 18px 0 6px; font-size: 13px; }
+  .unheld { margin: 22px 0 4px; padding: 12px 14px; border: 1px solid var(--line, #dfe4ea); border-radius: 10px; font-size: 14px; }
+  .unheld-h { color: var(--muted, #5b6675); margin-bottom: 6px; }
+  .unheld ul { margin: 0; padding-left: 18px; } .unheld li { margin: 3px 0; overflow-wrap: anywhere; }
+  .unheld-t { color: var(--muted, #5b6675); font-size: 13px; }
   .missing a { color: var(--muted); }
   .missing .values { border: 0; padding: 0; margin-top: 8px; display: block; position: static; width: auto; max-width: 420px; max-height: none; overflow: visible; }
   .me { max-width: calc(100vw - 36px); }
@@ -304,7 +308,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v37 2026-11-11";
+  const CLIENT = "lantern v38 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -562,6 +566,29 @@
     const mc = el("a", null, "Missing a company? Ask for it"); mc.href = "#"; mc.style.marginLeft = "14px";
     mc.onclick = ev => { ev.preventDefault(); const hold = miss.querySelector(".values") || miss.appendChild(el("div", "values")); askCompanyForm(hold); };
     miss.appendChild(mc); box.appendChild(miss);
+    if (!append) knownNotHeld(box, miss);
+  }
+
+  // Under one company's documents: the documents the library knows by their address and holds no file of (the
+  // company's site refuses the robot, or the link is dead), with the link to each original. Without this the list
+  // said "3 documents" for a company whose row counts 12 (11 Nov 2026).
+  async function knownNotHeld(box, before) {
+    const co = state.company; if (!co || co.includes(";") || state.q) return;
+    let j; try { j = await rpc("unheld_documents", { company: co }); } catch (e) { return; }
+    if (!j || !j.n || state.company !== co || !before.isConnected) return;
+    const w = el("div", "unheld");
+    w.appendChild(el("div", "unheld-h", `${j.n} more document${j.n === 1 ? " is" : "s are"} known but not read` +
+      (j.blocked ? `: the company's website refuses our robot${j.blocked < j.n ? ` (${j.blocked} of them)` : ""}.` : ": the file could not be downloaded.") +
+      " Their text is not searched. Open the original:"));
+    const ul = el("ul");
+    for (const d of j.documents) {
+      const li = el("li"); const a = el("a", null, d.label || d.url.split("/").pop()); a.href = d.url; a.target = "_blank"; a.rel = "noopener";
+      li.appendChild(a); if (d.type) li.appendChild(el("span", "unheld-t", ` · ${d.type}`)); ul.appendChild(li);
+    }
+    w.appendChild(ul);
+    if (j.n > j.documents.length) w.appendChild(el("div", "unheld-t", `and ${j.n - j.documents.length} more.`));
+    const old = box.querySelector(".unheld"); if (old) old.remove();
+    box.insertBefore(w, before);
   }
 
   async function search(fromChips, more) {

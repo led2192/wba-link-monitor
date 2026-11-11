@@ -2316,3 +2316,37 @@ exception when insufficient_privilege then
   raise notice 'the uploads bucket and its rule could not be made here (%): make them in the dashboard', sqlerrm;
 end
 $do$;
+
+-- ==============================================================================================
+-- Documents known, not held (11 Nov 2026). The search listed 3 documents for a retailer whose row in the library
+-- counted 12: nine were known by their address only, because the company's site refuses the robot. The search
+-- now says so under the company's documents, with the link to each original. load_companies.py fills the table
+-- every night from the rows of report_library that have an address and no file.
+create table if not exists public.unheld_documents (
+  library_id text primary key, wba_id text not null, url text not null, label text, doc_type text,
+  status text, updated timestamptz not null default now());
+alter table public.unheld_documents enable row level security;
+create index if not exists unheld_documents_company on public.unheld_documents (wba_id);
+
+create or replace function public.unheld_documents(company text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'n', (select count(*) from public.unheld_documents u where u.wba_id = co),
+    'blocked', (select count(*) from public.unheld_documents u where u.wba_id = co and u.status = 'blocked'),
+    'documents', (select coalesce(jsonb_agg(jsonb_build_object('label', x.label, 'type', x.doc_type, 'url', x.url, 'status', x.status)), '[]'::jsonb)
+                  from (select u.label, u.doc_type, u.url, u.status from public.unheld_documents u where u.wba_id = co
+                        order by u.label desc nulls last limit 60) x));
+end;
+$$;
+revoke all on function public.unheld_documents(text) from public, anon;
+grant execute on function public.unheld_documents(text) to authenticated;
+
