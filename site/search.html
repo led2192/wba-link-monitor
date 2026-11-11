@@ -304,7 +304,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v31 2026-11-11";
+  const CLIENT = "lantern v32 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -401,13 +401,15 @@
     // "L'Oréal": 10 Nov 2026), and a name may be followed by a comma or a semicolon ("Unilever; Nestlé living wage").
     const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     const hits = [];
-    const byLength = companies.filter(c => (c.name || "").length >= 4).sort((a, b) => b.name.length - a.name.length);
+    // (a name of two or three letters, "BP", "3M", "HP", is the company only as its name is written, capitals and all: "bp" may be a unit, "eni" a word)
+    const byLength = companies.filter(c => (c.name || "").length >= 2).sort((a, b) => b.name.length - a.name.length);
     let fq = fold(q); const sameLength = () => fq.length === q.length;
     if (!sameLength()) { q = fq; }                                      // a letter that folds to two: search the folded text
     for (const c of byLength) {
       const name = fold(c.name).toLowerCase();
       if (!fq.toLowerCase().includes(name)) continue;      // the cheap test first: 2,000 names a keystroke
-      const m = new RegExp("\\s" + esc(name) + "(?:'s)?[;,]?(?=\\s)", "i").exec(fq);
+      const short = c.name.length < 4;
+      const m = short ? new RegExp("\\s" + esc(fold(c.name)) + "(?:'s)?[;,]?(?=\\s)").exec(fq) : new RegExp("\\s" + esc(name) + "(?:'s)?[;,]?(?=\\s)", "i").exec(fq);
       if (!m) continue;
       // A company whose name is an everyday word ("target", "shell", "orange"): the company when it is written as a
       // name (a capital, or first in the box, or before a comma or semicolon), the word otherwise. 11 Nov 2026:
