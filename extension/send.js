@@ -49,11 +49,19 @@ function collectLinks() {
     out.push({ url: k, text: (text || "").replace(/\s+/g, " ").trim().slice(0, 200), sure });
   };
   if (document.contentType === "application/pdf") return { pdf: true, links: [] };
+  const GENERIC = /^(open( the)?( document)?|download( (the )?(pdf|document|report|file))?|pdf|view( pdf)?|read( more)?|here|click here|ver|abrir|descargar( pdf)?|descarga|t[eé]l[eé]charger|herunterladen|baixar|link)?$/i;
+  const better = (a, text) => {
+    if (!GENERIC.test(text.replace(/\s+/g, " ").trim())) return text;
+    const row = a.closest("tr, li, article, .card, [class*=item], [class*=row]");
+    const around = row ? (row.textContent || "").replace(a.textContent || "", " ").replace(/\s+/g, " ").trim() : "";
+    if (around && around.length <= 160 && !GENERIC.test(around)) return around;
+    try { return decodeURIComponent(new URL(a.href).pathname.split("/").pop() || "").replace(/\.pdf$/i, "").replace(/[-_+]+/g, " ").trim() || text; } catch (e) { return text; }
+  };
   for (const a of document.querySelectorAll("a[href]")) {
     const href = a.getAttribute("href") || "", text = a.textContent || a.getAttribute("title") || a.getAttribute("aria-label") || "";
     const sure = /\.pdf($|[?#])/i.test(href);
     const maybe = !sure && (/pdf|download|descarga|t[eé]l[eé]charg|herunterladen/i.test(href + " " + text) || a.hasAttribute("download")) && !/^(#|javascript:|mailto:)/i.test(href);
-    if (sure || maybe) add(href, text, sure);
+    if (sure || maybe) add(href, better(a, text), sure);
   }
   for (const f of document.querySelectorAll("iframe[src], embed[src], object[data]")) {
     const src = f.getAttribute("src") || f.getAttribute("data") || "";
@@ -149,7 +157,27 @@ function companyOfHost(host) {
   const cands = companies.filter(c => { const h = hostOf(c.website || ""); return h && (h === host || host.endsWith("." + h) || h.endsWith("." + parts.slice(-2).join(".")) || h === parts.slice(-2).join(".")); });
   return cands.length === 1 ? cands[0] : null;
 }
-const chosenCompany = () => { const v = fold($("company").value); return companies.find(c => fold(c.name) === v) || null; };
+let asked = null;          // a company this person has just asked for: { id: "REQ_<request>", name }
+const chosenCompany = () => { const v = fold($("company").value); return companies.find(c => fold(c.name) === v) || (asked && fold(asked.name) === v ? asked : null); };
+// A company that is not in the list. It is asked for (the same request "Missing a company?" makes in lanterN), a
+// person approves it, and the documents sent meanwhile wait for it. The database answers "already a company" when
+// the name or the website is one it holds, and that company is chosen instead: no second row for one company.
+function newCompany() {
+  $("cobox").hidden = false; $("coname").value = $("company").value.trim(); if (!$("cosite").value) $("cosite").value = "https://" + hostOf(TAB.url); $("coname").focus();
+  $("cocancel").onclick = () => { $("cobox").hidden = true; };
+  $("coask").onclick = async () => {
+    const name = $("coname").value.trim(), isin = $("coisin").value.trim().toUpperCase();
+    if (name.length < 2) { $("comsg").textContent = "Write the company's name."; return; }
+    if (isin && !/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(isin)) { $("comsg").textContent = "An ISIN has 12 characters, like US0378331005."; return; }
+    try {
+      const j = await rpc("request_company", { name, website: $("cosite").value.trim(), lei: $("colei").value.trim(), note: isin ? `ISIN ${isin}` : null, client: CLIENT });
+      if (j.held) { $("company").value = j.name; $("msg").textContent = `${j.name} is already a company of lanterN: chosen.`; }
+      else { asked = { id: `REQ_${j.request}`, name: j.name }; $("company").value = j.name;
+        $("msg").textContent = `${j.name} is asked for. You can send its documents now: they wait until the company is approved (table company_requests in Airtable, box approve).`; }
+      $("cobox").hidden = true; await markHeld();
+    } catch (e) { $("comsg").textContent = `Not added: ${e.message}`; }
+  };
+}
 function render() {
   const list = $("list"); list.innerHTML = "";
   if (!docs.length) list.append(el("div", "empty", "No link to a PDF on this page. Open the page that lists the documents, or the PDF itself, and click the button again."));
@@ -188,7 +216,7 @@ async function start() {
   $("company").onchange = markHeld;
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };
-  $("go").onclick = sendAll; $("watch").onclick = watchPage;
+  $("go").onclick = sendAll; $("watch").onclick = watchPage; $("newco").onclick = e => { e.preventDefault(); newCompany(); };
 }
 function showSignIn() {
   $("work").hidden = true; $("sign").hidden = false;
@@ -212,11 +240,13 @@ async function sendAll() {
     catch (e) { d.status.textContent = `not sent: ${e.message}`; d.status.className = "s bad"; bad++; }
     $("msg").textContent = `${ok + bad} of ${todo.length}…`;
   }
-  $("msg").textContent = `${ok} sent to ${company.name}${bad ? `, ${bad} not sent` : ""}. They appear in the library within the half hour, and in the search after the night's load.`;
+  $("msg").textContent = `${ok} sent to ${company.name}${bad ? `, ${bad} not sent` : ""}. ` + (/^REQ_/.test(company.id) ? "They wait for the company to be approved (company_requests in Airtable)."
+    : "They appear in the library within the half hour, and in the search after the night's load.");
   count();
 }
 async function watchPage() {
   const company = chosenCompany(); if (!company) { $("msg").textContent = "Choose the company from the list first."; $("company").focus(); return; }
+  if (/^REQ_/.test(company.id)) { $("msg").textContent = "The page can be added once the company is approved."; return; }
   if (!/^https?:/.test(TAB.url) || isPdfUrl(TAB.url)) { $("msg").textContent = "This is a document, not a page that lists documents."; return; }
   try { const j = await rpc("add_sources", { company: company.id, urls: [TAB.url.split("#")[0]], client: CLIENT });
     $("msg").textContent = j.added ? `Page added for ${company.name}: lanterN looks at it for new documents.` : j.again ? "You had already added this page." : j.known ? "lanterN already holds this address." : "Not a link lanterN can keep."; }

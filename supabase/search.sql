@@ -1441,6 +1441,13 @@ create table if not exists public.company_requests (
 alter table public.company_requests enable row level security;
 create unique index if not exists company_requests_one_per_person on public.company_requests (requester, lower(name));
 
+-- A website's host, without scheme, www, path or port: "https://www.Example.com/en/" is "example.com".
+create or replace function public.site_host(site text) returns text
+language sql immutable
+as $$
+  select split_part(split_part(regexp_replace(lower(btrim(coalesce(site, ''))), '^(https?://)?(www\.)?', ''), '/', 1), ':', 1)
+$$;
+
 create or replace function public.request_company(name text, website text default null, lei text default null, note text default null, client text default null)
 returns jsonb
 language plpgsql security definer
@@ -1453,6 +1460,8 @@ declare
   site text := nullif(btrim(coalesce(website, '')), '');
   code text := nullif(upper(regexp_replace(coalesce(lei, ''), '\s+', '', 'g')), '');
   held text;
+  held_id text;
+  rid bigint;
 begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to ask for a company' using errcode = '42501';
@@ -1469,16 +1478,23 @@ begin
   if (select count(*) from public.company_requests r where r.requester = who and r.at > now() - interval '1 day') >= 20 then
     raise exception 'twenty requests a day at most' using errcode = '22023';
   end if;
-  select c.name into held from public.companies c where lower(c.name) = lower(nm) limit 1;
+  -- already a company: by its name, or by its website (11 Nov 2026: the same host is the same company, whatever
+  -- name the person typed). The LEI and the name without legal endings are compared when the request is approved
+  -- (add_companies.py), against the companies table itself.
+  select c.name, c.wba_id into held, held_id from public.companies c
+    where lower(c.name) = lower(nm) or (site is not null and public.site_host(c.website) <> '' and public.site_host(c.website) = public.site_host(site))
+    order by (lower(c.name) = lower(nm)) desc limit 1;
   if held is not null then
-    return jsonb_build_object('held', true, 'name', held);          -- already a company: search for it
+    return jsonb_build_object('held', true, 'name', held, 'id', held_id);          -- search for it
   end if;
-  if exists (select 1 from public.company_requests r where r.requester = who and lower(r.name) = lower(nm)) then
-    return jsonb_build_object('asked', false, 'again', true, 'name', nm);
+  select r.id into rid from public.company_requests r where r.requester = who and lower(r.name) = lower(nm) limit 1;
+  if rid is not null then
+    return jsonb_build_object('asked', false, 'again', true, 'name', nm, 'request', rid);
   end if;
   insert into public.company_requests (requester, name, website, lei, note, client)
-    values (who, nm, site, code, nullif(left(btrim(coalesce(note, '')), 500), ''), left(client, 60));
-  return jsonb_build_object('asked', true, 'again', false, 'name', nm);
+    values (who, nm, site, code, nullif(left(btrim(coalesce(note, '')), 500), ''), left(client, 60))
+    returning id into rid;
+  return jsonb_build_object('asked', true, 'again', false, 'name', nm, 'request', rid);
 end;
 $$;
 revoke all on function public.request_company(text, text, text, text, text) from public, anon;
@@ -2177,7 +2193,11 @@ begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
   end if;
-  if co = '' or not exists (select 1 from public.companies c where c.wba_id = co) then
+  -- a company of the list, or one this person has asked for (REQ_<request>): its documents wait in the storage
+  -- until a person approves the company, so nothing has to be downloaded twice
+  if co = '' or not (exists (select 1 from public.companies c where c.wba_id = co)
+                     or (co ~ '^REQ_[0-9]+$' and exists (select 1 from public.company_requests r
+                                                        where r.id = substr(co, 5)::bigint and r.requester = who))) then
     raise exception 'choose the company the document belongs to' using errcode = '22023';
   end if;
   if sha !~ '^[0-9a-f]{64}$' then
