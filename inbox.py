@@ -275,7 +275,9 @@ def handle_company(rec, sess, tombs):
             new_pages += [o["id"] for o in out]; page_keys[k] = typ
             lines.append(f"Page added as {typ} and being scanned now: {short}")
         elif kind == "blocked":
-            if f.get("add_file"):
+            # a refused PAGE is never taken for the address of a dropped file (11 Nov 2026: a company's reports page
+            # and its annual accounts PDF were added together, and the PDF became "the document at" the reports page)
+            if f.get("add_file") and HR.is_pdf_url(url):
                 blocked_links.append(url)        # paired with a dropped file below
             elif not HR.is_pdf_url(url) and k not in page_keys:
                 # A page, not a document, on a site that refuses cloud servers (11 Nov 2026: a company's reports
