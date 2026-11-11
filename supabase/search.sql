@@ -1154,6 +1154,70 @@ create table if not exists public.value_reviews (
 alter table public.value_reviews enable row level security;
 create index if not exists value_reviews_version on public.value_reviews (version_id);
 
+-- How often a reading like this one is right (11 Nov 2026): measured, not felt. For every company, attribute and
+-- year with a validated answer (value_truth), the figure the panel would show (the one most documents give) is
+-- compared with it, and the share that match within 0.5% is kept by attribute and by evidence: read in one
+-- document or in two and more, and whether the documents gave different figures. "3 of 4 documents agree" says
+-- how the documents stand; this says how often such a standing has turned out right. A group with fewer than 20
+-- validated cases falls back to the attribute, then to every attribute. Rebuilt when these functions are
+-- installed (nightly, before the night's reading: a day behind at most).
+-- (value_truth is described with the review game below; made here too because this block reads it first)
+create table if not exists public.value_truth (
+  wba_id text not null, attribute text not null, year int not null, value double precision not null,
+  loaded timestamptz not null default now(), primary key (wba_id, attribute, year));
+create table if not exists public.value_confidence (
+  attribute text not null, evidence text not null, n int not null, good int not null, primary key (attribute, evidence));
+alter table public.value_confidence enable row level security;
+create or replace function public.evidence_group(agree int, variants int) returns text
+language sql immutable
+as $$ select case when coalesce(agree, 1) >= 2 then 'two or more documents' else 'one document' end
+          || case when coalesce(variants, 1) > 1 then ', other figures read too' else '' end $$;
+create or replace function public.refresh_value_confidence() returns int
+language plpgsql security definer set search_path = public
+as $$
+declare
+  n int;
+begin
+  delete from public.value_confidence;
+  insert into public.value_confidence (attribute, evidence, n, good)
+    with g as (select v.wba_id, v.attribute, v.year, v.value, count(distinct v.library_id)::int as docs, max(v.last_seen) as seen
+               from public.value_versions v group by 1, 2, 3, 4),
+         tot as (select wba_id, attribute, year, count(*)::int as variants from g group by 1, 2, 3),
+         best as (select distinct on (wba_id, attribute, year) * from g order by wba_id, attribute, year, docs desc, seen desc),
+         judged as (select b.attribute, public.evidence_group(b.docs, t.variants) as evidence,
+                           (abs(b.value - tr.value) / nullif(abs(tr.value), 0) <= 0.005) as good
+                    from best b join tot t using (wba_id, attribute, year)
+                    join public.value_truth tr on tr.wba_id = b.wba_id and tr.attribute = b.attribute and tr.year = b.year
+                    where tr.value <> 0)
+    select attribute, evidence, count(*)::int, count(*) filter (where good)::int from judged group by 1, 2
+    union all
+    select attribute, '(any)', count(*)::int, count(*) filter (where good)::int from judged group by 1
+    union all
+    select '(any)', '(any)', count(*)::int, count(*) filter (where good)::int from judged having count(*) > 0;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.refresh_value_confidence() from public, anon, authenticated;
+do $$
+begin
+  perform public.refresh_value_confidence();
+exception when others then
+  raise notice 'value_confidence not refreshed: %', sqlerrm;
+end $$;
+-- {share, n, of}: the measured share for this attribute and evidence, from the narrowest group with 20 cases.
+create or replace function public.confidence_of(attr text, agree int, variants int) returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  select jsonb_build_object('share', round(c.good::numeric / c.n, 2), 'n', c.n,
+                            'of', case when c.attribute = '(any)' then 'every attribute' when c.evidence = '(any)' then 'this attribute' else 'this attribute, ' || c.evidence end)
+  from public.value_confidence c
+  where c.n >= 20 and ((c.attribute = attr and c.evidence = public.evidence_group(agree, variants)) or (c.attribute = attr and c.evidence = '(any)') or c.attribute = '(any)')
+  order by (c.attribute = attr and c.evidence <> '(any)') desc, (c.attribute = attr) desc
+  limit 1
+$$;
+revoke all on function public.confidence_of(text, int, int) from public, anon, authenticated;
+
 create or replace function public.find_values(
   key text, company_filter text, year_from int default null, year_to int default null, attribute_filter text default null)
 returns jsonb
@@ -1190,6 +1254,7 @@ begin
              jsonb_build_object('version_id', p.version_id, 'wba_id', p.wba_id, 'company', coalesce(d.company, p.wba_id), 'attribute', p.attribute,
                'year', p.year, 'value', p.value, 'unit', p.unit, 'printed', p.printed, 'basis', p.basis, 'library_id', p.library_id, 'page', p.page,
                'url', d.url, 'label', d.label, 'doc_type', d.doc_type, 'agree', p.docs, 'readings', t.readings, 'variants', t.variants,
+               'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants),
                'ok', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'ok'),
                'wrong', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'wrong')) as j
       from pick p

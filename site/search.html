@@ -211,6 +211,7 @@
   .values .addlink:hover { border-color: var(--accent); }
   .values .fix button, .values .sign button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; justify-self: start; }
   .values .sign { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: grid; gap: 6px; }
+  .values .conf { margin-top: 2px; color: var(--fg); } .values .conf small { color: var(--muted); }
   .values .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
   /* The panel stands beside the results when the window has room for both (760 + 16 + 310). Between that and a
      wide window the results move left to make the room, so nothing ever runs off the side (11 Nov 2026: the panel
@@ -298,7 +299,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v28 2026-11-11";
+  const CLIENT = "lantern v29 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -825,6 +826,11 @@
       ev.append(document.createTextNode(evidence + " · "));
       if (v.url) { const a = el("a", null, `source, page ${v.page || "?"}`); a.href = /\.pdf(\?|$)/i.test(v.url) || !/#/.test(v.url) ? `${v.url}#page=${v.page || 1}` : v.url; a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); }
       if (v.ok || v.wrong) ev.append(document.createTextNode(` · reviews: ${v.ok} ✓ ${v.wrong} ✗`));
+      if (v.confidence && v.confidence.n) {                 // measured, not felt: how often a reading like this matched the validated answer
+        const cf = el("div", "conf", `Readings like this were right ${Math.round(v.confidence.share * 100)}% of the time`);
+        cf.title = `Measured on ${v.confidence.n} validated answers (${v.confidence.of}): the share where the figure shown matched the analysts' validated value.`;
+        cf.append(el("small", null, ` · ${v.confidence.n} checked`)); ev.appendChild(cf);
+      }
       const send = async (verdict, extra) => {
         const body = Object.assign({ version_id: v.version_id, verdict, seconds: Math.round((Date.now() - shownAt) / 1000), log_id: state.logId, client: CLIENT }, extra || {});
         try { await review(body); showMine(false); yes.classList.toggle("on", verdict === "ok"); no.classList.toggle("on", verdict === "wrong"); const f = row.querySelector(".fix"); if (f && verdict === "ok") f.remove(); return true; }
