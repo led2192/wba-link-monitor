@@ -174,7 +174,7 @@ def main():
     years, partition = parse_years(a.years), parse_partition(a.partition)
     emb = Embedder(a.model, a.batch)
     done, n_chunks, n_pages, n_pairs, examples, stopped = 0, 0, 0, 0, [], None
-    embed_s = 0.0
+    embed_s, lost = 0.0, 0
     with evidence_db.connect() as conn:
         cur = conn.cursor()
         cur.execute("set statement_timeout = '120s'")
@@ -186,21 +186,32 @@ def main():
             if time.time() - t0 > a.minutes * 60:
                 stopped = f"stopped at the time cap of {a.minutes:g} minutes"
                 break
-            cur.execute("select page, body from public.pages where library_id = %s order by page", (lid,))
-            pages = cur.fetchall()
-            chunks = chunk_pages(pages)
-            if not chunks:
+            try:
+                cur.execute("select page, body from public.pages where library_id = %s order by page", (lid,))
+                pages = cur.fetchall()
+                chunks = chunk_pages(pages)
+                if not chunks:
+                    if a.commit:
+                        cur.execute("insert into public.chunk_docs (library_id, chunks, model) values (%s, 0, %s) on conflict (library_id) do nothing", (lid, a.model))
+                        conn.commit()
+                    continue
+                t1 = time.time()
+                vectors = emb.embed_passages([c[2] for c in chunks])
+                embed_s += time.time() - t1
+                prs = pair_rows(pages)
                 if a.commit:
-                    cur.execute("insert into public.chunk_docs (library_id, chunks, model) values (%s, 0, %s) on conflict (library_id) do nothing", (lid, a.model))
+                    write_document(cur, lid, chunks, vectors, a.model, prs if has_pairs else None)
                     conn.commit()
+            except Exception as e:
+                # The database dropped the connection (11 Nov 2026: two runs died an hour in, each with hours of work
+                # ahead). A new connection, and the next document: this one is not marked done, the next run takes it.
+                if type(e).__name__ != "OperationalError" or lost >= 5:
+                    raise
+                lost += 1
+                print(f"  connection lost ({str(e)[:80]}); reconnecting ({lost} of 5)", flush=True)
+                time.sleep(20 * lost)
+                conn = evidence_db.connect(); cur = conn.cursor(); cur.execute("set statement_timeout = '120s'")
                 continue
-            t1 = time.time()
-            vectors = emb.embed_passages([c[2] for c in chunks])
-            embed_s += time.time() - t1
-            prs = pair_rows(pages)
-            if a.commit:
-                write_document(cur, lid, chunks, vectors, a.model, prs if has_pairs else None)
-                conn.commit()
             done += 1; n_chunks += len(chunks); n_pages += len(pages); n_pairs += sum(p.count(" ") + 1 for _, p in prs)
             if len(examples) < 5:
                 examples.append((lid, year, dtype, len(pages), len(chunks), chunks[min(2, len(chunks) - 1)][2][:140]))
