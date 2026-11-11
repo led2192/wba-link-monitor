@@ -1576,7 +1576,8 @@ begin
     return jsonb_build_object('error', format('the model answered HTTP %s: %s', status, left(coalesce(reply -> 'error' ->> 'message', ''), 200)));
   end if;
   return jsonb_build_object('text', (select string_agg(c ->> 'text', '') from jsonb_array_elements(reply -> 'content') c where c ->> 'type' = 'text'),
-                            'in', (reply -> 'usage' ->> 'input_tokens')::int, 'out', (reply -> 'usage' ->> 'output_tokens')::int);
+                            'in', (reply -> 'usage' ->> 'input_tokens')::int, 'out', (reply -> 'usage' ->> 'output_tokens')::int,
+                            'stop', reply ->> 'stop_reason', 'kinds', (select string_agg(c ->> 'type', ',') from jsonb_array_elements(reply -> 'content') c));
 exception when others then
   return jsonb_build_object('error', 'the model could not be reached: ' || left(sqlerrm, 200));
 end;
@@ -1656,11 +1657,14 @@ begin
       'You turn an analyst''s question about a company into the words to search that company''s reports with. Reply with 3 to 5 words, in lower case, '
       || 'separated by spaces: the words most likely to be printed on the page that answers the question. Write abbreviations in full '
       || '(S1 is scope 1, S3 Cat 11 is scope 3 use of sold products, RY is reporting year). No company names, no years, no punctuation, nothing else.',
-      left(search_q, 400), 40);
+      left(search_q, 400), 150);
     if got ? 'text' then
       keywords := btrim(left(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
       tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
-      if keywords = '' then keywords := null; end if;
+      if keywords = '' then
+        keywords := null;
+        err := format('search words not chosen: the model returned no text (stop %s, content %s, %s tokens out)', got ->> 'stop', coalesce(got ->> 'kinds', 'none'), got ->> 'out');
+      end if;
     else
       err := 'search words not chosen: ' || left(coalesce(got ->> 'error', 'no reply'), 200);     -- kept in the log; the question itself is searched
     end if;
