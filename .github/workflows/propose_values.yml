@@ -109,8 +109,11 @@ jobs:
           elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
             if [ "${{ github.event_name }}" = "workflow_run" ]; then
               H=$(date -u -d "${{ github.event.workflow_run.run_started_at }}" +%H)
-              if [ "${{ github.event.workflow_run.conclusion }}" != "success" ] || [ "$H" -ge 12 ]; then
-                echo "the load that finished was the evening one (started ${{ github.event.workflow_run.run_started_at }}) or did not succeed: nothing to do"; exit 0
+              # (11 Nov 2026: a functions-only install of the search functions, dispatched by hand at 06:33 UTC, is also a
+              # load that "completed" before noon, and it started a second paid pass beside the night's. Only the
+              # scheduled load starts one.)
+              if [ "${{ github.event.workflow_run.conclusion }}" != "success" ] || [ "$H" -ge 12 ] || [ "${{ github.event.workflow_run.event }}" != "schedule" ]; then
+                echo "the load that finished was not the night's scheduled one (event ${{ github.event.workflow_run.event }}, started ${{ github.event.workflow_run.run_started_at }}, ${{ github.event.workflow_run.conclusion }}): nothing to do"; exit 0
               fi
             fi
             ARGS="--years 2018- --methods sec,esef,model --model-years 2025,2024 --attributes GMC_00048.1,GMC_00001.1,GMC_00002.1,GMC_00003.1,GMC_02526.1 --max-usd 5 --fresh-days 30 --commit"

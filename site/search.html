@@ -109,6 +109,7 @@
   .filters input, .filters select { font: inherit; font-size: 14px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
                                     background: var(--box); color: var(--fg); min-width: 0; }
   @media (max-width: 560px) { .filters .row { grid-template-columns: 1fr 1fr; } }
+  .status .dym { margin-top: 4px; font-size: 15px; color: var(--fg); } .status .dym a { font-weight: 600; font-style: italic; }
   .status { color: var(--muted); font-size: 14px; margin: 6px 0 10px; min-height: 20px; }
   .values { border: 1px solid var(--line); background: var(--box); border-radius: 12px; padding: 10px 12px; margin: 0 0 14px; font-size: 13px; }
   .values[hidden] { display: none; }
@@ -297,7 +298,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v26 2026-11-11";
+  const CLIENT = "lantern v27 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -532,6 +533,7 @@
 
   async function search(fromChips, more) {
     document.body.classList.remove("playing");                    // a search ends the card game
+    if (typeof closeHistory === "function") closeHistory();          // and the suggestions step aside for the results (they stayed open over them when the page opened on a search)
     if (!fromChips) {
       const parsed = parse($("q").value);
       state.q = parsed.q;
@@ -569,12 +571,23 @@
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues();
+      if (!more && state.q) didYouMean($("q").value.trim());
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
     } catch (e) {
       setStatus(e.message.includes("not allowed") ? "This link no longer works; ask for a new one." : `Search failed: ${e.message}`);
       $("results").innerHTML = ""; $("values").hidden = true;
     }
+  }
+  // "Did you mean": a word typed wrong, set right from the words the library knows (did_you_mean). Asked after the
+  // results are shown; the person decides whether to take it.
+  async function didYouMean(typed) {
+    try {
+      const better = await rpc("did_you_mean", { key, q: typed });
+      if (!better || $("q").value.trim() !== typed) return;
+      const a = el("a", null, better); a.href = "#"; a.onclick = ev => { ev.preventDefault(); $("q").value = better; search(false); };
+      const d = el("div", "dym"); d.append(document.createTextNode("Did you mean "), a, document.createTextNode("?")); $("status").appendChild(d);
+    } catch (e) {}
   }
   // ---- The values the robot has read, and the reviews (10 Nov 2026) ----
   const ATTRS = [

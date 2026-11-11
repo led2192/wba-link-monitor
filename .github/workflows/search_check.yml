@@ -8,10 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = the sample searches; timing = where a lanterN search spends its time (search_timing.py)"
+        description: "check = the sample searches; timing = where a lanterN search spends its time (search_timing.py); compare = an option beside the default (search_compare.py)"
         type: choice
-        options: [check, timing]
+        options: [check, timing, compare]
         default: check
+      option:
+        description: "compare: the option to try (a row of search_options)"
+        default: pairs
 
 jobs:
   check:
@@ -33,7 +36,7 @@ jobs:
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           QA_COMMIT: "true"
         run: |
-          if [ "${{ inputs.mode }}" = "timing" ]; then python search_timing.py; else python search_check.py; fi
+          if [ "${{ inputs.mode }}" = "timing" ]; then python search_timing.py; elif [ "${{ inputs.mode }}" = "compare" ]; then python search_compare.py --option "${{ inputs.option || 'pairs' }}"; else python search_check.py; fi
       - name: Post the result on the pull request
         if: github.event_name == 'pull_request' && always()
         run: |

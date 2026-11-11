@@ -297,3 +297,8 @@ The first `load_scores.py` printed one sample row of two Data API datasets to se
 ## A check that searches holds the tables the install needs (10 Nov 2026)
 `search.sql` alters `search_log` and a few other tables each time it is applied (add column if not exists, enable row level security), which needs the table to itself for an instant. `search_check.py` runs its searches in one open transaction, and every search writes a row to `search_log`: while it ran (minutes), the functions-only install waited 30 seconds and failed with "lock timeout". Since both were started by the same pull request, they collided every time. The check is manual now; cancel a running one before installing functions.
 
+## A workflow chained on another's completion fires for every kind of run of it (11 Nov 2026)
+Propose values starts after Evidence database load "completed" and checked only the hour and the success. A functions-only install of the search functions, dispatched by hand at 06:33 UTC, is the same workflow completing before noon: it started a second pass with `--max-usd 5 --commit` beside the night's one. Cancelled after two minutes. A chained workflow that spends money must also check `github.event.workflow_run.event` (here: `schedule`). The ten functions-only installs of 10 Nov were all after 12:00 UTC and did nothing.
+
+## A lexeme with an underscore must be cast, not parsed (11 Nov 2026)
+`to_tsquery('simple', '''living_wage''')` runs the text parser, which cuts at the underscore and returns the phrase `'living' <-> 'wage'`. The pair index stores `living_wage` as one lexeme: build the query with a cast, `quote_literal('living_wage')::tsquery` (add `:*` before the cast for a prefix).
