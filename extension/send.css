@@ -1,0 +1,27 @@
+:root { --ink: #1c2430; --muted: #5b6675; --line: #dfe4ea; --blue: #1a56db; --bg: #fafbf8; --ok: #18794e; --bad: #b42318; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
+header { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #fff; }
+.logo { font-weight: 700; font-size: 18px; color: var(--blue); }
+.sub { color: var(--muted); flex: 1; }
+header a { color: var(--muted); font-size: 12px; }
+main { padding: 14px 16px 20px; }
+.what { margin: 0 0 10px; color: var(--muted); overflow-wrap: anywhere; }
+.lab { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 3px; }
+input[type=email], input:not([type]), #company, #code { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff; margin-bottom: 8px; }
+button { padding: 8px 14px; border: 1px solid var(--blue); background: var(--blue); color: #fff; border-radius: 8px; font: inherit; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+button.quiet { background: none; color: var(--blue); }
+.bar { display: flex; gap: 12px; align-items: baseline; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
+.bar span { flex: 1; }
+#list { border: 1px solid var(--line); border-radius: 8px; background: #fff; max-height: 420px; overflow-y: auto; }
+.doc { display: grid; grid-template-columns: 22px 1fr; gap: 2px 6px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.doc:last-child { border-bottom: 0; }
+.doc .t { overflow-wrap: anywhere; }
+.doc .u { grid-column: 2; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.doc .s { grid-column: 2; font-size: 12px; }
+.doc .s.ok { color: var(--ok); } .doc .s.bad { color: var(--bad); }
+.doc.maybe .t::after { content: " (may not be a PDF)"; color: var(--muted); font-size: 12px; }
+.acts { display: flex; gap: 8px; margin-top: 12px; }
+.msg { color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
+.empty { padding: 14px; color: var(--muted); }

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Send to lanterN</title>
+<link rel="stylesheet" href="send.css">
+</head>
+<body>
+<header><span class="logo">lanterN</span><span class="sub">Send to lanterN</span><a id="out" href="#" hidden>Sign out</a></header>
+<main>
+  <section id="sign" hidden>
+    <p class="what">Enter your WBA email; a code arrives by mail. Once per browser.</p>
+    <input id="mail" type="email" placeholder="name@worldbenchmarkingalliance.org">
+    <button id="sendcode">Send me the code</button>
+    <input id="code" placeholder="Code from the email" inputmode="numeric" hidden>
+    <button id="signin" hidden>Sign in</button>
+    <p id="signmsg" class="msg"></p>
+  </section>
+  <section id="work" hidden>
+    <p id="page" class="what"></p>
+    <label class="lab" for="company">Company</label>
+    <input id="company" list="companies" placeholder="Company" autocomplete="off">
+    <datalist id="companies"></datalist>
+    <div class="bar"><span id="count"></span><a id="all" href="#">all</a><a id="none" href="#">none</a></div>
+    <div id="list"></div>
+    <div class="acts">
+      <button id="go">Send the ticked documents</button>
+      <button id="watch" class="quiet" title="lanterN keeps this page and looks at it for new documents">Watch this page</button>
+    </div>
+    <p id="msg" class="msg"></p>
+  </section>
+</main>
+<script src="config.js"></script>
+<script src="send.js"></script>
+</body>
+</html>

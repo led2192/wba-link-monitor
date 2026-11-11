@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-11 Send to lanterN: a Chrome extension (`extension/`, built into `send-to-lantern.zip` by the Search page workflow, install page `site/send-to-lantern.html`) lists the PDF links of the page a person is on, downloads the ticked ones with that browser and stores them in the private bucket `uploads`, registered in `public.browser_uploads` (`upload_begin`, `upload_done`, `upload_companies`, and a storage rule that admits the registered object only). `browser_uploads.py` (workflow Browser uploads, every 15 minutes) puts each file on the row that already knew the document without its PDF, or makes the row. (#422)
 - 2026-11-11 `semantic_index.py` reconnects when the connection is closed or broken whatever the error is called: partition 6/8 died six minutes in on "lost synchronization with server", a DatabaseError the reconnect did not cover. (#421)
 - 2026-11-11 "+ Add a source" in lanterN takes links for a company that has no document yet (it checked `documents` only, so a company added that day was refused) and says that a page listing documents (a report hub) is accepted like a PDF link: the inbox keeps it as a watched page. Client v37. (#420)
 - 2026-11-11 Scan now: the watch starts even when the browser cannot be installed (the step is bounded to ten minutes and no longer fails the run); the inbox stood still for 20 minutes behind a failed and then a hanging install of system packages. (#419)
