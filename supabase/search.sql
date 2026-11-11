@@ -1657,7 +1657,7 @@ begin
       'You turn an analyst''s question about a company into the words to search that company''s reports with. Reply with 3 to 5 words, in lower case, '
       || 'separated by spaces: the words most likely to be printed on the page that answers the question. Write abbreviations in full '
       || '(S1 is scope 1, S3 Cat 11 is scope 3 use of sold products, RY is reporting year). No company names, no years, no punctuation, nothing else.',
-      left(search_q, 400), 150);
+      left(search_q, 400), 800);      -- room for the model's own reasoning before the words (with 40, then 150, it stopped before writing any)
     if got ? 'text' then
       keywords := btrim(left(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
       tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
