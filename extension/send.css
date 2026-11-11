@@ -8,7 +8,7 @@ header a { color: var(--muted); font-size: 12px; }
 main { padding: 14px 16px 20px; }
 .what { margin: 0 0 10px; color: var(--muted); overflow-wrap: anywhere; }
 .lab { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 3px; }
-input[type=email], input:not([type]), #company, #code { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff; margin-bottom: 8px; }
+input[type=email], input:not([type]), #company, #code, .box input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff; margin-bottom: 8px; }
 button { padding: 8px 14px; border: 1px solid var(--blue); background: var(--blue); color: #fff; border-radius: 8px; font: inherit; cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
 button.quiet { background: none; color: var(--blue); }
@@ -25,3 +25,5 @@ button.quiet { background: none; color: var(--blue); }
 .acts { display: flex; gap: 8px; margin-top: 12px; }
 .msg { color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
 .empty { padding: 14px; color: var(--muted); }
+.small { font-size: 12px; color: var(--blue); }
+.box { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px 12px 4px; margin: 8px 0; }

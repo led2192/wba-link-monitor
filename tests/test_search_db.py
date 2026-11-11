@@ -106,6 +106,14 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.request_company('acme robotics')"); self.assertTrue(cur.fetchone()[0]["again"])
         cur.execute("select public.request_company('Unilever')"); self.assertTrue(cur.fetchone()[0]["held"])      # already a company
         cur.execute("select name, website, status from public.company_requests"); self.assertEqual(cur.fetchall(), [("Acme Robotics", "acme.example.com", "new")])
+        cur.execute("update public.companies set website = 'https://www.unilever.com/' where name = 'Unilever'")
+        cur.execute("select public.request_company('Unilever Global Plc', 'unilever.com/investors')"); j = cur.fetchone()[0]
+        self.assertTrue(j["held"]); self.assertEqual(j["name"], "Unilever")                              # the same website is the same company
+        cur.execute("select public.site_host('HTTPS://www.Example.com:443/en/')"); self.assertEqual(cur.fetchone()[0], "example.com")
+        cur.execute("select public.request_company('acme robotics')"); rid = cur.fetchone()[0]["request"]
+        cur.execute("select public.upload_begin(%s, 'a.pdf', 5000, %s)", (f"REQ_{rid}", "ef" * 32)); self.assertEqual(cur.fetchone()[0]["path"], f"REQ_{rid}/{'ef' * 32}.pdf")
+        with self.assertRaises(Exception):
+            cur.execute("select public.upload_begin('REQ_999999', 'a.pdf', 5000, %s)", ("ef" * 32,))     # a request that is not this person's
         for bad in (("X",), ("Beta", "not a site"), ("Gamma", None, "123")):
             with self.assertRaises(Exception):
                 cur.execute("select public.request_company(%s, %s, %s)", (bad + (None, None))[:3])

@@ -26,7 +26,7 @@ invented for it (orphans are logged, never fabricated).
 Dry run prints what it would do, by company, never who sent it. Env: SUPABASE_DB_URL, SUPABASE_URL,
 SUPABASE_SERVICE_KEY, AIRTABLE_TOKEN, AIRTABLE_BASE; AIRTABLE_QA_TOKEN for the run record.
 """
-import argparse, collections, hashlib, os, sys, time
+import argparse, collections, hashlib, os, re, sys, time
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -45,6 +45,32 @@ def library_id(wba, source_url, filename, size):
 
 def note_for(filename, source_url):
     return f"Sent from a person's browser ({filename})" + (f", downloaded from {source_url}." if source_url else ".")
+
+
+REQ = re.compile(r"^REQ_(\d+)$")
+AN_ID = re.compile(r"\b(LN_[0-9a-f]{8}|PT_\d{3,6})\b")
+
+
+def resolve_requests(uploads, requests):
+    """Files sent for a company that was only asked for (wba_id REQ_<request>). requests: {request id: (status,
+    result)} from public.company_requests. Returns (ready, waiting, refused): ready are the uploads with their
+    wba_id replaced by the company's id (the request was approved, or the company turned out to be one we had:
+    add_companies.py writes "added as LN_..." or "already a company: PT_... has the same name" in result);
+    waiting are left untouched for a later run; refused [(upload, why)] have no company to go to."""
+    ready, waiting, refused = [], [], []
+    for u in uploads:
+        m = REQ.match(u["wba_id"] or "")
+        if not m:
+            ready.append(u); continue
+        status, result = requests.get(int(m.group(1)), (None, None))
+        found = AN_ID.search(result or "")
+        if status in ("added", "not added") and found:
+            ready.append({**u, "wba_id": found.group(1), "request": u["wba_id"]})
+        elif status in ("new", "waiting"):
+            waiting.append(u)
+        else:
+            refused.append((u, "the company asked for was not added" + (f": {result}" if result else "")))
+    return ready, waiting, refused
 
 
 def plan(uploads, companies, rows):
@@ -144,6 +170,25 @@ def main():
             print("No new file sent from a browser.")
             run.finish("ok", rows_in=0, rows_out=0, notes="nothing new")
             return 0
+        req_ids = sorted({int(REQ.match(u["wba_id"]).group(1)) for u in uploads if REQ.match(u["wba_id"] or "")})
+        requests = {}
+        if req_ids:
+            cur.execute("select id, status, result from public.company_requests where id = any(%s)", (req_ids,))
+            requests = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        uploads, waiting, refused = resolve_requests(uploads, requests)
+        if waiting:
+            print(f"  {len(waiting)} files wait for a company that was asked for and is not approved yet (company_requests in Airtable)", flush=True)
+        for u, why in refused:
+            if a.commit:
+                cur.execute("update public.browser_uploads set status = 'orphan', result = %s where id = %s and status = 'stored'", (why[:300], u["id"]))
+                conn.commit()
+        if a.commit:
+            for u in uploads:
+                if u.get("request"):                 # the company exists now: the upload carries its id from here on
+                    cur.execute("update public.browser_uploads b set wba_id = %s where b.id = %s and b.wba_id = %s and not exists "
+                                "(select 1 from public.browser_uploads o where o.wba_id = %s and o.sha256 = b.sha256)",
+                                (u["wba_id"], u["id"], u["request"], u["wba_id"]))      # the same file sent for the company itself stays the one
+            conn.commit()
         wanted = {u["wba_id"] for u in uploads}
         companies = {}
         for rec in sweep("companies", ["wba_id", "company_name"]):
@@ -199,6 +244,7 @@ def main():
                 airtable_request("POST", url, headers, payload={"fields": {k: v for k, v in fields.items() if v not in (None, "")}, "typecast": True})   # no link field among them
             mark(u, "taken", f"{'file put on the existing row' if act == 'fill' else 'new row'} {lid}")
             time.sleep(0.25)
+    c["waiting for a company"] = len(waiting); c["company not added"] = len(refused)
     print(f"{c['create']} new rows, {c['fill']} files put on rows that had none, {c['known']} already held, {c['failed']} failed, {c['orphan']} without a company"
           + ("" if a.commit else " (dry run: nothing written)"), flush=True)
     run.finish("ok", rows_in=len(uploads), rows_out=(c["create"] + c["fill"]) if a.commit else 0, counters=dict(c), notes="written" if a.commit else "dry run")

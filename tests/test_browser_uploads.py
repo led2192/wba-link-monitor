@@ -55,6 +55,16 @@ class Plan(unittest.TestCase):
         self.assertIn("downloaded from https://x.org/a.pdf", B.note_for("a.pdf", "https://x.org/a.pdf"))
 
 
+class Asked(unittest.TestCase):
+    def test_files_for_a_company_asked_for_wait_then_follow_it(self):
+        ups = [up(1), up(2, wba="REQ_7"), up(3, wba="REQ_8"), up(4, wba="REQ_9"), up(5, wba="REQ_10"), up(6, wba="REQ_11")]
+        reqs = {7: ("waiting", None), 8: ("added", "added as LN_0a1b2c3d"), 9: ("not added", "already a company: PT_00042 has the same name"), 10: ("not added", "no company name")}
+        ready, waiting, refused = B.resolve_requests(ups, reqs)
+        self.assertEqual([(u["id"], u["wba_id"]) for u in ready], [(1, "PT_1"), (3, "LN_0a1b2c3d"), (4, "PT_00042")])   # the duplicate goes to the company we had
+        self.assertEqual([u["id"] for u in waiting], [2])
+        self.assertEqual([u["id"] for u, _ in refused], [5, 6])                                                        # refused, or a request that is not there
+
+
 class Store(unittest.TestCase):
     def test_check_and_sign(self):
         self.assertEqual(B.Storage("https://p.supabase.co/", "k", Net()).check("PT_1/x.pdf", 5000), "ok")
