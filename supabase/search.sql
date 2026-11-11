@@ -693,6 +693,34 @@ create or replace function public.type_words(doc_type text) returns text
       else '' end
   $$;
 
+-- Options of the search, switched without a deploy (the rule of the house: a change to how pages are found ships
+-- as an option, is measured beside the default, and only then becomes the default). 'pairs' = ask the word-pair
+-- index (page_pairs) first. A session can also try an option alone: set lantern.pairs = 'on' (search_timing.py).
+create table if not exists public.search_options (name text primary key, is_on boolean not null default false, note text, changed timestamptz not null default now());
+alter table public.search_options enable row level security;
+insert into public.search_options (name, is_on, note) values ('pairs', false, 'ask page_pairs first for quoted phrases and neighbouring words') on conflict (name) do nothing;
+
+-- The lines of a page around a quoted phrase, the phrase marked as one piece (11 Nov 2026: the excerpt of
+-- "human rights due diligence" marked "rights" here and "diligence" there, wherever each word stood). Null when
+-- the page does not print the phrase as typed (then the usual excerpt is shown).
+create or replace function public.phrase_excerpt(body text, phrase text) returns text
+language plpgsql immutable
+as $$
+declare
+  pat text := array_to_string(array(select m[1] from regexp_matches(coalesce(phrase, ''), '[[:alnum:]]+', 'g') m), '[^[:alnum:]]+');
+  m text[];
+begin
+  if pat = '' or body is null then
+    return null;
+  end if;
+  m := regexp_match(body, '(.{0,170})\m(' || pat || ')\M(.{0,170})', 'is');
+  if m is null then
+    return null;
+  end if;
+  return regexp_replace(case when m[1] = '' then '' else '… ' end || regexp_replace(m[1], '^\S*\s', '') || '⟦' || m[2] || '⟧' || regexp_replace(m[3], '\s\S*$', '') || ' …', '\s+', ' ', 'g');
+end;
+$$;
+
 alter table public.search_log add column if not exists typed text;          -- what the person typed, before the box read filters out of it
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text);
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text, text, text, text);
@@ -729,6 +757,14 @@ declare
   capped boolean := false;
   lvl_q tsquery;
   pair_or tsquery;
+  use_pairs boolean := false;      -- the word-pair index is asked first (option 'pairs')
+  pp_req tsquery := null;          -- the pairs of every quoted phrase: all required
+  pp_all tsquery := null;          -- ... and every two neighbouring words asked
+  pp_any tsquery := null;          -- ... and at least one two neighbouring words asked
+  pp_lex tsquery;
+  toks text[];
+  j int;
+  via_pairs int := 0;
   yeq int;
   loose_q tsquery;
   lim int;
@@ -827,8 +863,59 @@ begin
   -- checked on the rows instead ("p.year + 0" keeps them out of the index): the index answers a span by listing every
   -- page of every year in it, millions of them (Unilever scope 1 2024 took 6.7 s with 2024 written as a span).
   yeq := case when year_from is not null and year_from = year_to then year_from end;
+  -- The word-pair index first (option 'pairs', 11 Nov 2026). page_pairs holds, for each page of the main reports
+  -- from 2024 on, every two neighbouring words as one lexeme ('living_wage'), so "which pages print these words
+  -- together" is one question of a small index, where the word index must list every page holding each word and
+  -- then read the pages ("just transition plan" took 7 s; a quoted rare phrase of common words found nothing).
+  -- Two statements: the pages with every pair asked, then the pages with at least one. A quoted phrase is still
+  -- checked on the page itself (three words in a row are two pairs, which may stand apart). When these pages fill
+  -- the list asked for, the word index is not asked at all; when they do not (older years, other document types,
+  -- a company filter, which the word index answers fast by itself), the search goes on as before.
+  use_pairs := ids is null and to_regclass('public.page_pairs') is not null
+               and (coalesce(current_setting('lantern.pairs', true), '') = 'on'
+                    or exists (select 1 from public.search_options o where o.name = 'pairs' and o.is_on));
+  if use_pairs then
+    for i in 1..coalesce(array_length(phrases, 1), 0) loop
+      toks := array(select m[1] from regexp_matches(lower(phrases[i]), '[[:alnum:]]+', 'g') m);
+      if coalesce(array_length(toks, 1), 0) < 2 then
+        use_pairs := false;                              -- a one-word "phrase" has no pair
+      else
+        for j in 1..array_length(toks, 1) - 1 loop
+          pp_lex := quote_literal(toks[j] || '_' || toks[j + 1])::tsquery;
+          pp_req := coalesce(pp_req && pp_lex, pp_lex);
+        end loop;
+      end if;
+    end loop;
+    for i in 1..nw - 1 loop
+      pp_lex := (quote_literal(words[i] || '_' || words[i + 1]) || case when length(words[i + 1]) >= 4 then ':*' else '' end)::tsquery;
+      pp_all := coalesce(pp_all && pp_lex, pp_lex);
+      pp_any := coalesce(pp_any || pp_lex, pp_lex);
+    end loop;
+    use_pairs := use_pairs and (pp_req is not null or pp_all is not null) and (nw <> 1 or pp_req is not null);
+  end if;
+  if use_pairs then
+    for pass in 1..(case when nw >= 3 then 2 else 1 end) loop
+      lvl_q := case when pass = 1 then pp_all else pp_any end;
+      lvl_q := case when lvl_q is null then pp_req when pp_req is null then lvl_q else pp_req && lvl_q end;
+      insert into find_cand
+        select p.library_id, p.page, p.words, p.year, p.doc_type
+        from (select pp.library_id, pp.page from public.page_pairs pp where pp.pairs @@ lvl_q limit 3000) x
+        join public.pages p on p.library_id = x.library_id and p.page = x.page
+        where p.wba_id <> ''
+          and (types is null or p.doc_type = any(types))
+          and (year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)
+          and (phrase_q is null or p.words @@ phrase_q)
+          and (nw <> 1 or p.words @@ tqs[1])
+        limit 400
+      on conflict do nothing;
+      get diagnostics n = row_count;
+      via_pairs := via_pairs + n;
+    end loop;
+    got := via_pairs;
+  end if;
   <<levels>>
   for drop_n in 0..least(2, greatest(nw - 1, 0)) loop
+    exit levels when via_pairs >= need;                -- the pair index filled the list: the word index is not asked
     lvl_q := null;
     for mask in 0..(case when nw = 0 then 0 else (1 << nw) - 1 end) loop
       continue when nw > 0 and (nw - (select count(*) from generate_series(0, nw - 1) b where (mask >> b) & 1 = 1)) <> drop_n;
@@ -978,8 +1065,9 @@ begin
     select lid, t2.rk::int, t2.library_id, d.company, d.wba_id, t2.year, t2.doc_type, d.label, d.url, t2.page, t2.score,
            -- the excerpt shows the words together when the page has them together (the lines that say "living wage",
            -- not the first lines that say "wage")
-           ts_headline('simple', left(p.body, 20000), case when t2.pairs > 0 and pair_or is not null then pair_or else or_q end,
-                       'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧')
+           coalesce(case when coalesce(array_length(phrases, 1), 0) > 0 then public.phrase_excerpt(left(p.body, 200000), phrases[1]) end,
+             ts_headline('simple', left(p.body, 20000), case when t2.pairs > 0 and pair_or is not null then pair_or else or_q end,
+                         'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧'))
     from top t2
     join public.documents d on d.library_id = t2.library_id
     join public.pages p on p.library_id = t2.library_id and p.page = t2.page
@@ -1243,6 +1331,92 @@ end;
 $$;
 revoke all on function public.doc_facts(text, text[]) from public;
 grant execute on function public.doc_facts(text, text[]) to anon, authenticated;
+
+-- "Did you mean" (11 Nov 2026). A word typed wrong finds nothing, or only the pages that hold the other words.
+-- search_vocab is the list of words the library knows well: every word of a document's title or a company's name
+-- (company names weigh most), refreshed each time these functions are installed (nightly). A word asked that is
+-- not in it, and that fewer than twenty pages hold, is compared with the list: the closest word (one letter
+-- changed, two for a long word), the most frequent first, is offered. Nothing is changed in the search itself:
+-- the page offers the corrected text and the person decides.
+create table if not exists public.search_vocab (word text primary key, n int not null);
+alter table public.search_vocab enable row level security;
+do $$
+begin
+  create extension if not exists fuzzystrmatch with schema extensions;
+exception when others then
+  raise notice 'fuzzystrmatch not created: %', sqlerrm;
+end $$;
+create or replace function public.refresh_search_vocab() returns int
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  n int;
+begin
+  create temp table vocab_new on commit drop as
+    select word, sum(x.n)::int as n from (
+      select word, ndoc as n from ts_stat($q$select to_tsvector('simple', coalesce(label, '')) from public.documents where wba_id is not null and wba_id <> ''$q$)
+      union all
+      select word, 100000 from ts_stat($q$select to_tsvector('simple', coalesce(name, '')) from public.companies$q$)
+    ) x
+    where word ~ '^[[:alpha:]]{4,30}$'
+    group by word having sum(x.n) >= 5;
+  delete from public.search_vocab;
+  insert into public.search_vocab select * from vocab_new;
+  get diagnostics n = row_count;
+  drop table vocab_new;
+  return n;
+end;
+$$;
+revoke all on function public.refresh_search_vocab() from public, anon, authenticated;
+do $$
+begin
+  if to_regclass('public.companies') is not null then
+    perform public.refresh_search_vocab();
+  end if;
+exception when others then
+  raise notice 'search_vocab not refreshed: %', sqlerrm;
+end $$;
+
+create or replace function public.did_you_mean(key text, q text) returns text
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '5s'
+as $$
+declare
+  t record;
+  w text;
+  best text;
+  far int;
+  out_q text := q;
+  changed boolean := false;
+  lev text := (select e.extnamespace::regnamespace::text from pg_extension e where e.extname = 'fuzzystrmatch');
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if lev is null or coalesce(btrim(q), '') = '' then
+    return null;
+  end if;
+  select * into t from public.find_terms(regexp_replace(q, '"', ' ', 'g'));
+  foreach w in array coalesce(t.words, '{}') loop
+    continue when w !~ '^[[:alpha:]]{4,30}$';
+    continue when exists (select 1 from public.search_vocab v where v.word = w);
+    continue when (select count(*) from (select 1 from public.pages p where p.words @@ quote_literal(w)::tsquery limit 20) x) >= 20;
+    far := case when length(w) >= 8 then 2 else 1 end;
+    execute format('select v.word from public.search_vocab v
+                    where length(v.word) between $1 - $2 and $1 + $2 and %s.levenshtein_less_equal(v.word, $3, $2) <= $2
+                    order by %s.levenshtein_less_equal(v.word, $3, $2), (left(v.word, 1) = left($3, 1)) desc, v.n desc, v.word limit 1', lev, lev)
+      into best using length(w), far, w;
+    if best is not null then
+      out_q := regexp_replace(out_q, '\m' || w || '\M', best, 'gi');
+      changed := true;
+    end if;
+  end loop;
+  return case when changed and lower(out_q) <> lower(q) then out_q end;
+end;
+$$;
+revoke all on function public.did_you_mean(text, text) from public;
+grant execute on function public.did_you_mean(text, text) to anon, authenticated;
 
 -- "Ask" (10 Nov 2026, the owner: like a web search's answer box, three questions a day a person). A signed-in
 -- WBA address asks a question; the search finds the pages (find_pages, the same ranking as the results under
