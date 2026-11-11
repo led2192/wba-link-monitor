@@ -897,15 +897,20 @@ begin
     for pass in 1..(case when nw >= 3 then 2 else 1 end) loop
       lvl_q := case when pass = 1 then pp_all else pp_any end;
       lvl_q := case when lvl_q is null then pp_req when pp_req is null then lvl_q else pp_req && lvl_q end;
+      -- (the check of the phrase on the page stands outside a subquery closed with "offset 0": written beside the
+      -- join, the planner answered it from the word index, every page holding the phrase's words, and the quoted
+      -- searches took longer with the option than without: 11 Nov 2026, "ACT Core" 7.9 s to 15.4 s)
       insert into find_cand
-        select p.library_id, p.page, p.words, p.year, p.doc_type
-        from (select pp.library_id, pp.page from public.page_pairs pp where pp.pairs @@ lvl_q limit 3000) x
-        join public.pages p on p.library_id = x.library_id and p.page = x.page
-        where p.wba_id <> ''
-          and (types is null or p.doc_type = any(types))
-          and (year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)
-          and (phrase_q is null or p.words @@ phrase_q)
-          and (nw <> 1 or p.words @@ tqs[1])
+        select y.library_id, y.page, y.words, y.year, y.doc_type
+        from (select p.library_id, p.page, p.words, p.year, p.doc_type
+              from (select pp.library_id, pp.page from public.page_pairs pp where pp.pairs @@ lvl_q limit 3000) x
+              join public.pages p on p.library_id = x.library_id and p.page = x.page
+              where p.wba_id <> ''
+                and (types is null or p.doc_type = any(types))
+                and (year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)
+              offset 0) y
+        where (phrase_q is null or y.words @@ phrase_q)
+          and (nw <> 1 or y.words @@ tqs[1])
         limit 400
       on conflict do nothing;
       get diagnostics n = row_count;
@@ -1381,6 +1386,7 @@ create or replace function public.did_you_mean(key text, q text) returns text
 language plpgsql stable security definer
 set search_path = public, extensions
 set statement_timeout = '5s'
+set enable_seqscan = 'off'          -- "do twenty pages hold this word" must be asked of the word index: with a limit the planner read the table instead, and a word no page holds ran into the timeout (11 Nov 2026)
 as $$
 declare
   t record;
