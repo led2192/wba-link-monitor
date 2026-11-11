@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-11 The "known but not read" list was shown to nobody: `unheld_documents` asked for a signed-in person and the page asks with its search key. It now accepts the key, as `find_pages` does. Seen on the live page before telling anyone it worked. (#431)
 - 2026-11-11 lanterN shows, under one company's documents, the documents known by their address and not held ("9 more documents are known but not read: the company's website refuses our robot"), with the link to each original. `load_companies.py` fills `public.unheld_documents` every night from the rows of `report_library` with an address and no file; function `unheld_documents(company)`. (#430)
 - 2026-11-11 Narrative evaluation may run 350 minutes (was 120): with the evidence pack an answer takes about 50 seconds, so the 95-minute budget read 111 of 1,950 answers of the 70-attribute measurement. A wide measurement passes `--budget 330` in `options`; the default budget stays 95 minutes. (#429)
 - 2026-11-11 The Scan now watch runs `add_companies.py` (and `discover_pages.py` for the new companies) and `browser_uploads.py` about every 15 minutes: their own 15-minute schedules were not started once by GitHub in three hours. Their schedules are removed, so that two runs never write the same row at once; both workflows stay for a run by hand. (#428)
