@@ -65,7 +65,7 @@ def test_the_review_game_is_signed_and_names_no_one():
     lucky = SQL[SQL.index("create or replace function public.review_score("):SQL.index("-- The signed-in person's own reviews")]
     assert "public.email_may_search(who)" in lucky and "grant execute on function public.lucky_value() to authenticated;" in lucky
     assert "revoke all on function public.review_score(text) from public, anon, authenticated;" in lucky
-    assert "r.seconds < 4 then 0.25" in lucky
+    assert "rv.seconds < 4 then 0.25" in lucky
     score = lucky[:lucky.index("create or replace function public.lucky_value")]
     assert "'reviewer'" not in score and "email" not in score.split("as $$")[1]
 
@@ -130,7 +130,7 @@ def test_added_sources_are_signed_checked_and_one_per_person():
     assert "exists (select 1 from public.documents d where d.url = u)" in src                    # a link the library holds is not kept
     assert "on conflict on constraint source_submissions_one_per_person do nothing" in src
     assert "to authenticated;" in src and "from public, anon;" in src
-    assert "select ss.reviewer, 3, 0 from public.source_submissions ss where ss.status = 'queued'" in SQL   # three points once passed on
+    assert "select ss.reviewer, 3, 0, 0, 0 from public.source_submissions ss where ss.status = 'queued'" in SQL   # three points once passed on
 
 
 def test_company_names_are_read_without_accents_and_with_separators():
@@ -168,3 +168,13 @@ def test_suggestions_name_the_company_before_past_searches():
     sug = PAGE[PAGE.index("function entitiesFor"):PAGE.index("function closeHistory")]
     assert 'kind: "Company"' in sug and 'kind: "Industry"' in sug and 'kind: "Country"' in sug
     assert sug.index("for (const it of things)") < sug.index("for (const it of items)")
+
+
+def test_the_review_game_counts_right_answers():
+    score = SQL[SQL.index("create or replace function public.review_score("):SQL.index("revoke all on function public.review_score(text)")]
+    assert "when rv.expected = rv.verdict then 3 else -2 end" in score and "greatest(sum(u.p), 0)" in score and "'checked'" in score
+    cv = SQL[SQL.index("create or replace function public.control_verdict("):SQL.index("-- Points: a review is 1 point")]
+    assert "<= 0.005 then 'ok'" in cv and "abs(v) > 2 * abs(truth) or abs(v) < 0.5 * abs(truth) then 'wrong'" in cv      # only the clear cases
+    lucky = SQL[SQL.index("create or replace function public.lucky_value()"):SQL.index("revoke all on function public.lucky_value()")]
+    assert "if random() < 0.2 then" in lucky and "public.control_verdict(vv.value, t.value) is not null" in lucky
+    assert "truth" not in lucky[lucky.index("select jsonb_build_object('version_id'"):]                              # a control card looks like any other

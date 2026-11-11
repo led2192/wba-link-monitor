@@ -453,6 +453,12 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
             except Exception as e:
                 conn.rollback()
                 c[f"model reader: versions not written ({type(e).__name__}: {str(e)[:100]})"] = 1
+        if getattr(a, "commit", False) and gold:
+            try:
+                c["model reader: validated answers kept for the review game"] = write_truth(conn, gold, now)
+            except Exception as e:
+                conn.rollback()
+                c[f"model reader: validated answers not kept ({type(e).__name__}: {str(e)[:100]})"] = 1
         if getattr(a, "commit", False) and reads:
             try:
                 c["model reader: reads recorded"] = write_reads(conn, reads, now)
@@ -508,6 +514,26 @@ def write_reads(conn, reads, now):
     cur.executemany("insert into public.model_reads (wba_id, attribute, year, read_on, found) values (%s,%s,%s,%s,%s) "
                     "on conflict (wba_id, attribute, year) do update set read_on = excluded.read_on, found = excluded.found",
                     list(rows.values()))
+    conn.commit()
+    return len(rows)
+
+
+TRUTH_SQL = """create table if not exists public.value_truth (
+  wba_id text not null, attribute text not null, year int not null, value double precision not null,
+  loaded timestamptz not null default now(), primary key (wba_id, attribute, year))"""
+
+
+def write_truth(conn, gold, now):
+    """Upsert the validated answers into value_truth (search.sql): the review game's control cards (a value the
+    robot read whose validated answer is known is dealt one time in five and decides the reviewer's points).
+    gold: {(wba, code, year): {"value": ...}}. The evidence database is private; nothing is printed."""
+    rows = [(w, a, int(y), float(g["value"]), now) for (w, a, y), g in gold.items() if w and a and y and g.get("value")]
+    if not rows:
+        return 0
+    cur = conn.cursor()
+    cur.execute(TRUTH_SQL)
+    cur.executemany("insert into public.value_truth (wba_id, attribute, year, value, loaded) values (%s,%s,%s,%s,%s) "
+                    "on conflict (wba_id, attribute, year) do update set value = excluded.value, loaded = excluded.loaded", rows)
     conn.commit()
     return len(rows)
 
