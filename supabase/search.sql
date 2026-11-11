@@ -1658,6 +1658,7 @@ as $$
 #variable_conflict use_variable
 declare
   per_day constant int := 3;
+  per_day_all constant int := 300;      -- every person together: the most Ask can cost in a day is fixed (about 3 USD), however many people come (11 Nov 2026)
   model constant text := 'claude-haiku-5-5';
   who text := lower(auth.jwt() ->> 'email');
   asked text := btrim(coalesce(question, ''));
@@ -1693,6 +1694,9 @@ begin
   select count(*) into used from public.ask_log a where a.asker = who and a.answered and a.at >= date_trunc('day', now());
   if used >= per_day then
     return jsonb_build_object('limit', true, 'left', 0, 'per_day', per_day);
+  end if;
+  if (select count(*) from public.ask_log a where a.answered and a.at >= date_trunc('day', now())) >= per_day_all then
+    return jsonb_build_object('limit', true, 'everyone', true, 'left', per_day - used, 'per_day', per_day);
   end if;
   begin
     select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;

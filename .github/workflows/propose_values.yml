@@ -116,7 +116,7 @@ jobs:
                 echo "the load that finished was not the night's scheduled one (event ${{ github.event.workflow_run.event }}, started ${{ github.event.workflow_run.run_started_at }}, ${{ github.event.workflow_run.conclusion }}): nothing to do"; exit 0
               fi
             fi
-            ARGS="--years 2018- --methods sec,esef,model --model-years 2025,2024 --attributes GMC_00048.1,GMC_00001.1,GMC_00002.1,GMC_00003.1,GMC_02526.1 --max-usd 5 --fresh-days 30 --commit"
+            ARGS="--years 2018- --methods sec,esef,model --model-years 2025,2024 --attributes GMC_00048.1,GMC_00001.1,GMC_00002.1,GMC_00003.1,GMC_02526.1 --max-usd ${{ vars.READER_MAX_USD || '5' }} --fresh-days 30 --commit"
           else
             ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }} --model-years ${{ inputs.model_years }} --max-usd ${{ inputs.max_usd }} --fresh-days ${{ inputs.fresh_days || '30' }}"
             [ -n "${{ inputs.attributes }}" ] && ARGS="$ARGS --attributes ${{ inputs.attributes }}"

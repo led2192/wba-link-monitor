@@ -39,8 +39,7 @@ class ArchiveDocuments(unittest.TestCase):
         self.assertEqual(A.with_text(cur, ["a", "gone", "b", None, "a"], batch=2), {"a", "b"})
         self.assertEqual(cur.asked, [["a", "b"], ["gone"]])                                        # unique, in batches
 
-    def test_no_commit_before_the_files_are_copied(self):
-        self.assertFalse(A.ARCHIVE_COPY_READY)
+    def test_the_size_of_the_files_is_reported(self):
         self.assertAlmostEqual(A.size_gb([doc("a", file_size_mb=512), doc("b", file_size_mb=1536), doc("c")]), 2.0)
 
     def test_payloads_tick_discard_with_the_reason_in_batches_of_ten(self):

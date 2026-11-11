@@ -58,19 +58,30 @@ MACHINE_REASONS = ("Duplicate of another document", "Not a disclosure",
                    "Archived: before 2022, not cited")       # archive_documents.py, 9 Nov 2026: old documents nobody uses
 
 
+ARCHIVED = "Archived: before 2022, not cited"
+
+
+def has_copy(fields):
+    """False only for an archived document whose PDF is not in lanterN's storage (stored_file empty): deleting
+    its row would delete the only copy of the file. Every other discard may be purged as before."""
+    return (fields.get("discard_reason") or "") != ARCHIVED or bool((fields.get("stored_file") or "").strip())
+
+
 def candidates(days, machine_only=False):
-    formula = (f"AND({{discard}}, NOT({{verified}}), "
+    # an archived document is purged only with its PDF stored (11 Nov 2026): asked of Airtable and checked again here
+    safe = f"OR({{discard_reason}}!='{ARCHIVED}', {{stored_file}}!='')"
+    formula = (f"AND({{discard}}, NOT({{verified}}), {safe}, "
                f"IS_BEFORE({{discarded_on}}, DATEADD(NOW(), -{int(days)}, 'days')))")
     if machine_only:
         reasons = ", ".join(f"{{discard_reason}}='{r}'" for r in MACHINE_REASONS)
-        formula = (f"AND({{discard}}, NOT({{verified}}), OR({reasons}), "
+        formula = (f"AND({{discard}}, NOT({{verified}}), OR({reasons}), {safe}, "
                    f"IS_BEFORE({{discarded_on}}, DATEADD(NOW(), -{int(days)}, 'days')))")
     url = f"{API}/{BASE}/{quote(TABLE)}"
     offset = None
     while True:
         p = [("pageSize", "100"), ("filterByFormula", formula)] + ([("offset", offset)] if offset else [])
         j = req("GET", url, params=p).json()
-        yield from j.get("records", [])
+        yield from (r for r in j.get("records", []) if has_copy(r.get("fields", {})))
         offset = j.get("offset"); time.sleep(0.12)
         if not offset:
             break

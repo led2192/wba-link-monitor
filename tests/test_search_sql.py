@@ -236,6 +236,13 @@ def test_a_company_is_asked_for_not_added():
     assert 'rpc/request_company' in PAGE and "Missing a company? Ask for it" in PAGE
 
 
+def test_ask_has_a_ceiling_for_everyone_together():
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text)")]
+    assert "per_day_all constant int := 300;" in ask and ">= per_day_all then" in ask and "'everyone', true" in ask
+    wf = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "propose_values.yml"), encoding="utf-8").read()
+    assert "--max-usd ${{ vars.READER_MAX_USD || '5' }}" in wf                       # the owner changes the night's ceiling without a code change
+
+
 def load_tests(loader, standard, pattern):
     """The Tests workflow runs unittest, which does not collect plain functions: without this hook none of the
     checks in this file ran there (found 11 Nov 2026). Each test_ function becomes a case."""
