@@ -42,7 +42,12 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt playwright
-      - run: playwright install --with-deps chromium
+      # The browser is a help for pages that need one, not a condition for the watch: on 11 Nov 2026 the system
+      # packages it wants would not install (exit 100, then a hang of ten minutes) and the inbox stood still with
+      # links waiting. Ten minutes at most, and the watch starts either way.
+      - name: Browser for the pages that need one (the watch runs without it if this fails)
+        run: timeout 600 playwright install --with-deps chromium || timeout 300 playwright install chromium || echo "no browser this run"
+        continue-on-error: true
       - name: Watch and scan
         run: python scan_now.py --watch "${{ inputs.watch_minutes || '330' }}" --every 180
         env:
