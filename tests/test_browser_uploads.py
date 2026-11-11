@@ -80,6 +80,8 @@ class Rules(unittest.TestCase):
         self.assertIn('ap.add_argument("--commit", action="store_true")', src)               # dry run by default
         self.assertIn("and status = 'stored'", src)                                           # a rerun never takes a file twice
         self.assertNotIn("uploader", src.split("def main")[1])                                # who sent it is never read or printed
+        import re
+        self.assertIsNone(re.search(r"^\s+requests\s*=", src.split("def main")[1], re.M))      # the name of the library is not given to anything else (11 Nov 2026: the first real run died on it)
         sql = open(os.path.join(ROOT, "supabase", "search.sql"), encoding="utf-8").read()
         self.assertIn("with check (bucket_id = ''uploads'' and public.upload_expected(name))", sql)   # a person can store the registered object only
         self.assertIn("revoke all on function public.upload_begin(text, text, bigint, text, text, text, text) from public, anon;", sql)
