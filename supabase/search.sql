@@ -1576,7 +1576,8 @@ begin
     return jsonb_build_object('error', format('the model answered HTTP %s: %s', status, left(coalesce(reply -> 'error' ->> 'message', ''), 200)));
   end if;
   return jsonb_build_object('text', (select string_agg(c ->> 'text', '') from jsonb_array_elements(reply -> 'content') c where c ->> 'type' = 'text'),
-                            'in', (reply -> 'usage' ->> 'input_tokens')::int, 'out', (reply -> 'usage' ->> 'output_tokens')::int);
+                            'in', (reply -> 'usage' ->> 'input_tokens')::int, 'out', (reply -> 'usage' ->> 'output_tokens')::int,
+                            'stop', reply ->> 'stop_reason', 'kinds', (select string_agg(c ->> 'type', ',') from jsonb_array_elements(reply -> 'content') c));
 exception when others then
   return jsonb_build_object('error', 'the model could not be reached: ' || left(sqlerrm, 200));
 end;
@@ -1656,11 +1657,16 @@ begin
       'You turn an analyst''s question about a company into the words to search that company''s reports with. Reply with 3 to 5 words, in lower case, '
       || 'separated by spaces: the words most likely to be printed on the page that answers the question. Write abbreviations in full '
       || '(S1 is scope 1, S3 Cat 11 is scope 3 use of sold products, RY is reporting year). No company names, no years, no punctuation, nothing else.',
-      left(search_q, 400), 40);
+      left(search_q, 400), 800);      -- room for the model's own reasoning before the words (with 40, then 150, it stopped before writing any)
     if got ? 'text' then
       keywords := btrim(left(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
       tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
-      if keywords = '' then keywords := null; end if;
+      if keywords = '' then
+        keywords := null;
+        err := format('search words not chosen: the model returned no text (stop %s, content %s, %s tokens out)', got ->> 'stop', coalesce(got ->> 'kinds', 'none'), got ->> 'out');
+      end if;
+    else
+      err := 'search words not chosen: ' || left(coalesce(got ->> 'error', 'no reply'), 200);     -- kept in the log; the question itself is searched
     end if;
   end if;
   -- the pages: the search's own best six, the first 3,000 characters of each
@@ -1679,8 +1685,8 @@ begin
   end loop;
   if n = 0 then
     insert into public.ask_log (asker, question, answered, error, ms, client)
-      values (who, asked, false, 'no page found', extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60));
-    return jsonb_build_object('answer', null, 'sources', '[]'::jsonb, 'left', per_day - used, 'per_day', per_day, 'none', true);
+      values (who, asked, false, left(concat_ws('; ', 'no page found', 'searched: ' || coalesce(keywords, '(the question)'), err), 400), extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60));
+    return jsonb_build_object('answer', null, 'sources', '[]'::jsonb, 'left', per_day - used, 'per_day', per_day, 'none', true, 'keywords', keywords, 'why', err);
   end if;
   got := public.ask_model(api_key, http_schema, model,
     'You answer questions from sustainability analysts using only the numbered excerpts of company documents given to you. '
@@ -1691,8 +1697,9 @@ begin
 
 Excerpts:
 
-' || context, 500);
-  answer := got ->> 'text'; err := got ->> 'error';
+' || context, 2500);      -- the answer is short; the room is for the model's reasoning (with 500 a hard question ended before any text)
+  answer := nullif(btrim(coalesce(got ->> 'text', '')), '');
+  err := coalesce(got ->> 'error', case when answer is null then format('the model returned no text (stop %s, %s tokens out)', got ->> 'stop', got ->> 'out') end);
   tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
   insert into public.ask_log (asker, question, answered, answer, sources, input_tokens, output_tokens, ms, error, client, keywords)
     values (who, asked, answer is not null, answer, sources, tok_in, tok_out,
