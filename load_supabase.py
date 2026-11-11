@@ -80,7 +80,8 @@ def document_row(d, m):
             m.get("type") or None, _int(m.get("year")), m.get("lang") or None, clean(m.get("label"), 2000) or None,
             m.get("url") or None, _int(d.get("pages")) if d.get("pages") is not None else _int(m.get("pages")),
             _int(d.get("chars")), d.get("status"), d.get("part"), d.get("at"),
-            (m.get("end") or None) if re.fullmatch(r"\d{4}(-\d{2})?", str(m.get("end") or "")) else None)
+            (m.get("end") or None) if re.fullmatch(r"\d{4}(-\d{2})?", str(m.get("end") or "")) else None,
+            (m.get("found") or None) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(m.get("found") or "")) else None)
 
 
 def current_pages(rows, index, part):
@@ -303,7 +304,7 @@ def upsert_documents(conn, rows):
     with conn.cursor() as c:
         c.execute("create temp table tmp_docs (like public.documents including defaults) on commit drop")
         cols = ("library_id, record_id, wba_id, company, doc_type, year, lang, label, url, pages, chars, "
-                "text_status, text_part, extracted_at, period_end")
+                "text_status, text_part, extracted_at, period_end, found")
         with c.copy(f"copy tmp_docs ({cols}) from stdin") as cp:
             for r in rows:
                 cp.write_row(r)

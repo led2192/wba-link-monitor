@@ -31,6 +31,9 @@ create table if not exists public.documents (
 -- reporting year before (2 Nov 2026: ORIX's integrated report dated 2024 covers April 2023 to March 2024, which
 -- is reporting year 2023, and was read as 2024's).
 alter table public.documents add column if not exists period_end text;
+-- found: "2026-11-03", the day the pipeline found the document (report_library.created_time), shown beside a
+-- result in the search page as a web search shows a page's date (11 Nov 2026).
+alter table public.documents add column if not exists found text;
 create index if not exists documents_wba_id on public.documents (wba_id);
 create index if not exists documents_year on public.documents (year);
 create index if not exists documents_doc_type on public.documents (doc_type);

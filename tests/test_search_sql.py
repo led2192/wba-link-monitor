@@ -146,3 +146,25 @@ def test_no_grey_globe_for_a_company_without_an_icon():
 
 def test_longer_documents_first_within_a_year_and_type():
     assert FIND.count("coalesce(array_position(types, d.doc_type), 99), coalesce(d.pages, 0) desc, d.company") == 2
+
+
+def test_no_sideways_scroll_and_the_panel_fits():
+    assert "html, body { overflow-x: hidden; }" in PAGE
+    assert ".wrap:has(> #values:not([hidden])) { margin-left: max(0px, calc((100vw - 1120px) / 2)); }" in PAGE
+
+
+def test_the_lucky_card_takes_the_screen():
+    assert "body.playing .boxwrap" in PAGE and 'document.body.classList.add("playing")' in PAGE
+    assert PAGE.count('document.body.classList.remove("playing")') == 2               # closing the card, and any search
+
+
+def test_results_show_the_day_the_document_was_found():
+    facts = SQL[SQL.index("create or replace function public.doc_facts("):SQL.index("-- \"Ask\" (10 Nov 2026")]
+    assert "public.search_key_name(key) is null" in facts and "to_jsonb(d) ->> 'found'" in facts and "ids[1:200]" in facts
+    assert 'rpc("doc_facts"' in PAGE and "found ${dayText(f.found)}" in PAGE
+
+
+def test_suggestions_name_the_company_before_past_searches():
+    sug = PAGE[PAGE.index("function entitiesFor"):PAGE.index("function closeHistory")]
+    assert 'kind: "Company"' in sug and 'kind: "Industry"' in sug and 'kind: "Country"' in sug
+    assert sug.index("for (const it of things)") < sug.index("for (const it of items)")

@@ -1226,6 +1226,24 @@ $$;
 revoke all on function public.doc_pages(text, text[]) from public;
 grant execute on function public.doc_pages(text, text[]) to anon, authenticated;
 
+-- What the page shows beside a result apart from the search itself (11 Nov 2026): the document's length and the day
+-- the pipeline found it, as a web search shows a page's date. One question for the documents on screen. The day is
+-- read through to_jsonb so the function works before the nightly load has added the column.
+create or replace function public.doc_facts(key text, ids text[]) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_object_agg(d.library_id, jsonb_build_object('pages', coalesce(d.pages, 0), 'found', to_jsonb(d) ->> 'found')), '{}'::jsonb)
+          from public.documents d where d.library_id = any(ids[1:200]));
+end;
+$$;
+revoke all on function public.doc_facts(text, text[]) from public;
+grant execute on function public.doc_facts(text, text[]) to anon, authenticated;
+
 -- "Ask" (10 Nov 2026, the owner: like a web search's answer box, three questions a day a person). A signed-in
 -- WBA address asks a question; the search finds the pages (find_pages, the same ranking as the results under
 -- it); the first lines of the best six pages go to the reader model with the question, and the model answers

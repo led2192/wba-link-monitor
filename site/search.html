@@ -79,6 +79,7 @@
   .history .h:hover, .history .h.on { background: var(--chip); }
   .history .h svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
   .history .h span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .history .h .ico { width: 18px; height: 18px; border-radius: 4px; flex: none; }
   .history .h small { color: var(--muted); font-size: 12px; }
   .history .h button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 0 2px; visibility: hidden; }
   .history .h:hover button { visibility: visible; }
@@ -160,7 +161,11 @@
   .values .scores .ar { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11.5px; padding-left: 10px; }
   .values .scores details:not([open]) .pl { display: block; }
   .values .subhead { font-size: 12px; color: var(--muted); text-transform: none; padding: 10px 0 2px; border-top: 1px solid var(--line); margin-top: 6px; }
-  .lucky { max-width: 760px; margin: 28px auto 0; padding: 26px 30px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--box); box-shadow: 0 6px 24px rgba(0, 25, 75, .06); }
+  /* While a card is up it is the page: the search box, its chips and the status line step aside (11 Nov 2026: the
+     card began halfway down the screen). "Back to search" on the card, or the lamp, brings them back. */
+  body.playing .boxwrap, body.playing #chips, body.playing #filters, body.playing #answer, body.playing #status, body.playing #strip, body.playing #homebtns { display: none !important; }
+  .lucky .top a { color: var(--accent); text-decoration: none; }
+  .lucky { max-width: 760px; margin: 8px auto 0; padding: 26px 30px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--box); box-shadow: 0 6px 24px rgba(0, 25, 75, .06); }
   .lucky .top { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
   .lucky .who { font-size: 14px; color: var(--muted); }
   .lucky h2 { margin: 2px 0 6px; font-size: 22px; color: var(--brand); font-weight: 600; }
@@ -206,9 +211,16 @@
   .values .fix button, .values .sign button { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; justify-self: start; }
   .values .sign { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: grid; gap: 6px; }
   .values .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
-  @media (min-width: 1180px) {
+  /* The panel stands beside the results when the window has room for both (760 + 16 + 310). Between that and a
+     wide window the results move left to make the room, so nothing ever runs off the side (11 Nov 2026: the panel
+     was cut and the page scrolled sideways on a 1,220-pixel window). Narrower, the panel sits above the results. */
+  html, body { overflow-x: hidden; }
+  @media (min-width: 1120px) {
     .values { position: absolute; top: 96px; left: calc(50% + 396px); width: 310px; margin: 0; max-height: 80vh; overflow: auto; }
     .wrap { position: relative; }
+  }
+  @media (min-width: 1120px) and (max-width: 1459px) {
+    .wrap:has(> #values:not([hidden])) { margin-left: max(0px, calc((100vw - 1120px) / 2)); }
   }
   .strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; font-size: 13px; }
   .strip .lbl { color: var(--muted); margin-right: 4px; }
@@ -285,7 +297,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v25 2026-11-10";
+  const CLIENT = "lantern v26 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -474,12 +486,18 @@
     iconOk.get(host).then(ok => { if (ok) { img.src = src; img.hidden = false; } else img.remove(); });
     return img;
   }
-  // How long each document is: one small question for the documents on screen, answered after the results are shown.
-  const sizeOf = {};
+  // How long each document is and the day the pipeline found it (as a web search shows a page's date): one small
+  // question for the documents on screen, answered after the results are shown.
+  const factOf = {};
+  const dayText = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? `${+m[3]} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][+m[2] - 1]} ${m[1]}` : ""; };
   async function docSizes(rows) {
-    const paint = () => document.querySelectorAll("#results .size[data-doc]").forEach(s => { const n = sizeOf[s.dataset.doc]; if (n && !s.textContent) s.textContent = `${n.toLocaleString("en")} pages in all`; });
-    const ask = [...new Set(rows.map(r => r.library_id))].filter(id => !(id in sizeOf));
-    if (ask.length) { try { const got = await rpc("doc_pages", { key, ids: ask }); for (const id of ask) sizeOf[id] = (got && got[id]) || 0; } catch (e) { return; } }
+    const paint = () => document.querySelectorAll("#results .size[data-doc]").forEach(s => {
+      const f = factOf[s.dataset.doc]; if (!f || s.textContent) return;
+      const bits = []; if (f.pages) bits.push(`${Number(f.pages).toLocaleString("en")} pages in all`); if (dayText(f.found)) bits.push(`found ${dayText(f.found)}`);
+      s.textContent = bits.join(" · ");
+    });
+    const ask = [...new Set(rows.map(r => r.library_id))].filter(id => !(id in factOf));
+    if (ask.length) { try { const got = await rpc("doc_facts", { key, ids: ask }); for (const id of ask) factOf[id] = (got && got[id]) || {}; } catch (e) { return; } }
     paint();
   }
   function render(rows, append) {
@@ -513,6 +531,7 @@
   }
 
   async function search(fromChips, more) {
+    document.body.classList.remove("playing");                    // a search ends the card game
     if (!fromChips) {
       const parsed = parse($("q").value);
       state.q = parsed.q;
@@ -882,9 +901,10 @@
     }
     return null;
   }
-  function luckyClose() { deck.at = -1; $("results").innerHTML = ""; setStatus(""); }
+  function luckyClose() { deck.at = -1; document.body.classList.remove("playing"); $("results").innerHTML = ""; setStatus(""); }
   async function lucky(move) {
     const box = $("results"); $("values").hidden = true; $("chips").innerHTML = ""; setStatus("");
+    $("head").classList.remove("home"); document.body.classList.add("playing");
     if (!(await token())) {
       box.innerHTML = ""; const c = el("div", "lucky"); c.append(el("h2", null, "I’m feeling lucky"), el("p", "what", "One value the robot read, with the page it came from. Say whether it is right. Each review counts."));
       const hold = el("div", "values"); c.appendChild(hold); box.appendChild(c); signInBox(hold, lucky); return;
@@ -897,7 +917,8 @@
     const card = deck.cards[deck.at], v = card.v, shownAt = Date.now();
     const sc = deck.score, pts = Number(sc.points || 0);
     box.innerHTML = ""; const c = el("div", "lucky");
-    const top = el("div", "top"); top.append(el("span", null, "I’m feeling lucky"),
+    const back = el("a", null, "← Back to search"); back.href = "#"; back.onclick = e => { e.preventDefault(); luckyClose(); };
+    const top = el("div", "top"); top.append(back,
       el("span", "score", `${pts % 1 ? pts.toFixed(2) : pts} ${pts === 1 ? "point" : "points"} · ${levelLine(pts)}` + (sc.reviewers > 1 && sc.reviews ? ` · #${sc.rank} of ${sc.reviewers}` : "")));
     showMe(sc);
     c.appendChild(top);
@@ -960,11 +981,37 @@
                      add(q) { const h = this.load().filter(x => x.q !== q); h.unshift({ q, at: Date.now() }); this.save(h); },
                      remove(q) { this.save(this.load().filter(x => x.q !== q)); }, clear() { this.save([]); } };
   const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? "now" : m < 60 ? `${m} min` : m < 1440 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} d`; };
+  // Under the box as one types: first what the words ARE (a company, an industry, a country: "nev" is the
+  // company whose name starts so, before any past search that merely holds the letters), then one's own searches.
+  // 11 Nov 2026, the owner: a web search offers the state of Nevada first, not any snowfall.
+  const foldText = t => (t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  function entitiesFor(typed) {
+    const t = foldText(typed).trim(); if (t.length < 2) return [];
+    const out = [];
+    const starts = [], inside = [];
+    for (const c of companies) { const n = foldText(c.name); if (n.startsWith(t)) starts.push(c); else if (t.length >= 3 && n.split(/[^a-z0-9]+/).some(w => w.startsWith(t))) inside.push(c); }
+    const byName = (a, b) => a.name.length - b.name.length || a.name.localeCompare(b.name);
+    for (const c of [...starts.sort(byName), ...inside.sort(byName)].slice(0, 5)) out.push({ q: c.name, kind: "Company", note: [c.industry, c.country].filter(Boolean).join(" · "), id: c.id });
+    for (const ind of industries) if (foldText(ind).startsWith(t) && out.length < 7) out.push({ q: ind, kind: "Industry", note: "every company in it" });
+    for (const [code, names] of Object.entries(COUNTRIES)) if (names.some(n => foldText(n).startsWith(t)) && out.length < 8) out.push({ q: names[0], kind: "Country", note: "companies based there" });
+    return out;
+  }
   function renderHistory() {
     const box = $("history"), typed = $("q").value.trim().toLowerCase();
-    const items = history_.load().filter(x => !typed || x.q.toLowerCase().includes(typed)).slice(0, 10);
+    const things = entitiesFor(typed);
+    const named = new Set(things.map(x => x.q.toLowerCase()));
+    const items = history_.load().filter(x => (!typed || x.q.toLowerCase().includes(typed)) && !named.has(x.q.toLowerCase())).slice(0, things.length ? 5 : 10);
     box.innerHTML = "";
-    if (!items.length) { box.classList.remove("open"); return; }
+    if (!items.length && !things.length) { box.classList.remove("open"); return; }
+    for (const it of things) {
+      const row = el("div", "h"); row.setAttribute("role", "option");
+      const ico = it.id ? companyIcon(it.id) : null;
+      if (ico) { ico.className = "ico"; ico.style.borderRadius = "4px"; row.appendChild(ico); }
+      else row.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
+      row.append(el("span", null, it.q), el("small", null, it.kind + (it.note ? " · " + it.note : "")));
+      row.onmousedown = ev => { ev.preventDefault(); $("q").value = it.q; closeHistory(); search(false); };
+      box.appendChild(row);
+    }
     for (const it of items) {
       const row = el("div", "h"); row.setAttribute("role", "option");
       row.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
@@ -974,7 +1021,7 @@
       row.onmousedown = ev => { ev.preventDefault(); $("q").value = it.q; closeHistory(); search(false); };
       box.appendChild(row);
     }
-    const f = el("div", "foot"); const c = el("button", null, "Clear my searches"); c.onmousedown = ev => { ev.preventDefault(); history_.clear(); renderHistory(); }; f.appendChild(c); box.appendChild(f);
+    if (items.length) { const f = el("div", "foot"); const c = el("button", null, "Clear my searches"); c.onmousedown = ev => { ev.preventDefault(); history_.clear(); renderHistory(); }; f.appendChild(c); box.appendChild(f); }
     box.classList.add("open");
   }
   function closeHistory() { $("history").classList.remove("open"); }
