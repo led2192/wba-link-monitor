@@ -1105,6 +1105,26 @@ begin
 end;
 $$;
 
+-- A verdict on a result, given from the list without opening the document (11 Nov 2026, the owner: "I can already
+-- tell whether the result is right or irrelevant" from the list, so three days of searching left three clicks).
+-- kind: 'open' (the document was opened), 'useful' or 'not' (the small marks beside a result). One row a mark;
+-- the last one for a result of a search is the one that counts.
+alter table public.search_clicks add column if not exists kind text not null default 'open';
+create or replace function public.find_judge(key text, log_id bigint, library_id text, page int, rank int, useful boolean)
+returns void
+language plpgsql security definer set search_path = public, extensions
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  insert into public.search_clicks (log_id, library_id, page, rank, kind)
+    values (log_id, left(library_id, 40), page, rank, case when useful then 'useful' else 'not' end);
+end;
+$$;
+revoke all on function public.find_judge(text, bigint, text, int, int, boolean) from public;
+grant execute on function public.find_judge(text, bigint, text, int, int, boolean) to anon, authenticated;
+
 -- The companies, for the page to recognise a company name typed in the box: one JSON value (the web
 -- interface caps set-returning functions at 1,000 rows).
 create or replace function public.find_companies(key text) returns jsonb
