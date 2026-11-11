@@ -171,11 +171,11 @@ def main():
             run.finish("ok", rows_in=0, rows_out=0, notes="nothing new")
             return 0
         req_ids = sorted({int(REQ.match(u["wba_id"]).group(1)) for u in uploads if REQ.match(u["wba_id"] or "")})
-        requests = {}
+        asked_for = {}
         if req_ids:
             cur.execute("select id, status, result from public.company_requests where id = any(%s)", (req_ids,))
-            requests = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
-        uploads, waiting, refused = resolve_requests(uploads, requests)
+            asked_for = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        uploads, waiting, refused = resolve_requests(uploads, asked_for)
         if waiting:
             print(f"  {len(waiting)} files wait for a company that was asked for and is not approved yet (company_requests in Airtable)", flush=True)
         for u, why in refused:
