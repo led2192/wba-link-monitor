@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-11 Narrative evaluation may run 350 minutes (was 120): with the evidence pack an answer takes about 50 seconds, so the 95-minute budget read 111 of 1,950 answers of the 70-attribute measurement. A wide measurement passes `--budget 330` in `options`; the default budget stays 95 minutes. (#429)
 - 2026-11-11 The Scan now watch runs `add_companies.py` (and `discover_pages.py` for the new companies) and `browser_uploads.py` about every 15 minutes: their own 15-minute schedules were not started once by GitHub in three hours. Their schedules are removed, so that two runs never write the same row at once; both workflows stay for a run by hand. (#428)
 - 2026-11-11 `browser_uploads.py`: its first run with a file to take died (a variable named `requests` hid the library of that name). Renamed, with a test. (#427)
 - 2026-11-11 `db_locks.py --orphans` (workflow Database locks, input `orphans`) ends the statements older than 6 hours 30 minutes, which no living job can own: the `insert into documents` of the load killed at 14:03 UTC was still running 7 hours after it began, holding its lock on `documents` (every install that added an index there failed on the lock) and the disk. (#426)
