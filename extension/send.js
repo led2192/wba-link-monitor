@@ -68,7 +68,7 @@ function collectLinks() {
     try { return decodeURIComponent(new URL(a.href).pathname.split("/").pop() || "").replace(/\.pdf$/i, "").replace(/[-_+]+/g, " ").trim() || text; } catch (e) { return text; }
   };
   for (const a of document.querySelectorAll("a[href]")) {
-    const href = a.getAttribute("href") || "", text = a.textContent || a.getAttribute("title") || a.getAttribute("aria-label") || "";
+    const href = a.getAttribute("href") || "", text = a.innerText || a.textContent || a.getAttribute("title") || a.getAttribute("aria-label") || "";   // innerText keeps the space between "Download" and the title
     const sure = /\.pdf($|[?#])/i.test(href);
     const maybe = !sure && (/pdf|download|descarga|t[eé]l[eé]charg|herunterladen/i.test(href + " " + text) || a.hasAttribute("download")) && !/^(#|javascript:|mailto:)/i.test(href);
     if (sure || maybe) add(href, better(a, text), sure);

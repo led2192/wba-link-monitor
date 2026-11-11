@@ -3,7 +3,8 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-11 A second search key,  (its hash only, as for ): the owner's browser lost the team key to the fault of #430 and the key itself is stored nowhere. (#433)
+- 2026-11-11 `browser_uploads.py`: a file sent from the browser whose bytes equal a file already on a row of the company (put there by hand, with no address) makes no new row; that row gets its `document_url`. Files under 20 KB are not matched by size alone. Extension 0.2.3 reads link titles with their spaces ("Download Annual Report 2025"). (#434)
+- 2026-11-11 A second search key, `owner` (its hash only, as for `team`): the owner's browser lost the team key to the fault of #430 and the key itself is stored nowhere. (#433)
 - 2026-11-11 Page v40: the "known but not read" list is asked on its own and can no longer make the page forget its key. For about 20 minutes (v38) the call went through `rpc()`, was refused, and `rpc()` removed the key from the browser: whoever opened one company's documents in that time has to open their lanterN link again. (#432)
 - 2026-11-11 The "known but not read" list was shown to nobody: `unheld_documents` asked for a signed-in person and the page asks with its search key. It now accepts the key, as `find_pages` does. Seen on the live page before telling anyone it worked. (#431)
 - 2026-11-11 lanterN shows, under one company's documents, the documents known by their address and not held ("9 more documents are known but not read: the company's website refuses our robot"), with the link to each original. `load_companies.py` fills `public.unheld_documents` every night from the rows of `report_library` with an address and no file; function `unheld_documents(company)`. (#430)
