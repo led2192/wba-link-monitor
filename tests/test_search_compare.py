@@ -37,7 +37,7 @@ def test_pairs_are_an_option_off_by_default():
 def test_a_phrase_is_marked_as_one_piece_and_typos_are_offered():
     assert "public.phrase_excerpt(left(p.body, 200000), phrases[1])" in FIND
     dym = SQL[SQL.index("create or replace function public.did_you_mean("):SQL.index("-- \"Ask\" (10 Nov 2026")]
-    assert "public.search_key_name(key) is null" in dym and "levenshtein_less_equal" in dym and "limit 20) x) >= 20" in dym and "set enable_seqscan = 'off'" in dym
+    assert "public.search_key_name(key) is null" in dym and "levenshtein_less_equal" in dym and "limit 200) x) >= 200" in dym and "set enable_seqscan = 'off'" in dym
     assert 'rpc("did_you_mean"' in PAGE and "Did you mean " in PAGE
 
 

@@ -1340,7 +1340,7 @@ grant execute on function public.doc_facts(text, text[]) to anon, authenticated;
 -- "Did you mean" (11 Nov 2026). A word typed wrong finds nothing, or only the pages that hold the other words.
 -- search_vocab is the list of words the library knows well: every word of a document's title or a company's name
 -- (company names weigh most), refreshed each time these functions are installed (nightly). A word asked that is
--- not in it, and that fewer than twenty pages hold, is compared with the list: the closest word (one letter
+-- not in it, and that fewer than two hundred pages hold (a misspelling is in the reports too: "emisions" stands on more than twenty pages), is compared with the list: the closest word (one letter
 -- changed, two for a long word), the most frequent first, is offered. Nothing is changed in the search itself:
 -- the page offers the corrected text and the person decides.
 create table if not exists public.search_vocab (word text primary key, n int not null);
@@ -1407,7 +1407,7 @@ begin
   foreach w in array coalesce(t.words, '{}') loop
     continue when w !~ '^[[:alpha:]]{4,30}$';
     continue when exists (select 1 from public.search_vocab v where v.word = w);
-    continue when (select count(*) from (select 1 from public.pages p where p.words @@ quote_literal(w)::tsquery limit 20) x) >= 20;
+    continue when (select count(*) from (select 1 from public.pages p where p.words @@ quote_literal(w)::tsquery limit 200) x) >= 200;
     far := case when length(w) >= 8 then 2 else 1 end;
     execute format('select v.word from public.search_vocab v
                     where length(v.word) between $1 - $2 and $1 + $2 and %s.levenshtein_less_equal(v.word, $3, $2) <= $2
