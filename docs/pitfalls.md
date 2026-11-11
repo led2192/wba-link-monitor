@@ -308,3 +308,6 @@ Propose values starts after Evidence database load "completed" and checked only 
 
 ## Eight writers at once starve the search (11 Nov 2026)
 Eight Semantic index partitions writing together, with the nightly reader and an archive dry run, made searches take 3 to 5 seconds instead of 1 and filled the 15 database places (an install waited 20 minutes for one). By day, two partitions at most; the rest at night.
+
+## A search must bound its own work (11 Nov 2026)
+`find_pages` relaxed a search by or-ing every group of the words with one missing, then two missing. With eight words that is 8 groups of seven, then 28 groups of six, each word with its longer forms: one question of three lines, typed into Ask, took the evidence database down for everyone at that minute, twice (connections dropped; the page said "Failed to fetch"; an install waited 20 minutes on a dead connection). Now at most six words, and one missing word from five words on. Any input a person can type is a load test: bound the size of the query built from it, not only its time.

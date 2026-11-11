@@ -217,4 +217,5 @@ def test_a_result_can_be_judged_from_the_list():
 def test_short_company_names_and_long_questions():
     parse = PAGE[PAGE.index("function parse(text)"):PAGE.index("function setStatus")]
     assert "const short = c.name.length < 4;" in parse and "length >= 2" in parse          # "BP", as written
-    assert "if nw > 6 and ids is null and year_from is null then" in FIND and "words := words[1:6];" in FIND
+    assert "if nw > 6 then" in FIND and "words := words[1:6];" in FIND                      # whatever the filters
+    assert "for drop_n in 0..least(case when nw >= 5 then 1 else 2 end, greatest(nw - 1, 0)) loop" in FIND

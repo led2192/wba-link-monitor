@@ -799,11 +799,12 @@ begin
   select * into t from public.find_terms(q);
   phrases := t.phrases; words := t.words;
   nw := coalesce(array_length(words, 1), 0);
-  -- A question written in full, with no company to narrow it: eight words asked of every page, then every seven of
-  -- them, then every six, is more than the word index answers in the seconds a search has (11 Nov 2026: the gateway
-  -- cut the answer, the page said "Failed to fetch"). The first six words are searched; a company or a year typed
-  -- with the question makes it fast and keeps all eight.
-  if nw > 6 and ids is null and year_from is null then
+  -- A question written in full: eight words, then every seven of them or-ed, then every six of them (28 groups of
+  -- six), is a query the database cannot carry. 11 Nov 2026: a three-line question given to Ask, twice, dropped
+  -- every connection to the database at that minute (two index runs lost theirs, an install hung on a dead one,
+  -- the page said "Failed to fetch"), with and without a company filter. So the work is bounded whatever is typed:
+  -- at most six words are searched (the first six), and from five words on only one word may be missing.
+  if nw > 6 then
     words := words[1:6];
     nw := 6;
   end if;
@@ -936,7 +937,7 @@ begin
     select count(distinct c.library_id) into via_pairs from find_cand c;
   end if;
   <<levels>>
-  for drop_n in 0..least(2, greatest(nw - 1, 0)) loop
+  for drop_n in 0..least(case when nw >= 5 then 1 else 2 end, greatest(nw - 1, 0)) loop
     exit levels when via_pairs >= need;                -- the pair index filled the list (documents, not pages): the word index is not asked
     lvl_q := null;
     for mask in 0..(case when nw = 0 then 0 else (1 << nw) - 1 end) loop
