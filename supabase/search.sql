@@ -2159,6 +2159,11 @@ create table if not exists public.browser_uploads (
 );
 alter table public.browser_uploads enable row level security;
 create unique index if not exists browser_uploads_one_file on public.browser_uploads (wba_id, sha256);
+-- "Does the library hold this address?" is asked for every link (upload_known, upload_begin, add_sources). Without
+-- this index each question read the whole documents table: on 11 Nov 2026, with the database busy, 35 links took
+-- longer than the 8 seconds a signed-in person's statement may run, and the files were "not sent".
+create index if not exists documents_url on public.documents (url);
+create index if not exists browser_uploads_source on public.browser_uploads (wba_id, source_url);
 
 create or replace function public.upload_companies() returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
@@ -2180,6 +2185,7 @@ create or replace function public.upload_begin(
   company text, filename text, bytes bigint, sha256 text, source_url text default null, page_url text default null, client text default null)
 returns jsonb
 language plpgsql security definer set search_path = public, extensions
+set statement_timeout = '20s'
 as $$
 #variable_conflict use_variable
 declare
@@ -2241,6 +2247,7 @@ grant execute on function public.upload_begin(text, text, bigint, text, text, te
 -- its text, or a file sent before). The extension shows them as held and does not offer them.
 create or replace function public.upload_known(company text, urls text[]) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
+set statement_timeout = '20s'
 as $$
 #variable_conflict use_variable
 declare

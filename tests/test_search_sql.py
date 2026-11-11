@@ -254,3 +254,8 @@ def load_tests(loader, standard, pattern):
         if name.startswith("test_") and callable(fn):
             suite.addTest(unittest.FunctionTestCase(fn, description=name))
     return suite
+
+
+def test_the_library_is_asked_about_an_address_through_an_index():
+    assert "create index if not exists documents_url on public.documents (url);" in SQL      # not by reading every document (11 Nov 2026)
+
