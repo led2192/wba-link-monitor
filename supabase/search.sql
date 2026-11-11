@@ -917,10 +917,14 @@ begin
       via_pairs := via_pairs + n;
     end loop;
     got := via_pairs;
+    -- (the list shows at most three pages a document: fifty pages of twelve documents are not a full list. The word
+    -- index is skipped only when the pair pages come from as many documents as rows were asked. 11 Nov 2026:
+    -- "living wage" gave 33 rows with the option where it gave 50 without)
+    select count(distinct c.library_id) into via_pairs from find_cand c;
   end if;
   <<levels>>
   for drop_n in 0..least(2, greatest(nw - 1, 0)) loop
-    exit levels when via_pairs >= need;                -- the pair index filled the list: the word index is not asked
+    exit levels when via_pairs >= need;                -- the pair index filled the list (documents, not pages): the word index is not asked
     lvl_q := null;
     for mask in 0..(case when nw = 0 then 0 else (1 << nw) - 1 end) loop
       continue when nw > 0 and (nw - (select count(*) from generate_series(0, nw - 1) b where (mask >> b) & 1 = 1)) <> drop_n;
