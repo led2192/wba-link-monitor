@@ -46,6 +46,14 @@ class Plan(unittest.TestCase):
         self.assertEqual(B.plan([up(1, url=url)], {"PT_1": "Co"}, {"PT_1": [("recD", lid, url, False, True)]})[0][1], "known")          # same id, discarded: not made again
         self.assertEqual(B.plan([up(1, url=url)], {"PT_1": "Co"}, {"PT_1": [("recD", "PT_1-other", url, False, True)]})[0][1], "create")  # the person sent it: a new row
 
+    def test_the_same_file_put_there_by_hand_is_not_made_again(self):
+        rows = {"PT_1": [("recH", "PT_1-hand", "", True, False, (11492709,)), ("recS", "PT_1-small", "", True, False, (900,))]}
+        u = up(1, url="https://example.com/annual-report-2025.pdf", size=11492709)
+        self.assertEqual(B.plan([u], {"PT_1": "Co"}, rows)[0][1:], ("same", "PT_1-hand", "recH"))                      # the row learns its address
+        rows["PT_1"][0] = ("recH", "PT_1-hand", "https://example.com/elsewhere.pdf", True, False, (11492709,))
+        self.assertEqual(B.plan([u], {"PT_1": "Co"}, rows)[0][1], "known")                                              # it had one: nothing is written
+        self.assertEqual(B.plan([up(2, url="https://example.com/x.pdf", size=900)], {"PT_1": "Co"}, rows)[0][1], "create")  # tiny files are not matched by size alone
+
     def test_ids(self):
         import hashlib
         from ids import normalize
