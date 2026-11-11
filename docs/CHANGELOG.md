@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-11 Extension 0.2.4: a site a person has sent documents from brings its company the next time (a company whose reports sit on a second domain was not recognised); privacy notices, terms of sale and brochures are no longer ticked from the start, methodologies and emissions documents are. (#435)
 - 2026-11-11 `browser_uploads.py`: a file sent from the browser whose bytes equal a file already on a row of the company (put there by hand, with no address) makes no new row; that row gets its `document_url`. Files under 20 KB are not matched by size alone. Extension 0.2.3 reads link titles with their spaces ("Download Annual Report 2025"). (#434)
 - 2026-11-11 A second search key, `owner` (its hash only, as for `team`): the owner's browser lost the team key to the fault of #430 and the key itself is stored nowhere. (#433)
 - 2026-11-11 Page v40: the "known but not read" list is asked on its own and can no longer make the page forget its key. For about 20 minutes (v38) the call went through `rpc()`, was refused, and `rpc()` removed the key from the browser: whoever opened one company's documents in that time has to open their lanterN link again. (#432)

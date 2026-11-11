@@ -171,6 +171,8 @@ function companyOfHost(host) {
   const cands = companies.filter(c => { const h = hostOf(c.website || ""); return h && (h === host || host.endsWith("." + h) || h.endsWith("." + parts.slice(-2).join(".")) || h === parts.slice(-2).join(".")); });
   return cands.length === 1 ? cands[0] : null;
 }
+let hostMemory = {};
+async function rememberHost(company) { const h = hostOf(TAB.url); if (!h || /^REQ_/.test(company.id) || hostMemory[h] === company.id) return; hostMemory[h] = company.id; await store.set("hosts", hostMemory); }
 let asked = null;          // a company this person has just asked for: { id: "REQ_<request>", name }
 const chosenCompany = () => { const v = fold($("company").value); return companies.find(c => fold(c.name) === v) || (asked && fold(asked.name) === v ? asked : null); };
 // A company that is not in the list. It is asked for (the same request "Missing a company?" makes in lanterN), a
@@ -206,9 +208,11 @@ function render() {
 }
 // Ticked from the start only when the link reads like a report or a policy: a home page also links magazines,
 // leaflets and terms of use, and those are for the person to tick, not for the button to send by default.
-const REPORT = /annual|report|informe|memoria|rapport|bericht|relat[oó]rio|bilan|sustainab|sostenib|nachhaltig|durab|esg|csr|rse|integrated|integrado|climat|clima|tcfd|cdp|gri|polic|pol[ií]tica|politique|code|c[oó]digo|conduct|ethic|[eé]tic|human.?rights|derechos|slavery|10-?k|20-?f|accounts|cuentas|financ|governance|gobierno|gouvernance|remunera|statement|universal.registration|proxy/i;
+const REPORT = /annual|report|informe|memoria|rapport|bericht|relat[oó]rio|bilan|sustainab|sostenib|nachhaltig|durab|esg|csr|rse|integrated|integrado|climat|clima|tcfd|cdp|gri|ghg|emission|emision|carbon|net.?zero|methodolog|metodolog|polic|pol[ií]tica|politique|code|c[oó]digo|conduct|ethic|[eé]tic|human.?rights|derechos|slavery|labour|labor|10-?k|20-?f|accounts|cuentas|financ|governance|gobierno|gouvernance|remunera|statement|universal.registration|proxy/i;
+// Papers a company also files beside its reports, and that are not disclosures: never ticked from the start.
+const NOT_REPORT = /privacy|privacidad|datos personales|data protection|protecci[oó]n de datos|cookie|terms (and|&) conditions|general terms|gtcs?\b|condiciones (generales|de venta|de uso)|job applicant|fair processing|brochure|folleto|catalog/i;
 const pathWords = u => { try { return decodeURIComponent(new URL(u).pathname).replace(/[-_+./]/g, " "); } catch (e) { return ""; } };
-const looksReport = d => REPORT.test(d.text + " " + pathWords(d.url));
+const looksReport = d => { const t = d.text + " " + pathWords(d.url); return REPORT.test(t) && !NOT_REPORT.test(t); };
 // Before anything is downloaded: the links lanterN already holds for the chosen company are shown as held, not offered.
 async function markHeld() {
   const company = chosenCompany(); docs.forEach(d => { d.held = false; });
@@ -225,7 +229,10 @@ async function start() {
   $("page").textContent = TAB.title ? `${TAB.title} · ${hostOf(TAB.url)}` : TAB.url;
   try { companies = await rpc("upload_companies"); } catch (e) { $("msg").textContent = `The companies could not be read: ${e.message}`; if (/sign in/.test(e.message)) showSignIn(); return; }
   const dl = $("companies"); for (const c of companies) { const o = el("option"); o.value = c.name; dl.append(o); }
-  const guess = companyOfHost(hostOf(TAB.url)); if (guess) $("company").value = guess.name;
+  // the company's own site, or a site this person has sent documents from before (a company with two sites:
+  // its reports on one, its website on another)
+  hostMemory = (await store.get("hosts")) || {};
+  const guess = companyOfHost(hostOf(TAB.url)) || companies.find(c => c.id === hostMemory[hostOf(TAB.url)]); if (guess) $("company").value = guess.name;
   docs = await listDocuments(); await markHeld();
   $("company").onchange = markHeld;
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
@@ -254,6 +261,7 @@ async function sendAll() {
     catch (e) { d.status.textContent = `not sent: ${e.message}`; d.status.className = "s bad"; bad++; }
     $("msg").textContent = `${ok + bad} of ${todo.length}…`;
   }
+  if (ok) await rememberHost(company);
   $("msg").textContent = `${ok} sent to ${company.name}${bad ? `, ${bad} not sent` : ""}. ` + (/^REQ_/.test(company.id) ? "They wait for the company to be approved (company_requests in Airtable)."
     : "They appear in the library within the half hour, and in the search after the night's load.");
   count();
@@ -263,6 +271,7 @@ async function watchPage() {
   if (/^REQ_/.test(company.id)) { $("msg").textContent = "The page can be added a quarter of an hour after the company is approved (close this window and click the button again)."; return; }
   if (!/^https?:/.test(TAB.url) || isPdfUrl(TAB.url)) { $("msg").textContent = "This is a document, not a page that lists documents."; return; }
   try { const j = await rpc("add_sources", { company: company.id, urls: [TAB.url.split("#")[0]], client: CLIENT });
+    if (j.added || j.again) await rememberHost(company);
     $("msg").textContent = j.added ? `Page added for ${company.name}: lanterN looks at it for new documents.` : j.again ? "You had already added this page." : j.known ? "lanterN already holds this address." : "Not a link lanterN can keep."; }
   catch (e) { $("msg").textContent = `Not added: ${e.message}`; }
 }
