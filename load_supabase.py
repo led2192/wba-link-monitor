@@ -132,6 +132,65 @@ def has_auth(conn):
         return c.fetchone()[0]
 
 
+_ADD_COLUMN = re.compile(r"^alter table (public\.\w+) add column if not exists (\w+) ([^;]+);(.*)$", re.I)
+_ENABLE_RLS = re.compile(r"^alter table (public\.\w+) enable row level security;(.*)$", re.I)
+_CREATE_INDEX = re.compile(r"^create index if not exists (\w+) on ([^;]+);(.*)$", re.I)
+
+
+def guard_sql(text):
+    """search.sql with its repeated schema lines made harmless. "alter table ... add column if not exists",
+    "alter table ... enable row level security" and "create index if not exists" take an exclusive (or write-
+    blocking) lock on the table even when there is nothing to do, and the file runs in one transaction: every
+    install of the search functions held search_log until its end, so every search waited for it (11 Nov 2026: an
+    install slowed by other work held the searches for minutes and the page said "Failed to fetch"). Each such
+    line becomes a block that looks first and touches the table only when the column, the policy switch or the
+    index is missing. Only whole lines that start in the first column are rewritten; everything else is untouched."""
+    out = []
+    for line in text.split("\n"):
+        m = _ADD_COLUMN.match(line)
+        if m:
+            table, col, rest, tail = m.groups()
+            schema, name = table.split(".")
+            stmt = f"alter table {table} add column if not exists {col} {rest}".replace("'", "''")
+            out.append(f"do $guard$ begin if not exists (select 1 from information_schema.columns where table_schema = '{schema}' and table_name = '{name}' "
+                       f"and column_name = '{col}') then execute '{stmt}'; end if; end $guard$;{tail}")
+            continue
+        m = _ENABLE_RLS.match(line)
+        if m:
+            table, tail = m.groups()
+            out.append(f"do $guard$ begin if not coalesce((select c.relrowsecurity from pg_class c where c.oid = to_regclass('{table}')), false) "
+                       f"then execute 'alter table {table} enable row level security'; end if; end $guard$;{tail}")
+            continue
+        m = _CREATE_INDEX.match(line)
+        if m:
+            index, rest, tail = m.groups()
+            stmt = f"create index if not exists {index} on {rest}".replace("'", "''")
+            out.append(f"do $guard$ begin if to_regclass('public.{index}') is null then execute '{stmt}'; end if; end $guard$;{tail}")
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+REFRESHES = ("public.refresh_search_vocab()", "public.refresh_value_confidence()")
+
+
+def refresh_derived(conn):
+    """The small tables rebuilt from the documents and the values (the words for "did you mean", the measured
+    confidence of values): after the functions are committed, each in its own transaction, so a slow rebuild holds
+    nothing the search needs. A failure is printed, never raised: the search works without them."""
+    done = []
+    for fn in REFRESHES:
+        try:
+            with conn.cursor() as c:
+                c.execute("set lock_timeout = '30s'")
+                c.execute(f"select {fn}")
+            conn.commit(); done.append(fn)
+        except Exception as e:
+            conn.rollback()
+            print(f"  {fn} not refreshed: {type(e).__name__}: {str(e)[:120]}", flush=True)
+    return done
+
+
 def search_index_exists(conn):
     with conn.cursor() as c:
         c.execute("select to_regclass('public.pages_search') is not null")
@@ -151,8 +210,10 @@ def apply_schema(conn, commit):
         c.execute(open(SCHEMA, encoding="utf-8").read())
     if has_auth(conn) and search_index_exists(conn):
         with conn.cursor() as c:
-            c.execute(open(SEARCH_SQL, encoding="utf-8").read())
+            c.execute(guard_sql(open(SEARCH_SQL, encoding="utf-8").read()))
     (conn.commit if commit else conn.rollback)()
+    if commit and has_auth(conn) and search_index_exists(conn):
+        refresh_derived(conn)
     with conn.cursor() as c:
         c.execute("set lock_timeout = 0")
 
@@ -397,8 +458,10 @@ def main():
             sys.exit("the search functions need the auth schema and the pages_search index")
         with conn.cursor() as c:
             c.execute("set lock_timeout = '30s'")
-            c.execute(open(SEARCH_SQL, encoding="utf-8").read())
+            c.execute(guard_sql(open(SEARCH_SQL, encoding="utf-8").read()))
         (conn.commit if a.commit else conn.rollback)()
+        if a.commit:
+            refresh_derived(conn)
         print(f"search.sql {'applied' if a.commit else 'checked and rolled back'}", flush=True)
         run.finish("ok", rows_in=0, rows_out=0, counters={"functions_only": True, "committed": a.commit}, notes="search functions only")
         return 0

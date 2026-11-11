@@ -212,5 +212,47 @@ class AgainstPostgres(unittest.TestCase):
 
 
 
+class InstallWithoutLocks(unittest.TestCase):
+    def test_repeated_schema_lines_look_before_they_touch_the_table(self):
+        sql = ("alter table public.search_log add column if not exists typed text;          -- what was typed\n"
+               "alter table public.search_log enable row level security;\n"
+               "create index if not exists search_log_at on public.search_log (at);\n"
+               "alter table public.search_clicks add column if not exists kind text not null default 'open';\n"
+               "  alter table public.x add column if not exists indented text;\n"
+               "create or replace function public.f() returns int language sql as $$ select 1 $$;\n")
+        g = L.guard_sql(sql).split("\n")
+        self.assertIn("information_schema.columns", g[0]); self.assertIn("column_name = 'typed'", g[0])
+        self.assertTrue(g[0].endswith("-- what was typed"))                       # the comment stays
+        self.assertIn("relrowsecurity", g[1]); self.assertIn("to_regclass('public.search_log_at') is null", g[2])
+        self.assertIn("default ''open''", g[3])                                   # quotes doubled inside execute
+        self.assertEqual(g[4], "  alter table public.x add column if not exists indented text;")   # only whole lines from the first column
+        self.assertEqual(g[5], "create or replace function public.f() returns int language sql as $$ select 1 $$;")
+
+    def test_the_search_functions_file_keeps_no_bare_lock_taking_line(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        g = L.guard_sql(open(os.path.join(here, "supabase", "search.sql"), encoding="utf-8").read())
+        for line in g.split("\n"):
+            self.assertFalse(line.startswith("alter table") or line.startswith("create index"), line[:80])
+        self.assertNotIn("perform public.refresh_search_vocab();", g)             # rebuilt after the commit, by the loader
+        self.assertNotIn("perform public.refresh_value_confidence();", g)
+
+    def test_refreshes_run_one_by_one_and_a_failure_is_not_raised(self):
+        class Cur:
+            def __init__(self, conn): self.conn = conn
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def execute(self, sql):
+                self.conn.log.append(sql)
+                if "refresh_search_vocab" in sql: raise RuntimeError("no such function")
+        class Conn:
+            def __init__(self): self.log = []
+            def cursor(self): return Cur(self)
+            def commit(self): self.log.append("commit")
+            def rollback(self): self.log.append("rollback")
+        c = Conn()
+        self.assertEqual(L.refresh_derived(c), ["public.refresh_value_confidence()"])
+        self.assertIn("rollback", c.log); self.assertEqual(c.log[-1], "commit")
+
+
 if __name__ == "__main__":
     unittest.main()
