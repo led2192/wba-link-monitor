@@ -35,7 +35,7 @@ jobs:
         run: |
           test -n "$KEY" || { echo "Set the repository variable SUPABASE_PUBLISHABLE_KEY first"; exit 1; }
           mkdir -p public
-          for f in index.html search.html; do
+          for f in index.html search.html bot.html; do
             sed -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" site/$f > public/$f
             grep -q "__SUPABASE_" public/$f && { echo "placeholders left in $f"; exit 1; } || true
           done

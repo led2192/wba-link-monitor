@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lanterN-bot</title>
+<style>
+  :root { --bg: #FAFAF7; --fg: #0B1F4B; --muted: #5B6680; --accent: #1A6DFF; --line: #E1E4EA; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0E1422; --fg: #EEF1F7; --muted: #A3ADC2; --accent: #7FB0FF; --line: #2A3347; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 48px 16px 80px; }
+  h1 { font-size: 30px; margin: 0 0 6px; } h2 { font-size: 19px; margin: 32px 0 6px; }
+  p { margin: 8px 0; } .lead { color: var(--muted); } a { color: var(--accent); }
+  code { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 1px 6px; border-radius: 5px; font-size: 15px; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>lanterN-bot</h1>
+  <p class="lead">The robot of lanterN, a search engine over what companies publish about their sustainability and their accounts.</p>
+
+  <h2>What it reads</h2>
+  <p>The pages where a company lists its public reports (annual and sustainability reports, policies, codes of conduct) and the documents those pages link to. It does not log in, fill in forms, or read anything behind a password.</p>
+
+  <h2>How often</h2>
+  <p>A page it follows is read at most once a day, usually less. A document is downloaded once. Requests to one site are spaced out.</p>
+
+  <h2>How it presents itself</h2>
+  <p>Its name in the request is <code>lanterN-bot</code>, with the address of this page.</p>
+
+  <h2>Your rules</h2>
+  <p>It follows <code>robots.txt</code>. To keep it out of a part of your site, or all of it:</p>
+  <p><code>User-agent: lanterN-bot</code><br><code>Disallow: /</code></p>
+
+  <h2>Ask it to stop, or to come in</h2>
+  <p>If you run a site and want lanterN-bot to stop, to slow down, or to be allowed where your protection now refuses it, write to us by opening an <a href="https://github.com/led2192/wba-link-monitor/issues">issue on the project's page</a>. Say which site; we answer and act on it.</p>
+
+  <hr>
+  <p class="lead">lanterN uses public documents only. Data from the World Benchmarking Alliance shown in lanterN is credited to it.</p>
+</main>
+</body>
+</html>
