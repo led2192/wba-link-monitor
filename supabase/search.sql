@@ -757,6 +757,7 @@ declare
   capped boolean := false;
   lvl_q tsquery;
   pair_or tsquery;
+  all_q tsquery := null;           -- every word asked, for the excerpt: the lines where they all come together
   use_pairs boolean := false;      -- the word-pair index is asked first (option 'pairs')
   pp_req tsquery := null;          -- the pairs of every quoted phrase: all required
   pp_all tsquery := null;          -- ... and every two neighbouring words asked
@@ -841,6 +842,7 @@ begin
   for i in 1..nw loop
     tqs := tqs || public.find_word_query(words[i]);
     or_q := coalesce(or_q || tqs[i], tqs[i]);
+    all_q := coalesce(all_q && tqs[i], tqs[i]);
   end loop;
   if nw >= 2 then
     together_q := phraseto_tsquery('simple', array_to_string(words, ' '));
@@ -1060,22 +1062,27 @@ begin
       -- and before both, the pages where the words stand together: someone who types "living wage" means the living
       -- wage, not a page that says "wage" here and "living" there (the owner, 10 Nov 2026). Three tiers: together,
       -- every word, some words; the score orders within a tier.
+      -- (11 Nov 2026, "Unilever scope 3 emissions target": a table of Scope 3 emissions with no target stood first,
+      -- because two of the words together counted before holding every word. With three words or more that is
+      -- wrong: the person asked for the target. Now: every word and some of them together; every word; some
+      -- together; some.)
       select w.*, (w.matched >= nw) as complete, (w.pairs > 0 or w.together) as joined,
-             row_number() over (partition by w.library_id order by (w.pairs > 0 or w.together) desc, (w.matched >= nw) desc, w.score desc, w.page) as in_doc
+             row_number() over (partition by w.library_id order by ((w.matched >= nw) and (w.pairs > 0 or w.together)) desc, (w.matched >= nw) desc, (w.pairs > 0 or w.together) desc, w.score desc, w.page) as in_doc
       from single w
       where w.dup = 1),
     top as (
-      select r.library_id, r.page, r.year, r.doc_type, r.score, r.pairs,
-             row_number() over (order by r.joined desc, r.complete desc, r.score desc, r.year desc, r.library_id, r.page) as rk
+      select r.library_id, r.page, r.year, r.doc_type, r.score, r.pairs, r.complete,
+             row_number() over (order by (r.complete and r.joined) desc, r.complete desc, r.joined desc, r.score desc, r.year desc, r.library_id, r.page) as rk
       from ranked r
       where r.in_doc <= 3
-      order by r.joined desc, r.complete desc, r.score desc, r.year desc, r.library_id, r.page
+      order by (r.complete and r.joined) desc, r.complete desc, r.joined desc, r.score desc, r.year desc, r.library_id, r.page
       limit need)
     select lid, t2.rk::int, t2.library_id, d.company, d.wba_id, t2.year, t2.doc_type, d.label, d.url, t2.page, t2.score,
            -- the excerpt shows the words together when the page has them together (the lines that say "living wage",
-           -- not the first lines that say "wage")
+           -- not the first lines that say "wage"); with three words or more on a page that holds them all, the lines
+           -- where all of them come closest (the target beside the Scope 3 emissions, not the emissions table)
            coalesce(case when coalesce(array_length(phrases, 1), 0) > 0 then public.phrase_excerpt(left(p.body, 200000), phrases[1]) end,
-             ts_headline('simple', left(p.body, 20000), case when t2.pairs > 0 and pair_or is not null then pair_or else or_q end,
+             ts_headline('simple', left(p.body, 20000), case when t2.complete and nw >= 3 and all_q is not null then all_q when t2.pairs > 0 and pair_or is not null then pair_or else or_q end,
                          'MaxFragments=2, MaxWords=40, MinWords=15, FragmentDelimiter=" … ", StartSel=⟦, StopSel=⟧'))
     from top t2
     join public.documents d on d.library_id = t2.library_id
