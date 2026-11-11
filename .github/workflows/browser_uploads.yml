@@ -1,11 +1,10 @@
 # The documents sent from a person's browser with the extension "Send to lanterN" (stored in the evidence
 # database's bucket `uploads`) become rows of report_library, with their file (browser_uploads.py).
-# Every 15 minutes, and by hand. Dry run on a PR.
+# Run by the Scan now watch about every 15 minutes (scan_now.side_jobs), and here by hand: no schedule, so that
+# two runs never write the same row at the same moment. Dry run on a PR.
 name: Browser uploads
 
 on:
-  schedule:
-    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       mode:
