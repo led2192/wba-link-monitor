@@ -302,3 +302,9 @@ Propose values starts after Evidence database load "completed" and checked only 
 
 ## A lexeme with an underscore must be cast, not parsed (11 Nov 2026)
 `to_tsquery('simple', '''living_wage''')` runs the text parser, which cuts at the underscore and returns the phrase `'living' <-> 'wage'`. The pair index stores `living_wage` as one lexeme: build the query with a cast, `quote_literal('living_wage')::tsquery` (add `:*` before the cast for a prefix).
+
+## "if not exists" still takes the lock (11 Nov 2026)
+`alter table t add column if not exists c`, `alter table t enable row level security` and `create index if not exists` lock the table (exclusively, or against writes) before they find there is nothing to do, and hold it until the transaction ends. `search.sql` runs as one transaction and repeats such lines for `search_log`: every install of the search functions made every search wait until the install ended, usually a minute, and minutes when the install was slowed by other work (the page said "Failed to fetch"). Measured on a local Postgres: 18 tables locked by a plain install, none with the lines guarded. The loader now rewrites them (`guard_sql`) and runs the slow rebuilds after the commit. The same goes for `schema.sql`, which runs only at night.
+
+## Eight writers at once starve the search (11 Nov 2026)
+Eight Semantic index partitions writing together, with the nightly reader and an archive dry run, made searches take 3 to 5 seconds instead of 1 and filled the 15 database places (an install waited 20 minutes for one). By day, two partitions at most; the rest at night.

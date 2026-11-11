@@ -1226,12 +1226,7 @@ begin
 end;
 $$;
 revoke all on function public.refresh_value_confidence() from public, anon, authenticated;
-do $$
-begin
-  perform public.refresh_value_confidence();
-exception when others then
-  raise notice 'value_confidence not refreshed: %', sqlerrm;
-end $$;
+-- (refresh_value_confidence is run by the loader after the functions are committed, in its own transaction: load_supabase.refresh_derived)
 -- {share, n, of}: the measured share for this attribute and evidence, from the narrowest group with 20 cases.
 create or replace function public.confidence_of(attr text, agree int, variants int) returns jsonb
 language sql stable security definer set search_path = public
@@ -1469,14 +1464,7 @@ begin
 end;
 $$;
 revoke all on function public.refresh_search_vocab() from public, anon, authenticated;
-do $$
-begin
-  if to_regclass('public.companies') is not null then
-    perform public.refresh_search_vocab();
-  end if;
-exception when others then
-  raise notice 'search_vocab not refreshed: %', sqlerrm;
-end $$;
+-- (refresh_search_vocab is run by the loader after the functions are committed, in its own transaction: load_supabase.refresh_derived)
 
 create or replace function public.did_you_mean(key text, q text) returns text
 language plpgsql stable security definer
