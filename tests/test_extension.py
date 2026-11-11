@@ -43,6 +43,13 @@ class Extension(unittest.TestCase):
             self.assertFalse(ticked(no), no)                                              # a retailer's home page and a trader's archive, 11 Nov 2026
         self.assertIn('store.set("hosts", hostMemory)', js)                               # a site sent from before brings its company
 
+    def test_one_level_deeper_stays_on_the_site_and_is_bounded(self):
+        js = read("extension", "send.js")
+        self.assertIn("u.host !== location.host", js)                                      # only pages of the same site are opened
+        self.assertIn("func: collectDeeper, args: [40]", js)                               # forty pages at most
+        self.assertIn("setTimeout(() => c.abort(), 15000)", js)
+        self.assertIn('id="deeper"', read("extension", "send.html"))
+
     def test_the_site_builds_and_offers_it(self):
         wf = read(".github", "workflows", "search_page.yml")
         self.assertIn("extension/**", wf); self.assertIn("public/send-to-lantern.zip", wf)

@@ -79,6 +79,55 @@ function collectLinks() {
   }
   return { pdf: false, links: out.slice(0, 400) };
 }
+// Runs inside the tab: one level deeper. Some report pages show a button per report ("VER", "View") that leads to
+// another page of the same site, and the PDFs are there (an insurer's report room, 11 Nov 2026). The pages this
+// page links to, on the same site, are fetched as the person's browser would and their PDF links collected. At
+// most 40 pages, four at a time, 15 seconds each; nothing is downloaded but those pages. Self-contained (serialised).
+async function collectDeeper(max) {
+  const isPdf = h => /\.pdf($|[?#])/i.test(h);
+  const here = location.href.split("#")[0], pages = [], seen = new Set([here]);
+  const WANT = /\bver\b|view|read|leer|more|m[aá]s|report|informe|memoria|annual|anual|sustain|sosten|document|download|descarg|publica|result|governance|gobierno|cuentas|accounts|esg|rapport|bericht|relat[oó]rio/i;
+  const cands = [];
+  for (const a of document.querySelectorAll("a[href]")) {
+    let u; try { u = new URL(a.getAttribute("href"), location.href); } catch (e) { continue; }
+    if (!/^https?:$/.test(u.protocol) || u.host !== location.host) continue;
+    u.hash = ""; const k = u.href; if (seen.has(k) || isPdf(k) || /\.(jpe?g|png|gif|svg|zip|xlsx?|docx?|pptx?|mp4)($|\?)/i.test(u.pathname)) continue;
+    seen.add(k); const t = (a.innerText || a.textContent || "") + " " + u.pathname;
+    cands.push({ url: k, want: WANT.test(t), inMain: !a.closest("header, nav, footer") });
+  }
+  cands.sort((x, y) => (y.want + y.inMain * 2) - (x.want + x.inMain * 2));
+  const todo = cands.slice(0, max), out = [], got = new Set();
+  const GENERIC = /^(open( the)?( document)?|download( (the )?(pdf|document|report|file))?|pdf|view( pdf)?|read( more)?|here|click here|ver|abrir|descargar( pdf)?|descarga|t[eé]l[eé]charger|herunterladen|baixar|link)?$/i;
+  const one = async p => {
+    try {
+      const c = new AbortController(); const timer = setTimeout(() => c.abort(), 15000);
+      const r = await fetch(p.url, { credentials: "include", signal: c.signal }); clearTimeout(timer);
+      if (!r.ok || !/html/i.test(r.headers.get("content-type") || "")) return;
+      const doc = new DOMParser().parseFromString(await r.text(), "text/html"); pages.push(p.url);
+      const title = (doc.querySelector("h1") || doc.querySelector("title") || {}).textContent || "";
+      for (const a of doc.querySelectorAll("a[href]")) {
+        const href = a.getAttribute("href") || ""; if (!isPdf(href)) continue;
+        let u; try { u = new URL(href, p.url); } catch (e) { continue; }
+        u.hash = ""; if (got.has(u.href)) continue; got.add(u.href);
+        let text = (a.textContent || a.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+        if (GENERIC.test(text)) text = (title.replace(/\s+/g, " ").trim() + " " + decodeURIComponent(u.pathname.split("/").pop() || "").replace(/\.pdf$/i, "").replace(/[-_+]+/g, " ")).trim();
+        out.push({ url: u.href, text: text.slice(0, 200), sure: true, from: p.url });
+      }
+    } catch (e) {}
+  };
+  for (let i = 0; i < todo.length; i += 4) await Promise.all(todo.slice(i, i + 4).map(one));
+  return { pages: pages.length, asked: todo.length, more: cands.length - todo.length, links: out.slice(0, 400) };
+}
+async function lookDeeper() {
+  $("deeper").textContent = "Reading the pages this page links to…";
+  try {
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: TAB.id }, func: collectDeeper, args: [40] });
+    const j = (res && res.result) || { pages: 0, links: [] }; const have = new Set(docs.map(d => d.url)); let n = 0;
+    for (const d of j.links) if (!have.has(d.url)) { have.add(d.url); docs.push(d); n++; }
+    await markHeld();
+    $("deeper").textContent = `${n} more document${n === 1 ? "" : "s"} found in ${j.pages} page${j.pages === 1 ? "" : "s"} this page links to` + (j.more > 0 ? ` (${j.more} other links were not opened)` : "") + ". Look again";
+  } catch (e) { $("deeper").textContent = "This page could not be read one level deeper. Try again"; }
+}
 async function listDocuments() {
   if (isPdfUrl(TAB.url)) return [{ url: TAB.url.split("#")[0], text: TAB.title, sure: true }];
   try {
@@ -196,7 +245,7 @@ function newCompany() {
 }
 function render() {
   const list = $("list"); list.innerHTML = "";
-  if (!docs.length) list.append(el("div", "empty", "No link to a PDF on this page. Open the page that lists the documents, or the PDF itself, and click the button again."));
+  if (!docs.length) list.append(el("div", "empty", "No link to a PDF on this page. If its buttons lead to the reports, use \"Look one level deeper\" above; or open the page that lists the documents, or the PDF itself, and click the button again."));
   docs.forEach((d, i) => {
     const row = el("label", "doc" + (d.sure ? "" : " maybe")); const box = el("input"); box.type = "checkbox"; box.checked = d.sure && looksReport(d) && !d.held; box.dataset.i = i;
     box.onchange = count;
@@ -238,6 +287,7 @@ async function start() {
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };
   $("go").onclick = sendAll; $("watch").onclick = watchPage; $("newco").onclick = e => { e.preventDefault(); newCompany(); };
+  $("deeper").hidden = isPdfUrl(TAB.url) || !/^https?:/.test(TAB.url); $("deeper").onclick = e => { e.preventDefault(); lookDeeper(); };
 }
 function showSignIn() {
   $("work").hidden = true; $("sign").hidden = false;
