@@ -206,6 +206,11 @@
   @media (max-width: 760px) { .me .lv { display: none; } .me { padding: 4px; } }
   .result .doc .ico { width: 18px; height: 18px; border-radius: 4px; vertical-align: -4px; margin-right: 2px; background: var(--box); }
   .result .doc .size:empty { display: none; }
+  .result .doc .marks { margin-left: auto; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+  .result:hover .doc .marks, .result .doc .marks.said, .result .doc .marks:focus-within { opacity: 1; }
+  .result .doc .marks button { font: inherit; font-size: 12px; line-height: 1; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); background: var(--box); color: var(--muted); cursor: pointer; padding: 0; }
+  .result .doc .marks .yes.on { background: #4BB42D; border-color: #4BB42D; color: #fff; } .result .doc .marks .no.on { background: #FF3C23; border-color: #FF3C23; color: #fff; }
+  @media (hover: none) { .result .doc .marks { opacity: 1; } }
   .values .score { font-size: 12.5px; color: var(--muted); padding: 6px 0; }
   .values .addlink { display: inline-block; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; color: var(--accent); text-decoration: none; background: var(--bg); }
   .values .addlink:hover { border-color: var(--accent); }
@@ -299,7 +304,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v30 2026-11-11";
+  const CLIENT = "lantern v31 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -392,13 +397,6 @@
     const found = { company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null };
     const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const take = (names) => { for (const n of names) { const re = new RegExp("\\s" + esc(n) + "\\s", "i"); if (re.test(q)) { q = q.replace(re, " "); return true; } } return false; };
-    // profiles first (an industry name like "Oil & Gas" or a country must not be read as words), longest names first
-    for (const ind of [...industries].sort((a, b) => b.length - a.length)) {
-      const names = [ind, ind.replace(/ & /g, " and "), ind.replace(/ & /g, " y "), ...(INDUSTRY_ALIASES[ind] || [])];
-      if (take(names)) { found.industry = ind; break; }
-    }
-    for (const [code, names] of Object.entries(COUNTRIES)) { if (take([...names, code])) { found.country = code; found.countryName = names[0]; break; } }
-    for (const reg of regions) { if (take([reg, reg.replace(/ & /g, " and "), ...(REGION_ALIASES[reg] || [])])) { found.region = reg; break; } }
     // Company names are matched without accents and whatever the case ("Nestlé" is the company "Nestle", "Loreal" is
     // "L'Oréal": 10 Nov 2026), and a name may be followed by a comma or a semicolon ("Unilever; Nestlé living wage").
     const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -425,6 +423,18 @@
     }
     if (hits.length) q = q.replace(/\s[;,](?=\s)/g, " ");
     if (hits.length) { found.company = hits.map(c => c.id).join(";"); found.companyName = hits.map(c => c.name).join(", "); }
+    // then the profiles (an industry name like "Oil & Gas" or a country must not be read as words), longest names first.
+    // Companies come before them: "Basra Oil Company" is a company, not the Oil & Gas industry and the word "Basra"
+    // (11 Nov 2026; 104 company names hold an industry's word, and others a country's: "Bank of China")
+    // With a company named, an industry or a country adds nothing as a filter, so the words stay words ("Shell oil spills").
+    if (!hits.length) {
+      for (const ind of [...industries].sort((a, b) => b.length - a.length)) {
+        const names = [ind, ind.replace(/ & /g, " and "), ind.replace(/ & /g, " y "), ...(INDUSTRY_ALIASES[ind] || [])];
+        if (take(names)) { found.industry = ind; break; }
+      }
+      for (const [code, names] of Object.entries(COUNTRIES)) { if (take([...names, code])) { found.country = code; found.countryName = names[0]; break; } }
+      for (const reg of regions) { if (take([reg, reg.replace(/ & /g, " and "), ...(REGION_ALIASES[reg] || [])])) { found.region = reg; break; } }
+    }
     const years = [];
     q = q.replace(/\s(20[0-3]\d)\s*[-–]\s*(20[0-3]\d)(?=\s)/g, (m, a, b) => { years.push(+a, +b); return " "; });
     q = q.replace(/\s(20[0-3]\d)(?=\s)/g, (m, a) => { years.push(+a); return " "; });
@@ -525,6 +535,15 @@
       if (href) { a.href = href; a.target = "_blank"; a.rel = "noopener"; }
       a.addEventListener("click", () => { rpc("find_click", { key, log_id: r.log_id, library_id: r.library_id, page: r.page, rank: r.rank }).catch(() => {}); });
       h.appendChild(a);
+      // the two marks: a verdict from the list, without opening the document (most results are judged that way)
+      const marks = el("span", "marks");
+      for (const [useful, sign, tip] of [[true, "✓", "This result is what I was looking for"], [false, "✗", "This result is not relevant"]]) {
+        const bt = el("button", useful ? "yes" : "no", sign); bt.type = "button"; bt.title = tip;
+        bt.onclick = () => { marks.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === bt)); marks.classList.add("said");
+                             rpc("find_judge", { key, log_id: r.log_id, library_id: r.library_id, page: r.page, rank: r.rank, useful }).catch(() => {}); };
+        marks.appendChild(bt);
+      }
+      doc.appendChild(marks);
       const p = el("p"); p.innerHTML = excerptHtml(r.excerpt);
       d.append(doc, h, p); box.appendChild(d);
     }
@@ -566,7 +585,7 @@
                                              industry_filter: state.industry, country_filter: state.country, region_filter: state.region,
                                              typed: $("q").value.trim() });
       const s = ((performance.now() - t0) / 1000).toFixed(1);
-      if (!rows.length) setStatus(state.q ? (state.q.includes('"') ? `No page found with that phrase${anyFilter ? " and these filters" : ""}. A phrase of very common words is checked on a sample of pages: add a company, a year or another word. (${s} s)` : `No page holds those words, even one or two of them${anyFilter ? ", with these filters" : ""}. (${s} s)`) : `No document matches these filters. (${s} s)`);
+      if (!rows.length) setStatus(state.q ? (state.q.includes('"') ? `No page found with that phrase${anyFilter ? " and these filters" : ""}. A phrase of very common words is checked on a sample of pages: add a company, a year or another word. (${s} s)` : `No page holds those words, even one or two of them${anyFilter ? ", with these filters" : ""}. (${s} s)`) : (state.company && !state.company.includes(";") && !state.type && !state.from && !state.to ? `We hold no document of ${state.companyName || "this company"} yet. If you know one, add its link below. (${s} s)` : `No document matches these filters. (${s} s)`));
       else if (!state.q) setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} documents, newest first. (${s} s)`);
       else setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} pages, best first, at most three a document. (${s} s)`);
       if (state.typeWords && !more) {                       // the type was read from the words typed: offer the other reading
@@ -1101,7 +1120,9 @@
   $("goLucky").onclick = () => $("lucky").click();
   $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; if (deck.at >= 0 && deck.cards.length) { deck.at--; } lucky("next"); window.scrollTo(0, 0); };
   $("foot").style.cssText = "margin-top:8px;padding-top:0"; showMine(false);
-  $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches and the pages opened are logged, without names, to improve the ranking.';
+  $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lanterN</a>';
+  $("share").onclick = async ev => { ev.preventDefault(); const link = location.origin + location.pathname + "#k=" + key;       // the same key on another device or for a colleague: searching needs only the link; reviews, Ask and adding need a WBA sign-in
+    try { await navigator.clipboard.writeText(link); ev.target.textContent = "Link copied: paste it to a colleague or open it on your other device"; } catch (e) { ev.target.textContent = link; } };
   loadCompanies().then(() => {
     const q0 = new URLSearchParams(location.search).get("q");
     if (q0) { $("q").value = q0; search(false); }

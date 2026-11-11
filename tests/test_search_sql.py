@@ -198,3 +198,17 @@ def test_a_company_named_like_a_word_is_the_word_unless_written_as_a_name():
 
 def test_the_excerpt_of_three_words_shows_where_they_all_meet():
     assert "case when t2.complete and nw >= 3 and all_q is not null then all_q" in FIND
+
+
+def test_companies_are_read_before_industries_and_countries():
+    parse = PAGE[PAGE.index("function parse(text)"):PAGE.index("function setStatus")]
+    assert parse.index("for (const c of byLength)") < parse.index("for (const ind of [...industries]")       # "Basra Oil Company" is a company
+    assert "if (!hits.length) {" in parse                                                                    # "Shell oil spills": oil stays a word
+    assert "We hold no document of" in PAGE
+
+
+def test_a_result_can_be_judged_from_the_list():
+    judge = SQL[SQL.index("create or replace function public.find_judge("):SQL.index("-- The companies, for the page to recognise")]
+    assert "public.search_key_name(key) is null" in judge and "case when useful then 'useful' else 'not' end" in judge
+    assert "add column if not exists kind text not null default 'open'" in SQL
+    assert 'rpc("find_judge"' in PAGE and 'id="share"' in PAGE and "prompt(" not in PAGE

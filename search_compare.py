@@ -12,7 +12,7 @@ the owner's connection), and reports for each:
   together       of the first ten, the pages whose excerpt marks the words as one piece or side by side
   same           of the first ten with the option on, how many were in the first ten without it
 
-and, from the click log (search_clicks: the pages people opened after a search of theirs):
+and, from the click log (search_clicks: the pages people opened, or marked useful, after a search of theirs):
 
   clicked found  of the pages opened in past searches, how many come back in the first ten, with and without
   MRR            the mean of 1 / rank of the opened page (0 when it is not in the first fifty)
@@ -115,7 +115,7 @@ def main():
             cur.execute("""
                 select distinct on (l.q, l.company, l.year_from, l.year_to, l.doc_type) l.q, l.company, l.year_from, l.year_to, c.library_id, c.page
                 from public.search_clicks c join public.search_log l on l.id = c.log_id
-                where coalesce(l.q, '') <> '' and coalesce(l.client, '') not like 'compare%%' and c.library_id is not null
+                where coalesce(l.q, '') <> '' and coalesce(l.client, '') not like 'compare%%' and c.library_id is not null and c.kind in ('open', 'useful')
                 order by l.q, l.company, l.year_from, l.year_to, l.doc_type, c.at desc limit %s""", (a.clicks,))
             clicks = cur.fetchall()
             r_off, r_on = [], []
