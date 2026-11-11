@@ -6,7 +6,7 @@ name: Add companies
 
 on:
   schedule:
-    - cron: "41 * * * *"
+    - cron: "11,26,41,56 * * * *"
   workflow_dispatch:
     inputs:
       mode:

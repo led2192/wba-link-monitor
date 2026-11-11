@@ -29,7 +29,17 @@ async function token() {
   }
   return s.access_token;
 }
+// A busy database drops a call now and then ("Failed to fetch", a statement timeout): each call is tried three times.
+const pause = ms => new Promise(r => setTimeout(r, ms));
 async function rpc(fn, body) {
+  let last;
+  for (let i = 0; i < 3; i++) {
+    try { return await rpcOnce(fn, body); }
+    catch (e) { last = e; if (!/Failed to fetch|timeout|HTTP 5\d\d|NetworkError/i.test(e.message)) throw e; await pause(2000 * (i + 1)); }
+  }
+  throw new Error(/Failed to fetch/.test(last.message) ? "lanterN's database did not answer (busy): try again in a few minutes" : last.message);
+}
+async function rpcOnce(fn, body) {
   const t = await token(); if (!t) throw new Error("sign in again");
   const r = await fetch(`${conf.url}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: conf.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   const j = await r.json().catch(() => ({}));
@@ -137,9 +147,13 @@ async function sendOne(doc, company) {
                                          page_url: doc.url === TAB.url.split("#")[0] ? null : TAB.url, client: CLIENT });
   if (j.known) return "already in lanterN";
   if (j.again) return "already sent";
-  const t = await token();
-  const r = await fetch(`${conf.url}/storage/v1/object/uploads/${j.path}`, { method: "POST",
-    headers: { apikey: conf.key, Authorization: `Bearer ${t}`, "Content-Type": "application/pdf" }, body: buf });
+  const t = await token(); let r;
+  for (let i = 0; ; i++) {
+    try { r = await fetch(`${conf.url}/storage/v1/object/uploads/${j.path}`, { method: "POST",
+      headers: { apikey: conf.key, Authorization: `Bearer ${t}`, "Content-Type": "application/pdf" }, body: buf }); if (r.status < 500 || i >= 2) break; }
+    catch (e) { if (i >= 2) throw new Error("lanterN's storage did not answer (busy): try again in a few minutes"); }
+    await pause(2000 * (i + 1));
+  }
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     if (!(r.status === 409 || /exists|duplicate/i.test(e.message || e.error || ""))) throw new Error(`not stored: ${e.message || e.error || "HTTP " + r.status}`);
