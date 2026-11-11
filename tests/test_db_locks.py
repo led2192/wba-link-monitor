@@ -18,3 +18,14 @@ class Waiting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Orphans(unittest.TestCase):
+    def test_only_statements_older_than_any_job(self):
+        import db_locks as D
+        rows = [(1, "postgres", "x", "active", "IO", "DataFileRead", 25042, "insert into public.documents"),
+                (2, "postgres", "x", "active", None, None, 3600, "select 1"),
+                (3, "postgres", "x", "idle in transaction", None, None, 99999, "select 1")]
+        self.assertEqual([r[0] for r in D.orphans(rows)], [1])
+        self.assertGreater(D.ORPHAN_SECONDS, 360 * 60)                 # longer than GitHub lets a job live
+

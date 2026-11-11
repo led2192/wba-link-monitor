@@ -114,6 +114,8 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.upload_begin(%s, 'a.pdf', 5000, %s)", (f"REQ_{rid}", "ef" * 32)); self.assertEqual(cur.fetchone()[0]["path"], f"REQ_{rid}/{'ef' * 32}.pdf")
         with self.assertRaises(Exception):
             cur.execute("select public.upload_begin('REQ_999999', 'a.pdf', 5000, %s)", ("ef" * 32,))     # a request that is not this person's
+        cur.execute("select public.upload_companies()"); mine = [c for c in cur.fetchone()[0] if c.get("asked")]
+        self.assertEqual([(c["id"], c["name"]) for c in mine], [(f"REQ_{rid}", "Acme Robotics")])        # the company asked for can be chosen again
         for bad in (("X",), ("Beta", "not a site"), ("Gamma", None, "123")):
             with self.assertRaises(Exception):
                 cur.execute("select public.request_company(%s, %s, %s)", (bad + (None, None))[:3])

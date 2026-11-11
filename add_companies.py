@@ -194,6 +194,13 @@ def main():
                                 "lei": norm_lei(f.get("lei")), "intake_note": f"{note}, asked for in lanterN ({today})"})})
                         airtable_request("PATCH", f"{API}/{BASE}/{quote('company_requests')}/{rec['id']}", headers,
                                          payload={"fields": {"status": "added" if what == "add" else "not added", "result": f"{note} ({today})"}})
+                        if what == "add":
+                            # the search's own list of companies (load_companies.py fills it nightly) learns the
+                            # company now, so its links and documents can be added at once
+                            cur.execute("select to_regclass('public.companies') is not null")
+                            if cur.fetchone()[0]:
+                                cur.execute("insert into public.companies (wba_id, name, website) values (%s, %s, %s) on conflict (wba_id) do nothing",
+                                            (cid, (f.get("company_name") or "").strip(), f.get("website") or None))
                         m = re.match(r"^REQ_(\d+)$", f.get("request_id") or "")
                         if m:
                             cur.execute("update public.company_requests set status = %s, result = %s where id = %s",

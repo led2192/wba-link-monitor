@@ -260,7 +260,7 @@ async function sendAll() {
 }
 async function watchPage() {
   const company = chosenCompany(); if (!company) { $("msg").textContent = "Choose the company from the list first."; $("company").focus(); return; }
-  if (/^REQ_/.test(company.id)) { $("msg").textContent = "The page can be added once the company is approved."; return; }
+  if (/^REQ_/.test(company.id)) { $("msg").textContent = "The page can be added a quarter of an hour after the company is approved (close this window and click the button again)."; return; }
   if (!/^https?:/.test(TAB.url) || isPdfUrl(TAB.url)) { $("msg").textContent = "This is a document, not a page that lists documents."; return; }
   try { const j = await rpc("add_sources", { company: company.id, urls: [TAB.url.split("#")[0]], client: CLIENT });
     $("msg").textContent = j.added ? `Page added for ${company.name}: lanterN looks at it for new documents.` : j.again ? "You had already added this page." : j.known ? "lanterN already holds this address." : "Not a link lanterN can keep."; }

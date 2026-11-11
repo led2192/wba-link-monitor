@@ -8,8 +8,15 @@ db_locks.py: who is waiting for whom in the evidence database, and the release o
                                             statement can stay queued for hours and, queued for an exclusive
                                             lock, it blocks every new reader of that table (9 Nov 2026).
 
-Dry run by default: --release prints what it would end; with --commit it ends them (pg_terminate_backend).
-Never ends a reader or a writer of rows, only a waiting schema statement. Read-only otherwise.
+    python db_locks.py --orphans [--commit] end the statements that have run longer than any job can live. A job is
+                                            killed by GitHub at 360 minutes; its statement can go on in the database
+                                            with nobody waiting for the answer (11 Nov 2026: the insert of a load
+                                            killed at 14:03 UTC had been running for 7 hours, holding its lock on
+                                            `documents` and the disk, and every install after it failed).
+
+Dry run by default: --release and --orphans print what they would end; with --commit they end them
+(pg_terminate_backend). --release never ends a reader or a writer of rows, only a waiting schema statement;
+--orphans ends only statements older than ORPHAN_SECONDS (6 hours 30 minutes). Read-only otherwise.
 """
 import argparse, os, sys
 
@@ -43,9 +50,18 @@ def waiting_schema(rows):
     return out
 
 
+ORPHAN_SECONDS = 6 * 3600 + 1800          # no job lives 6 h 30 min: GitHub kills it at 6 h
+
+
+def orphans(rows):
+    """The active statements older than any job: (pid, ..., seconds, query) rows of sessions()."""
+    return [r for r in rows if r[3] == "active" and (r[6] or 0) > ORPHAN_SECONDS]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--release", action="store_true")
+    ap.add_argument("--orphans", action="store_true")
     ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     import evidence_db
@@ -63,6 +79,16 @@ def main():
             print("no schema statement is waiting for a lock")
         for r in stuck:
             print(f"{'ending' if a.commit else 'would end'} pid {r[0]}: {r[7]}")
+            if a.commit:
+                cur.execute("select pg_terminate_backend(%s)", (r[0],))
+                print("  ended" if cur.fetchone()[0] else "  could not end (another role's session?)")
+        conn.commit()
+    if a.orphans:
+        old = orphans(rows)
+        if not old:
+            print("no statement has outlived its job")
+        for r in old:
+            print(f"{'ending' if a.commit else 'would end'} pid {r[0]}, running for {r[6] // 3600} h {r[6] % 3600 // 60} min")
             if a.commit:
                 cur.execute("select pg_terminate_backend(%s)", (r[0],))
                 print("  ended" if cur.fetchone()[0] else "  could not end (another role's session?)")
