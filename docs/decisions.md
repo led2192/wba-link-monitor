@@ -605,3 +605,6 @@ What: Supabase Storage, private bucket `archive`, one object a document at `<wba
 
 ## What a visitor can cost is bounded (11 Nov 2026)
 Searching costs nothing a search. Ask calls the model: 3 answers a person a day, and since today 300 a day for everyone together (about 3 USD at most). The nightly reader's ceiling is a repository variable (`READER_MAX_USD`, default 5) so the owner changes it without a change of code. Why: the owner may open lanterN to the public and pay for it himself.
+
+## The robot will say who it is; measured first (11 Nov 2026)
+The owner wants the robot to carry a name (`lanterN-bot`), point to a public page and obey robots.txt, and to ask refused sites for access. The 17 fetchers present themselves as a browser today and none reads robots.txt. Both changes can lose pages we read now (sites that refuse unknown robots, robots.txt rules against the pages we watch), so the first step changes no fetcher: `robot_identity.py` measures the loss on a sample, one page a site. The switch follows as an option in one shared place, then as the default if the owner accepts the measured loss. Rejected: switching the 17 fetchers at once (an unknown share of the watched pages could go dark the same night); proxies that pass for people (cost, and against the spirit of the legal review of crawling under way).
