@@ -1697,8 +1697,9 @@ begin
 
 Excerpts:
 
-' || context, 500);
-  answer := got ->> 'text'; err := got ->> 'error';
+' || context, 2500);      -- the answer is short; the room is for the model's reasoning (with 500 a hard question ended before any text)
+  answer := nullif(btrim(coalesce(got ->> 'text', '')), '');
+  err := coalesce(got ->> 'error', case when answer is null then format('the model returned no text (stop %s, %s tokens out)', got ->> 'stop', got ->> 'out') end);
   tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
   insert into public.ask_log (asker, question, answered, answer, sources, input_tokens, output_tokens, ms, error, client, keywords)
     values (who, asked, answer is not null, answer, sources, tok_in, tok_out,
