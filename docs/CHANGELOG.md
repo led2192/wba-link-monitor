@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-11 Scan now: the watch starts even when the browser cannot be installed (the step is bounded to ten minutes and no longer fails the run); the inbox stood still for 20 minutes behind a failed and then a hanging install of system packages. (#419)
 - 2026-11-11 `inbox.py`: a refused page pasted together with a dropped file is kept as a page, and the file is not given the page's address (an annual accounts PDF had become "the document at" the company's reports page). (#418)
 - 2026-11-11 The robot's name and rules, first step: `site/bot.html` (who lanterN-bot is, what it reads, how to keep it out or ask it in) and `robot_identity.py` (workflow Robot identity, manual, read-only), which reads a sample of watched pages as today and as `lanterN-bot` and checks each site's robots.txt, so the cost of the honest identity is known before any fetcher changes. No fetcher changed. (#417)
 - 2026-11-11 `inbox.py`: a page (not a PDF) on a site that refuses cloud servers is kept as a watched page marked blocked, so the office-network fetch reads it and its documents follow; before, the link was answered "nothing added" and lost. (#416)
