@@ -100,6 +100,26 @@ class RefusedPage(unittest.TestCase):
         self.assertTrue(any("drop it in add_file" in l for l in lines))                   # the PDF: as before
 
 
+class RefusedPageWithAFile(unittest.TestCase):
+    def test_a_dropped_file_is_not_given_the_address_of_a_refused_page(self):
+        import inbox as I
+        writes = []
+        real = (I.company_state, I.write)
+        I.company_state = lambda wba: ([], [])
+        I.write = lambda table, method, recs: writes.append((table, method, recs)) or [{"id": "recNEW"}]
+        try:
+            rec = {"id": "recCO", "fields": {"wba_id": "LN_350acc0e", "company_name": "Mutua", "add_link": "https://www.grupomutua.es/sala-de-prensa/informes/",
+                                             "add_file": [{"url": "https://dl/x.pdf", "filename": "cuentas_anuales_2024.pdf", "size": 10}]}}
+            lines, created, pages = I.handle_company(rec, FakeSess(403), set())
+        finally:
+            I.company_state, I.write = real
+        tables = [t for t, m, _ in writes]
+        self.assertEqual(sorted(tables), sorted([I.LINKS, I.LIB]))                    # the page is kept as a page, the file as a document
+        doc = [r for t, m, r in writes if t == I.LIB][0][0]["fields"]
+        self.assertNotIn("document_url", doc)                                         # not "the document at" the reports page
+        self.assertTrue(any("Page kept as" in l for l in lines))
+
+
 class ResearchLinks(unittest.TestCase):
     def test_research_links_are_marked_and_pages_tagged(self):
         import inbox as I
