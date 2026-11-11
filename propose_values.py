@@ -373,6 +373,19 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
             companies = [w for w in companies if fy_end_month(cur, w) in months]
             c["model reader: companies with a fiscal year ending in the months asked"] = len(companies)
         fresh = recent_reads(cur, companies, codes, getattr(a, "fresh_days", 0))
+        # the journal: only a run that writes keeps one (a dry run pays little and must leave the database alone)
+        journaling, journal = bool(getattr(a, "commit", False)), {}
+        if journaling:
+            try:
+                journal = journal_load(cur, companies, codes, getattr(a, "journal_days", 7)); conn.commit()
+                c["model reader: reads waiting in the journal"] = len(journal)
+            except Exception as e:
+                journaling = False
+                c[f"model reader: no journal ({type(e).__name__}: {str(e)[:100]})"] = 1
+                try:
+                    conn.rollback(); cur.execute("set statement_timeout = '90s'")
+                except Exception:
+                    pass
         c["model reader: read in the last days, skipped"] = 0
         for wba in companies:
             for code in codes:
@@ -399,7 +412,20 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                     try:
                         # the validated answers of the company's other years: the company's memory (company_memory.py)
                         known = {yy: g["value"] for (w, cc, yy), g in gold.items() if w == wba and cc == code and yy != y and g.get("value")}
-                        got = read_values(cur, wba, y, spec[code], full, usage, known)
+                        if (wba, code, y) in journal:        # read and paid for by a run that did not finish
+                            got = journal[(wba, code, y)]
+                            c["model reader: taken from the journal, not asked again"] += 1
+                        else:
+                            got = read_values(cur, wba, y, spec[code], full, usage, known)
+                            if journaling:
+                                try:
+                                    journal_put(conn, wba, code, y, got, now)
+                                except Exception as e:           # the read is kept in memory; only its safety copy is missing
+                                    c["model reader: reads not journalled"] += 1
+                                    try:
+                                        conn.rollback()
+                                    except Exception:
+                                        pass
                     except Exception as e:
                         if type(e).__name__ == "ModelRefused":
                             # the API said no (3 Nov 2026: the credit ran out after four hours of the second pass,
@@ -412,7 +438,18 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                             traceback.print_exc()
                             c[f"model reader: first error {type(e).__name__}: {str(e)[:120]}"] = 1
                         c["model reader: errors"] += 1
-                        conn.rollback(); cur.execute("set statement_timeout = '90s'")
+                        try:
+                            conn.rollback(); cur.execute("set statement_timeout = '90s'")
+                        except Exception:
+                            # the connection is gone (the database restarted, or dropped it): a new one, and the
+                            # reading goes on; if none can be had, stop and write what was read to Airtable
+                            try:
+                                conn = __import__("evidence_db").connect(wait_minutes=5); cur = conn.cursor()
+                                cur.execute("set statement_timeout = '90s'")
+                                c["model reader: reconnected to the evidence database"] += 1
+                            except Exception:
+                                c["model reader: stopped, the evidence database could not be reached"] = 1; stop = True
+                                break
                         continue
                     reads.append((wba, code, y, any(e["year"] == y for e in got)))
                     for e in got:
@@ -479,6 +516,34 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
         c["model reader: restated in another report"] += 1 if f["restated"] else 0
         rows.append(f)
     return rows
+
+
+JOURNAL_SQL = """create table if not exists public.model_read_journal (
+  wba_id text not null, attribute text not null, year int not null, read_on timestamptz not null,
+  entries jsonb not null, primary key (wba_id, attribute, year))"""
+
+
+def journal_load(cur, companies, codes, days):
+    """{(wba, code, year): entries} the model reader read and paid for in the last `days` days (model_read_journal).
+    A read is written there the moment the model answers. A run that dies before its end (11 Nov 2026: the database
+    dropped every connection at the run's last minute and about 2 USD of reads were lost) leaves its reads here,
+    and the next run takes them from the journal instead of asking the model again. A read that a finished run
+    recorded is skipped before this is looked at (recent_reads), so the journal only serves unfinished work."""
+    if not days:
+        return {}
+    cur.execute(JOURNAL_SQL)
+    cur.execute("select wba_id, attribute, year, entries from public.model_read_journal where read_on > now() - make_interval(days => %s) "
+                "and wba_id = any(%s) and attribute = any(%s)", (int(days), list(companies), list(codes)))
+    return {(w, a, int(y)): (e if isinstance(e, list) else json.loads(e)) for w, a, y, e in cur.fetchall()}
+
+
+def journal_put(conn, wba, code, year, got, now=None):
+    """One read into the journal, committed at once, stamped with the database's clock."""
+    with conn.cursor() as cur:
+        cur.execute("insert into public.model_read_journal (wba_id, attribute, year, read_on, entries) values (%s,%s,%s,now(),%s::jsonb) "
+                    "on conflict (wba_id, attribute, year) do update set read_on = excluded.read_on, entries = excluded.entries",
+                    (wba, code, int(year), json.dumps(got, default=str)))
+    conn.commit()
 
 
 READS_SQL = """create table if not exists public.model_reads (
@@ -607,6 +672,8 @@ def main():
     ap.add_argument("--attributes", default="", help="model reader: GMC codes (blank = every number attribute)")
     ap.add_argument("--companies", default="", help="model reader: wba ids, comma-separated (blank = every company)")
     ap.add_argument("--max-usd", type=float, default=1.0, help="model reader: stop when the estimated cost reaches this")
+    ap.add_argument("--journal-days", type=int, default=7, help="take from the journal the reads a run that did not finish paid for "
+                    "in the last N days, instead of asking the model again (0 = ask again)")
     ap.add_argument("--budget", type=float, default=300, help="minutes: the model reader stops reading after this, "
                     "so what it read is still written before the job's limit (one answer takes about 15 to 20 s)")
     ap.add_argument("--fresh-days", type=int, default=30, help="model reader: skip a company, attribute and year read "

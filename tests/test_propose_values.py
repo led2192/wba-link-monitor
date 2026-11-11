@@ -336,10 +336,43 @@ class Propose(unittest.TestCase):
             self.assertEqual(rows, [("L23", 100.0), ("L24", 100.2), ("L25", 97.0)])
             c.execute("drop table public.value_versions"); c.commit()
 
+    def test_a_read_is_journalled_at_once_and_not_paid_twice(self):
+        # 11 Nov 2026: the database dropped every connection at the run's last minute; about 2 USD of reads were lost
+        import types, collections, psycopg, extract_eval
+        url = os.environ.get("PG_TEST_URL") or os.environ.get("PG_SEARCH_TEST_URL")
+        if not url:
+            self.skipTest("PG_TEST_URL not set")
+        calls = []
+        def fake(cur, wba, year, attr, spec, usage, known=None):
+            calls.append((wba, year))
+            if wba == "PT_2":
+                raise RuntimeError("the run dies here")
+            return [dict(value=5.0, printed=5.0, scale=1, library_id="L", page=1, unit="tCO2e", year=year, column=str(year), asked=year)]
+        real = (extract_eval.read_values, P.library_docs, extract_eval.proposal_consensus, P.write_versions, P.write_reads, P.write_truth)
+        extract_eval.read_values = fake; P.library_docs = lambda *a: {}; extract_eval.proposal_consensus = lambda *a: (1, 1)
+        P.write_versions = P.write_reads = P.write_truth = lambda *a: 0
+        os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = url
+        a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024", companies="PT_1,PT_2", limit=0, max_usd=1.0, budget=300, commit=True)
+        spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number", "unit_family": "tco2e"}}
+        try:
+            with psycopg.connect(url) as c0:
+                c0.execute("drop table if exists public.model_read_journal"); c0.commit()
+            c1 = collections.Counter(); P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c1)
+            self.assertEqual(calls, [("PT_1", 2024), ("PT_2", 2024)])
+            calls.clear()
+            c2 = collections.Counter(); rows = P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c2)
+            self.assertEqual(calls, [("PT_2", 2024)])                               # PT_1 is not asked again
+            self.assertEqual(c2["model reader: taken from the journal, not asked again"], 1)
+            self.assertEqual([r["wba_id"] for r in rows], ["PT_1"])                 # and its figure is proposed all the same
+            with psycopg.connect(url) as c0:
+                c0.execute("drop table public.model_read_journal"); c0.commit()
+        finally:
+            extract_eval.read_values, P.library_docs, extract_eval.proposal_consensus, P.write_versions, P.write_reads, P.write_truth = real
+
     def test_validated_answers_kept_for_the_review_game(self):
         gold = {("PT_1", "GMC_00001.1", 2024): {"value": 100.0}, ("PT_1", "GMC_00002.1", 2024): {"value": None}, ("", "X", 2024): {"value": 3.0}}
         self.assertEqual(P.write_truth(None, {}, NOW), 0)                                  # nothing validated: the database is not asked
-        url = os.environ.get("PG_TEST_URL")
+        url = os.environ.get("PG_TEST_URL") or os.environ.get("PG_SEARCH_TEST_URL")
         if not url:
             self.skipTest("PG_TEST_URL not set")
         import psycopg

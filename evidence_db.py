@@ -18,7 +18,10 @@ def connect(url=None, connect_timeout=30, wait_minutes=WAIT_MINUTES, sleep=time.
     deadline, pause = time.time() + wait_minutes * 60, 15
     while True:
         try:
-            return psycopg.connect(url, connect_timeout=connect_timeout)
+            # keepalives: a connection whose other end is gone is noticed in about a minute. Without them a writer
+            # waited for hours on a dead connection (11 Nov 2026: the night's reader hung at its last step after the
+            # database dropped every connection, and was killed with what it had read unwritten).
+            return psycopg.connect(url, connect_timeout=connect_timeout, keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3)
         except psycopg.OperationalError as e:
             full = "max clients" in str(e) or "EMAXCONNSESSION" in str(e) or "too many clients" in str(e)
             if not full or time.time() + pause > deadline:

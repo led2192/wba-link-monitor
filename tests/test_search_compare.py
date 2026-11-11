@@ -44,3 +44,14 @@ def test_a_phrase_is_marked_as_one_piece_and_typos_are_offered():
 def test_only_the_scheduled_load_starts_a_paid_pass():
     wf = open(os.path.join(ROOT, ".github", "workflows", "propose_values.yml"), encoding="utf-8").read()
     assert '[ "${{ github.event.workflow_run.event }}" != "schedule" ]' in wf
+
+
+def load_tests(loader, standard, pattern):
+    """The Tests workflow runs unittest, which does not collect plain functions: without this hook none of the
+    checks in this file ran there (found 11 Nov 2026). Each test_ function becomes a case."""
+    import unittest
+    suite = unittest.TestSuite()
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            suite.addTest(unittest.FunctionTestCase(fn, description=name))
+    return suite

@@ -311,3 +311,6 @@ Eight Semantic index partitions writing together, with the nightly reader and an
 
 ## A search must bound its own work (11 Nov 2026)
 `find_pages` relaxed a search by or-ing every group of the words with one missing, then two missing. With eight words that is 8 groups of seven, then 28 groups of six, each word with its longer forms: one question of three lines, typed into Ask, took the evidence database down for everyone at that minute, twice (connections dropped; the page said "Failed to fetch"; an install waited 20 minutes on a dead connection). Now at most six words, and one missing word from five words on. Any input a person can type is a load test: bound the size of the query built from it, not only its time.
+
+## Paid work must be written when it is paid for (11 Nov 2026)
+The model reader kept everything it read in memory and wrote at the end. The database dropped every connection in the run's last minute; the run waited on a dead connection (no keepalive) until the job's time limit killed it, and about 2 USD of reads were lost. Three rules since: a paid result is written at once (`model_read_journal`) and reused by the next run; every database connection has keepalives; a writer that loses its connection opens another. The same had happened on 3 Nov with the API credit (fixed then for that cause only).
