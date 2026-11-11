@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-11 Extension 0.3.0, "Look one level deeper": a report page whose buttons lead to one page per report (an insurer's report room showed no PDF link at all) can be read one level down. The pages it links to on the same site, 40 at most, are fetched by the person's browser and their PDF links listed with the rest. (#436)
 - 2026-11-11 Extension 0.2.4: a site a person has sent documents from brings its company the next time (a company whose reports sit on a second domain was not recognised); privacy notices, terms of sale and brochures are no longer ticked from the start, methodologies and emissions documents are. (#435)
 - 2026-11-11 `browser_uploads.py`: a file sent from the browser whose bytes equal a file already on a row of the company (put there by hand, with no address) makes no new row; that row gets its `document_url`. Files under 20 KB are not matched by size alone. Extension 0.2.3 reads link titles with their spaces ("Download Annual Report 2025"). (#434)
 - 2026-11-11 A second search key, `owner` (its hash only, as for `team`): the owner's browser lost the team key to the fault of #430 and the key itself is stored nowhere. (#433)
