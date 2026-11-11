@@ -2328,7 +2328,10 @@ create table if not exists public.unheld_documents (
 alter table public.unheld_documents enable row level security;
 create index if not exists unheld_documents_company on public.unheld_documents (wba_id);
 
-create or replace function public.unheld_documents(company text) returns jsonb
+-- Open to whoever may search: the page's key, as find_pages, or a signed-in person. (The first version asked for
+-- a signed-in person only, and the page, which searches with its key, was shown nothing.)
+drop function if exists public.unheld_documents(text);
+create or replace function public.unheld_documents(company text, key text default null) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
 as $$
 #variable_conflict use_variable
@@ -2336,8 +2339,8 @@ declare
   who text := lower(auth.jwt() ->> 'email');
   co text := btrim(coalesce(company, ''));
 begin
-  if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+  if public.search_key_name(key) is null and (who is null or not public.email_may_search(who)) then
+    raise exception 'not allowed' using errcode = '42501';
   end if;
   return jsonb_build_object(
     'n', (select count(*) from public.unheld_documents u where u.wba_id = co),
@@ -2347,6 +2350,6 @@ begin
                         order by u.label desc nulls last limit 60) x));
 end;
 $$;
-revoke all on function public.unheld_documents(text) from public, anon;
-grant execute on function public.unheld_documents(text) to authenticated;
+revoke all on function public.unheld_documents(text, text) from public;
+grant execute on function public.unheld_documents(text, text) to anon, authenticated;
 
