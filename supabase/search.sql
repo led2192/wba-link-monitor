@@ -2192,6 +2192,10 @@ begin
   if (select count(*) from public.browser_uploads u where u.uploader = who and u.at > now() - interval '1 day') >= 300 then
     raise exception 'three hundred files a day at most' using errcode = '22023';
   end if;
+  -- everyone together: a ceiling, so that no mistake and no misuse fills the library in a day
+  if (select count(*) from public.browser_uploads u where u.at > now() - interval '1 day') >= 2000 then
+    raise exception 'the day''s limit for everyone is reached: try again tomorrow' using errcode = '22023';
+  end if;
   if src is not null and exists (select 1 from public.documents d where d.url = src and coalesce(d.pages, 0) > 0) then
     return jsonb_build_object('known', true);                        -- the library holds this document, with its text
   end if;
@@ -2212,6 +2216,30 @@ end;
 $$;
 revoke all on function public.upload_begin(text, text, bigint, text, text, text, text) from public, anon;
 grant execute on function public.upload_begin(text, text, bigint, text, text, text, text) to authenticated;
+
+-- Before anything is downloaded: which of these addresses lanterN already holds for the company (a document with
+-- its text, or a file sent before). The extension shows them as held and does not offer them.
+create or replace function public.upload_known(company text, urls text[]) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+  end if;
+  if coalesce(array_length(urls, 1), 0) > 400 then
+    raise exception 'four hundred links at most' using errcode = '22023';
+  end if;
+  return (select coalesce(jsonb_agg(x.u), '[]'::jsonb) from unnest(coalesce(urls, '{}')) as x(u)
+          where exists (select 1 from public.documents d where d.url = x.u and coalesce(d.pages, 0) > 0)
+             or exists (select 1 from public.browser_uploads b where b.wba_id = co and b.source_url = x.u and b.status in ('stored', 'taken', 'known')));
+end;
+$$;
+revoke all on function public.upload_known(text, text[]) from public, anon;
+grant execute on function public.upload_known(text, text[]) to authenticated;
 
 create or replace function public.upload_done(upload_id bigint) returns jsonb
 language plpgsql security definer set search_path = public, extensions

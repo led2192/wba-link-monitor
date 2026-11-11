@@ -27,6 +27,16 @@ class Extension(unittest.TestCase):
         self.assertIn('head.includes("%PDF-")', js)                                       # what is not a PDF is not sent
         self.assertIn("MAX_BYTES = 50 * 1024 * 1024", js)
 
+    def test_what_is_held_is_not_offered_and_only_reports_are_ticked(self):
+        js = read("extension", "send.js")
+        self.assertIn('rpc("upload_known"', js)                                           # asked before anything is downloaded
+        self.assertIn("box.checked = d.sure && looksReport(d) && !d.held", js)
+        m = re.search(r"const REPORT = /(.+)/i;", js); rx = re.compile(m.group(1), re.I)
+        for yes in ("Annual report 2024", "memoria anual 2023", "Informe de sostenibilidad", "Code of Conduct", "Política de derechos humanos"):
+            self.assertTrue(rx.search(yes), yes)
+        for no in ("¡Look Felin e ideas para regalar! document es revista noviembre 2026 pdf", "Ticket Digital CondicionesTicketDigital pdf"):
+            self.assertFalse(rx.search(no), no)                                           # a retailer's home page, 11 Nov 2026
+
     def test_the_site_builds_and_offers_it(self):
         wf = read(".github", "workflows", "search_page.yml")
         self.assertIn("extension/**", wf); self.assertIn("public/send-to-lantern.zip", wf)
