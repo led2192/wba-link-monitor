@@ -65,5 +65,13 @@ class Pairs(unittest.TestCase):
         self.assertIn("chunk_docs", calls[-1][1])
 
 
+class Reconnect(unittest.TestCase):
+    def test_a_lost_connection_is_replaced_not_fatal(self):
+        import os
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "semantic_index.py"), encoding="utf-8").read()
+        self.assertIn('if type(e).__name__ != "OperationalError" or lost >= 5:', src)      # five times, then the run fails as before
+        self.assertIn("conn = evidence_db.connect(); cur = conn.cursor()", src)
+
+
 if __name__ == "__main__":
     unittest.main()
