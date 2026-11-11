@@ -49,6 +49,7 @@ jobs:
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}     # read-only use: is each candidate's text in the evidence database
       - name: Summary
         if: always()
         run: cat archive_candidates.md >> "$GITHUB_STEP_SUMMARY" || true
