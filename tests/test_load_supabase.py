@@ -75,6 +75,10 @@ class Planning(unittest.TestCase):
         self.assertEqual(L.document_row({"id": "a", "status": "ok"}, {"end": "2025-03"})[14], "2025-03")
         self.assertEqual(L.document_row({"id": "a", "status": "ok"}, {"end": "2025"})[14], "2025")
         self.assertIsNone(L.document_row({"id": "a", "status": "ok"}, {"end": "March 2025"})[14])
+        # found (11 Nov 2026): the day the pipeline found the document, a plain date or nothing
+        self.assertEqual(L.document_row({"id": "a", "status": "ok"}, {"found": "2026-11-03"})[15], "2026-11-03")
+        self.assertIsNone(L.document_row({"id": "a", "status": "ok"}, {"found": "yesterday"})[15])
+        self.assertIsNone(L.document_row({"id": "a", "status": "ok"}, {})[15])
 
 
 @unittest.skipUnless(os.environ.get("PG_TEST_URL"), "set PG_TEST_URL to a throwaway Postgres to run")
