@@ -304,7 +304,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v34 2026-11-11";
+  const CLIENT = "lantern v35 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -558,7 +558,10 @@
     // at the foot of any list: the way to tell us what is missing
     const miss = el("div", "missing"); const ml = el("a", null, "Missing a document? Add its link"); ml.href = "#";
     ml.onclick = ev => { ev.preventDefault(); const hold = miss.querySelector(".values") || miss.appendChild(el("div", "values")); addSourceForm(hold, state.company && !state.company.includes(";") ? state.company : null); };
-    miss.appendChild(ml); box.appendChild(miss);
+    miss.appendChild(ml);
+    const mc = el("a", null, "Missing a company? Ask for it"); mc.href = "#"; mc.style.marginLeft = "14px";
+    mc.onclick = ev => { ev.preventDefault(); const hold = miss.querySelector(".values") || miss.appendChild(el("div", "values")); askCompanyForm(hold); };
+    miss.appendChild(mc); box.appendChild(miss);
   }
 
   async function search(fromChips, more) {
@@ -731,6 +734,31 @@
     const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
     f.append(el("div", "what", "A document we do not hold"), lab("Company"), co, lab("Links to the documents"), links, lab("Reporting year"), yr, lab("A note for the team"), why, msg, acts);
     holder.appendChild(f); (co.value ? links : co).focus();
+  }
+  // "Missing a company? Ask for it": a request, read by a person before the company is added and its pages searched for
+  function askCompanyForm(holder) {
+    if (holder.querySelector(".askco")) return; const f = el("div", "fix add askco"); const lab = t => el("label", "lab", t);
+    const nm = el("input"); nm.placeholder = "The company's name"; nm.maxLength = 120;
+    const site = el("input"); site.placeholder = "https://… (optional)";
+    const lei = el("input"); lei.placeholder = "20 characters (optional)"; lei.maxLength = 24;
+    const why = el("textarea"); why.rows = 2; why.placeholder = "Optional: why it matters, where its reports are";
+    const msg = el("div", "what", ""); const go = el("button", null, "Ask for the company");
+    const send = async () => {
+      if (nm.value.trim().length < 2) { msg.textContent = "Write the company's name."; return; }
+      const t = await token(); if (!t) { signInBox(holder, send); return; }
+      try {
+        const r = await fetch(`${CONFIG.url}/rest/v1/rpc/request_company`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: nm.value, website: site.value, lei: lei.value, note: why.value, client: CLIENT }) });
+        const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
+        f.innerHTML = ""; f.append(el("div", "what", j.held ? `${j.name} is already in lanterN: search for it by name.` : j.again ? `You had already asked for ${j.name}.`
+          : `Thank you. ${j.name} is asked for: a person checks it, then its reports are searched for.`));
+      } catch (e) { msg.textContent = `Not sent: ${e.message}`; }
+    };
+    go.onclick = send;
+    const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
+    const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
+    f.append(el("div", "what", "A company lanterN does not follow yet"), lab("Company"), nm, lab("Website"), site, lab("LEI"), lei, lab("A note for the team"), why, msg, acts);
+    holder.appendChild(f); nm.focus();
   }
   function addValueLink(panel, attrs) {
     const wrap = el("div", "addrow"); const a = el("a", "addlink", "+ Add a value"); a.href = "#"; a.title = "Add a value the robot does not hold, with its source";

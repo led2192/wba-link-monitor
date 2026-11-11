@@ -134,7 +134,7 @@ def has_auth(conn):
 
 _ADD_COLUMN = re.compile(r"^alter table (public\.\w+) add column if not exists (\w+) ([^;]+);(.*)$", re.I)
 _ENABLE_RLS = re.compile(r"^alter table (public\.\w+) enable row level security;(.*)$", re.I)
-_CREATE_INDEX = re.compile(r"^create index if not exists (\w+) on ([^;]+);(.*)$", re.I)
+_CREATE_INDEX = re.compile(r"^create (unique )?index if not exists (\w+) on ([^;]+);(.*)$", re.I)
 
 
 def guard_sql(text):
@@ -163,8 +163,8 @@ def guard_sql(text):
             continue
         m = _CREATE_INDEX.match(line)
         if m:
-            index, rest, tail = m.groups()
-            stmt = f"create index if not exists {index} on {rest}".replace("'", "''")
+            unique, index, rest, tail = m.groups()
+            stmt = f"create {unique or ''}index if not exists {index} on {rest}".replace("'", "''")
             out.append(f"do $guard$ begin if to_regclass('public.{index}') is null then execute '{stmt}'; end if; end $guard$;{tail}")
             continue
         out.append(line)
