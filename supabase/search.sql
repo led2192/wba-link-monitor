@@ -1661,6 +1661,8 @@ begin
       keywords := btrim(left(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
       tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
       if keywords = '' then keywords := null; end if;
+    else
+      err := 'search words not chosen: ' || left(coalesce(got ->> 'error', 'no reply'), 200);     -- kept in the log; the question itself is searched
     end if;
   end if;
   -- the pages: the search's own best six, the first 3,000 characters of each
@@ -1679,8 +1681,8 @@ begin
   end loop;
   if n = 0 then
     insert into public.ask_log (asker, question, answered, error, ms, client)
-      values (who, asked, false, 'no page found', extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60));
-    return jsonb_build_object('answer', null, 'sources', '[]'::jsonb, 'left', per_day - used, 'per_day', per_day, 'none', true);
+      values (who, asked, false, left(concat_ws('; ', 'no page found', 'searched: ' || coalesce(keywords, '(the question)'), err), 400), extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60));
+    return jsonb_build_object('answer', null, 'sources', '[]'::jsonb, 'left', per_day - used, 'per_day', per_day, 'none', true, 'keywords', keywords, 'why', err);
   end if;
   got := public.ask_model(api_key, http_schema, model,
     'You answer questions from sustainability analysts using only the numbered excerpts of company documents given to you. '
