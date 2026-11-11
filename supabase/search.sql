@@ -466,6 +466,8 @@ alter table public.search_keys enable row level security;
 -- The team's link (10 Nov 2026). To revoke: update search_keys set active = false where name = 'team';
 -- a new key: insert a new row with encode(digest('<key>', 'sha256'), 'hex') and send the new link.
 insert into public.search_keys (name, key_hash) values ('team', 'a6018fc9ce54a921d2e1540c77d6abfa2c912daa2103f56ad792f3acc01be207') on conflict (name) do nothing;
+-- The owner's own link (11 Nov 2026), made when a change to the page removed the key from his browser.
+insert into public.search_keys (name, key_hash) values ('owner', 'c8c8ac6bb48eb2cedd55ae43a5895fd7d1e7854e55c80ca82ff5d811346af215') on conflict (name) do nothing;
 
 create table if not exists public.search_log (
   id         bigserial primary key,
