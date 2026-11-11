@@ -34,8 +34,14 @@ class Extension(unittest.TestCase):
         m = re.search(r"const REPORT = /(.+)/i;", js); rx = re.compile(m.group(1), re.I)
         for yes in ("Annual report 2024", "memoria anual 2023", "Informe de sostenibilidad", "Code of Conduct", "Política de derechos humanos"):
             self.assertTrue(rx.search(yes), yes)
-        for no in ("¡Look Felin e ideas para regalar! document es revista noviembre 2026 pdf", "Ticket Digital CondicionesTicketDigital pdf"):
-            self.assertFalse(rx.search(no), no)                                           # a retailer's home page, 11 Nov 2026
+        m2 = re.search(r"const NOT_REPORT = /(.+)/i;", js); nx = re.compile(m2.group(1), re.I)
+        ticked = lambda t: bool(rx.search(t)) and not nx.search(t)
+        for yes in ("Vitol GHG Methodology 2025 Vitol GHG Emissions Calculation Methodology 2025", "Modern Slavery Policy Statement 2025/26", "Human rights policy"):
+            self.assertTrue(ticked(yes), yes)
+        for no in ("¡Look Felin e ideas para regalar! document es revista noviembre 2026 pdf", "Ticket Digital CondicionesTicketDigital pdf",
+                   "Colombia privacy policy 05 11 2025 Politica de Tratamiento de Datos Colombia 2025", "Vitol in Africa Vitol in Africa Brochure ENG", "Vitol Metals GTCs"):
+            self.assertFalse(ticked(no), no)                                              # a retailer's home page and a trader's archive, 11 Nov 2026
+        self.assertIn('store.set("hosts", hostMemory)', js)                               # a site sent from before brings its company
 
     def test_the_site_builds_and_offers_it(self):
         wf = read(".github", "workflows", "search_page.yml")
