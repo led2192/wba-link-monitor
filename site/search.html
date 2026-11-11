@@ -298,7 +298,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v27 2026-11-11";
+  const CLIENT = "lantern v28 2026-11-11";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -932,7 +932,7 @@
     box.innerHTML = ""; const c = el("div", "lucky");
     const back = el("a", null, "← Back to search"); back.href = "#"; back.onclick = e => { e.preventDefault(); luckyClose(); };
     const top = el("div", "top"); top.append(back,
-      el("span", "score", `${pts % 1 ? pts.toFixed(2) : pts} ${pts === 1 ? "point" : "points"} · ${levelLine(pts)}` + (sc.reviewers > 1 && sc.reviews ? ` · #${sc.rank} of ${sc.reviewers}` : "")));
+      el("span", "score", `${pts % 1 ? pts.toFixed(2) : pts} ${pts === 1 ? "point" : "points"} · ${levelLine(pts)}` + (Number(sc.checked) > 0 ? ` · ${sc.right} of ${sc.checked} checked answers right` : "") + (sc.reviewers > 1 && sc.reviews ? ` · #${sc.rank} of ${sc.reviewers}` : "")));
     showMe(sc);
     c.appendChild(top);
     c.append(el("div", "who", [v.company, v.industry, v.country].filter(Boolean).join(" · ")));

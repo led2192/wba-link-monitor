@@ -1729,18 +1729,53 @@ grant execute on function public.add_sources(text, text[], int, text, text) to a
 -- with its source and the person's score. The score counts reviews, a review made in under four seconds as a
 -- quarter (kept, and weighed as such); the rank is the person's place among reviewers, without names. Scoring by
 -- reviews that turn out right (validated values mixed in unannounced) waits for the validated values to be loaded.
+-- The review game counts right answers, not volume (phase 2, 11 Nov 2026). value_truth holds the validated answers
+-- (propose_values.py writes them each night from the read-only bases; this database is private). A value the
+-- robot read whose validated answer is known is a control card: it is dealt one time in five, unannounced, and
+-- looks like any other. Only the clear cases count: the robot's figure within 0.5% of the validated one (the
+-- right verdict is "right"), or off by more than double or less than half (a scale error: the right verdict is
+-- "wrong"). In between the two figures may differ for a good reason (a restatement, another basis), and a careful
+-- reviewer would be punished for reading the page well: those cards are ordinary ones.
+create table if not exists public.value_truth (
+  wba_id text not null, attribute text not null, year int not null, value double precision not null,
+  loaded timestamptz not null default now(), primary key (wba_id, attribute, year));
+alter table public.value_truth enable row level security;
+
+-- 'ok' or 'wrong' when the version is a control card, null when it is not.
+create or replace function public.control_verdict(v double precision, truth double precision) returns text
+language sql immutable
+as $$
+  select case when v is null or truth is null or truth = 0 then null
+              when abs(v - truth) / abs(truth) <= 0.005 then 'ok'
+              when abs(v) > 2 * abs(truth) or abs(v) < 0.5 * abs(truth) then 'wrong'
+              else null end
+$$;
+
+-- Points: a review is 1 point (a quarter when made in under four seconds); on a control card a right verdict is 3
+-- and a wrong one takes 2 away; a source passed on to the pipeline is 3. Never below zero. "checked" and "right"
+-- say how many control cards the person has answered and how many well.
 create or replace function public.review_score(who text) returns jsonb
 language sql stable security definer set search_path = public
 as $$
-  with pts as (select u.reviewer, sum(u.p) as points, sum(u.r) as reviews
-               from (select r.reviewer, case when r.seconds is not null and r.seconds < 4 then 0.25 else 1 end as p, 1 as r
-                     from public.value_reviews r where r.verdict in ('ok', 'wrong')
+  with rv as (select r.reviewer, r.verdict, r.seconds,
+                     (select public.control_verdict(vv.value, t.value) from public.value_versions vv
+                      join public.value_truth t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
+                      where vv.version_id = r.version_id) as expected
+              from public.value_reviews r where r.verdict in ('ok', 'wrong')),
+       pts as (select u.reviewer, greatest(sum(u.p), 0) as points, sum(u.r) as reviews, sum(u.c) as checked, sum(u.g) as good
+               from (select rv.reviewer,
+                            case when rv.expected is null then case when rv.seconds is not null and rv.seconds < 4 then 0.25 else 1 end
+                                 when rv.expected = rv.verdict then 3 else -2 end as p,
+                            1 as r, case when rv.expected is null then 0 else 1 end as c, case when rv.expected = rv.verdict then 1 else 0 end as g
+                     from rv
                      union all
-                     select ss.reviewer, 3, 0 from public.source_submissions ss where ss.status = 'queued') u   -- a source passed on to the pipeline: three points
+                     select ss.reviewer, 3, 0, 0, 0 from public.source_submissions ss where ss.status = 'queued') u   -- a source passed on to the pipeline: three points
                group by u.reviewer)
   select jsonb_build_object(
     'points', coalesce((select p.points from pts p where p.reviewer = who), 0),
     'reviews', coalesce((select p.reviews from pts p where p.reviewer = who), 0),
+    'checked', coalesce((select p.checked from pts p where p.reviewer = who), 0),
+    'right', coalesce((select p.good from pts p where p.reviewer = who), 0),
     'rank', 1 + (select count(*) from pts p where p.points > coalesce((select q.points from pts q where q.reviewer = who), 0)),
     'reviewers', (select count(*) from pts))
 $$;
@@ -1763,11 +1798,21 @@ begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to review' using errcode = '42501';
   end if;
-  select vv.* into p from public.value_versions vv
-    where not exists (select 1 from public.value_reviews r where r.version_id = vv.version_id and r.reviewer = who)
-    order by (select count(*) from public.value_reviews r where r.version_id = vv.version_id), random()
-    limit 1;
-  if not found then
+  if random() < 0.2 then                                     -- one card in five is a control card, when there is one left for this person
+    select vv.* into p from public.value_versions vv
+      join public.value_truth t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
+      where public.control_verdict(vv.value, t.value) is not null
+        and not exists (select 1 from public.value_reviews r where r.version_id = vv.version_id and r.reviewer = who)
+      order by random()
+      limit 1;
+  end if;
+  if p.version_id is null then
+    select vv.* into p from public.value_versions vv
+      where not exists (select 1 from public.value_reviews r where r.version_id = vv.version_id and r.reviewer = who)
+      order by (select count(*) from public.value_reviews r where r.version_id = vv.version_id), random()
+      limit 1;
+  end if;
+  if p.version_id is null then
     return jsonb_build_object('value', null, 'score', public.review_score(who));
   end if;
   -- the lines of the source page around the figure, so the card can be judged before opening the document: the

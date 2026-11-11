@@ -336,6 +336,21 @@ class Propose(unittest.TestCase):
             self.assertEqual(rows, [("L23", 100.0), ("L24", 100.2), ("L25", 97.0)])
             c.execute("drop table public.value_versions"); c.commit()
 
+    def test_validated_answers_kept_for_the_review_game(self):
+        gold = {("PT_1", "GMC_00001.1", 2024): {"value": 100.0}, ("PT_1", "GMC_00002.1", 2024): {"value": None}, ("", "X", 2024): {"value": 3.0}}
+        self.assertEqual(P.write_truth(None, {}, NOW), 0)                                  # nothing validated: the database is not asked
+        url = os.environ.get("PG_TEST_URL")
+        if not url:
+            self.skipTest("PG_TEST_URL not set")
+        import psycopg
+        with psycopg.connect(url) as c:
+            c.execute("drop table if exists public.value_truth"); c.commit()
+            self.assertEqual(P.write_truth(c, gold, NOW), 1)                                # an answer with no value, or no company, is left out
+            gold[("PT_1", "GMC_00001.1", 2024)]["value"] = 101.0
+            self.assertEqual(P.write_truth(c, gold, NOW), 1)                                # written again: updated, not duplicated
+            self.assertEqual(c.execute("select wba_id, year, value from public.value_truth").fetchall(), [("PT_1", 2024, 101.0)])
+            c.execute("drop table public.value_truth"); c.commit()
+
 if __name__ == "__main__":
     unittest.main()
 
