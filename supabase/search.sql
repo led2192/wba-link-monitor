@@ -1907,7 +1907,10 @@ begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to add a source' using errcode = '42501';
   end if;
-  if co = '' or not exists (select 1 from public.documents d where d.wba_id = co) then
+  -- a company of the list, with or without documents yet (11 Nov 2026: a company added that day had none, and
+  -- its first links were refused)
+  if co = '' or not (exists (select 1 from public.documents d where d.wba_id = co)
+                     or exists (select 1 from public.companies c where c.wba_id = co)) then
     raise exception 'choose the company the document belongs to' using errcode = '22023';
   end if;
   if coalesce(array_length(urls, 1), 0) = 0 or array_length(urls, 1) > 20 then

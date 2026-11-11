@@ -129,6 +129,8 @@ def test_added_sources_are_signed_checked_and_one_per_person():
     assert "public.email_may_search(who)" in src and "array_length(urls, 1) > 20" in src
     assert "exists (select 1 from public.documents d where d.url = u)" in src                    # a link the library holds is not kept
     assert "on conflict on constraint source_submissions_one_per_person do nothing" in src
+    assert "exists (select 1 from public.companies c where c.wba_id = co)" in src                # a company with no document yet can be given its first links
+    assert "pages that list them" in PAGE                                                        # a report hub is a link like any other
     assert "to authenticated;" in src and "from public, anon;" in src
     assert "select ss.reviewer, 3, 0, 0, 0 from public.source_submissions ss where ss.status = 'queued'" in SQL   # three points once passed on
 
