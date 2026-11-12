@@ -73,6 +73,14 @@ class Propose(unittest.TestCase):
         f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1", "unit_family": "tco2e"}, 2024, dict(got, unit=""), {}, {}, None, NOW)
         self.assertEqual((f["unit"], f["source_url"], f["matches_validated"]), ("tCO2e", None, "no validated answer"))
         self.assertNotIn("document", f)
+        self.assertNotIn("unit_printed", f)
+        # 12 Nov 2026: 0.39 Mt-CO2e was written as 390,000 "Mt-CO2e"
+        f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1", "unit_family": "tco2e"}, 2024,
+                        dict(got, value=390000.0, printed=0.39, unit="t-CO2e", unit_printed="Mt-CO2e"), {}, {}, None, NOW)
+        self.assertEqual((f["value"], f["unit"], f["unit_printed"]), (390000.0, "tCO2e", "Mt-CO2e"))
+        f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1", "unit_family": "tco2e"}, 2024,
+                        dict(got, value=88555.0, printed=88555.0, scale=1, unit="MT CO2e"), {}, {}, None, NOW)
+        self.assertEqual(f["unit"], "MT CO2e"); self.assertNotIn("unit_printed", f)          # metric tons or megatonnes: not ours to say
         self.assertNotIn("printed_on_pages", f)                            # no consensus computed: nothing written
         f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1"}, 2024, dict(got, printed_pages=1, printed_docs=1), {}, {}, None, NOW)
         self.assertEqual((f["printed_on_pages"], f["printed_in_documents"]), (1, 1))

@@ -213,11 +213,18 @@ def validated_fields(g):
     return f
 
 
+from model_reader import shown_unit
+
+
 def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
     """The Airtable fields of one model-reader proposal. got: model_reader's checked reply; doc: the
     report_library row of its document ({"id", "url", "label"}) or {}."""
     g = gold.get((wba, code, year))
-    unit = got.get("unit") or {"tco2e": "tCO2e", "count": "employees"}.get(attr.get("unit_family"), "")
+    # The unit of the value, not of the printed number (12 Nov 2026): the scale is taken out of it and tonnes of CO2e
+    # are written one way; what the document prints goes to unit_printed when it differs (model_reader.shown_unit).
+    printed_unit = got.get("unit_printed") or got.get("unit") or ""
+    unit = (shown_unit(printed_unit, got.get("scale"), attr.get("unit_family"))
+            or {"tco2e": "tCO2e", "count": "employees"}.get(attr.get("unit_family"), ""))
     scale = SCALE_WORDS.get(got["scale"], f"x{got['scale']:g}")
     f = {"value_id": value_id(wba, code, year, "model reader"), "wba_id": wba, "attribute": code,
          "attribute_name": attr["name"], "year": year, "value": got["value"], "unit": unit, "method": "model reader",
@@ -232,6 +239,8 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
                       f"itself prints may differ if restated." if got.get("asked") and got["asked"] != year else "")
                    + (" " + got["basis_note"] if got.get("basis_note") else ""),
          "matches_validated": "no validated answer", "validated_value": None}
+    if printed_unit and printed_unit != unit:
+        f["unit_printed"] = printed_unit
     if company_rec:
         f["company"] = [company_rec]
     if doc.get("id"):

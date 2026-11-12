@@ -477,6 +477,19 @@ UNIT_CASES = [("Mt-CO2e", 1e6, "t-CO2e"), ("MtCO2e", 1e6, "tCO2e"), ("ktCO2e", 1
               ("Mt-CO2e", 1, "Mt-CO2e"), ("ktCO2e", 1e6, "ktCO2e"), ("", 1e6, ""), ("millions", 1e6, "millions")]
 
 
+class ShownUnit(unittest.TestCase):
+    def test_tonnes_of_co2e_are_written_one_way_and_nothing_is_guessed(self):
+        import model_reader as MR
+        for unit, scale, want in [("Mt-CO2e", 1e6, "tCO2e"), ("ktCO2e", 1e3, "tCO2e"), ("t-CO2e", 1, "tCO2e"), ("tonnes CO2e", 1, "tCO2e"),
+                                  ("metric tons CO2e", 1, "tCO2e"), ("tCO₂e", 1, "tCO2e"), ("million tonnes CO2 equivalent", 1e6, "tCO2e"),
+                                  ("t", 1, "tCO2e"), ("tons of CO2e", 1, "tCO2e"),
+                                  ("MT CO2e", 1, "MT CO2e"), ("mt CO2e", 1, "mt CO2e"), ("Mt-CO2e", 1, "Mt-CO2e"), ("ktCO2e", 1, "ktCO2e"),
+                                  ("tCO2", 1, "tCO2"), ("ktCO2e", 1e6, "ktCO2e"), ("", 1e6, "")]:
+            self.assertEqual(MR.shown_unit(unit, scale, "tco2e"), want, (unit, scale))
+        self.assertEqual(MR.shown_unit("t", 1, "currency"), "t")                       # only for emissions
+        self.assertEqual(MR.shown_unit("RMB million", 1e6, "currency"), "RMB")
+
+
 class UnitAfterScale(unittest.TestCase):
     def test_the_scale_applied_to_the_value_leaves_the_unit(self):
         import model_reader as MR
