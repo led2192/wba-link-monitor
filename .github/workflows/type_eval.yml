@@ -1,0 +1,54 @@
+# Can our own reader replace the Airtable AI field that types documents? Reads N documents whose true type a person
+# gave (Pipeline QA labels) and reports how often the stored type, the rules and our reader are right. Manual.
+# Writes nothing to Airtable. About $0.0003 a document at the Haiku list price.
+name: Type evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      n:
+        description: "documents to read (0 = every one with a true type given by a person)"
+        default: "1500"
+      max_usd:
+        description: "stop at this estimated cost"
+        default: "3"
+      model:
+        description: "the model that types"
+        default: "claude-haiku-5-5"
+      workers:
+        description: "model calls in flight at once"
+        default: "4"
+
+concurrency:
+  group: type-eval
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        run: python type_eval.py --n "${{ inputs.n }}" --max-usd "${{ inputs.max_usd }}" --workers "${{ inputs.workers || '4' }}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          READER_MODEL: ${{ inputs.model }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: "true"
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: type-eval-${{ github.run_id }}
+          path: type_eval.md
+          if-no-files-found: ignore
