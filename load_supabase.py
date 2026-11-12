@@ -364,25 +364,37 @@ def build_search_index(conn):
     conn.autocommit = False
 
 
-def upsert_documents(conn, rows):
-    with conn.cursor() as c:
-        c.execute("create temp table tmp_docs (like public.documents including defaults) on commit drop")
-        cols = ("library_id, record_id, wba_id, company, doc_type, year, lang, label, url, pages, chars, "
-                "text_status, text_part, extracted_at, period_end, found")
-        with c.copy(f"copy tmp_docs ({cols}) from stdin") as cp:
-            for r in rows:
-                cp.write_row(r)
-        rest = cols.split(", ")[1:]
-        sets = ", ".join(f"{k} = excluded.{k}" for k in rest)
-        # Only the rows that differ are written (12 Nov 2026). Every load rewrote every document, some 300,000 rows
-        # with their indexes, to change a few hundred: on the Small machine, with its disk allowance spent, that one
-        # statement ran for more than five hours two days in a row and the night's documents never reached the
-        # search. loaded_at is now the time a document last changed here.
-        same = "(" + ", ".join(f"d.{k}" for k in rest) + ") is not distinct from (" + ", ".join(f"excluded.{k}" for k in rest) + ")"
-        c.execute(f"insert into public.documents as d ({cols}) select distinct on (library_id) {cols} from tmp_docs "
-                  f"on conflict (library_id) do update set {sets}, loaded_at = now() where not ({same})")
-        n = c.rowcount
-    conn.commit()
+DOC_BATCH = 5000
+
+
+def upsert_documents(conn, rows, batch=DOC_BATCH, say=print):
+    """The documents, written in batches of 5,000 with a commit after each, and only the rows that differ.
+    Only the rows that differ (12 Nov 2026): every load rewrote every document, some 300,000 rows with their
+    indexes, to change a few hundred, and on the Small machine that one statement ran for more than five hours two
+    days in a row. In batches (the same day): a new column (`found`) made every row differ once, the single
+    statement that had to rewrite them all never ended inside a job's six hours, and being one transaction it kept
+    nothing of what it had done. A batch that is committed stays; the next run skips it. loaded_at is the time a
+    document last changed here. Returns the rows written."""
+    cols = ("library_id, record_id, wba_id, company, doc_type, year, lang, label, url, pages, chars, "
+            "text_status, text_part, extracted_at, period_end, found")
+    rest = cols.split(", ")[1:]
+    sets = ", ".join(f"{k} = excluded.{k}" for k in rest)
+    same = "(" + ", ".join(f"d.{k}" for k in rest) + ") is not distinct from (" + ", ".join(f"excluded.{k}" for k in rest) + ")"
+    rows = list(rows)
+    n, t0 = 0, time.time()
+    for i in range(0, len(rows), batch):
+        with conn.cursor() as c:
+            c.execute("create temp table tmp_docs (like public.documents including defaults) on commit drop")
+            with c.copy(f"copy tmp_docs ({cols}) from stdin") as cp:
+                for r in rows[i:i + batch]:
+                    cp.write_row(r)
+            c.execute(f"insert into public.documents as d ({cols}) select distinct on (library_id) {cols} from tmp_docs "
+                      f"on conflict (library_id) do update set {sets}, loaded_at = now() where not ({same})")
+            n += c.rowcount
+        conn.commit()
+        done = min(i + batch, len(rows))
+        if done == len(rows) or (i // batch) % 10 == 9:
+            say(f"  documents: {done:,} of {len(rows):,} looked at, {n:,} written, {(time.time() - t0) / 60:.1f} min", flush=True)
     return n
 
 

@@ -168,7 +168,12 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select loaded_at from public.documents where library_id = 'PT_00000-loadtest'"); self.assertEqual(cur.fetchone()[0], first)
         self.assertEqual(LS.upsert_documents(conn, [row[:9] + (12,) + row[10:]]), 1)           # one field differs: written
         cur.execute("select pages from public.documents where library_id = 'PT_00000-loadtest'"); self.assertEqual(cur.fetchone()[0], 12)
-        cur.execute("delete from public.documents where library_id = 'PT_00000-loadtest'"); self.conn.commit()
+        many = [(f"PT_00000-batch{i}",) + row[1:] for i in range(7)]
+        said = []
+        self.assertEqual(LS.upsert_documents(conn, many, batch=3, say=lambda *a, **k: said.append(a[0])), 7)   # three batches, each committed
+        self.assertIn("7 of 7 looked at, 7 written", said[-1])
+        self.assertEqual(LS.upsert_documents(conn, many, batch=3, say=lambda *a, **k: None), 0)
+        cur.execute("delete from public.documents where library_id = 'PT_00000-loadtest' or library_id like 'PT_00000-batch%'")
 
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
