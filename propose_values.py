@@ -223,7 +223,7 @@ def model_row(wba, code, attr, year, got, doc, gold, company_rec, now):
     # The unit of the value, not of the printed number (12 Nov 2026): the scale is taken out of it and tonnes of CO2e
     # are written one way; what the document prints goes to unit_printed when it differs (model_reader.shown_unit).
     printed_unit = got.get("unit_printed") or got.get("unit") or ""
-    unit = (shown_unit(printed_unit, got.get("scale"), attr.get("unit_family"))
+    unit = (shown_unit(printed_unit, got.get("scale"), attr.get("unit_family"), code, got.get("value"), got.get("page_says"))
             or {"tco2e": "tCO2e", "count": "employees"}.get(attr.get("unit_family"), ""))
     scale = SCALE_WORDS.get(got["scale"], f"x{got['scale']:g}")
     f = {"value_id": value_id(wba, code, year, "model reader"), "wba_id": wba, "attribute": code,
@@ -285,8 +285,18 @@ def plan(proposals, existing, now, scope=None):
         elif ex["status"] == "superseded":              # proposed again (a source answered again, a rule came back)
             updates.append((ex["id"], dict(f, status="proposed")))
         else:
-            updates.append((ex["id"], f))
+            updates.append((ex["id"], settled_unit_stays(f, ex)))
     return creates, updates, kept
+
+
+def settled_unit_stays(f, ex):
+    """A unit already converted on the row is not put back by a proposal that cannot decide (12 Nov 2026). The
+    row says its unit was converted when `unit_printed` is filled; when the proposal brings that same printed unit
+    as its `unit` and no conversion of its own, the row's unit was settled by something this run does not have (the
+    document's other figures, a person who opened the report), and both fields are left as they are."""
+    if ex.get("unit_printed") and f.get("unit") == ex["unit_printed"] and not f.get("unit_printed"):
+        return {k: v for k, v in f.items() if k != "unit"}
+    return f
 
 
 def fetch(H, base, table, fields, formula=None):
@@ -731,8 +741,8 @@ def main():
         global WRITE_PAUSE
         WRITE_PAUSE = 0.22 * shard_n                  # N jobs share the base's five requests a second
     rec = {r["fields"]["wba_id"]: r["id"] for r in comps if r["fields"].get("wba_id")}
-    existing = {r["fields"]["value_id"]: {"id": r["id"], "status": (r["fields"].get("status") or "")}
-                for r in fetch(H, base, TABLE, ["value_id", "status"]) if r["fields"].get("value_id")}
+    existing = {r["fields"]["value_id"]: {"id": r["id"], "status": (r["fields"].get("status") or ""), "unit_printed": r["fields"].get("unit_printed") or ""}
+                for r in fetch(H, base, TABLE, ["value_id", "status", "unit_printed"]) if r["fields"].get("value_id")}
     print(f">>> {len(rec):,} companies; {len(existing):,} rows already in {TABLE}; {len(gold):,} validated revenue answers; years {years}", flush=True)
 
     sess, c, proposals = requests.Session(), collections.Counter(), []

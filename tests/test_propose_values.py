@@ -60,6 +60,14 @@ class Propose(unittest.TestCase):
         del got["column"]
         self.assertIn("(units) on page 1", P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1"}, 2024, got, {}, {}, None, NOW)["detail"])
 
+    def test_a_unit_settled_on_the_row_is_not_put_back(self):
+        ex = {"id": "rec1", "status": "proposed", "unit_printed": "MT CO2"}
+        self.assertNotIn("unit", P.settled_unit_stays({"value_id": "v", "value": 1056.44, "unit": "MT CO2"}, ex))
+        self.assertEqual(P.settled_unit_stays({"value_id": "v", "unit": "tCO2e", "unit_printed": "Mt-CO2e"}, ex)["unit"], "tCO2e")   # its own conversion wins
+        self.assertEqual(P.settled_unit_stays({"value_id": "v", "unit": "EUR"}, dict(ex, unit_printed=""))["unit"], "EUR")
+        _, updates, _ = P.plan([{"value_id": "v", "value": 1.0, "unit": "MT CO2"}], {"v": ex}, NOW)
+        self.assertEqual(updates, [("rec1", {"value_id": "v", "value": 1.0})])
+
     def test_model_row(self):
         got = {"value": 2804e6, "printed": 2804.0, "scale": 1e6, "library_id": "PT_1-abc", "page": 57, "unit": "EUR"}
         doc = {"id": "recDoc", "url": "https://example.com/ar.pdf", "label": "2024 | Testco | Annual Report"}
@@ -80,7 +88,13 @@ class Propose(unittest.TestCase):
         self.assertEqual((f["value"], f["unit"], f["unit_printed"]), (390000.0, "tCO2e", "Mt-CO2e"))
         f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1", "unit_family": "tco2e"}, 2024,
                         dict(got, value=88555.0, printed=88555.0, scale=1, unit="MT CO2e"), {}, {}, None, NOW)
-        self.assertEqual(f["unit"], "MT CO2e"); self.assertNotIn("unit_printed", f)          # metric tons or megatonnes: not ours to say
+        self.assertEqual((f["unit"], f["unit_printed"]), ("tCO2e", "MT CO2e"))             # 88,555 megatonnes is not possible
+        f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1", "unit_family": "tco2e"}, 2024,
+                        dict(got, value=227.0, printed=227.0, scale=1, unit="mtCO2e", page_says="tonnes"), {}, {}, None, NOW)
+        self.assertEqual((f["unit"], f["unit_printed"]), ("tCO2e", "mtCO2e"))                # the page spells out metric tons
+        f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1", "unit_family": "tco2e"}, 2024,
+                        dict(got, value=227.0, printed=227.0, scale=1, unit="mtCO2e"), {}, {}, None, NOW)
+        self.assertEqual(f["unit"], "mtCO2e")                                                # nothing settles it: as printed
         self.assertNotIn("printed_on_pages", f)                            # no consensus computed: nothing written
         f = P.model_row("PT_2", "GMC_00001.1", {"name": "Scope 1"}, 2024, dict(got, printed_pages=1, printed_docs=1), {}, {}, None, NOW)
         self.assertEqual((f["printed_on_pages"], f["printed_in_documents"]), (1, 1))

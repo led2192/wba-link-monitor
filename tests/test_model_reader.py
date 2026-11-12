@@ -488,6 +488,13 @@ class ShownUnit(unittest.TestCase):
                                   ("tCO2", 1, "tCO2"), ("ktCO2e", 1e6, "ktCO2e"), ("", 1e6, "")]:
             self.assertEqual(MR.shown_unit(unit, scale, "tco2e"), want, (unit, scale))
         self.assertEqual(MR.shown_unit("t", 1, "currency"), "t")                       # only for emissions
+        self.assertEqual(MR.shown_unit("MT CO2e", 1, "tco2e", "GMC_00001.1", 88555), "tCO2e")          # not possible as megatonnes
+        self.assertEqual(MR.shown_unit("MT CO2", 1, "tco2e", "GMC_00002.1", 1056.44, "tonnes"), "tCO2")  # the page says so; no "e" added
+        self.assertEqual(MR.shown_unit("MT CO2e", 1, "tco2e", "GMC_00001.1", 12, "megatonnes"), "MT CO2e")
+        self.assertEqual(MR.shown_unit("MT CO2e", 1, "tco2e", "GMC_00005.1", 30000), "MT CO2e")        # Scope 3: only above the world's emissions
+        self.assertEqual(MR.page_says("all figures in metric tons CO2e"), "tonnes")
+        self.assertEqual(MR.page_says("million tonnes (Mt)"), "megatonnes")
+        self.assertIsNone(MR.page_says("metric tons and million tonnes")); self.assertIsNone(MR.page_says(None))
         self.assertEqual(MR.shown_unit("RMB million", 1e6, "currency"), "RMB")
 
 
