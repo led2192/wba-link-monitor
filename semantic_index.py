@@ -162,28 +162,34 @@ def write_document(cur, lid, chunks, vectors, model, pairs=None):
 
 INDEX_SQL = ("create index if not exists chunks_embedding on public.chunks using hnsw (embedding extensions.vector_cosine_ops) "
              "with (m = 16, ef_construction = 64)")
+PAIRS_INDEX_SQL = "create index if not exists page_pairs_pairs on public.page_pairs using gin (pairs)"
+FILL_INDEXES = ("chunks_embedding", "page_pairs_pairs")      # dropped for the fill, built once at the end
 
 
 def drop_vector_index(cur):
-    """While the table is filled it carries no index on the embeddings: each insert into an HNSW index places its
-    vector in the graph, and that was two thirds of a run's time (12 Nov 2026: 33 of 48 minutes). Nothing reads
-    the embeddings until the index is built at the end. Waits 30 seconds for the lock at most; False when it
-    could not (another partition is writing: it will be dropped by the next run that can)."""
-    cur.execute("select to_regclass('public.chunks_embedding') is not null")
-    if not cur.fetchone()[0]:
-        return True
-    try:
-        cur.execute("set lock_timeout = '30s'")
-        cur.execute("drop index if exists public.chunks_embedding")
-        cur.connection.commit()
-        print(">>> the index on the embeddings is dropped for the fill; build it at the end with --build-index", flush=True)
-        return True
-    except Exception as e:
-        cur.connection.rollback()
-        print(f">>> the index on the embeddings could not be dropped now ({type(e).__name__}); this run writes with it", flush=True)
-        return False
-    finally:
-        cur.execute("set lock_timeout = 0")
+    """While the tables are filled they carry no index on the embeddings nor on the word pairs: each insert into an
+    HNSW index places its vector in the graph (33 of 48 minutes of a run), and each page's pairs are some 400 entries
+    of a GIN index (14 of 45 minutes once the first was gone). Nothing reads either until they are built at the end:
+    the search by meaning is not connected yet and the option 'pairs' is off. Waits 30 seconds for each lock at
+    most; an index that could not be dropped (another partition is writing) is dropped by the next run that can.
+    Returns the names dropped."""
+    dropped = []
+    for name in FILL_INDEXES:
+        cur.execute("select to_regclass(%s) is not null", (f"public.{name}",))
+        if not cur.fetchone()[0]:
+            continue
+        try:
+            cur.execute("set lock_timeout = '30s'")
+            cur.execute(f"drop index if exists public.{name}")
+            cur.connection.commit()
+            dropped.append(name)
+            print(f">>> the index {name} is dropped for the fill; build it at the end with --build-index", flush=True)
+        except Exception as e:
+            cur.connection.rollback()
+            print(f">>> the index {name} could not be dropped now ({type(e).__name__}); this run writes with it", flush=True)
+        finally:
+            cur.execute("set lock_timeout = 0")
+    return dropped
 
 
 def build_vector_index(cur):
@@ -193,6 +199,10 @@ def build_vector_index(cur):
     t = time.time()
     cur.execute(INDEX_SQL)
     cur.connection.commit()
+    cur.execute("select to_regclass('public.page_pairs') is not null")
+    if cur.fetchone()[0]:
+        cur.execute(PAIRS_INDEX_SQL)
+        cur.connection.commit()
     return time.time() - t
 
 
@@ -219,7 +229,7 @@ def main():
     if a.build_index:
         with evidence_db.connect() as conn:
             secs = build_vector_index(conn.cursor())
-        print(f"The index on the embeddings is built ({secs / 60:.1f} min).", flush=True)
+        print(f"The indexes on the embeddings and on the word pairs are built ({secs / 60:.1f} min).", flush=True)
         run.finish("ok", rows_in=0, rows_out=0, notes="index built")
         return 0
     emb = Embedder(a.model, a.batch)

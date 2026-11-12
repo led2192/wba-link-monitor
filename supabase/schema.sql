@@ -171,7 +171,10 @@ create table if not exists public.page_pairs (
   pairs       tsvector not null,
   primary key (library_id, page)
 );
-create index if not exists page_pairs_pairs on public.page_pairs using gin (pairs);
+-- No index on the pairs either while the table is being filled (12 Nov 2026): with the embeddings' index gone, a
+-- measured run still spent 14 of 45 minutes writing the word pairs into this GIN index. The search asks page_pairs
+-- only when the option 'pairs' is on, and it is off until the fill is done and compared. Built at the end with the
+-- other: semantic_index.py --build-index.
 alter table public.page_pairs enable row level security;
 
 -- Extracted values, one per company x attribute x period. Empty until the extraction pilot.

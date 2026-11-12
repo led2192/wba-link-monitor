@@ -4,6 +4,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import semantic_index as S  # noqa: E402
 
 
+def schema_text():
+    return open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase", "schema.sql"), encoding="utf-8").read()
+
+
 class Arguments(unittest.TestCase):
     def test_partition(self):
         self.assertEqual(S.parse_partition(""), (0, 1)); self.assertEqual(S.parse_partition("2/4"), (2, 4))
@@ -72,7 +76,9 @@ class Reconnect(unittest.TestCase):
         self.assertIn('if not gone or lost >= 5:', src)
         self.assertIn('WRITE_S["pairs"] += time.time() - t', src); self.assertIn("Minutes writing:", src)   # where the time goes is printed, not guessed (12 Nov 2026)
         self.assertIn('prs if (has_pairs and not a.no_pairs) else None', src)
-        self.assertIn('cur.execute("drop index if exists public.chunks_embedding")', src)        # the fill writes with no index on the embeddings
+        self.assertIn('FILL_INDEXES = ("chunks_embedding", "page_pairs_pairs")', src)           # the fill writes with no index on the embeddings nor on the pairs
+        self.assertIn('cur.execute(f"drop index if exists public.{name}")', src)
+        self.assertNotIn("create index if not exists page_pairs_pairs", schema_text())
         self.assertIn("set lock_timeout = '30s'", src)                                          # and never waits long for the lock to drop it
         schema = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase", "schema.sql"), encoding="utf-8").read()
         self.assertNotIn("create index if not exists chunks_embedding", schema)                 # a load must not build it back in the middle of the fill
