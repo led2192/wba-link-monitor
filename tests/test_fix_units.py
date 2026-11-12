@@ -66,6 +66,16 @@ class Ambiguous(unittest.TestCase):
         self.assertEqual(left, [("v3", "MT CO2e", 12, "neither the page nor the size settles it")])
         self.assertEqual(c["megatonnes: the page spells out million tonnes"], 1)
 
+    def test_one_document_means_one_thing_by_a_unit(self):
+        fam = {"S1": "tco2e"}
+        recs = [self.row(1, "mtCO2e", 1676, lid="PT_9-doc"), self.row(2, "mtCO2e", 250000, lid="PT_9-doc"),      # the second is settled by the bound
+                self.row(3, "mtCO2e", 900, lid="PT_8-other"), self.row(4, "MT CO2", 88555, lid="PT_7-x")]
+        todo, c, left = F.plan_ambiguous(recs, fam, {})
+        self.assertEqual(sorted(t[1] for t in todo), ["v1", "v2", "v4"])
+        self.assertEqual(dict((t[1], t[3]) for t in todo)["v4"], "tCO2")                  # no "e" printed, none added
+        self.assertEqual([l[0] for l in left], ["v3"])
+        self.assertEqual(c["tonnes: the same document's other figures are in metric tons"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

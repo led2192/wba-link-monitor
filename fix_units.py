@@ -98,10 +98,22 @@ def settle(attribute, value, body):
     return None, "the page says both" if metric and mega else "neither the page nor the size settles it"
 
 
+def flat(unit):
+    return re.sub(r"[\s\-_.,/()]+", "", (unit or "").replace("₂", "2")).lower()
+
+
+def tonnes_unit(unit):
+    """tCO2e, or tCO2 when the printed unit has no "e" (CO2 alone is another quantity), or t."""
+    f = flat(unit)
+    return "tCO2e" if re.search(r"co2(e|eq)", f) else "tCO2" if "co2" in f else "t"
+
+
 def plan_ambiguous(records, families, bodies):
-    """(changes, counts, left [(value_id, unit, value, reason)]). bodies: {(library_id, page): text}."""
+    """(changes, counts, left [(value_id, unit, value, reason)]). bodies: {(library_id, page): text}. A row neither
+    its page nor the bound settles takes the answer of another figure of the same document printed with the same
+    unit: one report does not mean metric tons on one line and megatonnes on the next."""
     c = collections.Counter()
-    todo, left = [], []
+    todo, open_rows, tonnes_in = [], [], set()
     for rec in records:
         f = rec.get("fields", {})
         unit = (f.get("unit") or "").strip()
@@ -109,11 +121,22 @@ def plan_ambiguous(records, families, bodies):
                 or scale_of(f.get("detail")) != 1:
             continue
         what, why = settle(f.get("attribute"), f.get("value"), bodies.get((f.get("library_id"), f.get("page"))))
-        c[f"{what or 'left'}: {why}"] += 1
         if what == "tonnes":
-            todo.append((rec["id"], f.get("value_id") or "", unit, "tCO2e"))
-        elif what is None:
+            todo.append((rec["id"], f.get("value_id") or "", unit, tonnes_unit(unit)))
+            tonnes_in.add((f.get("library_id"), flat(unit)))
+        if what is None:
+            open_rows.append((rec, unit, why))
+        else:
+            c[f"{what}: {why}"] += 1
+    left = []
+    for rec, unit, why in open_rows:
+        f = rec["fields"]
+        if f.get("library_id") and (f.get("library_id"), flat(unit)) in tonnes_in:
+            todo.append((rec["id"], f.get("value_id") or "", unit, tonnes_unit(unit)))
+            c["tonnes: the same document's other figures are in metric tons"] += 1
+        else:
             left.append((f.get("value_id") or "", unit, f.get("value"), why))
+            c[f"left: {why}"] += 1
     c["to correct"] = len(todo)
     return todo, c, left
 
