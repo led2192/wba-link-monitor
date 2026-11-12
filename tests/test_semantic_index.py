@@ -71,7 +71,12 @@ class Reconnect(unittest.TestCase):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "semantic_index.py"), encoding="utf-8").read()
         self.assertIn('if not gone or lost >= 5:', src)
         self.assertIn('WRITE_S["pairs"] += time.time() - t', src); self.assertIn("Minutes writing:", src)   # where the time goes is printed, not guessed (12 Nov 2026)
-        self.assertIn('prs if (has_pairs and not a.no_pairs) else None', src)      # five times, then the run fails as before
+        self.assertIn('prs if (has_pairs and not a.no_pairs) else None', src)
+        self.assertIn('cur.execute("drop index if exists public.chunks_embedding")', src)        # the fill writes with no index on the embeddings
+        self.assertIn("set lock_timeout = '30s'", src)                                          # and never waits long for the lock to drop it
+        schema = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase", "schema.sql"), encoding="utf-8").read()
+        self.assertNotIn("create index if not exists chunks_embedding", schema)                 # a load must not build it back in the middle of the fill
+        self.assertIn("--build-index", src)      # five times, then the run fails as before
         self.assertIn('getattr(conn, "broken", False)', src)                                 # a connection the driver gave up on is lost too
         self.assertIn("conn = evidence_db.connect(); cur = conn.cursor()", src)
 

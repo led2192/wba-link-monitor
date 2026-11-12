@@ -147,7 +147,10 @@ create table if not exists public.chunks (
   written     timestamptz not null default now(),
   primary key (library_id, page, n)
 );
-create index if not exists chunks_embedding on public.chunks using hnsw (embedding extensions.vector_cosine_ops) with (m = 16, ef_construction = 64);
+-- No index on the embeddings while the table is being filled (12 Nov 2026). With the HNSW index in place every
+-- insert had to place its vector in the graph: a measured run spent 33 of 48 minutes writing the chunks, 8 embedding
+-- and 7 on the word pairs, and the index of about 15,000 documents would have taken weeks. Nothing reads the
+-- embeddings yet. The index is built once, when the documents are in: semantic_index.py --build-index.
 create table if not exists public.chunk_docs (
   library_id  text primary key references public.documents (library_id),
   chunks      int  not null,
