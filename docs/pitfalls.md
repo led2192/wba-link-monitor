@@ -335,3 +335,6 @@ In an expression, `inputs.x == 'true'` is false for an input declared `type: boo
 
 ## A unit copied as printed, beside a value that was scaled
 The reader copies the number as printed and multiplies it by the page's scale; it also copied the unit as printed. When the unit itself names the scale (Mt, kt, "RMB million", "'000 tonnes") the pair is wrong by that scale: 390,000 "Mt-CO2e" for 0.39 Mt-CO2e (12 Nov 2026, seen on a review card). Money hid it, because "RMB" beside a scale of thousands is right. Whenever a number is converted, its unit is converted in the same place (`unit_after_scale`), and the printed pair is kept for the reviewer.
+
+## A size limit that stops a load quietly
+The load stops loading pages when the database reaches `SUPABASE_MAX_GB` (85 on 12 Nov 2026) and ends green, with "Stopped early" in its summary. When another job grew the database past the limit (the semantic fill, about 8 GB), every load after it finished "successfully" with no new page, and documents sent by people did not reach the search for days while the cause was looked for elsewhere (locks, the slow documents statement, memory). A run that stops on a limit before doing its main work must fail or record a failure (`qa.py`), and the limit must be reviewed whenever something new writes to the same database.
