@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v41 2026-11-12";
+  const CLIENT = "lantern v42 2026-11-12";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -992,8 +992,10 @@
              share: next ? Math.max(0, Math.min(1, (pts - LEVELS[i][0]) / (next[0] - LEVELS[i][0]))) : 1 };
   }
   // Every reading of the same company, attribute and year (12 Nov 2026): which figure each report gives, the newest
-  // report first. When reports differ, the newest report's figure is the one that stands (a restatement) and the
-  // earlier ones stay listed. Pure text for the summary; a node with the list for the card.
+  // report first. When reports differ the card says which is the restatement and which the figure as first
+  // reported, and both stay listed. It does not say the newest "stands": on the run of 31 Oct 2026 a figure from the
+  // year's own report matched the validated answer 76% of the time and a restated one 66% (propose_values.py).
+  // Pure text for the summary; a node with the list for the card.
   function readingsSummary(v) {
     const rs = (v.readings || []).filter(r => r && r.value !== null && r.value !== undefined);
     if (rs.length <= 1) return "This is the only reading.";
@@ -1003,8 +1005,8 @@
     const mine = rs.find(r => r.this), newest = rs.filter(r => (Number(r.doc_year) || 0) === top);
     if (!top || !mine) return `${diff.length} ${diff.length === 1 ? "report gives" : "reports give"} another figure.`;
     if (newest.some(r => Number(r.value) !== Number(newest[0].value))) return `The newest reports (${top}) do not agree with each other.`;
-    if ((Number(mine.doc_year) || 0) === top) return `This is the figure in the newest report (${top}). An earlier report gave another: it looks restated, and this one stands.`;
-    return `A newer report (${top}) gives ${fmt(newest[0].value)}${newest[0].unit ? " " + newest[0].unit : ""}: this figure looks restated, and the newer one stands.`;
+    if ((Number(mine.doc_year) || 0) === top) return `This is the figure in the newest report (${top}): it restates what an earlier report gave. Both are kept. The validated answers usually take the figure as first reported.`;
+    return `A newer report (${top}) gives ${fmt(newest[0].value)}${newest[0].unit ? " " + newest[0].unit : ""}: this figure was restated later. Both are kept. The validated answers usually take the figure as first reported, which is this one.`;
   }
   function readingsBox(v) {
     const rs = (v.readings || []).filter(r => r && r.value !== null && r.value !== undefined);
