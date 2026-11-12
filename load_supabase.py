@@ -372,9 +372,15 @@ def upsert_documents(conn, rows):
         with c.copy(f"copy tmp_docs ({cols}) from stdin") as cp:
             for r in rows:
                 cp.write_row(r)
-        sets = ", ".join(f"{k} = excluded.{k}" for k in cols.split(", ")[1:])
-        c.execute(f"insert into public.documents ({cols}) select distinct on (library_id) {cols} from tmp_docs "
-                  f"on conflict (library_id) do update set {sets}, loaded_at = now()")
+        rest = cols.split(", ")[1:]
+        sets = ", ".join(f"{k} = excluded.{k}" for k in rest)
+        # Only the rows that differ are written (12 Nov 2026). Every load rewrote every document, some 300,000 rows
+        # with their indexes, to change a few hundred: on the Small machine, with its disk allowance spent, that one
+        # statement ran for more than five hours two days in a row and the night's documents never reached the
+        # search. loaded_at is now the time a document last changed here.
+        same = "(" + ", ".join(f"d.{k}" for k in rest) + ") is not distinct from (" + ", ".join(f"excluded.{k}" for k in rest) + ")"
+        c.execute(f"insert into public.documents as d ({cols}) select distinct on (library_id) {cols} from tmp_docs "
+                  f"on conflict (library_id) do update set {sets}, loaded_at = now() where not ({same})")
         n = c.rowcount
     conn.commit()
     return n

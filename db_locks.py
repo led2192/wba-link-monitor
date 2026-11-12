@@ -53,15 +53,17 @@ def waiting_schema(rows):
 ORPHAN_SECONDS = 6 * 3600 + 1800          # no job lives 6 h 30 min: GitHub kills it at 6 h
 
 
-def orphans(rows):
-    """The active statements older than any job: (pid, ..., seconds, query) rows of sessions()."""
-    return [r for r in rows if r[3] == "active" and (r[6] or 0) > ORPHAN_SECONDS]
+def orphans(rows, seconds=ORPHAN_SECONDS):
+    """The active statements older than any job: (pid, ..., seconds, query) rows of sessions(). seconds: a shorter
+    age for the case where the job is known to be dead (cancelled, or killed by its own timeout), never under an hour."""
+    return [r for r in rows if r[3] == "active" and (r[6] or 0) > max(3600, seconds)]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--release", action="store_true")
     ap.add_argument("--orphans", action="store_true")
+    ap.add_argument("--older-than-minutes", type=int, default=ORPHAN_SECONDS // 60, help="with --orphans: the age that makes a statement an orphan (60 at least)")
     ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     import evidence_db
@@ -84,7 +86,7 @@ def main():
                 print("  ended" if cur.fetchone()[0] else "  could not end (another role's session?)")
         conn.commit()
     if a.orphans:
-        old = orphans(rows)
+        old = orphans(rows, a.older_than_minutes * 60)
         if not old:
             print("no statement has outlived its job")
         for r in old:

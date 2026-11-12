@@ -10,6 +10,9 @@ on:
       release:
         description: "true to end the waiting schema statements (dry run otherwise, which only lists)"
         default: "false"
+      older_than_minutes:
+        description: "with orphans: the age in minutes that makes a statement an orphan (390 by default; less only when its job is known to be dead; never under 60)"
+        default: "390"
       orphans:
         description: "true to end the statements that outlived their job (older than 6 h 30 min)"
         default: "false"
@@ -30,4 +33,4 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           if [ "${{ inputs.release }}" = "true" ]; then python db_locks.py --release --commit; else python db_locks.py --release; fi
-          if [ "${{ inputs.orphans }}" = "true" ]; then python db_locks.py --orphans --commit; else python db_locks.py --orphans; fi
+          if [ "${{ inputs.orphans }}" = "true" ]; then python db_locks.py --orphans --older-than-minutes "${{ inputs.older_than_minutes || '390' }}" --commit; else python db_locks.py --orphans; fi
