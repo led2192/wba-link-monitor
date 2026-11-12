@@ -147,6 +147,31 @@ class Storage:
         return self.base + (j.get("signedURL") or j.get("signedUrl"))
 
 
+ROOM_SHARE = 0.95          # new rows from people's files are made up to this share of the base's record limit
+
+
+def room_left(total, limit, share=ROOM_SHARE):
+    """Rows that can still be made: share of the limit minus the base's last count. None without a count."""
+    return None if not total else max(0, int(share * limit) - int(total))
+
+
+def hold_for_room(todo, left):
+    """(todo to do now, uploads held). A new row is made only while there is room; a file for a row that exists
+    (fill, same, known) never waits, because it adds no record. Held uploads stay 'stored' and the next run
+    tries them again, so nothing a person sent is lost when the base is full. left None: no count to go by,
+    nothing is held."""
+    if left is None:
+        return list(todo), []
+    now, held = [], []
+    for item in todo:
+        if item[1] == "create":
+            if left <= 0:
+                held.append(item[0]); continue
+            left -= 1
+        now.append(item)
+    return now, held
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -212,6 +237,22 @@ def main():
                 lst.append((rec["id"], f.get("library_id"), f.get("document_url") or "", bool(f.get("file")), bool(f.get("discard")),
                             tuple(x.get("size") for x in (f.get("file") or []) if isinstance(x, dict) and x.get("size"))))
         todo = plan(uploads, companies, rows)
+        # Room in the base (12 Nov 2026): the Disclosure Library holds 500,000 records at most, and files sent by
+        # people arrive in hundreds a day. The count is the last base_health row (daily); new rows stop at 95%.
+        from base_health import RECORD_LIMIT
+        left = None
+        try:
+            counts = sorted(((r.get("fields", {}).get("date") or "", r.get("fields", {}).get("records_total") or 0)
+                             for r in sweep("base_health", ["date", "records_total"], "{records_total} > 0")), reverse=True)
+            left = room_left(counts[0][1] if counts else None, RECORD_LIMIT)
+        except Exception as e:
+            print(f"  the base's record count could not be read ({type(e).__name__}): no room check this run", flush=True)
+        todo, held = hold_for_room(todo, left)
+        if held:
+            print(f"  {len(held)} new documents wait: the base has no room for new rows (95% of {RECORD_LIMIT:,} records). "
+                  "They stay stored and are tried again on the next run.", flush=True)
+            run.failure("DATA_CHECK", f"{len(held)} files sent from a browser wait for room in the Disclosure Library (new rows stop at 95% of the record limit)",
+                        key=f"browser_upload_room|{datetime.now(timezone.utc).date().isoformat()}")
         by = collections.Counter((u["wba_id"], act) for u, act, _, _ in todo)
         print(f"{len(uploads)} files sent from a browser:", flush=True)
         for (wba, act), n in sorted(by.items()):
@@ -257,7 +298,7 @@ def main():
                 airtable_request("POST", url, headers, payload={"fields": {k: v for k, v in fields.items() if v not in (None, "")}, "typecast": True})   # no link field among them
             mark(u, "taken", f"{'file put on the existing row' if act == 'fill' else 'new row'} {lid}")
             time.sleep(0.25)
-    c["waiting for a company"] = len(waiting); c["company not added"] = len(refused)
+    c["waiting for a company"] = len(waiting); c["company not added"] = len(refused); c["waiting for room"] = len(held)
     print(f"{c['create']} new rows, {c['fill']} files put on rows that had none, {c['known'] + c['same']} already held ({c['same']} of them learned their address), {c['failed']} failed, {c['orphan']} without a company"
           + ("" if a.commit else " (dry run: nothing written)"), flush=True)
     run.finish("ok", rows_in=len(uploads), rows_out=(c["create"] + c["fill"]) if a.commit else 0, counters=dict(c), notes="written" if a.commit else "dry run")

@@ -63,6 +63,24 @@ class Plan(unittest.TestCase):
         self.assertIn("downloaded from https://x.org/a.pdf", B.note_for("a.pdf", "https://x.org/a.pdf"))
 
 
+class Room(unittest.TestCase):
+    def test_new_rows_wait_when_the_base_is_full_and_files_for_existing_rows_never_do(self):
+        import browser_uploads as B
+        todo = [({"id": 1}, "create", "PT_1-a", None), ({"id": 2}, "fill", "PT_1-b", "rec2"), ({"id": 3}, "create", "PT_1-c", None),
+                ({"id": 4}, "known", "PT_1-d", "rec4"), ({"id": 5}, "create", "PT_1-e", None)]
+        now, held = B.hold_for_room(todo, 2)
+        self.assertEqual([t[0]["id"] for t in now], [1, 2, 3, 4]); self.assertEqual([u["id"] for u in held], [5])
+        now, held = B.hold_for_room(todo, 0)
+        self.assertEqual([t[0]["id"] for t in now], [2, 4]); self.assertEqual(len(held), 3)
+        self.assertEqual(B.hold_for_room(todo, None), (todo, []))                     # no count: nothing is held
+
+    def test_room_left(self):
+        import browser_uploads as B
+        self.assertEqual(B.room_left(400_000, 500_000), 75_000)
+        self.assertEqual(B.room_left(480_000, 500_000), 0)
+        self.assertIsNone(B.room_left(None, 500_000))
+
+
 class Asked(unittest.TestCase):
     def test_files_for_a_company_asked_for_wait_then_follow_it(self):
         ups = [up(1), up(2, wba="REQ_7"), up(3, wba="REQ_8"), up(4, wba="REQ_9"), up(5, wba="REQ_10"), up(6, wba="REQ_11")]
