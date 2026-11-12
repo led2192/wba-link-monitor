@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-12 The load writes its documents in batches of 5,000, each committed, and prints its progress. #442 was not enough on its first run: a column added on 11 Nov (`found`) made every row differ once, so the single statement still had to rewrite all 300,000 and was at 61 minutes with nothing to show. A committed batch stays; the next run skips it. (#444)
 - 2026-11-12 The semantic index also fills without the GIN index on `page_pairs`, built at the end with the other (`--build-index`). With the embeddings' index gone a run of 45 minutes gave 28 to embedding, 14 to writing the word pairs and 1 to writing the chunks. The option `pairs` stays off until both are built. (#443)
 - 2026-11-12 The load writes only the documents that changed. `upsert_documents` rewrote all of some 300,000 rows on every load; on 11 and 12 Nov that single statement ran for more than five hours each day (the database waiting on its disk) and the night's documents did not reach the search. Database locks takes `older_than_minutes` to end the statement of a job known to be dead before the default 6 h 30 min. (#442)
 - 2026-11-12 The semantic index is filled without the HNSW index on `chunks.embedding`, which is built once at the end (`semantic_index.py --build-index`, workflow input `build_index`). Measured: a run spent 33 of 48 minutes writing the chunks, 8 embedding, 7 on the word pairs. `schema.sql` no longer creates the index. (#441)
