@@ -332,3 +332,6 @@ A new company was to be given its id by an hourly job and its links handled by t
 
 ## A workflow input of type boolean is not the text 'true'
 In an expression, `inputs.x == 'true'` is false for an input declared `type: boolean`, even when it was passed as `-f x=true`; inside a shell step the same input prints as `true` and a string test works, which hides the difference. The functions-only queue (#448) compared the text and so never applied; the first run after it happened to start before the load and looked fine. Compare booleans as `inputs.x == true`, and check a concurrency change with the long job already running.
+
+## A unit copied as printed, beside a value that was scaled
+The reader copies the number as printed and multiplies it by the page's scale; it also copied the unit as printed. When the unit itself names the scale (Mt, kt, "RMB million", "'000 tonnes") the pair is wrong by that scale: 390,000 "Mt-CO2e" for 0.39 Mt-CO2e (12 Nov 2026, seen on a review card). Money hid it, because "RMB" beside a scale of thousands is right. Whenever a number is converted, its unit is converted in the same place (`unit_after_scale`), and the printed pair is kept for the reviewer.

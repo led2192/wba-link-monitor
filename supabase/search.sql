@@ -1288,7 +1288,7 @@ begin
     select coalesce(jsonb_agg(x.j order by x.company, x.attribute, x.year desc), '[]'::jsonb) from (
       select d.company, p.attribute, p.year,
              jsonb_build_object('version_id', p.version_id, 'wba_id', p.wba_id, 'company', coalesce(d.company, p.wba_id), 'attribute', p.attribute,
-               'year', p.year, 'value', p.value, 'unit', p.unit, 'printed', p.printed, 'basis', p.basis, 'library_id', p.library_id, 'page', p.page,
+               'year', p.year, 'value', p.value, 'unit', public.unit_shown(p.unit, p.value::numeric, p.printed::text), 'printed', p.printed, 'basis', p.basis, 'library_id', p.library_id, 'page', p.page,
                'url', d.url, 'label', d.label, 'doc_type', d.doc_type, 'agree', p.docs, 'readings', t.readings, 'variants', t.variants,
                'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants),
                'ok', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'ok'),
@@ -2015,6 +2015,45 @@ as $$
 $$;
 revoke all on function public.review_score(text) from public, anon, authenticated;
 
+-- The unit of a value after its scale was applied (12 Nov 2026). value_versions keeps the printed number times the
+-- page's scale, with the unit as printed: "0.39 Mt-CO2e" is stored as 390,000 "Mt-CO2e", which reads as 390,000
+-- megatonnes. When the value is a thousand, a million or a billion times the printed number and the unit names that
+-- scale (a word, or the prefix of kt, Mt, Gt), the scale is taken out of the unit shown. The same rule as
+-- model_reader.unit_after_scale, which writes new rows right; this one is for the rows already stored.
+create or replace function public.unit_shown(unit text, value numeric, printed text) returns text
+language plpgsql immutable
+set search_path = public
+as $$
+declare
+  u text := btrim(coalesce(unit, ''));
+  num numeric;
+  scale numeric;
+  words text;
+  pre text;
+  o text;
+begin
+  if u = '' or value is null then return u; end if;
+  begin
+    num := nullif(regexp_replace(coalesce(printed, ''), '[^0-9.]', '', 'g'), '')::numeric;
+  exception when others then
+    return u;
+  end;
+  if num is null or num = 0 then return u; end if;
+  scale := round(abs(value) / num);
+  if scale = 1000 then words := 'thousands?(\s+of)?|''?000s?|\mk\M'; pre := 'k';
+  elsif scale = 1000000 then words := 'millions?(\s+of)?|\mmn\M|\mmio\M|\mmm\M'; pre := 'm';
+  elsif scale = 1000000000 then words := 'billions?(\s+of)?|\mbn\M'; pre := 'g';
+  else return u;
+  end if;
+  if abs(abs(value) - num * scale) > 0.0005 * abs(value) then return u; end if;     -- not that scale after all
+  o := regexp_replace(u, words, ' ', 'gi');
+  if o = u then o := regexp_replace(u, '^\s*' || pre || '(?=t)', '', 'i'); end if;
+  if o = u and scale = 1000000 then o := regexp_replace(u, '([^A-Za-z])m\.?$', '\1'); end if;
+  o := btrim(regexp_replace(o, '\s+', ' ', 'g'), ' -,;:()[]');
+  return case when o = '' then u else o end;
+end;
+$$;
+
 create or replace function public.lucky_value() returns jsonb
 language plpgsql security definer
 set search_path = public, extensions
@@ -2069,7 +2108,8 @@ begin
     end loop;
   end if;
   select jsonb_build_object('version_id', p.version_id, 'wba_id', p.wba_id, 'company', coalesce(c.name, d.company, p.wba_id), 'industry', c.industry,
-                            'country', c.country, 'attribute', p.attribute, 'year', p.year, 'value', p.value, 'unit', p.unit, 'printed', p.printed,
+                            'country', c.country, 'attribute', p.attribute, 'year', p.year, 'value', p.value, 'unit', public.unit_shown(p.unit, p.value::numeric, p.printed::text),
+                            'unit_printed', p.unit, 'printed', p.printed,
                             'basis', p.basis, 'column_label', p.column_label, 'page', p.page, 'url', d.url, 'label', d.label, 'doc_type', d.doc_type,
                             'doc_year', d.year, 'needle', needle,
                             'library_id', p.library_id,
@@ -2082,7 +2122,7 @@ begin
                             -- report first: which figure each report gives, so a restatement can be seen and the
                             -- earlier figures stay in view (12 Nov 2026; the counts alone said "1 give another"
                             -- and not which, nor where)
-                            'readings', (select coalesce(jsonb_agg(jsonb_build_object('value', o.value, 'unit', o.unit, 'basis', o.basis, 'page', o.page,
+                            'readings', (select coalesce(jsonb_agg(jsonb_build_object('value', o.value, 'unit', public.unit_shown(o.unit, o.value::numeric, o.printed::text), 'basis', o.basis, 'page', o.page,
                                                   'label', od.label, 'doc_type', od.doc_type, 'doc_year', od.year, 'url', od.url,
                                                   'this', o.version_id = p.version_id) order by od.year desc nulls last, o.last_seen desc), '[]'::jsonb)
                                          from (select * from public.value_versions o where o.wba_id = p.wba_id and o.attribute = p.attribute

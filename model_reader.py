@@ -39,6 +39,29 @@ MAX_TOKENS = 2500                   # 300 cut replies off before their JSON (ave
 SCALES = {"units": 1, "thousands": 1e3, "ten thousands": 1e4, "lakhs": 1e5, "millions": 1e6, "crores": 1e7, "hundred millions": 1e8,
           "billions": 1e9}
 
+# The unit of a value after its scale is applied (12 Nov 2026). The value kept is the printed number times the
+# page's scale, but the unit kept was the unit as printed: Hitachi's "0.39 Mt-CO2e" became 390,000 with the unit
+# "Mt-CO2e", which reads as 390,000 megatonnes. When a scale of a thousand, a million or a billion was applied and
+# the unit itself names that scale (a word: "million tonnes", "RMB'000", "USD bn"; or a prefix on tonnes: kt, Mt,
+# Gt), the scale is taken out of the unit: "t-CO2e", "tonnes", "RMB". A unit that does not name the scale is left
+# as it is (MWh stays MWh). The same rule is in supabase/search.sql (unit_shown) for the rows already stored.
+_UNIT_WORDS = {1e3: r"thousands?(\s+of)?|'?000s?|\bk\b", 1e6: r"millions?(\s+of)?|\bmn\b|\bmio\b|\bmm\b", 1e9: r"billions?(\s+of)?|\bbn\b"}
+_UNIT_PREFIX = {1e3: "k", 1e6: "m", 1e9: "g"}
+
+
+def unit_after_scale(unit, scale):
+    u = str(unit or "").strip()
+    if not u or scale not in _UNIT_WORDS:
+        return u
+    out = re.sub(_UNIT_WORDS[scale], " ", u, flags=re.I)
+    if out == u:
+        out = re.sub(r"^\s*" + _UNIT_PREFIX[scale] + r"(?=t)", "", u, flags=re.I)
+    if out == u and scale == 1e6:
+        out = re.sub(r"(?<=[^A-Za-z])m\.?$", "", u)                 # "€m", "US$ m": never the m of "RMB" or "sqm"
+    out = re.sub(r"\s+", " ", out).strip(" -,;:()[]")
+    return out or u
+
+
 SYSTEM = ("You read pages of company reports and find one reported figure, for every year the pages print it. Answer "
           "with one JSON object and nothing else: no explanation before or after it. Copy each number exactly as printed "
           "on the page. Never compute, convert or round.")
@@ -311,7 +334,7 @@ def check(reply, pages, to_number, numbers_on, fy_month=None, why=None, period_c
         return drop("year differs from the column (July-December year end)")   # a column of 2025 is 2025, never 2024 (2 Nov 2026:
                                         # CVS Health's 2025 verification opinion, "January 1 to December 31, 2025", read as 2024)
     return {"value": printed * scale, "printed": printed, "scale": scale, "library_id": lid, "page": page,
-            "unit": reply.get("unit") or "", "column": column, "year": year,
+            "unit": unit_after_scale(reply.get("unit"), scale), "unit_printed": reply.get("unit") or "", "column": column, "year": year,
             "basis": str(reply.get("basis") or "").strip().lower()[:20]}
 
 
