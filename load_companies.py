@@ -16,11 +16,12 @@ AIRTABLE_QA_TOKEN for the run record (QA_COMMIT=true writes it).
 """
 import argparse, collections, os, sys, time
 
-FIELDS = ["wba_id", "company_name", "wba_industry", "hq_country", "hq_region", "website"]
+FIELDS = ["wba_id", "company_name", "wba_industry", "hq_country", "hq_region", "website", "lantern_id"]
 
 
 def company_rows(records):
-    """[(wba_id, name, industry, country, region, website)] from Airtable records; rows without a wba_id are skipped."""
+    """[(wba_id, name, industry, country, region, website, lantern_id)] from Airtable records; rows without a wba_id are
+    skipped. lantern_id is lanterN's own id for the company (lantern_ids.py), None until it is written."""
     out = []
     for rec in records:
         f = rec.get("fields", {})
@@ -29,7 +30,7 @@ def company_rows(records):
             continue
         out.append((wba, (f.get("company_name") or "").strip() or None, (f.get("wba_industry") or "").strip() or None,
                     (f.get("hq_country") or "").strip() or None, (f.get("hq_region") or "").strip() or None,
-                    (f.get("website") or "").strip() or None))
+                    (f.get("website") or "").strip() or None, (f.get("lantern_id") or "").strip() or None))
     return out
 
 
@@ -76,15 +77,26 @@ def upsert(conn, rows):
     with conn.cursor() as c:
         c.execute("""create table if not exists public.companies (
                        wba_id text primary key, name text, industry text, country text, region text, website text,
-                       updated timestamptz not null default now())""")
+                       updated timestamptz not null default now(), lantern_id text)""")
+        # lantern_id (12 Nov 2026): added only when missing, so that no load waits for a lock on a table every search reads
+        c.execute("""do $guard$ begin
+                       if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'companies'
+                                      and column_name = 'lantern_id') then
+                         execute 'alter table public.companies add column lantern_id text';
+                       end if;
+                       if to_regclass('public.companies_lantern_id') is null then
+                         execute 'create index companies_lantern_id on public.companies (lantern_id)';
+                       end if;
+                     end $guard$""")
         c.execute("alter table public.companies enable row level security")
         c.execute("create index if not exists companies_industry on public.companies (industry)")
         c.execute("create index if not exists companies_country on public.companies (country)")
         c.execute("create index if not exists companies_region on public.companies (region)")
-        c.executemany("""insert into public.companies (wba_id, name, industry, country, region, website)
-                         values (%s, %s, %s, %s, %s, %s)
+        c.executemany("""insert into public.companies (wba_id, name, industry, country, region, website, lantern_id)
+                         values (%s, %s, %s, %s, %s, %s, %s)
                          on conflict (wba_id) do update set name = excluded.name, industry = excluded.industry,
-                           country = excluded.country, region = excluded.region, website = excluded.website, updated = now()""", rows)
+                           country = excluded.country, region = excluded.region, website = excluded.website,
+                           lantern_id = coalesce(excluded.lantern_id, public.companies.lantern_id), updated = now()""", rows)
     conn.commit()
 
 
