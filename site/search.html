@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v42 2026-11-12";
+  const CLIENT = "lantern v43 2026-11-12";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1079,7 +1079,7 @@
     const facts = el("dl");
     const fact = (k, val) => { if (val === null || val === undefined || val === "") return; facts.append(el("dt", null, k), typeof val === "string" ? el("dd", null, val) : (() => { const d = el("dd"); d.appendChild(val); return d; })()); };
     fact("In full", Number(v.value).toLocaleString("en", { maximumFractionDigits: 2 }) + (v.unit ? " " + v.unit : ""));
-    fact("Read as", v.printed ? String(v.printed).slice(0, 60) + (v.column_label ? `, under “${String(v.column_label).slice(0, 60)}”` : "") : "");
+    fact("Read as", v.printed ? String(v.printed).slice(0, 60) + (v.unit_printed && v.unit_printed !== v.unit ? " " + String(v.unit_printed).slice(0, 30) : "") + (v.column_label ? `, under “${String(v.column_label).slice(0, 60)}”` : "") : "");
     fact("Document", [v.label, v.doc_type].filter(Boolean).join(" · "));
     if (v.url) { const a = el("a", null, `Open the source at page ${v.page || "?"} ↗`); a.href = /\.pdf(\?|$)/i.test(v.url) || !/#/.test(v.url) ? `${v.url}#page=${v.page || 1}` : v.url; a.target = "_blank"; a.rel = "noopener"; fact("Page", a); }
     if (!v.url) fact("Page", `Page ${v.page || "?"}. This file was added by hand and has no public link; the text of the page as lanterN holds it is below.`);

@@ -468,3 +468,18 @@ class GeminiPath(unittest.TestCase):
         s = self.GSess((429, "quota"), (200, "ok"))
         self.assertEqual(M.call([{"role": "user", "content": "x"}], usage, sess=s, model="gemini-3.8-flash"), "ok")
         self.assertFalse(M.is_gemini("claude-haiku-5-5")); self.assertTrue(M.is_gemini("Gemini-3.8-flash-lite"))
+
+
+UNIT_CASES = [("Mt-CO2e", 1e6, "t-CO2e"), ("MtCO2e", 1e6, "tCO2e"), ("ktCO2e", 1e3, "tCO2e"), ("kt CO2e", 1e3, "t CO2e"),
+              ("million tonnes CO2e", 1e6, "tonnes CO2e"), ("thousand tonnes", 1e3, "tonnes"), ("RMB million", 1e6, "RMB"),
+              ("RMB'000", 1e3, "RMB"), ("USD bn", 1e9, "USD"), ("€m", 1e6, "€"), ("US$ m", 1e6, "US$"),
+              ("RMB", 1e6, "RMB"), ("sqm", 1e6, "sqm"), ("MWh", 1e6, "MWh"), ("tCO2e", 1e3, "tCO2e"),      # the unit does not name the scale: untouched
+              ("Mt-CO2e", 1, "Mt-CO2e"), ("ktCO2e", 1e6, "ktCO2e"), ("", 1e6, ""), ("millions", 1e6, "millions")]
+
+
+class UnitAfterScale(unittest.TestCase):
+    def test_the_scale_applied_to_the_value_leaves_the_unit(self):
+        import model_reader as MR
+        for unit, scale, want in UNIT_CASES:
+            self.assertEqual(MR.unit_after_scale(unit, scale), want, (unit, scale))
+

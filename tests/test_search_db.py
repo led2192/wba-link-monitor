@@ -212,6 +212,16 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((new["differ"], new["others"]), (1, 0))
         cur.execute("delete from public.value_versions; delete from public.pages where library_id like 'PT_09999-%'; delete from public.documents where library_id like 'PT_09999-%'")
 
+    def test_the_unit_shown_drops_the_scale_that_went_into_the_value(self):
+        """12 Nov 2026: 0.39 Mt-CO2e was shown as 390,000 Mt-CO2e. The same cases as model_reader.unit_after_scale."""
+        from test_model_reader import UNIT_CASES
+        cur = self.conn.cursor()
+        for unit, scale, want in UNIT_CASES:
+            cur.execute("select public.unit_shown(%s::text, %s::numeric, %s::text)", (unit, 0.39 * scale, "0.39"))
+            self.assertEqual(cur.fetchone()[0], want, (unit, scale))
+        cur.execute("select public.unit_shown('Mt-CO2e', 390000, null::text), public.unit_shown('Mt-CO2e', 390000, '12,345'), public.unit_shown('RMB''000', 12575901000, '12,575,901')")
+        self.assertEqual(cur.fetchone(), ("Mt-CO2e", "Mt-CO2e", "RMB"))             # no printed number or another ratio: untouched
+
     def test_the_schema_installs_while_other_jobs_read_and_write(self):
         """The semantic index keeps a transaction open on pages, chunks and page_pairs for hours; the load applies
         schema.sql at its start and waits 30 seconds at most for a lock. Nothing in the guarded schema may need a
