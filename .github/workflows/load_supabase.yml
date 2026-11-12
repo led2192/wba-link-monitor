@@ -33,7 +33,7 @@ on:
 # Installing the search functions alone takes seconds and has its own queue (12 Nov 2026): in the load's queue it
 # waited for hours behind a running load, and a fix to a function could not reach the page.
 concurrency:
-  group: load-supabase${{ inputs.functions_only == 'true' && '-functions' || '' }}
+  group: load-supabase${{ inputs.functions_only == true && '-functions' || '' }}
   cancel-in-progress: false
 
 jobs:
