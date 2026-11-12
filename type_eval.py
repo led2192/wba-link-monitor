@@ -28,7 +28,7 @@ import argparse, collections, hashlib, os, re, sys, time
 
 API = "https://api.airtable.com/v0"
 PEOPLE = ("source_library", "correction", "Edi")                # labelled_by values that are a person's answer
-FIELDS = ("library_id", "cover_text", "doc_language", "source_type_check", "source_type", "source_title")
+FIELDS = ("library_id", "cover_text", "doc_language", "source_type_check", "source_type", "source_title", "document_url", "company_name")
 
 
 def value(v):
@@ -40,10 +40,11 @@ def value(v):
     return v.strip() if isinstance(v, str) else ""
 
 
-def pick(truth, n):
+def pick(truth, n, offset=0):
     """n record ids of the truth, the same ones every run: ordered by a hash of the id (not by the id, which is
-    ordered by creation time and would take the oldest documents only)."""
-    ids = sorted(truth, key=lambda r: hashlib.sha1(r.encode()).hexdigest())
+    ordered by creation time and would take the oldest documents only). offset skips the first ones: the documents
+    a prompt is written on (to read its mistakes) must not be the ones it is measured on."""
+    ids = sorted(truth, key=lambda r: hashlib.sha1(r.encode()).hexdigest())[offset:]
     return ids[:n] if n else ids
 
 
@@ -118,6 +119,8 @@ def report(docs, c, left_out, usage_line):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=1500, help="documents to read (0 = every one with a true type)")
+    ap.add_argument("--offset", type=int, default=0, help="skip this many documents of the fixed order (a second, unseen set)")
+    ap.add_argument("--reader", type=int, default=1, choices=[1, 2], help="the reader's prompt: 1 the first pages alone; 2 more rules, more text, the address and the company")
     ap.add_argument("--max-usd", type=float, default=3.0)
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--out", default="type_eval")
@@ -145,7 +148,7 @@ def main():
             left_out["true types outside the list of 23"] += 1
         else:
             truth[l["record_id"]] = tt
-    ids = pick(truth, a.n)
+    ids = pick(truth, a.n, a.offset)
     print(f">>> {len(truth):,} documents with a sure true type given by a person; reading {len(ids):,}.", flush=True)
     rows = []
     for i in range(0, len(ids), 40):
@@ -157,7 +160,7 @@ def main():
 
     def read_one(r):
         u = collections.Counter()
-        t, _conf, title = TC.read_type(value(r.get("cover_text")), u)
+        t, _conf, title = TC.read_type(value(r.get("cover_text")), u, address=value(r.get("document_url")), company=value(r.get("company_name")), version=a.reader)
         return r, t, title, u
 
     docs, stopped = [], None
@@ -176,7 +179,7 @@ def main():
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
     left_out = collections.Counter({k: v for k, v in left_out.items() if v})
-    line = (f"{usage['calls']:,} calls, ${model_reader.cost(usage):.2f}{model_reader.cost_note()}, {(time.time() - t0) / 60:.0f} min."
+    line = (f"Reader prompt {a.reader}, model {os.environ.get('READER_MODEL') or 'the default'}, documents {a.offset:,} to {a.offset + len(ids):,} of the fixed order. {usage['calls']:,} calls, ${model_reader.cost(usage):.2f}{model_reader.cost_note()}, {(time.time() - t0) / 60:.0f} min."
             + (f" {stopped}." if stopped else ""))
     c = score(docs, checks_of)
     out = report(docs, c, left_out, line)
