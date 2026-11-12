@@ -180,6 +180,7 @@
   .lucky dt { color: var(--muted); } .lucky dd { margin: 0; overflow-wrap: anywhere; } .lucky dd a { color: var(--accent); }
   .lucky .excerpt { font-size: 13.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; max-height: 190px; overflow: auto; margin-bottom: 16px; }
   .lucky mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+  .lucky ul.readings { margin: 6px 0 0; padding-left: 18px; } .lucky ul.readings li { margin: 3px 0; } .lucky ul.readings .tag { color: var(--muted); font-size: 12.5px; }
   .lucky .excerpt .cap { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
   .lucky .verdict { display: flex; gap: 12px; justify-content: center; margin-bottom: 10px; }
   .lucky .verdict button { font: inherit; font-size: 16px; padding: 10px 26px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--box); color: var(--fg); cursor: pointer; }
@@ -308,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v40 2026-11-11";
+  const CLIENT = "lantern v41 2026-11-12";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -990,6 +991,40 @@
     return { n: i + 1, name: LEVELS[i][1], next: next ? { n: i + 2, name: next[1], at: next[0] } : null,
              share: next ? Math.max(0, Math.min(1, (pts - LEVELS[i][0]) / (next[0] - LEVELS[i][0]))) : 1 };
   }
+  // Every reading of the same company, attribute and year (12 Nov 2026): which figure each report gives, the newest
+  // report first. When reports differ, the newest report's figure is the one that stands (a restatement) and the
+  // earlier ones stay listed. Pure text for the summary; a node with the list for the card.
+  function readingsSummary(v) {
+    const rs = (v.readings || []).filter(r => r && r.value !== null && r.value !== undefined);
+    if (rs.length <= 1) return "This is the only reading.";
+    const diff = rs.filter(r => Number(r.value) !== Number(v.value));
+    if (!diff.length) return `${rs.length - 1} more ${rs.length === 2 ? "report gives" : "reports give"} the same figure.`;
+    const years = rs.map(r => Number(r.doc_year) || 0), top = Math.max(...years);
+    const mine = rs.find(r => r.this), newest = rs.filter(r => (Number(r.doc_year) || 0) === top);
+    if (!top || !mine) return `${diff.length} ${diff.length === 1 ? "report gives" : "reports give"} another figure.`;
+    if (newest.some(r => Number(r.value) !== Number(newest[0].value))) return `The newest reports (${top}) do not agree with each other.`;
+    if ((Number(mine.doc_year) || 0) === top) return `This is the figure in the newest report (${top}). An earlier report gave another: it looks restated, and this one stands.`;
+    return `A newer report (${top}) gives ${fmt(newest[0].value)}${newest[0].unit ? " " + newest[0].unit : ""}: this figure looks restated, and the newer one stands.`;
+  }
+  function readingsBox(v) {
+    const rs = (v.readings || []).filter(r => r && r.value !== null && r.value !== undefined);
+    const box = el("div"); box.append(el("div", null, readingsSummary(v)));
+    if (rs.length <= 1) return box;
+    const top = Math.max(...rs.map(r => Number(r.doc_year) || 0));
+    const ul = el("ul", "readings");
+    for (const r of rs) {
+      const li = el("li");
+      li.append(el("b", null, Number(r.value).toLocaleString("en", { maximumFractionDigits: 2 }) + (r.unit ? " " + r.unit : "")));
+      li.append(document.createTextNode(" · " + ([r.label, r.doc_type].filter(Boolean).join(" · ") || "a document with no title") + " · "));
+      if (r.url) { const a = el("a", null, `page ${r.page || "?"} ↗`); a.href = /\.pdf(\?|$)/i.test(r.url) || !/#/.test(r.url) ? `${r.url}#page=${r.page || 1}` : r.url; a.target = "_blank"; a.rel = "noopener"; li.append(a); }
+      else li.append(document.createTextNode(`page ${r.page || "?"} (no public link)`));
+      const tags = [r.this ? "this card" : "", top && (Number(r.doc_year) || 0) === top ? "newest report" : "", Number(r.value) !== Number(v.value) ? "another figure" : ""].filter(Boolean);
+      if (tags.length) li.append(el("span", "tag", " " + tags.join(" · ")));
+      ul.appendChild(li);
+    }
+    box.appendChild(ul);
+    return box;
+  }
   const levelLine = pts => { const L = levelOf(pts); return `Level ${L.n} · ${L.name}` + (L.next ? ` · ${Math.ceil(L.next.at - pts)} to ${L.next.name}` : ""); };
   // The signed-in person, top right: initials, the level's leaf with its number, and a bar toward the next level. Not a button.
   function showMe(score) {
@@ -1045,7 +1080,8 @@
     fact("Read as", v.printed ? String(v.printed).slice(0, 60) + (v.column_label ? `, under “${String(v.column_label).slice(0, 60)}”` : "") : "");
     fact("Document", [v.label, v.doc_type].filter(Boolean).join(" · "));
     if (v.url) { const a = el("a", null, `Open the source at page ${v.page || "?"} ↗`); a.href = /\.pdf(\?|$)/i.test(v.url) || !/#/.test(v.url) ? `${v.url}#page=${v.page || 1}` : v.url; a.target = "_blank"; a.rel = "noopener"; fact("Page", a); }
-    fact("Other readings", (v.others || v.differ) ? `${v.others || 0} more ${v.others === 1 ? "document gives" : "documents give"} this figure, ${v.differ || 0} give another` : "this is the only reading");
+    if (!v.url) fact("Page", `Page ${v.page || "?"}. This file was added by hand and has no public link; the text of the page as lanterN holds it is below.`);
+    fact("Other readings", readingsBox(v));
     c.appendChild(facts);
     if (v.excerpt) { const ex = el("div", "excerpt"); let t = escH(v.excerpt); if (v.needle) t = t.split(escH(v.needle)).join(`<mark>${escH(v.needle)}</mark>`);
                      ex.innerHTML = `<div class="cap">${v.needle ? "The page, around the figure" : "The page (the figure was not found as printed; open the source)"}</div>… ${t} …`; c.appendChild(ex); }
