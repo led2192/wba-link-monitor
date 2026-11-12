@@ -32,6 +32,12 @@ class Values(unittest.TestCase):
         self.assertFalse(E.same_title("", "Annual Report"))
 
 
+class AnswerKey(unittest.TestCase):
+    def test_labels_that_repeat_the_stored_type_are_not_an_answer_key(self):
+        self.assertNotIn("correction", E.PEOPLE); self.assertIn("correction", E.DEPENDENT)
+        self.assertIn("source_library", E.PEOPLE)
+
+
 class Scores(unittest.TestCase):
     def setUp(self):
         self.docs = [doc("Annual Report", "Annual Report", "Annual Report", "Annual Report"),
