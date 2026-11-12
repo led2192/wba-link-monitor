@@ -67,7 +67,7 @@ def unit_after_scale(unit, scale):
 _PLAIN_TONNES = re.compile(r"^(t|tonnes?|tons?|metrictonn?es?|metrictons?)(of)?(co2(e|eq|equiv|equivalents?))?$")
 
 
-def shown_unit(unit_printed, scale, family=None):
+def shown_unit(unit_printed, scale, family=None, attribute=None, value=None, says=None):
     """The unit to show beside a value (the printed number times `scale`). First the scale is taken out of the
     unit (unit_after_scale). Then, for emissions (family "tco2e"), a unit that plainly means tonnes of CO2
     equivalent in any spelling ("t-CO2e", "tonnes CO2e", "metric tons CO2e", "t") is written the one way, tCO2e.
@@ -75,12 +75,58 @@ def shown_unit(unit_printed, scale, family=None):
     (metric tons in most American reports, megatonnes in others), a kt or Mt whose scale was not applied (the value
     is then in that unit), and CO2 without the "e" (not the same quantity)."""
     u = unit_after_scale(unit_printed, scale)
+    if family == "tco2e" and u and scale in (None, 1) and is_mt(u) and mt_means(attribute, value, says)[0] == "tonnes":
+        return tonnes_unit(u)                                            # MT settled as metric tons (12 Nov 2026)
     if family == "tco2e" and u:
         flat = re.sub(r"[\s\-_.,/()]+", "", u.replace("₂", "2"))
         if flat[:1] in ("t", "T") or flat[:6].lower() == "metric":            # never "MT...", "Mt...", "kt..."
             if _PLAIN_TONNES.match(flat.lower()):
                 return "tCO2e"
     return u
+
+
+# "MT", "mt" or "Mt" with no scale applied: metric tons in most American reports, megatonnes in others. Settled by
+# the page when it spells one out and not the other, or by what is possible (fix_units.py has the reasons).
+_MT = re.compile(r"^mt(co2(e|eq|equiv|equivalents?)?)?$")
+_METRIC_WORDS = re.compile(r"metric\s+tonn?e?s?\b", re.I)
+_MEGA_WORDS = re.compile(r"millions?\s+(of\s+)?(metric\s+)?tonn?e?s?\b|mega\s?tonn?e?s?\b|\bMt\s*=", re.I)
+MT_BOUND = {"GMC_00005.1": 60000.0}         # megatonnes: more than the world emits in a year (Scope 3 can be large)
+MT_BOUND_DEFAULT = 2000.0                   # megatonnes of Scope 1 or 2: several times the largest emitter on record
+
+
+def flat_unit(unit):
+    return re.sub(r"[\s\-_.,/()]+", "", (unit or "").replace("₂", "2")).lower()
+
+
+def is_mt(unit):
+    return bool(_MT.match(flat_unit(unit)))
+
+
+def page_says(body):
+    """"tonnes" when the page spells out metric tons and never million tonnes, "megatonnes" the other way round,
+    None when it says neither or both."""
+    metric, mega = bool(body and _METRIC_WORDS.search(body)), bool(body and _MEGA_WORDS.search(body))
+    return "tonnes" if metric and not mega else "megatonnes" if mega and not metric else None
+
+
+def mt_means(attribute, value, says):
+    """("tonnes" | "megatonnes" | None, reason) for a figure printed with MT and no scale applied."""
+    if says == "tonnes":
+        return "tonnes", "the page spells out metric tons"
+    if says == "megatonnes":
+        return "megatonnes", "the page spells out million tonnes"
+    try:
+        if abs(float(value)) > MT_BOUND.get(attribute, MT_BOUND_DEFAULT):
+            return "tonnes", "more megatonnes than is possible"
+    except (TypeError, ValueError):
+        pass
+    return None, "neither the page nor the size settles it"
+
+
+def tonnes_unit(unit):
+    """tCO2e, or tCO2 when the printed unit has no "e" (CO2 alone is another quantity), or t."""
+    f = flat_unit(unit)
+    return "tCO2e" if re.search(r"co2(e|eq)", f) else "tCO2" if "co2" in f else "t"
 
 
 SYSTEM = ("You read pages of company reports and find one reported figure, for every year the pages print it. Answer "
@@ -355,7 +401,8 @@ def check(reply, pages, to_number, numbers_on, fy_month=None, why=None, period_c
         return drop("year differs from the column (July-December year end)")   # a column of 2025 is 2025, never 2024 (2 Nov 2026:
                                         # CVS Health's 2025 verification opinion, "January 1 to December 31, 2025", read as 2024)
     return {"value": printed * scale, "printed": printed, "scale": scale, "library_id": lid, "page": page,
-            "unit": unit_after_scale(reply.get("unit"), scale), "unit_printed": reply.get("unit") or "", "column": column, "year": year,
+            "unit": unit_after_scale(reply.get("unit"), scale), "unit_printed": reply.get("unit") or "", "page_says": page_says(body),
+            "column": column, "year": year,
             "basis": str(reply.get("basis") or "").strip().lower()[:20]}
 
 

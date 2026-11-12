@@ -72,40 +72,14 @@ def plan(records, families):
     return todo, c
 
 
-AMBIGUOUS = re.compile(r"^mt(co2(e|eq|equiv|equivalents?)?)?$")
-METRIC = re.compile(r"metric\s+tonn?e?s?\b", re.I)
-MEGA = re.compile(r"millions?\s+(of\s+)?(metric\s+)?tonn?e?s?\b|mega\s?tonn?e?s?\b|\bMt\s*=", re.I)
-BOUND = {"GMC_00005.1": 60000.0}            # megatonnes: more than the world emits in a year; Scope 3 can be large
-BOUND_DEFAULT = 2000.0                      # megatonnes of Scope 1 or 2: several times the largest emitter on record
-
-
-def is_ambiguous(unit):
-    return bool(AMBIGUOUS.match(re.sub(r"[\s\-_.,/()]+", "", (unit or "").replace("₂", "2")).lower()))
+from model_reader import is_mt as is_ambiguous, page_says, mt_means, tonnes_unit, flat_unit as flat      # one rule, here and when a value is proposed
 
 
 def settle(attribute, value, body):
     """("tonnes" | "megatonnes" | None, reason) for one ambiguous row. body: the text of its page, or None."""
-    metric, mega = bool(body and METRIC.search(body)), bool(body and MEGA.search(body))
-    if metric and not mega:
-        return "tonnes", "the page spells out metric tons"
-    if mega and not metric:
-        return "megatonnes", "the page spells out million tonnes"
-    try:
-        if abs(float(value)) > BOUND.get(attribute, BOUND_DEFAULT):
-            return "tonnes", "more megatonnes than is possible"
-    except (TypeError, ValueError):
-        pass
-    return None, "the page says both" if metric and mega else "neither the page nor the size settles it"
-
-
-def flat(unit):
-    return re.sub(r"[\s\-_.,/()]+", "", (unit or "").replace("₂", "2")).lower()
-
-
-def tonnes_unit(unit):
-    """tCO2e, or tCO2 when the printed unit has no "e" (CO2 alone is another quantity), or t."""
-    f = flat(unit)
-    return "tCO2e" if re.search(r"co2(e|eq)", f) else "tCO2" if "co2" in f else "t"
+    if body and page_says(body) is None and re.search(r"metric\s+tonn?e?s?\b", body, re.I) and mt_means(attribute, value, None)[0] is None:
+        return None, "the page says both"
+    return mt_means(attribute, value, page_says(body))
 
 
 def plan_ambiguous(records, families, bodies):
