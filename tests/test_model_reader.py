@@ -474,7 +474,8 @@ UNIT_CASES = [("Mt-CO2e", 1e6, "t-CO2e"), ("MtCO2e", 1e6, "tCO2e"), ("ktCO2e", 1
               ("million tonnes CO2e", 1e6, "tonnes CO2e"), ("thousand tonnes", 1e3, "tonnes"), ("RMB million", 1e6, "RMB"),
               ("RMB'000", 1e3, "RMB"), ("USD bn", 1e9, "USD"), ("€m", 1e6, "€"), ("US$ m", 1e6, "US$"),
               ("RMB", 1e6, "RMB"), ("sqm", 1e6, "sqm"), ("MWh", 1e6, "MWh"), ("tCO2e", 1e3, "tCO2e"),      # the unit does not name the scale: untouched
-              ("Mt-CO2e", 1, "Mt-CO2e"), ("ktCO2e", 1e6, "ktCO2e"), ("", 1e6, ""), ("millions", 1e6, "millions")]
+              ("Mt-CO2e", 1, "Mt-CO2e"), ("ktCO2e", 1e6, "ktCO2e"), ("", 1e6, ""), ("millions", 1e6, "millions"),
+              ("employees (headcount)", 1e3, "employees (headcount)"), ("(RMB)", 1e6, "(RMB)")]      # the first dry run of fix_units cut the bracket
 
 
 class ShownUnit(unittest.TestCase):

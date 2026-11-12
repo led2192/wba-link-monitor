@@ -58,6 +58,8 @@ def unit_after_scale(unit, scale):
         out = re.sub(r"^\s*" + _UNIT_PREFIX[scale] + r"(?=t)", "", u, flags=re.I)
     if out == u and scale == 1e6:
         out = re.sub(r"(?<=[^A-Za-z])m\.?$", "", u)                 # "€m", "US$ m": never the m of "RMB" or "sqm"
+    if out == u:
+        return u                                                     # the unit does not name the scale: not a character of it changes
     out = re.sub(r"\s+", " ", out).strip(" -,;:()[]")
     return out or u
 
