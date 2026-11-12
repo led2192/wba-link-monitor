@@ -72,5 +72,20 @@ class Purge(unittest.TestCase):
         self.assertIn(P.ARCHIVED, P.MACHINE_REASONS)
 
 
+
+class Patient(unittest.TestCase):
+    def test_airtable_down_for_minutes_does_not_end_the_copy(self):
+        calls, slept = [], []
+        def call():
+            calls.append(1)
+            if len(calls) < 4:
+                raise RuntimeError("503")
+            return "ok"
+        self.assertEqual(C.patient(call, sleep=slept.append), "ok")
+        self.assertEqual(slept, [60, 300, 300])
+        with self.assertRaises(RuntimeError):
+            C.patient(lambda: (_ for _ in ()).throw(RuntimeError("503")), waits=(1,), sleep=lambda s: None)
+
+
 if __name__ == "__main__":
     unittest.main()

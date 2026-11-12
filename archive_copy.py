@@ -102,6 +102,24 @@ def copy_one(storage, session, wba, library_id, attachment):
     return "stored", stored_note(path, len(data))
 
 
+WAITS = (60, 300, 300, 600)          # seconds between further tries when Airtable stays down
+
+
+def patient(call, waits=WAITS, sleep=time.sleep):
+    """A call to Airtable that has already been retried for a minute (base_health.req) is tried again after each
+    wait. On 11 Nov 2026 Airtable answered 503 for longer than a minute and a copy that had run for 228 minutes
+    ended there, two hours before its time; the rest of the night was lost. Raises after the last wait."""
+    for i, w in enumerate((0,) + tuple(waits)):
+        if w:
+            print(f"  Airtable did not answer; waiting {w} s (try {i + 1} of {len(waits) + 1})", flush=True)
+            sleep(w)
+        try:
+            return call()
+        except Exception as e:
+            last = e
+    raise last
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rule", choices=["A", "B"], default="B")
@@ -141,7 +159,7 @@ def main():
                 break
             batch = todo[i:i + BATCH]
             formula = "OR(" + ",".join(f"RECORD_ID()='{rid}'" for rid, _ in batch) + ")"
-            fresh = req("GET", url, params=[("filterByFormula", formula), ("fields[]", "file"), ("fields[]", "stored_file"), ("pageSize", "100")]).json().get("records", [])
+            fresh = patient(lambda: req("GET", url, params=[("filterByFormula", formula), ("fields[]", "file"), ("fields[]", "stored_file"), ("pageSize", "100")])).json().get("records", [])
             files = {r["id"]: r.get("fields", {}) for r in fresh}
             updates = []
             for rid, f in batch:
@@ -156,7 +174,7 @@ def main():
                     updates.append({"id": rid, "fields": {"stored_file": note}})
                     sent += int(note.rsplit("(", 1)[1].split()[0])
             if updates:
-                req("PATCH", url, json={"records": updates})
+                patient(lambda: req("PATCH", url, json={"records": updates}))
             if (i // BATCH) % 20 == 19:
                 print(f"  {c['stored']:,} stored, {sent / 1e9:.1f} GB, {(time.time() - t0) / 60:.0f} min", flush=True)
     md = [f"### Archive copy, rule {a.rule}" + ("" if a.commit else " (dry run: nothing downloaded or uploaded)"), "",
