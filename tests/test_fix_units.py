@@ -35,5 +35,37 @@ class Plan(unittest.TestCase):
         self.assertEqual(body, {"records": [{"id": "rec1", "fields": {"unit": "tCO2e", "unit_printed": "Mt-CO2e"}}]})
 
 
+class Ambiguous(unittest.TestCase):
+    def row(self, i, unit, value, attr="S1", lid="PT_1-a", page=4, detail="Printed as 1 (units) on page 4.", printed=""):
+        return {"id": f"rec{i}", "fields": {"value_id": f"v{i}", "attribute": attr, "unit": unit, "unit_printed": printed, "detail": detail,
+                                            "value": value, "library_id": lid, "page": page}}
+
+    def test_which_units_are_ambiguous(self):
+        for u in ("MT CO2e", "mt CO2e", "Mt-CO2e", "MT", "MtCO2eq", "mtCO₂e"):
+            self.assertTrue(F.is_ambiguous(u), u)
+        for u in ("tCO2e", "ktCO2e", "metric tons CO2e", "MWh", "", "Mt CO2e per MWh"):
+            self.assertFalse(F.is_ambiguous(u), u)
+
+    def test_the_page_or_what_is_possible_settles_it_and_nothing_else_does(self):
+        self.assertEqual(F.settle("S1", 88555, "Scope 1 (metric tons CO2e) 88,555")[0], "tonnes")
+        self.assertEqual(F.settle("S1", 0.39, "Emissions (Mt-CO2e), million tonnes of CO2 equivalent 0.39")[0], "megatonnes")
+        self.assertEqual(F.settle("S1", 88555, None), ("tonnes", "more megatonnes than is possible"))
+        self.assertEqual(F.settle("S1", 1500, None)[0], None)                       # 1,500 Mt is not impossible enough to decide
+        self.assertEqual(F.settle("S3", 30000, "nothing about units", )[0], "tonnes")
+        self.assertEqual(F.settle("GMC_00005.1", 30000, None)[0], None)             # Scope 3: only above the world's emissions
+        self.assertEqual(F.settle("S1", 12, "metric tons and million tonnes on one page"), (None, "the page says both"))
+
+    def test_the_plan(self):
+        fam = {"S1": "tco2e", "REV": "currency"}
+        recs = [self.row(1, "MT CO2e", 88555), self.row(2, "Mt-CO2e", 0.39, lid="PT_2-b", page=130), self.row(3, "MT CO2e", 12, lid="PT_3-c"),
+                self.row(4, "MT CO2e", 5, detail="Printed as 5 (millions) on page 4."),      # a scale was applied: the first pass's business
+                self.row(5, "MT", 9, attr="REV"), self.row(6, "MT CO2e", 7, printed="x")]
+        bodies = {("PT_1-a", 4): "all figures in metric tons CO2e", ("PT_2-b", 130): "Emissions in million tonnes (Mt-CO2e)"}
+        todo, c, left = F.plan_ambiguous(recs, fam, bodies)
+        self.assertEqual(todo, [("rec1", "v1", "MT CO2e", "tCO2e")])
+        self.assertEqual(left, [("v3", "MT CO2e", 12, "neither the page nor the size settles it")])
+        self.assertEqual(c["megatonnes: the page spells out million tonnes"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,10 @@ on:
         description: "write the units (false = print what would change)"
         type: boolean
         default: false
+      ambiguous:
+        description: "the second pass: MT with no scale applied, settled by the page or by what is possible"
+        type: boolean
+        default: false
 
 concurrency:
   group: fix-units
@@ -26,9 +30,10 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Units
-        run: python fix_units.py ${{ inputs.commit && '--commit' || '' }}
+        run: python fix_units.py ${{ inputs.commit && '--commit' || '' }} ${{ inputs.ambiguous && '--ambiguous' || '' }}
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
