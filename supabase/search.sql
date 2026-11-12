@@ -2072,8 +2072,22 @@ begin
                             'country', c.country, 'attribute', p.attribute, 'year', p.year, 'value', p.value, 'unit', p.unit, 'printed', p.printed,
                             'basis', p.basis, 'column_label', p.column_label, 'page', p.page, 'url', d.url, 'label', d.label, 'doc_type', d.doc_type,
                             'doc_year', d.year, 'needle', needle,
+                            'library_id', p.library_id,
+                            -- a document with no address (a file added by hand) cannot be opened from the card: the
+                            -- card then carries much more of the page, so the figure can still be judged (12 Nov 2026)
                             'excerpt', case when body is null then null
+                                            when d.url is null then regexp_replace(substring(body from greatest(pos - 1500, 1) for 6000), '\s+', ' ', 'g')
                                             else regexp_replace(substring(body from greatest(pos - 450, 1) for 1000), '\s+', ' ', 'g') end,
+                            -- every reading of this company, attribute and year, this one included, the newest
+                            -- report first: which figure each report gives, so a restatement can be seen and the
+                            -- earlier figures stay in view (12 Nov 2026; the counts alone said "1 give another"
+                            -- and not which, nor where)
+                            'readings', (select coalesce(jsonb_agg(jsonb_build_object('value', o.value, 'unit', o.unit, 'basis', o.basis, 'page', o.page,
+                                                  'label', od.label, 'doc_type', od.doc_type, 'doc_year', od.year, 'url', od.url,
+                                                  'this', o.version_id = p.version_id) order by od.year desc nulls last, o.last_seen desc), '[]'::jsonb)
+                                         from (select * from public.value_versions o where o.wba_id = p.wba_id and o.attribute = p.attribute
+                                                 and o.year = p.year order by o.last_seen desc limit 12) o
+                                         left join public.documents od on od.library_id = o.library_id),
                             'others', (select count(*) from public.value_versions o where o.wba_id = p.wba_id and o.attribute = p.attribute and o.year = p.year
                                          and o.version_id <> p.version_id and o.value = p.value),
                             'differ', (select count(*) from public.value_versions o where o.wba_id = p.wba_id and o.attribute = p.attribute and o.year = p.year

@@ -183,6 +183,35 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.did_you_mean('', 'unilver scope 3')"); self.assertEqual(cur.fetchone()[0], "unilever scope 3")
         cur.execute("select public.did_you_mean('', 'living wage')"); self.assertIsNone(cur.fetchone()[0])
 
+    def test_the_review_card_lists_every_reading_and_carries_the_page_when_there_is_no_link(self):
+        """12 Nov 2026: the card said "1 give another" and not which figure or where; and a document with no address
+        could not be opened at all."""
+        cur = self.conn.cursor()
+        cur.execute("delete from public.value_versions")
+        cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, label, url, pages) values "
+                    "('PT_09999-new', 'PT_09999', 'Card Co', 'ESG Report', 2026, '2026 | Card Co | ESG Report', null, 3), "
+                    "('PT_09999-old', 'PT_09999', 'Card Co', 'ESG Report', 2025, '2025 | Card Co | ESG Report', 'https://card.example/esg-2025.pdf', 3) "
+                    "on conflict (library_id) do nothing")
+        cur.execute("insert into public.pages (library_id, page, body) values ('PT_09999-new', 2, %s) on conflict do nothing",
+                    ("x " * 1200 + "Scope 2 emissions 150,641 tonnes " + "y " * 2500,))
+        cur.execute("insert into public.value_versions (version_id, wba_id, attribute, year, value, unit, printed, library_id, page, method) values "
+                    "('v-new', 'PT_09999', 'GMC_T', 2024, 150641, 'tCO2e', '150,641', 'PT_09999-new', 2, 'model'), "
+                    "('v-old', 'PT_09999', 'GMC_T', 2024, 148000, 'tCO2e', '148,000', 'PT_09999-old', 3, 'model')")
+        seen = {}
+        for _ in range(40):                                         # the draw is random between the two
+            cur.execute("select public.lucky_value()")
+            v = cur.fetchone()[0]["value"]
+            seen[v["library_id"]] = v
+            if len(seen) == 2:
+                break
+        new, old = seen["PT_09999-new"], seen["PT_09999-old"]
+        self.assertEqual([(r["value"], r["doc_year"], r["this"]) for r in new["readings"]], [(150641, 2026, True), (148000, 2025, False)])
+        self.assertEqual([r["this"] for r in old["readings"]], [False, True])
+        self.assertEqual(old["readings"][1]["url"], "https://card.example/esg-2025.pdf")
+        self.assertIsNone(new["url"]); self.assertGreater(len(new["excerpt"]), 4000); self.assertIn("150,641", new["excerpt"])
+        self.assertEqual((new["differ"], new["others"]), (1, 0))
+        cur.execute("delete from public.value_versions; delete from public.pages where library_id like 'PT_09999-%'; delete from public.documents where library_id like 'PT_09999-%'")
+
     def test_the_schema_installs_while_other_jobs_read_and_write(self):
         """The semantic index keeps a transaction open on pages, chunks and page_pairs for hours; the load applies
         schema.sql at its start and waits 30 seconds at most for a lock. Nothing in the guarded schema may need a
