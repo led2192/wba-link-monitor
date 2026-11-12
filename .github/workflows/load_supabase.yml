@@ -23,6 +23,9 @@ on:
       minutes:
         description: "time budget in minutes (0 = install the search functions and refresh documents only, no pages: the documents refresh takes about two hours)"
         default: "300"
+      max_gb:
+        description: "stop loading pages at this database size in GB (empty = the repository variable SUPABASE_MAX_GB)"
+        default: ""
       functions_only:
         description: "true = apply search.sql (the search functions) and stop: seconds, no schema, no documents, no pages"
         type: boolean
@@ -56,7 +59,7 @@ jobs:
           TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
-          MAX_GB: ${{ vars.SUPABASE_MAX_GB || '6' }}
+          MAX_GB: ${{ inputs.max_gb || vars.SUPABASE_MAX_GB || '6' }}
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
                # never past 06:00 UTC (07:00 Madrid in winter): loading slows every search
