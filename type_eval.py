@@ -8,7 +8,7 @@ and so does the title (`source_title`). Leaving Airtable means typing every docu
 already does it for the other languages with the model reader's model, and its only measure so far is its
 agreement with the AI field (76% of 300 on 10 Nov), which says how alike the two are, not which one is right.
 The Pipeline QA base holds the answer key: the labels with a sure true type given by a person (Source Library
-analysts, corrections by hand, cards answered by the owner). Labels settled by a model are left out, so that no
+analysts, cards answered by the owner; not the 'correction' labels, which repeat the stored type). Labels settled by a model are left out, so that no
 model is graded by a model (qa_sample.py).
 
 What it does: takes N of those documents (the same N every run: ordered by a hash of the record id), reads their
@@ -27,7 +27,12 @@ QA_COMMIT=true), ANTHROPIC_API_KEY (READER_MODEL for another model).
 import argparse, collections, hashlib, os, re, sys, time
 
 API = "https://api.airtable.com/v0"
-PEOPLE = ("source_library", "correction", "Edi")                # labelled_by values that are a person's answer
+PEOPLE = ("source_library", "Edi")                              # labelled_by values that are a person's own answer
+# Not "correction" (12 Nov 2026): qa_sync writes that label whenever source_type_check differs from the first type
+# it saw on the row, and takes the new value as the truth. Most of those changes are the AI field answering after
+# the address rule, not a person: about 15,000 of the 22,244 sure labels. Graded on them the stored type is right
+# by construction (93% in the first run, which measured nothing).
+DEPENDENT = ("correction",)
 FIELDS = ("library_id", "cover_text", "doc_language", "source_type_check", "source_type", "source_title", "document_url", "company_name")
 
 
@@ -142,7 +147,9 @@ def main():
     truth = {}
     for l in labels:
         tt = value(l.get("true_type"))
-        if value(l.get("labelled_by")) not in PEOPLE:
+        if value(l.get("labelled_by")) in DEPENDENT:
+            left_out["labels that are a change of the stored type (the stored type is right on them by construction)"] += 1
+        elif value(l.get("labelled_by")) not in PEOPLE:
             left_out["labels not given by a person"] += 1
         elif tt not in TC.TYPES and tt != TC.UNKNOWN:
             left_out["true types outside the list of 23"] += 1
