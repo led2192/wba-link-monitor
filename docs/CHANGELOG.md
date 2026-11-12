@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-12 Purge discarded rows: saving the tombstones takes the new commits of `main` first (three tries). A pull request merged while the purge selected its rows made the push fail and the purge stop before deleting anything. (#449)
 - 2026-11-12 Installing the search functions alone (`functions_only`) no longer waits behind a running load: it has its own queue in the Evidence database load workflow. (#448)
 - 2026-11-12 Send to lanterN: the limit is 1,000 files a person a day (it was 300, reached on the second day of real use) and 3,000 for everyone together (it was 2,000). A document the library already holds no longer meets the limit: that answer comes first. (#447)
 - 2026-11-12 `type_eval.py` and the `Type evaluation` workflow (manual): on documents whose true type a person gave (Pipeline QA labels; labels settled by a model left out), how often the stored type (the Airtable AI field on English documents), the address and cover rules and our own reader (`type_covers.read_type`) are right, exact and at check level, English and other languages apart. The measure needed before our reader types English documents too. Writes nothing to Airtable. (#446)
