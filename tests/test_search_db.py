@@ -183,6 +183,23 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.did_you_mean('', 'unilver scope 3')"); self.assertEqual(cur.fetchone()[0], "unilever scope 3")
         cur.execute("select public.did_you_mean('', 'living wage')"); self.assertIsNone(cur.fetchone()[0])
 
+    def test_the_schema_installs_while_other_jobs_read_and_write(self):
+        """The semantic index keeps a transaction open on pages, chunks and page_pairs for hours; the load applies
+        schema.sql at its start and waits 30 seconds at most for a lock. Nothing in the guarded schema may need a
+        lock those readers and writers refuse (12 Nov 2026: "drop trigger" on pages did, and the load ended there)."""
+        import psycopg, load_supabase as LS
+        other = psycopg.connect(URL)
+        try:
+            oc = other.cursor()
+            oc.execute("select count(*) from public.pages"); oc.execute("select count(*) from public.documents")
+            oc.execute("delete from public.chunks where false"); oc.execute("delete from public.page_pairs where false")
+            with psycopg.connect(URL) as mine:                  # `other` is now idle in a transaction that holds its locks
+                c = mine.cursor()
+                c.execute("set lock_timeout = '2s'")
+                c.execute(LS.guard_sql(pg_search.schema_text(c)))
+                mine.commit()
+        finally:
+            other.rollback(); other.close()
 
 if __name__ == "__main__":
     unittest.main()

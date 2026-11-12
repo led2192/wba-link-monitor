@@ -75,9 +75,15 @@ create or replace function public.pages_before_write() returns trigger
     new.year := coalesce(new.year, 0); new.doc_type := coalesce(new.doc_type, ''); new.wba_id := coalesce(new.wba_id, '');
     return new;
   end $$;
-drop trigger if exists pages_before_write on public.pages;
-create trigger pages_before_write before insert or update of body on public.pages
-  for each row execute function public.pages_before_write();
+-- Created only when missing (12 Nov 2026): "drop trigger" takes an exclusive lock on the table even when the
+-- trigger is already right, so every load waited for every reader of pages and gave up after 30 seconds whenever
+-- the semantic index was running. To change a trigger's definition, give it a new name here and drop the old one.
+do $guard$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'pages_before_write' and tgrelid = 'public.pages'::regclass) then
+    create trigger pages_before_write before insert or update of body on public.pages
+      for each row execute function public.pages_before_write();
+  end if;
+end $guard$;
 
 -- When a document's year, type or company changes (a correction in the library), its pages follow.
 create or replace function public.documents_after_change() returns trigger
@@ -89,11 +95,14 @@ create or replace function public.documents_after_change() returns trigger
        and (year, doc_type, wba_id) is distinct from (coalesce(new.year, 0), coalesce(new.doc_type, ''), coalesce(new.wba_id, ''));
     return null;
   end $$;
-drop trigger if exists documents_after_change on public.documents;
-create trigger documents_after_change after update of year, doc_type, wba_id on public.documents
-  for each row
-  when (old.year is distinct from new.year or old.doc_type is distinct from new.doc_type or old.wba_id is distinct from new.wba_id)
-  execute function public.documents_after_change();
+do $guard$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'documents_after_change' and tgrelid = 'public.documents'::regclass) then
+    create trigger documents_after_change after update of year, doc_type, wba_id on public.documents
+      for each row
+      when (old.year is distinct from new.year or old.doc_type is distinct from new.doc_type or old.wba_id is distinct from new.wba_id)
+      execute function public.documents_after_change();
+  end if;
+end $guard$;
 
 -- Evidence passages (evidence_chunks.py): about 120 words each, tagged climate, nature, social,
 -- financial. embedding is filled later, when the embeddings provider is chosen.
