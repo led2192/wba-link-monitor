@@ -207,7 +207,10 @@ def apply_schema(conn, commit):
         # search and the web interface for half an hour). Wait at most 30 seconds for a lock, then fail; the
         # next load applies the schema again.
         c.execute("set lock_timeout = '30s'")
-        c.execute(open(SCHEMA, encoding="utf-8").read())
+        # schema.sql too goes through guard_sql (12 Nov 2026): its "add column if not exists" and "create index if
+        # not exists" lines waited for a lock on tables other jobs were writing, and the night's load ended there
+        # after 30 seconds without loading anything. Guarded, a line touches its table only when there is work.
+        c.execute(guard_sql(open(SCHEMA, encoding="utf-8").read()))
     if has_auth(conn) and search_index_exists(conn):
         with conn.cursor() as c:
             c.execute(guard_sql(open(SEARCH_SQL, encoding="utf-8").read()))

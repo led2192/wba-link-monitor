@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-12 `load_supabase.py` passes `schema.sql` through `guard_sql`, as it does `search.sql`: the night's load ended after 30 seconds on a lock (an `add column if not exists` waiting on a table another job was writing) and loaded nothing. (#439)
 - 2026-11-12 `archive_copy.py` rides out an Airtable outage: after the usual minute of retries it waits 1, 5, 5 and 10 minutes before giving up. The second batch of the copy ended at minute 228 on a 503 that lasted longer than a minute (6,386 documents stored, the rest of the night lost). (#438)
 - 2026-11-11 Extension 0.3.1: documents with no ".pdf" in their address are listed (an investor site served every annual report as `/static-files/<id>` and the window said "No link to a PDF"). Known by the address (the platforms of `monitor_core.DOC_ENDPOINTS`) or by the PDF icon on the link; each doubtful link is asked for its headers, and the ones the site calls a PDF are treated as the others. (#437)
 - 2026-11-11 Extension 0.3.0, "Look one level deeper": a report page whose buttons lead to one page per report (an insurer's report room showed no PDF link at all) can be read one level down. The pages it links to on the same site, 40 at most, are fetched by the person's browser and their PDF links listed with the rest. (#436)

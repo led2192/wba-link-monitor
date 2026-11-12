@@ -259,3 +259,13 @@ def load_tests(loader, standard, pattern):
 def test_the_library_is_asked_about_an_address_through_an_index():
     assert "create index if not exists documents_url on public.documents (url);" in SQL      # not by reading every document (11 Nov 2026)
 
+
+def test_the_schema_is_guarded_like_the_functions():
+    import load_supabase as LS
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(ROOT, "load_supabase.py"), encoding="utf-8").read()
+    assert "c.execute(guard_sql(open(SCHEMA, encoding=\"utf-8\").read()))" in src
+    g = LS.guard_sql(open(os.path.join(ROOT, "supabase", "schema.sql"), encoding="utf-8").read())
+    for line in g.split("\n"):                                  # no bare lock-taking line is left at the first column
+        assert not line.startswith(("alter table public.documents add column", "create index if not exists", "create unique index if not exists")), line
+
