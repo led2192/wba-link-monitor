@@ -30,8 +30,10 @@ on:
   pull_request:
     paths: [load_supabase.py, supabase/schema.sql, .github/workflows/load_supabase.yml]
 
+# Installing the search functions alone takes seconds and has its own queue (12 Nov 2026): in the load's queue it
+# waited for hours behind a running load, and a fix to a function could not reach the page.
 concurrency:
-  group: load-supabase
+  group: load-supabase${{ inputs.functions_only == 'true' && '-functions' || '' }}
   cancel-in-progress: false
 
 jobs:
