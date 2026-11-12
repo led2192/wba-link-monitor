@@ -156,6 +156,20 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((j["n"], j["blocked"]), (2, 1))
         self.assertEqual([d["url"] for d in j["documents"]], ["https://example.com/ar-2024.pdf", "https://example.com/old.pdf"])   # newest label first
 
+    def test_a_load_writes_only_the_documents_that_changed(self):
+        import load_supabase as LS, psycopg
+        cur = self.conn.cursor()
+        conn = psycopg.connect(os.environ["PG_SEARCH_TEST_URL"])        # the loader's own kind of connection: a transaction per call
+        self.addCleanup(conn.close)
+        row = ("PT_00000-loadtest", "recX", "PT_00000", "Unilever", "Annual Report", 2024, "en", "2024 | Unilever | Test", "https://example.com/t.pdf", 10, 1000, "ok", "p1", "2026-11-12", None, "2026-11-01")
+        self.assertEqual(LS.upsert_documents(conn, [row]), 1)
+        cur.execute("select loaded_at from public.documents where library_id = 'PT_00000-loadtest'"); first = cur.fetchone()[0]
+        self.assertEqual(LS.upsert_documents(conn, [row]), 0)                                  # the same again: nothing is written
+        cur.execute("select loaded_at from public.documents where library_id = 'PT_00000-loadtest'"); self.assertEqual(cur.fetchone()[0], first)
+        self.assertEqual(LS.upsert_documents(conn, [row[:9] + (12,) + row[10:]]), 1)           # one field differs: written
+        cur.execute("select pages from public.documents where library_id = 'PT_00000-loadtest'"); self.assertEqual(cur.fetchone()[0], 12)
+        cur.execute("delete from public.documents where library_id = 'PT_00000-loadtest'"); self.conn.commit()
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:

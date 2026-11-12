@@ -28,4 +28,6 @@ class Orphans(unittest.TestCase):
                 (3, "postgres", "x", "idle in transaction", None, None, 99999, "select 1")]
         self.assertEqual([r[0] for r in D.orphans(rows)], [1])
         self.assertGreater(D.ORPHAN_SECONDS, 360 * 60)                 # longer than GitHub lets a job live
+        self.assertEqual([r[0] for r in D.orphans(rows, 300 * 60)], [1])                      # a known-dead job's statement, five hours old
+        self.assertEqual([r[0] for r in D.orphans(rows, 60)], [1])                             # never under an hour, whatever is asked
 
