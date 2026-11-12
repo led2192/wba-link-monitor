@@ -2225,15 +2225,18 @@ begin
   if src is not null and (src !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(src) > 1000) then
     raise exception 'the address the file came from is not a link' using errcode = '22023';
   end if;
-  if (select count(*) from public.browser_uploads u where u.uploader = who and u.at > now() - interval '1 day') >= 300 then
-    raise exception 'three hundred files a day at most' using errcode = '22023';
-  end if;
-  -- everyone together: a ceiling, so that no mistake and no misuse fills the library in a day
-  if (select count(*) from public.browser_uploads u where u.at > now() - interval '1 day') >= 2000 then
-    raise exception 'the day''s limit for everyone is reached: try again tomorrow' using errcode = '22023';
-  end if;
   if src is not null and exists (select 1 from public.documents d where d.url = src and coalesce(d.pages, 0) > 0) then
     return jsonb_build_object('known', true);                        -- the library holds this document, with its text
+  end if;
+  -- A thousand a person a day (12 Nov 2026; it was 300, reached on the second day of real use by one person
+  -- sending whole report archives, which is the intended use). A document the library already holds is answered
+  -- above and never counts against the limit.
+  if (select count(*) from public.browser_uploads u where u.uploader = who and u.at > now() - interval '1 day') >= 1000 then
+    raise exception 'a thousand files a day at most: the rest can be sent tomorrow' using errcode = '22023';
+  end if;
+  -- everyone together: a ceiling, so that no mistake and no misuse fills the library in a day
+  if (select count(*) from public.browser_uploads u where u.at > now() - interval '1 day') >= 3000 then
+    raise exception 'the day''s limit for everyone is reached: try again tomorrow' using errcode = '22023';
   end if;
   select * into row from public.browser_uploads u where u.wba_id = co and u.sha256 = sha;
   if found and row.status <> 'expected' then
