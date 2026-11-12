@@ -193,6 +193,17 @@ def drop_vector_index(cur):
     return dropped
 
 
+def remaining_line(cur, years):
+    """One line on where the fill stands: documents done and left. Seconds, reads two counts, embeds nothing. A
+    running job's log cannot be read from outside, so this is how the fill is watched (12 Nov 2026)."""
+    left = len(documents_to_index(cur, years, (0, 1), 1_000_000))
+    cur.execute("select count(*) from public.chunk_docs")
+    done = cur.fetchone()[0]
+    cur.execute("select pg_database_size(current_database()) / 1e9")
+    gb = float(cur.fetchone()[0])
+    return f"Semantic fill: {done:,} documents done, {left:,} left to index; database {gb:.1f} GB."
+
+
 def build_settings(memory, workers):
     """The two settings of the build, checked before they reach SQL. memory like '512MB' or '8GB'; workers 0 to 16."""
     m = re.fullmatch(r"\s*(\d{1,5})\s*(MB|GB)\s*", str(memory or ""), re.I)
@@ -236,6 +247,7 @@ def main():
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--build-index", action="store_true", help="build the index on the embeddings (once, when the documents are in) and stop")
+    ap.add_argument("--remaining", action="store_true", help="print how many documents are done and left, and stop")
     ap.add_argument("--build-memory", default="512MB", help="maintenance_work_mem for --build-index: about half the database machine's RAM")
     ap.add_argument("--build-workers", type=int, default=2, help="parallel workers for --build-index: the machine's processors minus one")
     ap.add_argument("--no-pairs", action="store_true", help="write the chunks only; the word pairs of these documents are left for a later pass")
@@ -253,6 +265,14 @@ def main():
             secs = build_vector_index(conn.cursor(), a.build_memory, a.build_workers)
         print(f"The indexes on the embeddings and on the word pairs are built ({secs / 60:.1f} min).", flush=True)
         run.finish("ok", rows_in=0, rows_out=0, notes="index built")
+        return 0
+    if a.remaining:
+        with evidence_db.connect() as conn:
+            line = remaining_line(conn.cursor(), years)
+        print(line, flush=True)
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(line + "\n")
+        run.finish("ok", rows_in=0, rows_out=0, notes="remaining counted")
         return 0
     emb = Embedder(a.model, a.batch)
     done, n_chunks, n_pages, n_pairs, examples, stopped = 0, 0, 0, 0, [], None

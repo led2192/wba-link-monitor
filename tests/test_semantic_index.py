@@ -87,6 +87,17 @@ class Reconnect(unittest.TestCase):
         self.assertIn("conn = evidence_db.connect(); cur = conn.cursor()", src)
 
 
+class Remaining(unittest.TestCase):
+    def test_one_line_from_two_counts(self):
+        import semantic_index as SI
+        class Cur:
+            def __init__(self): self.q = ""
+            def execute(self, q, *a): self.q = q
+            def fetchall(self): return [("PT_1-a", 2025, "Annual Report", 10)] * 3
+            def fetchone(self): return (True,) if "to_regclass" in self.q else (12345,) if "chunk_docs" in self.q else (91.26,)
+        self.assertEqual(SI.remaining_line(Cur(), (2024, None)), "Semantic fill: 12,345 documents done, 3 left to index; database 91.3 GB.")
+
+
 class BuildSettings(unittest.TestCase):
     def test_only_a_size_and_a_small_number_reach_the_sql(self):
         import semantic_index as SI

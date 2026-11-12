@@ -16,6 +16,9 @@ on:
       build_workers:
         description: "for build_index: parallel workers, the machine's processors minus one"
         default: "2"
+      remaining:
+        description: "true to print how many documents are done and left, and stop (seconds)"
+        default: "false"
       commit:
         description: "write the chunks and embeddings (false = read, embed and print, write nothing)"
         type: boolean
@@ -37,7 +40,7 @@ on:
         default: "2024-"
 
 concurrency:
-  group: semantic-index-${{ inputs.partition || 'all' }}
+  group: semantic-index-${{ inputs.remaining == 'true' && 'count' || inputs.partition || 'all' }}
   cancel-in-progress: false
 
 jobs:
@@ -62,6 +65,7 @@ jobs:
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
           [ "${{ inputs.pairs }}" = "false" ] && ARGS="$ARGS --no-pairs"
           [ "${{ inputs.build_index }}" = "true" ] && ARGS="--build-index --commit --build-memory ${{ inputs.build_memory || '512MB' }} --build-workers ${{ inputs.build_workers || '2' }}"
+          [ "${{ inputs.remaining }}" = "true" ] && ARGS="--remaining --years ${{ inputs.years }}"
           echo "python semantic_index.py $ARGS"
           python semantic_index.py $ARGS
         env:
