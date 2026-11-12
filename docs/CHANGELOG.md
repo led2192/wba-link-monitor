@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-12 `browser_uploads.py` checks the room in the base before making rows: new rows stop at 95% of the record limit (the last `base_health` count); the files wait as `stored` and the next run tries them again, with one DATA_CHECK failure a day. A file for a row that already exists never waits. (#451)
 - 2026-11-12 First measure of our type reader against the types people gave (run 43212861155, 1,485 English documents): the Airtable AI field is right on 93.3% (98.1% at check level), our reader on 70.6% (90.5%), the address and cover rules on 21.3% (60.0%). Our reader cannot replace the AI field yet. A second prompt as an option (`type_covers.prompt(version=2)`, `type_eval.py --reader 2`): more rules for its commonest mistakes, 6,000 characters instead of 2,500, the file's address and the company name; `--offset` measures on a second set of documents not seen when the prompt was written. The default is unchanged. (#450)
 - 2026-11-12 Purge discarded rows: saving the tombstones takes the new commits of `main` first (three tries). A pull request merged while the purge selected its rows made the push fail and the purge stop before deleting anything. (#449)
 - 2026-11-12 Installing the search functions alone (`functions_only`) no longer waits behind a running load: it has its own queue in the Evidence database load workflow. (#448)
