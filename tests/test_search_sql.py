@@ -266,6 +266,8 @@ def test_the_schema_is_guarded_like_the_functions():
     src = open(os.path.join(ROOT, "load_supabase.py"), encoding="utf-8").read()
     assert "c.execute(guard_sql(open(SCHEMA, encoding=\"utf-8\").read()))" in src
     g = LS.guard_sql(open(os.path.join(ROOT, "supabase", "schema.sql"), encoding="utf-8").read())
+    assert "\nalter table" not in g                             # padded with spaces or not, every one is guarded
+    assert "\ndrop trigger" not in g                            # it takes an exclusive lock even when the trigger is right
     for line in g.split("\n"):                                  # no bare lock-taking line is left at the first column
         assert not line.startswith(("alter table public.documents add column", "create index if not exists", "create unique index if not exists")), line
 

@@ -36,18 +36,23 @@ def table_ddl():
     return "\n".join(out)
 
 
-def install(conn):
-    """Roles, schema.sql, the loaders' tables, the page index and search.sql (as the loader installs it)."""
-    import load_supabase as L
-    cur = conn.cursor()
-    cur.execute(ROLES)
+def schema_text(cur):
+    """schema.sql as this Postgres can take it (without the vector extension where it is not installed)."""
     with open(os.path.join(ROOT, "supabase", "schema.sql"), encoding="utf-8") as fh:
         schema = fh.read()
     cur.execute("select 1 from pg_available_extensions where name = 'vector'")
     if not cur.fetchone():
         schema = "\n".join(l for l in schema.split("\n") if "create extension if not exists vector" not in l and "using hnsw" not in l)
         schema = re.sub(r"extensions\.vector\(\d+\)", "real[]", schema)
-    cur.execute(schema)
+    return schema
+
+
+def install(conn):
+    """Roles, schema.sql, the loaders' tables, the page index and search.sql (as the loader installs it)."""
+    import load_supabase as L
+    cur = conn.cursor()
+    cur.execute(ROLES)
+    cur.execute(schema_text(cur))
     cur.execute(table_ddl())
     cur.execute("set search_path = public, extensions")
     cur.execute("create index if not exists pages_search on public.pages using gin (words, year, doc_type, wba_id)")

@@ -133,7 +133,7 @@ def has_auth(conn):
 
 
 _ADD_COLUMN = re.compile(r"^alter table (public\.\w+) add column if not exists (\w+) ([^;]+);(.*)$", re.I)
-_ENABLE_RLS = re.compile(r"^alter table (public\.\w+) enable row level security;(.*)$", re.I)
+_ENABLE_RLS = re.compile(r"^alter table (public\.\w+) +enable row level security;(.*)$", re.I)
 _CREATE_INDEX = re.compile(r"^create (unique )?index if not exists (\w+) on ([^;]+);(.*)$", re.I)
 
 
