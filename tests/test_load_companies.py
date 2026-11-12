@@ -6,12 +6,12 @@ import load_companies as L  # noqa: E402
 
 class Rows(unittest.TestCase):
     def test_rows_come_from_the_fields_and_need_a_wba_id(self):
-        recs = [{"fields": {"wba_id": "PT_00001", "company_name": "Acme", "wba_industry": "Oil & Gas", "hq_country": "USA", "hq_region": "North America", "website": "https://acme.example"}},
+        recs = [{"fields": {"wba_id": "PT_00001", "company_name": "Acme", "wba_industry": "Oil & Gas", "hq_country": "USA", "hq_region": "North America", "website": "https://acme.example", "lantern_id": "LN_0a0a0a0a"}},
                 {"fields": {"company_name": "No id"}},
                 {"fields": {"wba_id": " PT_00002 ", "company_name": "", "wba_industry": ""}}]
         rows = L.company_rows(recs)
-        self.assertEqual(rows[0], ("PT_00001", "Acme", "Oil & Gas", "USA", "North America", "https://acme.example"))
-        self.assertEqual(rows[1], ("PT_00002", None, None, None, None, None))
+        self.assertEqual(rows[0], ("PT_00001", "Acme", "Oil & Gas", "USA", "North America", "https://acme.example", "LN_0a0a0a0a"))
+        self.assertEqual(rows[1], ("PT_00002", None, None, None, None, None, None))
         self.assertEqual(len(rows), 2)
 
     def test_upsert_creates_the_table_and_writes_every_row(self):
@@ -26,7 +26,7 @@ class Rows(unittest.TestCase):
         class Conn:
             def cursor(self): return Cur()
             def commit(self): calls.append("commit")
-        L.upsert(Conn(), [("PT_1", "A", None, None, None, None), ("PT_2", "B", "Banks", "JPN", "East Asia & Pacific", None)])
+        L.upsert(Conn(), [("PT_1", "A", None, None, None, None, None), ("PT_2", "B", "Banks", "JPN", "East Asia & Pacific", None, "LN_0b0b0b0b")])
         self.assertIn("create table", calls[0]); self.assertIn("many 2", calls); self.assertEqual(calls[-1], "commit")
 
 
