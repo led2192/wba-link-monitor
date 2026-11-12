@@ -87,5 +87,30 @@ class Reconnect(unittest.TestCase):
         self.assertIn("conn = evidence_db.connect(); cur = conn.cursor()", src)
 
 
+class BuildSettings(unittest.TestCase):
+    def test_only_a_size_and_a_small_number_reach_the_sql(self):
+        import semantic_index as SI
+        self.assertEqual(SI.build_settings("8gb", "3"), ("8GB", 3))
+        self.assertEqual(SI.build_settings(" 512MB ", 0), ("512MB", 0))
+        for bad in ("8", "8GB; drop table x", "", None, "lots"):
+            with self.assertRaises(ValueError):
+                SI.build_settings(bad, 2)
+        with self.assertRaises(ValueError):
+            SI.build_settings("8GB", 64)
+
+    def test_the_build_sets_memory_and_workers_before_the_index(self):
+        import semantic_index as SI
+        ran = []
+        class Cur:
+            connection = type("C", (), {"commit": lambda self: None})()
+            def execute(self, q, *a): ran.append(" ".join(q.split()))
+            def fetchone(self): return (2900000,) if "count(*)" in ran[-1] else (False,)
+        said = []
+        SI.build_vector_index(Cur(), "8GB", 3, say=lambda *a, **k: said.append(a[0]))
+        self.assertIn("set maintenance_work_mem = '8GB'", ran); self.assertIn("set max_parallel_maintenance_workers = 3", ran)
+        self.assertLess(ran.index("set maintenance_work_mem = '8GB'"), next(i for i, q in enumerate(ran) if "hnsw" in q.lower()))
+        self.assertIn("2,900,000 chunks", said[0])
+
+
 if __name__ == "__main__":
     unittest.main()

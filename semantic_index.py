@@ -30,6 +30,7 @@ examples, writes nothing. --partition k/N takes the documents whose hash falls i
 share the work (each with its own database connection; the database allows 15).
 Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run record (QA_COMMIT=true writes it).
 """
+import re
 import argparse, collections, os, sys, time
 
 MODEL = "intfloat/multilingual-e5-small"     # 384 dimensions, 100+ languages, 118M parameters: about 100 passages/s on 4 CPU cores
@@ -192,10 +193,29 @@ def drop_vector_index(cur):
     return dropped
 
 
-def build_vector_index(cur):
-    """The one build, when the documents are in. Minutes to an hour on the whole table."""
+def build_settings(memory, workers):
+    """The two settings of the build, checked before they reach SQL. memory like '512MB' or '8GB'; workers 0 to 16."""
+    m = re.fullmatch(r"\s*(\d{1,5})\s*(MB|GB)\s*", str(memory or ""), re.I)
+    if not m:
+        raise ValueError(f"memory {memory!r}: write it like 512MB or 8GB")
+    w = int(workers)
+    if not 0 <= w <= 16:
+        raise ValueError("workers: 0 to 16")
+    return f"{int(m.group(1))}{m.group(2).upper()}", w
+
+
+def build_vector_index(cur, memory="512MB", workers=2, say=print):
+    """The one build, when the documents are in. How long it takes depends on one thing above all: whether the
+    graph fits in maintenance_work_mem. When it does not, pgvector says so in a notice and goes on many times
+    slower, reading and writing the index on disk. Some millions of 384-number vectors need several GB, so the
+    build is meant to run on a machine made larger for the day, with `memory` set to about half its RAM and
+    `workers` to its processors minus one (12 Nov 2026: 512 MB on a 4 GB machine would have been that slow path)."""
+    memory, workers = build_settings(memory, workers)
     cur.execute("set statement_timeout = 0")
-    cur.execute("set maintenance_work_mem = '512MB'")
+    cur.execute(f"set maintenance_work_mem = '{memory}'")
+    cur.execute(f"set max_parallel_maintenance_workers = {workers}")
+    cur.execute("select count(*) from public.chunks")
+    say(f">>> building the index on {cur.fetchone()[0]:,} chunks with maintenance_work_mem {memory} and {workers} parallel workers", flush=True)
     t = time.time()
     cur.execute(INDEX_SQL)
     cur.connection.commit()
@@ -216,6 +236,8 @@ def main():
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--build-index", action="store_true", help="build the index on the embeddings (once, when the documents are in) and stop")
+    ap.add_argument("--build-memory", default="512MB", help="maintenance_work_mem for --build-index: about half the database machine's RAM")
+    ap.add_argument("--build-workers", type=int, default=2, help="parallel workers for --build-index: the machine's processors minus one")
     ap.add_argument("--no-pairs", action="store_true", help="write the chunks only; the word pairs of these documents are left for a later pass")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
@@ -228,7 +250,7 @@ def main():
     years, partition = parse_years(a.years), parse_partition(a.partition)
     if a.build_index:
         with evidence_db.connect() as conn:
-            secs = build_vector_index(conn.cursor())
+            secs = build_vector_index(conn.cursor(), a.build_memory, a.build_workers)
         print(f"The indexes on the embeddings and on the word pairs are built ({secs / 60:.1f} min).", flush=True)
         run.finish("ok", rows_in=0, rows_out=0, notes="index built")
         return 0

@@ -10,6 +10,12 @@ on:
       build_index:
         description: "true to build the index on the embeddings and stop (once, when every document is in)"
         default: "false"
+      build_memory:
+        description: "for build_index: maintenance_work_mem, about half the database machine's RAM (512MB, 8GB)"
+        default: "512MB"
+      build_workers:
+        description: "for build_index: parallel workers, the machine's processors minus one"
+        default: "2"
       commit:
         description: "write the chunks and embeddings (false = read, embed and print, write nothing)"
         type: boolean
@@ -55,7 +61,7 @@ jobs:
           [ -n "${{ inputs.partition }}" ] && ARGS="$ARGS --partition ${{ inputs.partition }}"
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
           [ "${{ inputs.pairs }}" = "false" ] && ARGS="$ARGS --no-pairs"
-          [ "${{ inputs.build_index }}" = "true" ] && ARGS="--build-index --commit"
+          [ "${{ inputs.build_index }}" = "true" ] && ARGS="--build-index --commit --build-memory ${{ inputs.build_memory || '512MB' }} --build-workers ${{ inputs.build_workers || '2' }}"
           echo "python semantic_index.py $ARGS"
           python semantic_index.py $ARGS
         env:
