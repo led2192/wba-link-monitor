@@ -62,6 +62,25 @@ def unit_after_scale(unit, scale):
     return out or u
 
 
+_PLAIN_TONNES = re.compile(r"^(t|tonnes?|tons?|metrictonn?es?|metrictons?)(of)?(co2(e|eq|equiv|equivalents?))?$")
+
+
+def shown_unit(unit_printed, scale, family=None):
+    """The unit to show beside a value (the printed number times `scale`). First the scale is taken out of the
+    unit (unit_after_scale). Then, for emissions (family "tco2e"), a unit that plainly means tonnes of CO2
+    equivalent in any spelling ("t-CO2e", "tonnes CO2e", "metric tons CO2e", "t") is written the one way, tCO2e.
+    Left as printed, because they cannot be told apart from the unit alone: "MT" or "mt" with no scale applied
+    (metric tons in most American reports, megatonnes in others), a kt or Mt whose scale was not applied (the value
+    is then in that unit), and CO2 without the "e" (not the same quantity)."""
+    u = unit_after_scale(unit_printed, scale)
+    if family == "tco2e" and u:
+        flat = re.sub(r"[\s\-_.,/()]+", "", u.replace("₂", "2"))
+        if flat[:1] in ("t", "T") or flat[:6].lower() == "metric":            # never "MT...", "Mt...", "kt..."
+            if _PLAIN_TONNES.match(flat.lower()):
+                return "tCO2e"
+    return u
+
+
 SYSTEM = ("You read pages of company reports and find one reported figure, for every year the pages print it. Answer "
           "with one JSON object and nothing else: no explanation before or after it. Copy each number exactly as printed "
           "on the page. Never compute, convert or round.")
