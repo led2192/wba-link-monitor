@@ -17,6 +17,9 @@ on:
       minutes:
         description: "stop cleanly after this many minutes (the job is killed at 360)"
         default: "330"
+      pairs:
+        description: "false to write the chunks only (the word pairs in a later pass)"
+        default: "true"
       partition:
         description: "k/N: this run takes slice k of N of the documents (empty = everything)"
         default: ""
@@ -48,6 +51,7 @@ jobs:
           ARGS="--limit ${{ inputs.limit }} --minutes ${{ inputs.minutes }} --years ${{ inputs.years }}"
           [ -n "${{ inputs.partition }}" ] && ARGS="$ARGS --partition ${{ inputs.partition }}"
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
+          [ "${{ inputs.pairs }}" = "false" ] && ARGS="$ARGS --no-pairs"
           echo "python semantic_index.py $ARGS"
           python semantic_index.py $ARGS
         env:

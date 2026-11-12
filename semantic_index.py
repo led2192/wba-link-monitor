@@ -138,18 +138,24 @@ class Embedder:
         return self.model.encode(["query: " + text], normalize_embeddings=True, show_progress_bar=False)[0]
 
 
+WRITE_S = {"pairs": 0.0, "chunks": 0.0}      # seconds spent writing each table, for the run's last line
+
+
 def write_document(cur, lid, chunks, vectors, model, pairs=None):
     """The document's chunks with their embeddings, its pages' word pairs (pairs: [(page, tsvector literal)], when the
     page_pairs table exists), then its done-marker. One transaction per document (the caller commits)."""
+    t = time.time()
     for i in range(0, len(pairs or []), INSERT_BATCH):
         cur.executemany("insert into public.page_pairs (library_id, page, pairs) values (%s, %s, %s::tsvector) "
                         "on conflict (library_id, page) do update set pairs = excluded.pairs",
                         [(lid, page, lit) for page, lit in pairs[i:i + INSERT_BATCH]])
+    WRITE_S["pairs"] += time.time() - t; t = time.time()
     rows = [(lid, page, n, body, vector_literal(v), model) for (page, n, body), v in zip(chunks, vectors)]
     for i in range(0, len(rows), INSERT_BATCH):
         cur.executemany("insert into public.chunks (library_id, page, n, body, embedding, model) values (%s, %s, %s, %s, %s::extensions.vector, %s) "
                         "on conflict (library_id, page, n) do update set body = excluded.body, embedding = excluded.embedding, model = excluded.model",
                         rows[i:i + INSERT_BATCH])
+    WRITE_S["chunks"] += time.time() - t
     cur.execute("insert into public.chunk_docs (library_id, chunks, model) values (%s, %s, %s) on conflict (library_id) do update set chunks = excluded.chunks, model = excluded.model, written = now()",
                 (lid, len(rows), model))
 
@@ -163,6 +169,7 @@ def main():
     ap.add_argument("--years", default=f"{YEAR_MIN}-", help="reporting years in scope, e.g. 2024- or 2023-2024")
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--model", default=MODEL)
+    ap.add_argument("--no-pairs", action="store_true", help="write the chunks only; the word pairs of these documents are left for a later pass")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
@@ -200,7 +207,7 @@ def main():
                 embed_s += time.time() - t1
                 prs = pair_rows(pages)
                 if a.commit:
-                    write_document(cur, lid, chunks, vectors, a.model, prs if has_pairs else None)
+                    write_document(cur, lid, chunks, vectors, a.model, prs if (has_pairs and not a.no_pairs) else None)
                     conn.commit()
             except Exception as e:
                 # The database dropped the connection (11 Nov 2026: two runs died an hour in, each with hours of work
@@ -225,6 +232,7 @@ def main():
     md = [f"### Semantic index ({'written' if a.commit else 'dry run'})", "",
           f"{done:,} documents, {n_pages:,} pages, {n_chunks:,} chunks in {secs / 60:.1f} min ({n_chunks / max(embed_s, 1e-9):.0f} chunks/s embedding, "
           f"{n_chunks / max(secs, 1e-9):.0f} chunks/s in all); model {a.model}, {DIMS} dimensions; years {a.years}, slice {partition[0]}/{partition[1]}."
+          + f" Minutes writing: {WRITE_S['chunks'] / 60:.0f} the chunks, {WRITE_S['pairs'] / 60:.0f} the word pairs; {embed_s / 60:.0f} embedding."
           + f" Word pairs: {n_pairs:,} ({n_pairs / max(n_pages, 1):.0f} a page){'' if has_pairs else '; the page_pairs table is not there yet, none written'}."
           + (f" {stopped}." if stopped else ""), ""]
     if examples:
