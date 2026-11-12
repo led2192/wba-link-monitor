@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-12 The semantic index is filled without the HNSW index on `chunks.embedding`, which is built once at the end (`semantic_index.py --build-index`, workflow input `build_index`). Measured: a run spent 33 of 48 minutes writing the chunks, 8 embedding, 7 on the word pairs. `schema.sql` no longer creates the index. (#441)
 - 2026-11-12 `semantic_index.py` prints the minutes spent writing the chunks, writing the word pairs and embedding, and takes `--no-pairs` (workflow input `pairs`). A 330-minute run indexed 245 documents: embedding took about 85 of those minutes and nobody had measured where the other 245 went. (#440)
 - 2026-11-12 `load_supabase.py` passes `schema.sql` through `guard_sql`, as it does `search.sql`: the night's load ended after 30 seconds on a lock (an `add column if not exists` waiting on a table another job was writing) and loaded nothing. (#439)
 - 2026-11-12 `archive_copy.py` rides out an Airtable outage: after the usual minute of retries it waits 1, 5, 5 and 10 minutes before giving up. The second batch of the copy ended at minute 228 on a 503 that lasted longer than a minute (6,386 documents stored, the rest of the night lost). (#438)

@@ -160,6 +160,42 @@ def write_document(cur, lid, chunks, vectors, model, pairs=None):
                 (lid, len(rows), model))
 
 
+INDEX_SQL = ("create index if not exists chunks_embedding on public.chunks using hnsw (embedding extensions.vector_cosine_ops) "
+             "with (m = 16, ef_construction = 64)")
+
+
+def drop_vector_index(cur):
+    """While the table is filled it carries no index on the embeddings: each insert into an HNSW index places its
+    vector in the graph, and that was two thirds of a run's time (12 Nov 2026: 33 of 48 minutes). Nothing reads
+    the embeddings until the index is built at the end. Waits 30 seconds for the lock at most; False when it
+    could not (another partition is writing: it will be dropped by the next run that can)."""
+    cur.execute("select to_regclass('public.chunks_embedding') is not null")
+    if not cur.fetchone()[0]:
+        return True
+    try:
+        cur.execute("set lock_timeout = '30s'")
+        cur.execute("drop index if exists public.chunks_embedding")
+        cur.connection.commit()
+        print(">>> the index on the embeddings is dropped for the fill; build it at the end with --build-index", flush=True)
+        return True
+    except Exception as e:
+        cur.connection.rollback()
+        print(f">>> the index on the embeddings could not be dropped now ({type(e).__name__}); this run writes with it", flush=True)
+        return False
+    finally:
+        cur.execute("set lock_timeout = 0")
+
+
+def build_vector_index(cur):
+    """The one build, when the documents are in. Minutes to an hour on the whole table."""
+    cur.execute("set statement_timeout = 0")
+    cur.execute("set maintenance_work_mem = '512MB'")
+    t = time.time()
+    cur.execute(INDEX_SQL)
+    cur.connection.commit()
+    return time.time() - t
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -169,6 +205,7 @@ def main():
     ap.add_argument("--years", default=f"{YEAR_MIN}-", help="reporting years in scope, e.g. 2024- or 2023-2024")
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--model", default=MODEL)
+    ap.add_argument("--build-index", action="store_true", help="build the index on the embeddings (once, when the documents are in) and stop")
     ap.add_argument("--no-pairs", action="store_true", help="write the chunks only; the word pairs of these documents are left for a later pass")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
@@ -179,6 +216,12 @@ def main():
     run = qa.Run("semantic_index.py")
     t0 = time.time()
     years, partition = parse_years(a.years), parse_partition(a.partition)
+    if a.build_index:
+        with evidence_db.connect() as conn:
+            secs = build_vector_index(conn.cursor())
+        print(f"The index on the embeddings is built ({secs / 60:.1f} min).", flush=True)
+        run.finish("ok", rows_in=0, rows_out=0, notes="index built")
+        return 0
     emb = Embedder(a.model, a.batch)
     done, n_chunks, n_pages, n_pairs, examples, stopped = 0, 0, 0, 0, [], None
     embed_s, lost = 0.0, 0
@@ -187,6 +230,9 @@ def main():
         cur.execute("set statement_timeout = '120s'")
         cur.execute("select to_regclass('public.page_pairs') is not null")
         has_pairs = cur.fetchone()[0]                          # the table arrives with a full Evidence database load
+        if a.commit:
+            drop_vector_index(cur)
+            cur.execute("set statement_timeout = '120s'")
         docs = documents_to_index(cur, years, partition, a.limit if a.limit else 1_000_000)
         print(f">>> {len(docs):,} documents to index (years {a.years}, slice {partition[0]}/{partition[1]}), model {a.model}", flush=True)
         for lid, year, dtype, pages_n in docs:

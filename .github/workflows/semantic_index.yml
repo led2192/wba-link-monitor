@@ -7,6 +7,9 @@ name: Semantic index
 on:
   workflow_dispatch:
     inputs:
+      build_index:
+        description: "true to build the index on the embeddings and stop (once, when every document is in)"
+        default: "false"
       commit:
         description: "write the chunks and embeddings (false = read, embed and print, write nothing)"
         type: boolean
@@ -52,6 +55,7 @@ jobs:
           [ -n "${{ inputs.partition }}" ] && ARGS="$ARGS --partition ${{ inputs.partition }}"
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
           [ "${{ inputs.pairs }}" = "false" ] && ARGS="$ARGS --no-pairs"
+          [ "${{ inputs.build_index }}" = "true" ] && ARGS="--build-index --commit"
           echo "python semantic_index.py $ARGS"
           python semantic_index.py $ARGS
         env:
