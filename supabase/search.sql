@@ -2049,6 +2049,7 @@ begin
   o := regexp_replace(u, words, ' ', 'gi');
   if o = u then o := regexp_replace(u, '^\s*' || pre || '(?=t)', '', 'i'); end if;
   if o = u and scale = 1000000 then o := regexp_replace(u, '([^A-Za-z])m\.?$', '\1'); end if;
+  if o = u then return u; end if;                 -- the unit does not name the scale: not a character of it changes
   o := btrim(regexp_replace(o, '\s+', ' ', 'g'), ' -,;:()[]');
   return case when o = '' then u else o end;
 end;
