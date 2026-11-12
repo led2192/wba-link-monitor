@@ -511,3 +511,62 @@ class DocumentChunks(unittest.TestCase):
         forms = X.printed_forms(12345.0, X.EMISSION_SCALES)
         hits = [X.found_on(b, v) for _, _, _, b, _ in more for v, *_ in forms]
         self.assertTrue(any(hits))
+
+
+class SemanticPool(unittest.TestCase):
+    """--semantic-pool: pages nearest in meaning, added to the pool. Offline: the embedding and the database are stubs."""
+
+    class Cur:
+        def __init__(self, rows):
+            self.rows, self.sql, self.args = rows, [], []
+            self.connection = self
+
+        def transaction(self):
+            import contextlib
+            return contextlib.nullcontext()
+
+        def execute(self, q, args=None):
+            self.sql.append(" ".join(q.split())); self.args.append(args)
+
+        def fetchone(self):
+            return ("120s",)
+
+        def fetchall(self):
+            return list(self.rows)
+
+    def test_what_is_asked(self):
+        self.assertEqual(X.semantic_query({"name": "Revenue", "labels": ["total revenue", "net sales", "turnover"]}), "Revenue: total revenue, net sales, turnover")
+        self.assertEqual(X.semantic_query({"name": "Revenue", "labels": ["a"], "semantic_query": "Total revenue for the fiscal year."}), "Total revenue for the fiscal year.")
+        self.assertEqual(X.semantic_query({"name": "Employees"}), "Employees")
+        self.assertEqual(X.semantic_query({}), "")
+
+    def test_adds_the_nearest_new_pages_scaled_to_the_pool(self):
+        cur = self.Cur([("d", 7, "our workforce totalled 45,000", 0.10), ("d", 4, "already in the pool", 0.12), ("d", 9, "plantilla media 44.000", 0.28),
+                        ("e", 2, "something else", 0.55)])
+        got = X.semantic_pool_pages(cur, ["d", "e"], {"name": "Employees", "labels": ["number of employees"]}, {("d", 4)}, 2, 0.4, embed=lambda t: [0.1, 0.2])
+        self.assertEqual([(l, p) for l, p, _, _ in got], [("d", 7), ("d", 9)])
+        self.assertAlmostEqual(got[0][3], 0.4); self.assertAlmostEqual(got[1][3], 0.4 * 0.72 / 0.90)
+        q = next(x for x in cur.sql if "public.chunks" in x)
+        self.assertIn("c.library_id = any(%s)", q); self.assertIn("group by 1, 2", q)       # exact, inside these documents, by page
+        a = cur.args[cur.sql.index(q)]
+        self.assertEqual((a[0], a[1], a[2]), ("[0.100000,0.200000]", ["d", "e"], 3))             # k plus the pages the pool holds
+        self.assertIn("set statement_timeout = '120s'", cur.sql[-1])                             # the caller's timeout is put back
+
+    def test_off_no_passages_and_failures_add_nothing(self):
+        attr = {"name": "Employees", "labels": ["employees"]}
+        self.assertEqual(X.semantic_pool_pages(self.Cur([]), ["d"], attr, set(), 0, 0.4, embed=lambda t: [1.0]), [])
+        self.assertEqual(X.semantic_pool_pages(self.Cur([]), ["d"], attr, set(), 5, 0.4, embed=lambda t: [1.0]), [])      # documents with no passages
+        self.assertEqual(X.semantic_pool_pages(self.Cur([]), [], attr, set(), 5, 0.4, embed=lambda t: [1.0]), [])
+
+        def no_model(t):
+            raise ImportError("sentence_transformers")
+        self.assertEqual(X.semantic_pool_pages(self.Cur([("d", 1, "x", 0.1)]), ["d"], attr, set(), 5, 0.4, embed=no_model), [])
+
+        class Broken(self.Cur):
+            def fetchall(self):
+                raise RuntimeError("timeout")
+        self.assertEqual(X.semantic_pool_pages(Broken([]), ["d"], attr, set(), 5, 0.4, embed=lambda t: [1.0]), [])
+
+    def test_off_by_default(self):
+        self.assertEqual(X.SEMANTIC_POOL, 0)
+

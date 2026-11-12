@@ -86,7 +86,7 @@ jobs:
           path: ~/.cache/huggingface
           key: hf-models-${{ runner.os }}-v1
       - name: Install the embedding model's library (CPU), for the learned page choice
-        if: github.event_name == 'workflow_dispatch' && (inputs.select == 'learned' || inputs.select == 'rerank' || startsWith(inputs.select, 'map'))
+        if: github.event_name == 'workflow_dispatch' && (inputs.select == 'learned' || inputs.select == 'rerank' || startsWith(inputs.select, 'map') || contains(inputs.options, 'semantic-pool'))
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install sentence-transformers datasets "accelerate>=1.1.0"

@@ -712,6 +712,12 @@ def ranked_pages(cur, ids, weight, year, attr, spec, info=None, memory=None, sib
         if info is not None:
             info["bm25_added"] = {(lid, page) for lid, page, _, _ in added}
         found += added
+    if SEMANTIC_POOL:
+        added = semantic_pool_pages(cur, ids, attr, {(lid, page) for lid, page, _, _ in found}, SEMANTIC_POOL,
+                                    max((rk for *_, rk in found), default=0.1))
+        if info is not None:
+            info["semantic_added"] = {(lid, page) for lid, page, _, _ in added}
+        found += added
     if TEXT_RANK == "bm25":
         found = bm25_text_rank(cur, found, attr)
     def score(lid, page, body, rk):
@@ -787,6 +793,66 @@ def bm25_pool_pages(cur, ids, attr, have, k, top_rank):
     scored.sort(key=lambda x: -x[0])
     best = scored[0][0] if scored and scored[0][0] > 0 else 1.0
     return [(lid, page, body, (top_rank or 0.1) * sc / best) for sc, lid, page, body in scored[:k] if sc > 0]
+
+
+SEMANTIC_POOL = 0         # --semantic-pool N: also the N pages of the documents nearest in meaning to the attribute (13 Nov 2026)
+SEMANTIC_TIMEOUT = "20s"
+_EMBEDDER = None
+
+
+def semantic_query(attr):
+    """What is asked of the passages, in words: the attribute's own `semantic_query` when it has one, else its name
+    and its first labels ("Revenue: total revenue, net sales, turnover")."""
+    if attr.get("semantic_query"):
+        return str(attr["semantic_query"])
+    labels = [l for l in attr.get("labels", []) if l][:6]
+    name = (attr.get("name") or "").strip()
+    return (name + ": " if name and labels else name) + ", ".join(labels)
+
+
+def embed_query(text):
+    """The query's vector with the model the passages were embedded with (semantic_index.Embedder), loaded once."""
+    global _EMBEDDER
+    if _EMBEDDER is None:
+        import semantic_index
+        _EMBEDDER = semantic_index.Embedder()
+    return [float(x) for x in _EMBEDDER.embed_query(text)]
+
+
+def semantic_pool_pages(cur, ids, attr, have, k, top_rank, embed=None):
+    """[(library_id, page, body, rank)] of the k pages of the documents whose passages are nearest in meaning to the
+    attribute, that the pool does not hold yet. Finding the page is where the reader loses most (the oracle run:
+    about 7 points), and the label query only finds pages that print a label's words; a passage that says the same
+    in other words, or in another language, is found by its embedding (public.chunks, semantic_index.py). The
+    search is exact, over the passages of these documents only (some thousands), so it needs no vector index. A
+    page's distance is its nearest passage's. Documents with no passages (older than 2024, or not a main type)
+    add nothing. This only ADDS pages; their rank is the similarity scaled to the pool's best rank. Own timeout
+    and savepoint, as more_terms_pages; any failure adds nothing."""
+    text = semantic_query(attr)
+    if not text or k <= 0 or not ids:
+        return []
+    cur.execute("show statement_timeout")
+    before = cur.fetchone()[0]
+    try:
+        vec = "[" + ",".join(f"{x:.6f}" for x in (embed or embed_query)(text)) + "]"
+        with cur.connection.transaction():
+            cur.execute(f"set local statement_timeout = '{SEMANTIC_TIMEOUT}'")
+            cur.execute("with near as (select c.library_id, c.page, min(c.embedding operator(extensions.<=>) %s::extensions.vector) as dist "
+                        "              from public.chunks c where c.library_id = any(%s) group by 1, 2 order by dist limit %s) "
+                        "select n.library_id, n.page, b.body, n.dist from near n join public.pages b using (library_id, page) order by n.dist",
+                        (vec, ids, k + len(have)))
+            rows = [r for r in cur.fetchall() if (r[0], r[1]) not in have][:k]
+    except Exception:
+        return []
+    finally:
+        try:
+            cur.execute(f"set statement_timeout = '{before}'")
+        except Exception:
+            pass
+    if not rows:
+        return []
+    best = max(1e-9, 1.0 - float(rows[0][3]))
+    return [(lid, page, body, (top_rank or 0.1) * max(0.0, 1.0 - float(dist)) / best) for lid, page, body, dist in rows]
 
 
 def more_terms_pages(cur, ids, attr, have, info=None):
@@ -1105,6 +1171,7 @@ def main():
     ap.add_argument("--whole-chars", type=int, default=0, help="with --select whole: characters of document text in one call (0 = 1,200,000 for a Gemini model, 600,000 for a Claude one)")
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
+    ap.add_argument("--semantic-pool", type=int, default=0, help="also add the N pages of the documents nearest in meaning to the attribute to the ranking pool, from the passages' embeddings (0: off, today). An option until measured beside today's pool on the same answers")
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
@@ -1135,13 +1202,14 @@ def main():
     model_reader.UNSTATED_BASIS = a.unstated_basis
     model_reader.PERIOD_CHECK = a.period_check
     model_reader.SELECTOR = a.selector
-    global BM25_POOL, MODEL_PAGES, ANCHOR, FREQUENCY, READS, SLOTS, ESCALATE
+    global BM25_POOL, MODEL_PAGES, ANCHOR, FREQUENCY, READS, SLOTS, ESCALATE, SEMANTIC_POOL
     READS = max(1, a.reads)
     SLOTS = a.slots
     ESCALATE = a.escalate
     global ESCALATE_STEPS
     ESCALATE_STEPS = max(1, a.escalate_steps)
     BM25_POOL = a.bm25_pool
+    SEMANTIC_POOL = a.semantic_pool
     ANCHOR = a.anchor
     FREQUENCY = a.frequency
     MODEL_PAGES = max(1, a.model_pages)
@@ -1602,7 +1670,7 @@ def main():
     print("\n".join(md), flush=True)
     # per-answer outcomes for compare_runs.py (paired McNemar and a company bootstrap between two runs). Hashed keys,
     # right or wrong only: no value, no company id, no analyst answer.
-    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "whole_chars": whole_chars() if SELECT == "whole" else None, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "with_known": a.with_known or None, "escalate_steps": ESCALATE_STEPS if a.escalate != "none" else None, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
+    print(">>> OUTCOMES_JSON_BEGIN\n" + json.dumps({"select": SELECT, "semantic_pool": SEMANTIC_POOL, "order": PAGE_ORDER, "guidance": a.guidance, "page_text": PAGE_TEXT, "unstated_basis": a.unstated_basis, "period_check": a.period_check, "bm25_pool": a.bm25_pool, "selector": a.selector, "model_pages": MODEL_PAGES, "whole_chars": whole_chars() if SELECT == "whole" else None, "heldout": a.heldout, "auto_spec": a.auto_spec, "anchor": a.anchor, "frequency": a.frequency, "reads": READS, "slots": a.slots, "escalate": a.escalate, "with_known": a.with_known or None, "escalate_steps": ESCALATE_STEPS if a.escalate != "none" else None, "spec_by": a.spec_by if (a.auto_spec or a.heldout) else None, "spec_examples": a.spec_examples if a.spec_by == "model" else None,
                                                     "reader": a.reader, "rows": outcomes}, separators=(",", ":")) + "\n>>> OUTCOMES_JSON_END", flush=True)
     for c in codes:                               # the scoreboard (Pipeline QA evals), one row per attribute
         s = stats[c]; n = s["answers"] - s["database did not answer"]
