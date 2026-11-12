@@ -24,6 +24,7 @@ class Values(unittest.TestCase):
         self.assertEqual(a, E.pick(dict(reversed(list(truth.items()))), 20))
         self.assertNotEqual(a, sorted(truth)[:20])
         self.assertEqual(len(E.pick(truth, 0)), 200)
+        self.assertEqual(set(E.pick(truth, 20)) & set(E.pick(truth, 20, offset=20)), set())      # the second set shares nothing with the first
 
     def test_titles(self):
         self.assertTrue(E.same_title("Annual Report 2024", "Acme plc - Annual report 2024"))

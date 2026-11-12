@@ -59,23 +59,55 @@ SYSTEM = ("You classify company documents into one document type from a fixed li
           "pages in any language. Reply with JSON only.")
 
 
-def prompt(cover):
+COVER_CHARS_V2 = 6000
+RULES_V1 = ("Rules: the type is what the document is as a whole, not a topic it mentions. A yearly report with a sustainability "
+            "chapter is an Annual Report (Integrated Report only when it calls itself integrated). A report named sustainability, "
+            "ESG or CSR takes that name. A quarterly or half-year report, results release or earnings call transcript is Interim "
+            "Reports; a full-year results release, summary of operating results or set of financial ratios is Financial Statement. "
+            "Slides (a deck of short pages, often saying 'this presentation') are Company Presentations even when titled Full Year "
+            "Results or quarterly results. Anything issued for shareholders or a regulator about the "
+            "company as a legal entity (meeting notices, resolutions, bylaws, charters, prospectuses and their supplements, listing "
+            "documents, capital notices) is Statutory Documents, not UNKNOWN. A document that states what the company commits to "
+            "on one topic is Policy Documents even when it is short or called a statement, position or guideline. Use UNKNOWN only "
+            "when no listed type fits. Text in Japanese, Chinese, Korean, Spanish, French, German or any other language is typed by "
+            "the same rules.")
+# The second prompt (12 Nov 2026), an option until it is measured better: on 1,485 English documents typed by people
+# the first prompt was right on 70.6% and the Airtable AI field on 93.3%. Its commonest mistakes were policies read
+# as UNKNOWN (47) or as Statutory Documents (24), statutory documents read as UNKNOWN (22), registration documents
+# read as Statutory Documents (18), and the house rules it was never told (a modern slavery statement is Social
+# Reports). The AI field also reads the file's address and the company name, and 10,000 characters, not 2,500.
+RULES_V2 = (" More rules. Policy Documents is wide: any document where the company sets out its position, principles, "
+            "commitments, standards, guidelines, requirements, procedures or approach on a topic (tax strategy, remuneration "
+            "policy, whistleblowing, supplier standards, privacy notice, responsible sourcing, animal welfare, lobbying, "
+            "diversity policy), however short and whatever it is called; choose UNKNOWN for a policy only if it is none of "
+            "these. Statutory Documents is about the company as a legal entity and its securities: articles, bylaws, board and "
+            "committee charters, corporate governance statements and guidelines, shareholder meeting notices, minutes and voting "
+            "results, proxy statements, prospectuses, stock exchange and regulatory announcements, Pillar 3; a policy the board "
+            "adopted is still Policy Documents. Registration Document is a universal registration document, document de "
+            "reference, annual securities report or registration statement filed with a securities regulator as one large "
+            "yearly filing: prefer it over Statutory Documents and Annual Report when the document calls itself that. A modern "
+            "slavery or human trafficking statement, a gender pay gap report, a diversity or workforce data report and a health "
+            "and safety report are Social Reports. A human rights statement or commitment is Human Rights Policy. A report that "
+            "calls itself CSR or corporate responsibility is CSR Report; one that calls itself ESG is ESG Report; one that calls "
+            "itself sustainability is Sustainability Report: go by the name on the cover, not by the content. A TCFD, climate "
+            "or net zero report is Climate Report; a water, biodiversity, waste or environmental data report is Environmental "
+            "Reports. The file's address often names the type (code-of-conduct.pdf, /policies/, 10-k, urd): use it when the "
+            "first pages are unclear, never against a clear cover.")
+
+
+def prompt(cover, address="", company="", version=1):
+    """version 1: the first pages alone (2,500 characters). version 2: more rules, 6,000 characters, and the file's
+    address and the company name when known, as the Airtable AI field has them."""
+    v2 = int(version) >= 2
     lines = ["Which type of document is this? The types:"]
     lines += [f"- {t}: {d}" for t, d in TYPES.items()]
     lines += [f"- {UNKNOWN}: none of the above (a web page, a brochure, a form, a press release, a product sheet, a magazine, a speech)",
-              "",
-              "Rules: the type is what the document is as a whole, not a topic it mentions. A yearly report with a sustainability "
-              "chapter is an Annual Report (Integrated Report only when it calls itself integrated). A report named sustainability, "
-              "ESG or CSR takes that name. A quarterly or half-year report, results release or earnings call transcript is Interim "
-              "Reports; a full-year results release, summary of operating results or set of financial ratios is Financial Statement. "
-              "Slides (a deck of short pages, often saying 'this presentation') are Company Presentations even when titled Full Year "
-              "Results or quarterly results. Anything issued for shareholders or a regulator about the "
-              "company as a legal entity (meeting notices, resolutions, bylaws, charters, prospectuses and their supplements, listing "
-              "documents, capital notices) is Statutory Documents, not UNKNOWN. A document that states what the company commits to "
-              "on one topic is Policy Documents even when it is short or called a statement, position or guideline. Use UNKNOWN only "
-              "when no listed type fits. Text in Japanese, Chinese, Korean, Spanish, French, German or any other language is typed by "
-              "the same rules.",
-              "", "First pages:", "<cover>", (cover or "")[:COVER_CHARS], "</cover>", "",
+              "", RULES_V1 + (RULES_V2 if v2 else ""), ""]
+    if v2 and company:
+        lines.append(f"Company: {company[:120]}")
+    if v2 and address:
+        lines.append(f"File address: {address[:300]}")
+    lines += ["First pages:", "<cover>", (cover or "")[:COVER_CHARS_V2 if v2 else COVER_CHARS], "</cover>", "",
               'Reply with JSON: {"type": "<one type exactly as listed>", "confidence": "high" or "low", '
               '"title": "<the document title as printed, in its language, up to 120 characters, or empty>"}']
     return "\n".join(lines)
@@ -107,12 +139,12 @@ def parse_reply(text):
 LAST_REPLY = None
 
 
-def read_type(cover, usage, call=None):
+def read_type(cover, usage, call=None, address="", company="", version=1):
     """One call: (type, confidence, title). None type when the model gave no usable reply."""
     global LAST_REPLY
     import model_reader
     call = call or model_reader.call
-    text = call([{"role": "user", "content": prompt(cover)}], usage, system=SYSTEM, max_tokens=1000)
+    text = call([{"role": "user", "content": prompt(cover, address, company, version)}], usage, system=SYSTEM, max_tokens=1000)
     LAST_REPLY = text
     return parse_reply(text)
 

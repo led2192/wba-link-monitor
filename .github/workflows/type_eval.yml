@@ -9,6 +9,14 @@ on:
       n:
         description: "documents to read (0 = every one with a true type given by a person)"
         default: "1500"
+      offset:
+        description: "skip this many documents of the fixed order (1500 = a second set, not seen when the prompt was written)"
+        default: "0"
+      reader:
+        description: "the reader's prompt: 1 = the first pages alone; 2 = more rules, 6,000 characters, the address and the company"
+        type: choice
+        options: ["1", "2"]
+        default: "1"
       max_usd:
         description: "stop at this estimated cost"
         default: "3"
@@ -20,7 +28,7 @@ on:
         default: "4"
 
 concurrency:
-  group: type-eval
+  group: type-eval-${{ inputs.reader }}-${{ inputs.model }}-${{ inputs.offset }}
   cancel-in-progress: false
 
 jobs:
@@ -35,7 +43,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Evaluate
-        run: python type_eval.py --n "${{ inputs.n }}" --max-usd "${{ inputs.max_usd }}" --workers "${{ inputs.workers || '4' }}"
+        run: python type_eval.py --n "${{ inputs.n }}" --offset "${{ inputs.offset || '0' }}" --reader "${{ inputs.reader || '1' }}" --max-usd "${{ inputs.max_usd }}" --workers "${{ inputs.workers || '4' }}"
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}

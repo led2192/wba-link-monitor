@@ -68,5 +68,29 @@ class Queue(unittest.TestCase):
         self.assertEqual(by["Annual Report"], [2, 1]); self.assertEqual(dis[("Annual Report", "Integrated Report")], 1)
 
 
+class SecondPrompt(unittest.TestCase):
+    def test_the_first_prompt_is_unchanged_by_the_option(self):
+        import type_covers as TC
+        p1 = TC.prompt("x" * 9000, "https://a.example/code-of-conduct.pdf", "Acme")
+        self.assertNotIn("File address", p1); self.assertNotIn("Acme", p1); self.assertNotIn("More rules", p1)
+        self.assertIn("x" * 2500, p1); self.assertNotIn("x" * 2501, p1)
+
+    def test_the_second_prompt_adds_rules_text_address_and_company(self):
+        import type_covers as TC
+        p2 = TC.prompt("x" * 9000, "https://a.example/code-of-conduct.pdf", "Acme", version=2)
+        for part in ("More rules", "File address: https://a.example/code-of-conduct.pdf", "Company: Acme", "x" * 6000, "modern", "Registration Document is"):
+            self.assertIn(part, p2)
+        self.assertNotIn("x" * 6001, p2)
+        self.assertNotIn("File address", TC.prompt("cover", version=2))                 # nothing to say: no empty line
+
+    def test_read_type_passes_the_option_on(self):
+        import type_covers as TC
+        seen = []
+        def call(messages, usage, system=None, max_tokens=None):
+            seen.append(messages[0]["content"]); return '{"type": "Code of Conduct", "confidence": "high", "title": "Code"}'
+        self.assertEqual(TC.read_type("cover", {}, call=call, address="https://a.example/coc.pdf", company="Acme", version=2)[0], "Code of Conduct")
+        self.assertIn("File address: https://a.example/coc.pdf", seen[0])
+
+
 if __name__ == "__main__":
     unittest.main()
