@@ -855,6 +855,30 @@ def semantic_pool_pages(cur, ids, attr, have, k, top_rank, embed=None):
     return [(lid, page, body, (top_rank or 0.1) * max(0.0, 1.0 - float(dist)) / best) for lid, page, body, dist in rows]
 
 
+def semantic_read(r):
+    """Where the figure of a proposal was read, for --semantic-pool: "added" when its page is one the option brought
+    into the pool, "other" when it is a page the pool held anyway, None with no proposal. Says whether the answers
+    the option breaks are read on its pages (the pages mislead) or elsewhere (the reader's own chance)."""
+    if not r.get("proposal") or not r.get("got"):
+        return None
+    _, lid, page = r["got"]
+    return "added" if (lid, page) in (r.get("semantic_added") or ()) else "other"
+
+
+def semantic_table(codes, stats, spec):
+    """The report's lines on where proposals were read with --semantic-pool: on a page the option added, or not."""
+    md = ["### The semantic pool: where the figure was read", "",
+          "Pages the option added among the pages read, an answer; and the proposals read on such a page against the others.", "",
+          "| Attribute | Answers | Added pages read, an answer | Read on an added page | Right there | Read on another page | Right there |",
+          "| --- | --: | --: | --: | --: | --: | --: |"]
+    for c in codes:
+        s = stats[c]
+        n, ad, ot = s["answers"] or 1, s["semantic read added"], s["semantic read other"]
+        md.append(f"| {c} {spec['attributes'][c]['name']} | {s['answers']:,} | {s['semantic pages given'] / n:.1f} | {ad:,} | "
+                  f"{s['semantic read added right'] / (ad or 1):.0%} | {ot:,} | {s['semantic read other right'] / (ot or 1):.0%} |")
+    return md + [""]
+
+
 def more_terms_pages(cur, ids, attr, have, info=None):
     """[(library_id, page, body, rank)] of the pages that print one of the attribute's more_terms and were not
     found by the label query. A separate query with its own MORE_TERMS_TIMEOUT inside a savepoint: wording
@@ -1048,6 +1072,8 @@ def evaluate(cur, g, attr, spec, reader="rules", usage=None, known=None):
     r["neighbour_pages"] = len(info.get("neighbours", ()))
     r["neighbour_hit"] = any((lid, page) in info.get("neighbours", ()) for lid, page, _ in holding)   # the number sits on a page brought in as a neighbour
     r["neighbour_kept"] = any((lid, page) in info.get("neighbours", ()) and any(found_on(body, v) for v, _, _ in forms) for _, lid, page, body, _ in pages)
+    r["semantic_added"] = set(info.get("semantic_added", ()))          # the pages --semantic-pool brought into the pool
+    r["semantic_on_pages"] = sum(1 for _, lid, page, _, _ in pages if (lid, page) in r["semantic_added"])
     if r["in_docs"] and not r["in_pages"]:
         r["miss"] = retrieval_miss(holding, rows, forms)
     # each kept page's best rule candidate, used by the rule reader and to pick the model's pages
@@ -1443,10 +1469,16 @@ def main():
                     drop_reasons[g["attribute"]][d] += 1
                 if len(declined) < 20:
                     declined.append(f"{g['id']}: \"{r.get('declined_why') or 'no reason given'}\"")
+            where = semantic_read(r) if SEMANTIC_POOL else None
+            if SEMANTIC_POOL:
+                s["semantic pages given"] += r.get("semantic_on_pages", 0)
+                if where:
+                    s[f"semantic read {where}"] += 1
+                    s[f"semantic read {where} right"] += bool(r["right"])
             if r["proposal"] and not r["right"] and len(wrong[g["attribute"]]) < 12:
                 (v, raw, sc, lab), lid, page = r["got"]
                 wrong[g["attribute"]].append(f"{g['id']}: validated {g['value']:,.2f} {g['unit']}; read {raw:,.2f} × {sc:g} "
-                                             f"after \"{lab}\" ({lid} p.{page})")
+                                             f"after \"{lab}\" ({lid} p.{page})" + ("; a page the semantic pool added" if where == "added" else ""))
 
     title = "model reader (" + os.environ.get("READER_MODEL", "claude-haiku-5-5") + ")" if a.reader == "model" else "generic reader (no model)"
     if SELECT == "oracle":
@@ -1663,6 +1695,8 @@ def main():
         md.append(f"| {c} {spec['attributes'][c]['name']} | {s['fy shift']:,} | {s['fy shift proposal'] / (s['fy shift'] or 1):.0%} | "
                   f"{s['fy shift right'] / (s['fy shift'] or 1):.0%} |")
     md.append("")
+    if SEMANTIC_POOL:
+        md += semantic_table(codes, stats, spec)
     for c in codes:
         if wrong[c]:
             md += [f"Wrong proposals, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]
