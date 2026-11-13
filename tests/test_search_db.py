@@ -338,6 +338,7 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.admin_facts('k', null, 'marked', 10)")
             marked = cur.fetchone()[0]
             self.assertEqual((marked[0]["verdict"], marked[0]["question"], marked[0]["asker"]), ("wrong", "q?", "p@x.org"))
+            self.assertIn("doc_year", marked[0]); self.assertIn("doc_type", marked[0])       # the report the fact was read in
             cur.execute("select public.admin_fact_set('k', %s, 'none'), public.admin_overview('k')", (fact,))
             _, o = cur.fetchone()
             c.rollback()
@@ -345,6 +346,18 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertAlmostEqual(float(today["usd"]), 0.2, places=3)             # 1M read at 0.10 + 0.2M written at 0.50
         self.assertIn("luis", [l["name"] for l in o["links"]])
         self.assertIn("p@x.org", [p["email"] for p in o["people"]])
+
+    def test_a_page_is_read_inside_lantern(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select library_id, page from public.pages order by library_id, page limit 1")
+            lid, page = cur.fetchone()
+            cur.execute("select public.doc_page('k', %s, %s), public.doc_page('k', %s, 99999), public.doc_page('k', 'no such document', 1)", (lid, page, lid))
+            got, beyond, none = cur.fetchone()
+        self.assertTrue(got["body"]); self.assertEqual((got["library_id"], got["page"]), (lid, page)); self.assertIn("pages", got)
+        self.assertIsNone(beyond["body"]); self.assertEqual(beyond["library_id"], lid)      # the document is there, the page is not
+        self.assertIsNone(none)
 
     def test_did_you_mean(self):
         import psycopg, load_supabase as L

@@ -363,3 +363,9 @@ def test_the_owner_groups_the_facts_by_company_and_searches_them():
 def test_a_fact_is_something_stated_and_a_text_has_no_unit():
     assert "never an item saying that something is not stated or could not be found" in SQL
     assert 'if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, f.unit));' in PAGE
+
+
+def test_a_page_without_a_link_can_still_be_read():
+    assert "grant execute on function public.doc_page(text, text, int) to anon, authenticated;" in SQL
+    assert "async function openReader(libraryId, page, find)" in PAGE and "no public link for this document" in PAGE
+    assert '"Fact", "Value", "Report", "Page"' in PAGE                                      # the owner sees which report states a fact
