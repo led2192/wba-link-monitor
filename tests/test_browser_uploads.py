@@ -116,6 +116,14 @@ class Rules(unittest.TestCase):
         self.assertIn("drop function if exists public.upload_begin(text, text, bigint, text, text, text, text);", sql)
         self.assertIn("doc.file ? null : doc.url", js)                                               # a file from the computer has no address
 
+    def test_an_upload_records_the_document_it_became(self):
+        import os
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "browser_uploads.py"), encoding="utf-8").read()
+        self.assertIn('cur.execute("update public.browser_uploads set library_id = %s where id = %s", (lid, u["id"]))', src)
+        self.assertIn("""mark(u, "taken", f"{'file put on the existing row' if act == 'fill' else 'new row'} {lid}", lid)""", src)
+        sql = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "supabase", "search.sql"), encoding="utf-8").read()
+        self.assertIn("alter table public.browser_uploads add column if not exists library_id text;", sql)
+
     def test_the_script_keeps_the_house_rules(self):
         src = open(os.path.join(ROOT, "browser_uploads.py"), encoding="utf-8").read()
         self.assertIn('ap.add_argument("--commit", action="store_true")', src)               # dry run by default

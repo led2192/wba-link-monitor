@@ -279,8 +279,14 @@ def main():
         today = datetime.now(timezone.utc).date().isoformat()
         url = f"{API}/{BASE}/{quote('report_library')}"
 
-        def mark(u, status, result):
+        def mark(u, status, result, lid=None):
             cur.execute("update public.browser_uploads set status = %s, result = %s where id = %s and status = 'stored'", (status, result, u["id"]))
+            if lid:                                           # the document the upload became or was found to be (the column may not be installed yet)
+                try:
+                    with conn.transaction():
+                        cur.execute("update public.browser_uploads set library_id = %s where id = %s", (lid, u["id"]))
+                except Exception:
+                    pass
             conn.commit()
 
         for u, act, lid, rec in todo:
@@ -292,10 +298,10 @@ def main():
             if act == "orphan":
                 mark(u, "orphan", "the company is not in the companies table"); continue
             if act == "known":
-                mark(u, "known", f"the library already holds this document ({lid})"); continue
+                mark(u, "known", f"the library already holds this document ({lid})", lid); continue
             if act == "same":
                 airtable_request("PATCH", f"{url}/{rec}", headers, payload={"fields": {"document_url": u["source_url"]}})
-                mark(u, "known", f"the same file was on {lid}, put there by hand: its address is now recorded"); continue
+                mark(u, "known", f"the same file was on {lid}, put there by hand: its address is now recorded", lid); continue
             why = storage.check(u["path"], u["bytes"])
             if why != "ok":
                 c["failed"] += 1; c[act] -= 1
@@ -315,7 +321,7 @@ def main():
                     fields["document_url"] = u["source_url"]
                 fields.update(sender_fields(u))
                 airtable_request("POST", url, headers, payload={"fields": {k: v for k, v in fields.items() if v not in (None, "")}, "typecast": True})   # no link field among them
-            mark(u, "taken", f"{'file put on the existing row' if act == 'fill' else 'new row'} {lid}")
+            mark(u, "taken", f"{'file put on the existing row' if act == 'fill' else 'new row'} {lid}", lid)
             time.sleep(0.25)
     c["waiting for a company"] = len(waiting); c["company not added"] = len(refused); c["waiting for room"] = len(held)
     print(f"{c['create']} new rows, {c['fill']} files put on rows that had none, {c['known'] + c['same']} already held ({c['same']} of them learned their address), {c['failed']} failed, {c['orphan']} without a company"

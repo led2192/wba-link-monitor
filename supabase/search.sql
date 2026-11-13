@@ -3207,6 +3207,11 @@ alter table public.browser_uploads enable row level security;
 -- of the library's own types (source_type_terms.json); the year is the one printed on the report.
 alter table public.browser_uploads add column if not exists sent_type text;
 alter table public.browser_uploads add column if not exists sent_year int;
+-- The document the upload became (13 Nov 2026): written by browser_uploads.py when the file is taken. What the sender
+-- said (sent_type, sent_year) can then be read for a document in the database itself, the first facts about a
+-- document that do not live in Airtable (phase 2 of leaving it).
+alter table public.browser_uploads add column if not exists library_id text;
+create index if not exists browser_uploads_library on public.browser_uploads (library_id) where library_id is not null;
 create unique index if not exists browser_uploads_one_file on public.browser_uploads (wba_id, sha256);
 -- "Does the library hold this address?" is asked for every link (upload_known, upload_begin, add_sources). Without
 -- this index each question read the whole documents table: on 11 Nov 2026, with the database busy, 35 links took
