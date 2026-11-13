@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v44 2026-11-13";
+  const CLIENT = "lantern v45 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -367,7 +367,7 @@
   }
 
   let companies = [];
-  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null };
+  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null, blended: false };
   let industries = [], regions = [];
 
   async function rpc(fn, body) {
@@ -618,11 +618,20 @@
     renderChips();
     setStatus("Searching…");
     const t0 = performance.now();
+    const seq = ++searchSeq;
     try {
-      const rows = await rpc("find_pages", { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
-                                             type_filter: state.type, max_rows: state.rows, client: CLIENT,
-                                             industry_filter: state.industry, country_filter: state.country, region_filter: state.region,
-                                             typed: $("q").value.trim() });
+      // One search (13 Nov 2026): the words and their meaning together, in one list (find_blend). The meaning needs the
+      // language model: when it is already in memory the search is blended at once; when it is not, the words answer
+      // first and the list is blended when the model has loaded (blendWhenReady). "More results" keeps the list's kind.
+      let vec = null;
+      if (more ? state.blended : (canBlend() && embedder)) { try { vec = await queryVector(meaningWords()); } catch (e) { vec = null; } }
+      const args = { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
+                     type_filter: state.type, max_rows: state.rows, client: CLIENT,
+                     industry_filter: state.industry, country_filter: state.country, region_filter: state.region,
+                     typed: $("q").value.trim() };
+      const rows = vec ? await rpc("find_blend", { ...args, qvec: vec }) : await rpc("find_pages", args);
+      if (seq !== searchSeq) return;                        // a newer search started meanwhile
+      if (!more) state.blended = !!vec;
       const s = ((performance.now() - t0) / 1000).toFixed(1);
       if (!rows.length) setStatus(state.q ? (state.q.includes('"') ? `No page found with that phrase${anyFilter ? " and these filters" : ""}. A phrase of very common words is checked on a sample of pages: add a company, a year or another word. (${s} s)` : `No page holds those words, even one or two of them${anyFilter ? ", with these filters" : ""}. (${s} s)`) : (state.company && !state.company.includes(";") && !state.type && !state.from && !state.to ? `We hold no document of ${state.companyName || "this company"} yet. If you know one, add its link below. (${s} s)` : `No document matches these filters. (${s} s)`));
       else if (!state.q) setStatus(`${rows.length}${rows.length >= state.rows ? "+" : ""} documents, newest first. (${s} s)`);
@@ -640,11 +649,7 @@
         a.onclick = ev => { ev.preventDefault(); $("q").value = $("q").value.replace(new RegExp("(^|\\s)" + mb.word + "(?=\\s|$)", "i"), (m0, pre) => pre + mb.name + ";"); search(false); };
         st.append(document.createTextNode(" · "), a);
       }
-      if (state.q && !more) {                               // the same words, searched by what they mean (an option, 13 Nov 2026)
-        const a = el("a", null, "Search by meaning (beta)"); a.href = "#"; a.title = "Pages that say this in other words or in another language. Reports of 2024 and later.";
-        a.onclick = ev => { ev.preventDefault(); searchByMeaning(); };
-        $("status").append(document.createTextNode(" · "), a);
-      }
+      if (!more && !vec && canBlend()) blendWhenReady(seq, args);
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues();
@@ -656,40 +661,43 @@
       $("results").innerHTML = ""; $("values").hidden = true;
     }
   }
-  // Search by meaning (13 Nov 2026, an option). The words typed become a vector in the browser, with the same model
-  // the passages were embedded with (multilingual-e5-small), and find_meaning returns the pages nearest to it. The
-  // model (about 120 MB) is fetched the first time the option is used and kept by the browser; nothing loads before.
-  let embedder = null;
-  async function queryVector(text) {
-    if (!embedder) {
+  // The meaning half of the one search (13 Nov 2026). The words typed become a vector in the browser, with the same
+  // model the passages were embedded with (multilingual-e5-small), and find_blend merges the pages nearest to it with
+  // the pages the words find. The model (about 120 MB) is fetched in the background after the first search and kept
+  // by the browser; not on a connection that asks to save data. Words in quotes and the industry, country and region
+  // filters stay with the words alone. Until the vector is made on the server, a first search answers by words and
+  // is blended a moment later, only while the reader is still at the top of the list.
+  let embedder = null, embedderLoading = null, searchSeq = 0;
+  const lastVector = { text: null, vec: null };
+  const meaningWords = () => state.q.replace(/"/g, " ").trim();
+  const canBlend = () => !!state.q && !state.q.includes('"') && !state.industry && !state.country && !state.region
+                         && !(navigator.connection && navigator.connection.saveData);
+  function loadEmbedder() {
+    if (!embedderLoading) embedderLoading = (async () => {
       const { pipeline } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2");
       embedder = await pipeline("feature-extraction", "Xenova/multilingual-e5-small", { dtype: "q8" });
-    }
-    const out = await embedder(["query: " + text], { pooling: "mean", normalize: true });
-    return Array.from(out.data).slice(0, 384);
+    })().catch(e => { embedderLoading = null; throw e; });
+    return embedderLoading;
   }
-  async function searchByMeaning() {
-    const words = state.q.replace(/"/g, " ").trim();
-    if (!words) return;
-    setStatus(embedder ? "Searching by meaning…" : "Loading the language model, about 120 MB the first time…");
-    const t0 = performance.now();
+  async function queryVector(text) {
+    if (lastVector.text === text) return lastVector.vec;
+    await loadEmbedder();
+    const out = await embedder(["query: " + text], { pooling: "mean", normalize: true });
+    lastVector.text = text; lastVector.vec = Array.from(out.data).slice(0, 384);
+    return lastVector.vec;
+  }
+  async function blendWhenReady(seq, args) {
     try {
-      const embedding = await queryVector(words);
-      setStatus("Searching by meaning…");
-      const rows = await rpc("find_meaning", { key, qvec: embedding, company_filter: state.company, year_from: state.from, year_to: state.to, type_filter: state.type, max_rows: 50 });
-      const s = ((performance.now() - t0) / 1000).toFixed(1);
-      setStatus(rows.length ? `${rows.length} pages nearest in meaning, at most three a document (beta: the words need not be on the page; reports of 2024 and later). (${s} s)`
-                            : "No page found by meaning: passages exist for reports of 2024 and later only.");
-      const back = el("a", null, "Search by words"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); search(true); };
-      $("status").append(document.createTextNode(" · "), back);
-      state.rows = 200;                                   // no "more results" under a search by meaning
+      const vec = await queryVector(meaningWords());
+      if (seq !== searchSeq || window.scrollY > 300) return;          // a newer search, or the reader is already down the list
+      const rows = await rpc("find_blend", { ...args, qvec: vec, client: CLIENT + " blended after" });
+      if (seq !== searchSeq || window.scrollY > 300 || !rows.length) return;
+      state.blended = true; state.logId = rows[0].log_id;
       render(rows, false);
-      state.rows = 50; state.logId = null;
-    } catch (e) {
-      setStatus(`Search by meaning failed: ${e.message}`);
-      const back = el("a", null, "Search by words"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); search(true); };
-      $("status").append(document.createTextNode(" · "), back);
-    }
+      const st = $("status"), first = st.firstChild;
+      if (first && first.nodeType === 3 && /^No /.test(first.nodeValue)) setStatus(`${rows.length} pages that say it in other words: the words as typed are on no page.`);
+      else if (first && first.nodeType === 3) first.nodeValue = first.nodeValue.replace(/^\d+\+? pages/, `${rows.length}${rows.length >= state.rows ? "+" : ""} pages`);
+    } catch (e) { /* the words' answer stays */ }
   }
   // "Did you mean": a word typed wrong, set right from the words the library knows (did_you_mean). Asked after the
   // results are shown; the person decides whether to take it.

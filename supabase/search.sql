@@ -2087,6 +2087,54 @@ $$;
 revoke all on function public.find_meaning(text, real[], text, int, int, text, int) from public;
 grant execute on function public.find_meaning(text, real[], text, int, int, text, int) to anon, authenticated;
 
+-- One search (13 Nov 2026). People do not choose between words and meaning: they type, and the search uses both.
+-- find_blend runs the search by words (find_pages, which also logs the search) and, when the page sends the query's
+-- vector, the search by meaning (find_meaning), and merges the two lists by reciprocal rank: a page's score is
+-- 1/(60 + its place by words) + 1/(60 + its place by meaning), so a page both find comes first and a page only
+-- one finds still enters. At most three pages a document. The excerpt is the words' one (with its highlights) when
+-- there is one, else the nearest passage. The words alone decide, as before, when no vector comes, when the words
+-- are in quotes (an exact phrase was asked for), or with an industry, country or region filter, which the search
+-- by meaning does not know.
+create or replace function public.find_blend(
+  key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 50, client text default null,
+  industry_filter text default null, country_filter text default null, region_filter text default null,
+  typed text default null)
+returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
+               label text, url text, page int, score real, excerpt text)
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '50s'
+as $$
+#variable_conflict use_column
+declare
+  need int := least(greatest(coalesce(max_rows, 50), 1), 200);
+begin
+  if qvec is null or coalesce(array_length(qvec, 1), 0) <> 384 or position('"' in coalesce(q, '')) > 0
+     or industry_filter is not null or country_filter is not null or region_filter is not null then
+    return query select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
+                                                  industry_filter, country_filter, region_filter, typed);
+    return;
+  end if;
+  return query
+    with w as materialized (select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, need, client,
+                                                             industry_filter, country_filter, region_filter, typed)),
+         m as materialized (select * from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, 60)),
+         u as (select coalesce(w.library_id, m.library_id) as library_id, coalesce(w.page, m.page) as page,
+                      coalesce(w.company, m.company) as company, coalesce(w.wba_id, m.wba_id) as wba_id, coalesce(w.year, m.year) as year,
+                      coalesce(w.doc_type, m.doc_type) as doc_type, coalesce(w.label, m.label) as label, coalesce(w.url, m.url) as url,
+                      coalesce(w.excerpt, m.excerpt) as excerpt,
+                      (coalesce(1.0 / (60 + w.rank), 0) + coalesce(1.0 / (60 + m.rank), 0)) as s
+               from w full join m on m.library_id = w.library_id and m.page = w.page),
+         k as (select u.*, row_number() over (partition by u.library_id order by u.s desc) as in_doc from u)
+    select (select max(w.log_id) from w), (row_number() over (order by k.s desc, k.library_id, k.page))::int, k.library_id, k.company, k.wba_id,
+           k.year, k.doc_type, k.label, k.url, k.page, k.s::real, k.excerpt
+    from k where k.in_doc <= 3 order by k.s desc, k.library_id, k.page limit need;
+end;
+$$;
+revoke all on function public.find_blend(text, text, real[], text, int, int, text, int, text, text, text, text, text) from public;
+grant execute on function public.find_blend(text, text, real[], text, int, int, text, int, text, text, text, text, text) to anon, authenticated;
+
 -- The unit of a value after its scale was applied (12 Nov 2026). value_versions keeps the printed number times the
 -- page's scale, with the unit as printed: "0.39 Mt-CO2e" is stored as 390,000 "Mt-CO2e", which reads as 390,000
 -- megatonnes. When the value is a thousand, a million or a billion times the printed number and the unit names that
