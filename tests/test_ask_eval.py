@@ -69,5 +69,19 @@ class AskEval(unittest.TestCase):
         self.assertIn("jsonb_build_object('q', search_q, 'company', company_filter, 'from', year_from, 'to', year_to, 'type', type_filter, 'vector', qvec is not null))", sql)
 
 
+class SearchTimingLevels(unittest.TestCase):
+    def test_the_two_levels_are_built_as_find_pages_builds_them(self):
+        import search_timing as T
+
+        class Cur:
+            def execute(self, sql, args=None): self.args = args
+            def fetchone(self): return ["a:*", "b", "c:* | x <-> y"]
+        every, but_one = T.level_queries(Cur(), ["a", "b", "c"])
+        self.assertEqual(every, "(a:*) & (b) & (c:* | x <-> y)")
+        self.assertEqual(but_one, "((b) & (c:* | x <-> y)) | ((a:*) & (c:* | x <-> y)) | ((a:*) & (b))")
+        for _, question, _ in T.LONG:
+            self.assertNotIn("ANA", question)                       # our own sentences only: the log is public
+
+
 if __name__ == "__main__":
     unittest.main()
