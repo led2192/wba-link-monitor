@@ -302,3 +302,8 @@ def test_the_querys_vector_is_made_on_a_server_with_a_token_the_page_never_sees(
     assert "sqlerrm" not in made                                                                   # an error's text may hold the request
     assert "revoke all on function public.query_vector_made(text) from public, anon, authenticated;" in SQL
     assert 'rpc("query_vector", { key, q: text })' in PAGE and "serverVector = false" in PAGE     # the browser's model only when the server is off
+
+
+def test_a_mark_on_a_fact_shows():
+    assert "for (const b of marks.children) { b.style.background" not in PAGE        # a mark that repaints the whole row wipes the other mark's colour
+    assert "bt.paint = paint; paint(); marks.appendChild(bt);" in PAGE and "Not saved: sign in" in PAGE
