@@ -2019,6 +2019,55 @@ $$;
 revoke all on function public.value_detail(text, text) from public;
 grant execute on function public.value_detail(text, text) to anon, authenticated;
 
+-- A company whose main reports of the last three years are not all in the library, for the "Fill a document gap"
+-- card of Contribute (13 Nov 2026, the owner: show people a card a company with its gaps in documents of the last
+-- years and ask whether they can add a link or a document). For each of the three years before this one: the annual
+-- or financial reports held and the sustainability reports held (an integrated report counts as both). Sixty
+-- companies are drawn at random and the first with a gap is returned, so a card costs the same whatever the size of
+-- the library; "skip" holds the companies this person has already been shown.
+create or replace function public.gap_card(key text, skip text[] default null)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '15s'
+as $$
+#variable_conflict use_variable
+declare
+  y2 int := extract(year from now())::int - 1;
+  y1 int := y2 - 2;
+  got jsonb;
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  with drawn as materialized (
+         select c.wba_id, c.name, c.industry, c.country, c.website from public.companies c
+         where c.wba_id is not null and (skip is null or c.wba_id <> all(skip)) order by random() limit 60),
+       ys as (select generate_series(y1, y2) as year),
+       held as (
+         select d.wba_id, d.year,
+                array_agg(distinct d.doc_type) filter (where d.doc_type in ('Annual Report', 'Integrated Report', '10K Form', 'Registration Document', 'Financial Statement')) as annual,
+                array_agg(distinct d.doc_type) filter (where d.doc_type in ('Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Integrated Report',
+                                                                              'Climate Report', 'Environmental Reports', 'Social Reports')) as sustainability,
+                count(*) as documents
+         from public.documents d join drawn on drawn.wba_id = d.wba_id where d.year between y1 and y2 group by 1, 2),
+       grid as (
+         select drawn.wba_id, ys.year, coalesce(h.annual, '{}') as annual, coalesce(h.sustainability, '{}') as sustainability, coalesce(h.documents, 0) as documents
+         from drawn cross join ys left join held h on h.wba_id = drawn.wba_id and h.year = ys.year),
+       gaps as (select g.wba_id, count(*) filter (where cardinality(g.annual) = 0 or cardinality(g.sustainability) = 0) as n from grid g group by 1)
+  select jsonb_build_object('wba_id', drawn.wba_id, 'company', drawn.name, 'industry', drawn.industry, 'country', drawn.country, 'website', drawn.website,
+                            'gaps', gaps.n,
+                            'documents', (select count(*) from public.documents d where d.wba_id = drawn.wba_id),
+                            'years', (select jsonb_agg(jsonb_build_object('year', g.year, 'annual', to_jsonb(g.annual), 'sustainability', to_jsonb(g.sustainability),
+                                                                         'documents', g.documents) order by g.year desc) from grid g where g.wba_id = drawn.wba_id))
+    into got
+  from drawn join gaps on gaps.wba_id = drawn.wba_id where gaps.n > 0 order by random() limit 1;
+  return got;
+end;
+$$;
+revoke all on function public.gap_card(text, text[]) from public;
+grant execute on function public.gap_card(text, text[]) to anon, authenticated;
+
 -- One page of a document, as text, for reading inside lanterN (13 Nov 2026). Some documents have no public address
 -- (the library holds their text, not a link), so a fact or a value read on their page 65 could not be checked by
 -- anyone; and the owner wants to check a fact without leaving the panel. Returns the page's text with the document's

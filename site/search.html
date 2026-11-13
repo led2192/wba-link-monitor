@@ -285,7 +285,7 @@
   </div>
   <div class="homebtns" id="homebtns">
     <button type="button" id="goSearch">Search with lanterN</button>
-    <button type="button" id="goLucky">I’m feeling lucky</button>
+    <button type="button" id="goLucky">Contribute</button>
   </div>
   <div class="chips" id="chips"></div>
   <div class="filters" id="filters" hidden>
@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v65 2026-11-13";
+  const CLIENT = "lantern v66 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1158,18 +1158,18 @@
     const box = $("results"); $("values").hidden = true; $("chips").innerHTML = ""; setStatus("");
     $("head").classList.remove("home"); document.body.classList.add("playing");
     if (!(await token())) {
-      box.innerHTML = ""; const c = el("div", "lucky"); c.append(el("h2", null, "I’m feeling lucky"), el("p", "what", "One value the robot read, with the page it came from. Say whether it is right. Each review counts."));
+      box.innerHTML = ""; const c = el("div", "lucky"); c.append(el("h2", null, "Review a value"), el("p", "what", "One value the robot read, with the page it came from. Say whether it is right. Each review counts."));
       const hold = el("div", "values"); c.appendChild(hold); box.appendChild(c); signInBox(hold, lucky); return;
     }
     if (move === "prev" && deck.at > 0) deck.at--;
     else if (move !== "prev") {
       if (deck.at < deck.cards.length - 1) deck.at++;
-      else { box.style.opacity = ".5"; const v = await luckyDraw(); box.style.opacity = ""; if (v) deck.at = deck.cards.length - 1; else if (!deck.cards.length) { box.innerHTML = ""; const c = el("div", "lucky"); c.append(el("h2", null, "I’m feeling lucky"), el("p", "what", "Nothing left to review, or the value could not be fetched. Try again in a moment.")); box.appendChild(c); return; } }
+      else { box.style.opacity = ".5"; const v = await luckyDraw(); box.style.opacity = ""; if (v) deck.at = deck.cards.length - 1; else if (!deck.cards.length) { box.innerHTML = ""; const c = el("div", "lucky"); c.append(el("h2", null, "Review a value"), el("p", "what", "Nothing left to review, or the value could not be fetched. Try again in a moment.")); box.appendChild(c); return; } }
     }
     const card = deck.cards[deck.at], v = card.v, shownAt = Date.now();
     const sc = deck.score, pts = Number(sc.points || 0);
     box.innerHTML = ""; const c = el("div", "lucky");
-    const back = el("a", null, "← Back to search"); back.href = "#"; back.onclick = e => { e.preventDefault(); luckyClose(); };
+    const back = el("a", null, "← Contribute"); back.href = "#"; back.onclick = e => { e.preventDefault(); contribute(); };
     const top = el("div", "top"); top.append(back,
       el("span", "score", `${pts % 1 ? pts.toFixed(2) : pts} ${pts === 1 ? "point" : "points"} · ${levelLine(pts)}` + (Number(sc.checked) > 0 ? ` · ${sc.right} of ${sc.checked} checked answers right` : "") + (sc.reviewers > 1 && sc.reviews ? ` · #${sc.rank} of ${sc.reviewers}` : "")));
     showMe(sc);
@@ -1437,10 +1437,10 @@
   $("askBtn").onclick = ask;
   $("funnel").addEventListener("click", () => { const f = $("filters"); f.hidden = !f.hidden; $("funnel").setAttribute("aria-expanded", String(!f.hidden)); if (!f.hidden) $("fCompany").focus(); });
   for (const id of ["fCompany", "fFrom", "fTo", "fType"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) search(false); });
-  $("foot").insertAdjacentHTML("beforebegin", '<div style="text-align:center;font-size:13px;margin-top:auto;padding-top:40px"><span id="luckyWrap"><a href="#" id="lucky">I’m feeling lucky</a><span class="sep"> · </span></span><span id="mine"></span></div>');
+  $("foot").insertAdjacentHTML("beforebegin", '<div style="text-align:center;font-size:13px;margin-top:auto;padding-top:40px"><span id="luckyWrap"><a href="#" id="lucky">Contribute</a><span class="sep"> · </span></span><span id="mine"></span></div>');
   $("goSearch").onclick = go;
   $("goLucky").onclick = () => $("lucky").click();
-  $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; if (deck.at >= 0 && deck.cards.length) { deck.at--; } lucky("next"); window.scrollTo(0, 0); };
+  $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; contribute(); window.scrollTo(0, 0); };
   $("foot").style.cssText = "margin-top:8px;padding-top:0"; showMine(false);
   $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lanterN</a>';
   $("share").onclick = async ev => { ev.preventDefault(); const link = location.origin + location.pathname + "#k=" + key;       // the same key on another device or for a colleague: searching needs only the link; reviews, Ask and adding need a WBA sign-in
@@ -1525,6 +1525,56 @@
         body.appendChild(li);
       }
     } else { const n = el("p", null, "Read in this one document only."); n.style.color = "var(--muted)"; body.appendChild(n); }
+  }
+  // Contribute (v66, the owner, 13 Nov: "I'm feeling lucky" renamed to say what it is for, with a choice): review a
+  // value the robot read, as before, or look at a company whose main reports of the last years are not all in the
+  // library and add a link when one is known.
+  function contribute() {
+    const box = $("results"); $("values").hidden = true; $("chips").innerHTML = ""; $("answer").innerHTML = ""; $("strip").innerHTML = ""; setStatus("");
+    $("head").classList.remove("home"); document.body.classList.add("playing");
+    box.innerHTML = ""; const c = el("div", "lucky");
+    const back = el("a", null, "← Back to search"); back.href = "#"; back.onclick = e => { e.preventDefault(); luckyClose(); };
+    c.append(back, el("h2", null, "Contribute"), el("p", "what", "Two ways to make lanterN better. A few minutes of either one count."));
+    const two = el("div"); two.style.cssText = "display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:14px";
+    const choice = (title, text, fn) => {
+      const b = el("button"); b.type = "button"; b.style.cssText = "font:inherit;text-align:left;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--bg);color:var(--fg);cursor:pointer";
+      const t = el("div", null, title); t.style.cssText = "font-weight:600;font-size:16px;margin-bottom:4px"; const d = el("div", null, text); d.style.cssText = "font-size:13.5px;color:var(--muted);line-height:1.45";
+      b.append(t, d); b.onclick = fn; return b;
+    };
+    two.append(choice("Review a value", "One figure the robot read, with the page it came from. Say whether it is right.", () => { if (deck.at >= 0 && deck.cards.length) deck.at--; lucky("next"); window.scrollTo(0, 0); }),
+               choice("Fill a document gap", "One company whose main reports of the last three years are not all in the library. Add a link if you know where one is.", () => { gapCard(); window.scrollTo(0, 0); }));
+    c.appendChild(two); box.appendChild(c);
+  }
+  const gapSeen = [];
+  async function gapCard() {
+    const box = $("results"); $("values").hidden = true; setStatus(""); document.body.classList.add("playing");
+    box.innerHTML = ""; const c = el("div", "lucky"); box.appendChild(c);
+    const back = el("a", null, "← Contribute"); back.href = "#"; back.onclick = e => { e.preventDefault(); contribute(); }; c.appendChild(back);
+    const wait = el("p", "what", "Looking for a company with a gap…"); c.appendChild(wait);
+    let g = null; try { g = await rpc("gap_card", { key, skip: gapSeen.slice(-300) }); } catch (e) { g = null; }
+    wait.remove();
+    if (!g) { c.append(el("h2", null, "Fill a document gap"), el("p", "what", "No company with a gap came up this time. Try again.")); const again = el("button", null, "Try again"); again.type = "button"; again.onclick = gapCard; const nav0 = el("div", "nav"); nav0.appendChild(again); c.appendChild(nav0); return; }
+    gapSeen.push(g.wba_id);
+    c.appendChild(el("h2", null, g.company));
+    const sub = el("p", "what", [g.industry, g.country].filter(Boolean).join(" · ")); if (g.website) { const host = String(g.website).replace(/^https?:\/\//, "").replace(/\/.*$/, ""); const w = el("a", null, host + " ↗"); w.href = /^https?:/.test(g.website) ? g.website : "https://" + g.website; w.target = "_blank"; w.rel = "noopener"; sub.append(document.createTextNode(sub.textContent ? " · " : ""), w); }
+    c.appendChild(sub);
+    c.appendChild(el("p", null, `The main reports the library holds for the last three years. “Missing” is a report lanterN could not find: it may exist.`));
+    const t = el("table"); t.style.cssText = "border-collapse:collapse;width:100%;margin:6px 0 12px;font-size:14px";
+    const hr = el("tr"); for (const h of ["Year", "Annual or financial report", "Sustainability report"]) { const th = el("th", null, h); th.style.cssText = "text-align:left;font-weight:600;padding:7px 10px 7px 0;border-bottom:1px solid var(--line)"; hr.appendChild(th); } t.appendChild(hr);
+    for (const y of g.years || []) {
+      const tr = el("tr"); const cell = v => { const td = el("td"); td.style.cssText = "padding:7px 10px 7px 0;border-bottom:1px solid var(--line);vertical-align:top"; if (v instanceof Node) td.appendChild(v); else td.textContent = v; return td; };
+      const held = list => { const sp = el("span"); if (list && list.length) { const k = el("span", null, "✓ "); k.style.color = "#2E8B1F"; sp.append(k, document.createTextNode(list.join(", "))); } else { sp.textContent = "Missing"; sp.style.cssText = "color:#B4540A;font-weight:600"; } return sp; };
+      tr.append(cell(String(y.year)), cell(held(y.annual)), cell(held(y.sustainability))); t.appendChild(tr);
+    }
+    c.appendChild(t);
+    const all = el("p", "what", `${g.documents} document${g.documents === 1 ? "" : "s"} of this company in the library in all. `);
+    const see = el("a", null, "See them"); see.href = "#"; see.onclick = e => { e.preventDefault(); luckyClose(); $("q").value = g.company; go(); }; all.appendChild(see); c.appendChild(all);
+    const hold = el("div", "values"); hold.style.marginTop = "8px"; c.appendChild(hold);
+    const nav = el("div", "nav");
+    const add = el("button", "save", "Add a link"); add.type = "button"; add.title = "A link to the missing report, or to the page that lists the company's reports"; add.onclick = () => addSourceForm(hold, g.wba_id);
+    const next = el("button", null, "Next company →"); next.type = "button"; next.onclick = () => { gapCard(); window.scrollTo(0, 0); };
+    nav.append(add, next); c.appendChild(nav);
+    c.appendChild(el("p", "what", "To send the file itself, open it in your browser and use the Send to lanterN extension."));
   }
   // The owner's panel (13 Nov 2026): links and people, the facts of answers and who marked them, and what Ask costs.
   // Shown only when the page was opened with the owner's link and the person is signed in (admin_ok); every admin
