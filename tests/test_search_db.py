@@ -150,6 +150,15 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.upload_expected(%s)", (j["path"],)); self.assertFalse(cur.fetchone()[0])         # stored: the place is closed
         cur.execute("select public.upload_begin('PT_00000', 'x.pdf', 5000000, %s)", (sha,)); self.assertTrue(cur.fetchone()[0]["again"])
         cur.execute("select status, filename, source_url from public.browser_uploads"); self.assertEqual(cur.fetchall(), [("stored", "Annual report 2024.pdf", "https://example.com/ar-2024.pdf")])
+        # what the sender says of the document (extension 0.4.0): kept with the upload; only a type of the library and a plausible year
+        cur.execute("select public.upload_begin('PT_00000', 'from disk.pdf', 5000, %s, null, 'https://example.com/reports', 'send-to-lantern 0.4.0', 'Annual Report', 2024)", ("cd" * 32,))
+        self.assertIn("path", cur.fetchone()[0])
+        cur.execute("select public.upload_begin('PT_00000', 'from disk.pdf', 5000, %s, sent_year => 2023)", ("cd" * 32,))        # said again before storing: the last word stands, the type is kept
+        cur.execute("select sent_type, sent_year, source_url from public.browser_uploads where sha256 = %s", ("cd" * 32,)); self.assertEqual(cur.fetchall(), [("Annual Report", 2023, None)])
+        import psycopg
+        for bad_type, bad_year in (("Brochure", None), (None, 1066)):
+            with self.assertRaises(psycopg.Error):
+                cur.execute("select public.upload_begin('PT_00000', 'y.pdf', 5000, %s, sent_type => %s, sent_year => %s)", ("ee" * 32, bad_type, bad_year))
         for bad in (("PT_nope", "a.pdf", 5000, sha, None), ("PT_00000", "a.pdf", 10, sha, None), ("PT_00000", "a.pdf", 60000000, sha, None),
                     ("PT_00000", "a.pdf", 5000, "zz", None), ("PT_00000", "a.pdf", 5000, "cd" * 32, "not a link")):
             with self.assertRaises(Exception):

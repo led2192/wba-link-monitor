@@ -30,7 +30,7 @@ class Extension(unittest.TestCase):
     def test_what_is_held_is_not_offered_and_only_reports_are_ticked(self):
         js = read("extension", "send.js")
         self.assertIn('rpc("upload_known"', js)                                           # asked before anything is downloaded
-        self.assertIn("box.checked = d.sure && looksReport(d) && !d.held", js)
+        self.assertIn("box.checked = d.file ? !d.done : (d.sure && looksReport(d) && !d.held)", js)       # a file chosen from the computer is ticked: the person chose it
         m = re.search(r"const REPORT = /(.+)/i;", js); rx = re.compile(m.group(1), re.I)
         for yes in ("Annual report 2024", "memoria anual 2023", "Informe de sostenibilidad", "Code of Conduct", "Política de derechos humanos"):
             self.assertTrue(rx.search(yes), yes)
@@ -42,6 +42,14 @@ class Extension(unittest.TestCase):
                    "Colombia privacy policy 05 11 2025 Politica de Tratamiento de Datos Colombia 2025", "Vitol in Africa Vitol in Africa Brochure ENG", "Vitol Metals GTCs"):
             self.assertFalse(ticked(no), no)                                              # a retailer's home page and a trader's archive, 11 Nov 2026
         self.assertIn('store.set("hosts", hostMemory)', js)                               # a site sent from before brings its company
+
+    def test_the_sender_can_say_type_and_year_and_send_a_file_from_the_computer(self):
+        js, html = read("extension", "send.js"), read("extension", "send.html")
+        self.assertIn('sent_type: doc.kind && doc.kind.value || null, sent_year: year', js)
+        self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
+        self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
+        self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
+        self.assertIn('"version": "0.4.0"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.4.0", read("extension", "config.js"))
 
     def test_one_level_deeper_stays_on_the_site_and_is_bounded(self):
         js = read("extension", "send.js")

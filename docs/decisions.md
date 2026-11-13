@@ -738,3 +738,9 @@ Also: lanterN guesses "inside the annual report" by itself when the year's annua
 Not done yet: the coverage numbers (`company_coverage.py`) do not read `gap_notes`; "held under another type or year" is not fed back to the type and year of the document.
 Rejected: a free-text note field (not countable); marking the company as a whole as "private" (the reason differs by report: a private company may publish a sustainability report and no accounts).
 
+## The sender's type and year are a person's word (13 Nov 2026)
+What: a person sending a document with the extension may say its type and the year printed on it. The type is written to `source_type_check`, the field people correct and the robot fills only where empty, so no classifier runs over it. The year is written to `doc_year`.
+Why: the person has the report open and knows what it is; interpreting it afterwards costs runs and is sometimes wrong.
+Open: `doc_year` is the weakest input of the `year` formula, so a year read from the full text still wins over the sender's. To make the sender's year win, the formula needs a field of its own for it; left for the step that moves the year out of Airtable.
+Rejected: free text for the type (not the library's list); making either compulsory (most documents are sent many at a time from a page of links).
+

@@ -3202,6 +3202,11 @@ create table if not exists public.browser_uploads (
   client      text
 );
 alter table public.browser_uploads enable row level security;
+-- What the sender says of the document (13 Nov 2026, extension 0.4.0, the owner: "I could already give the type of
+-- report and the year the company gives it, and spare the pipeline the interpreting"). Both optional. The type is one
+-- of the library's own types (source_type_terms.json); the year is the one printed on the report.
+alter table public.browser_uploads add column if not exists sent_type text;
+alter table public.browser_uploads add column if not exists sent_year int;
 create unique index if not exists browser_uploads_one_file on public.browser_uploads (wba_id, sha256);
 -- "Does the library hold this address?" is asked for every link (upload_known, upload_begin, add_sources). Without
 -- this index each question read the whole documents table: on 11 Nov 2026, with the database busy, 35 links took
@@ -3233,8 +3238,10 @@ $$;
 revoke all on function public.upload_companies() from public, anon;
 grant execute on function public.upload_companies() to authenticated;
 
+drop function if exists public.upload_begin(text, text, bigint, text, text, text, text);        -- one upload_begin, not two the API could confuse
 create or replace function public.upload_begin(
-  company text, filename text, bytes bigint, sha256 text, source_url text default null, page_url text default null, client text default null)
+  company text, filename text, bytes bigint, sha256 text, source_url text default null, page_url text default null, client text default null,
+  sent_type text default null, sent_year int default null)
 returns jsonb
 language plpgsql security definer set search_path = public, extensions
 set statement_timeout = '20s'
@@ -3246,6 +3253,7 @@ declare
   sha text := lower(btrim(coalesce(sha256, '')));
   src text := nullif(btrim(coalesce(source_url, '')), '');
   fn text := left(btrim(regexp_replace(coalesce(filename, ''), '[[:cntrl:]]', '', 'g')), 200);
+  kind text := nullif(btrim(coalesce(sent_type, '')), '');
   row public.browser_uploads;
 begin
   if who is null or not public.email_may_search(who) then
@@ -3260,6 +3268,12 @@ begin
   end if;
   if sha !~ '^[0-9a-f]{64}$' then
     raise exception 'the file''s SHA-256 is missing' using errcode = '22023';
+  end if;
+  if kind is not null and kind <> all(array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', 'Environmental Reports', 'Social Reports', 'Financial Statement', '10K Form', 'Registration Document', 'Interim Reports', 'CDP Report', 'GRI', 'SASB Index', 'Human Rights Policy', 'Code of Conduct', 'Policy Documents', 'Statutory Documents', 'Company Presentations', 'Engagement Report', 'Certifications']) then
+    raise exception 'not one of the document types' using errcode = '22023';
+  end if;
+  if sent_year is not null and sent_year not between 1990 and 2100 then
+    raise exception 'a year between 1990 and 2100' using errcode = '22023';
   end if;
   if bytes is null or bytes < 1000 or bytes > 52428800 then
     raise exception 'a file of 1 KB to 50 MB' using errcode = '22023';
@@ -3285,18 +3299,21 @@ begin
     return jsonb_build_object('again', true);                        -- this very file was sent before
   end if;
   if not found then
-    insert into public.browser_uploads (uploader, wba_id, source_url, page_url, filename, bytes, sha256, path, client)
+    insert into public.browser_uploads (uploader, wba_id, source_url, page_url, filename, bytes, sha256, path, client, sent_type, sent_year)
       values (who, co, src, left(nullif(btrim(coalesce(page_url, '')), ''), 1000), coalesce(nullif(fn, ''), 'document.pdf'), bytes, sha,
-              co || '/' || sha || '.pdf', left(client, 60))
+              co || '/' || sha || '.pdf', left(client, 60), kind, sent_year)
       returning * into row;
-  elsif row.uploader <> who then
-    update public.browser_uploads u set uploader = who, at = now() where u.id = row.id returning * into row;   -- registered and never stored by someone else
+  else
+    -- registered and never stored (by this person or another): the last sender's word stands
+    update public.browser_uploads u set uploader = who, at = case when u.uploader <> who then now() else u.at end,
+                                        sent_type = coalesce(kind, u.sent_type), sent_year = coalesce(upload_begin.sent_year, u.sent_year)
+      where u.id = row.id returning * into row;
   end if;
   return jsonb_build_object('id', row.id, 'path', row.path);
 end;
 $$;
-revoke all on function public.upload_begin(text, text, bigint, text, text, text, text) from public, anon;
-grant execute on function public.upload_begin(text, text, bigint, text, text, text, text) to authenticated;
+revoke all on function public.upload_begin(text, text, bigint, text, text, text, text, text, int) from public, anon;
+grant execute on function public.upload_begin(text, text, bigint, text, text, text, text, text, int) to authenticated;
 
 -- Before anything is downloaded: which of these addresses lanterN already holds for the company (a document with
 -- its text, or a file sent before). The extension shows them as held and does not offer them.
