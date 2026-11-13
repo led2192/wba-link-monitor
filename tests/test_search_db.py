@@ -175,6 +175,46 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(LS.upsert_documents(conn, many, batch=3, say=lambda *a, **k: None), 0)
         cur.execute("delete from public.documents where library_id = 'PT_00000-loadtest' or library_id like 'PT_00000-batch%'")
 
+    def test_one_search_blends_words_and_meaning(self):
+        """find_blend: the words alone without a vector, in quotes or with a place filter; else both lists merged by
+        reciprocal rank. The search by meaning is replaced by a stub here (no vector type in the test database)."""
+        vec = [0.0] * 384
+        import psycopg, psycopg.sql
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select library_id, page, rank from public.find_pages('', 'living wage')")
+            words = cur.fetchall()
+            self.assertTrue(words)
+            cur.execute("select library_id, page, rank from public.find_blend('', 'living wage')")
+            self.assertEqual(cur.fetchall(), words)                         # no vector: the words' answer
+            cur.execute("select library_id, page, rank from public.find_blend('', '\"living wage\"', %s::real[])", (vec,))
+            self.assertTrue(cur.fetchall())                                  # a phrase in quotes never asks the meaning (which cannot run here)
+            last = words[-1]
+            cur.execute("select library_id, page from public.pages order by library_id, page")
+            other = next(r for r in cur.fetchall() if (r[0], r[1]) not in {(w[0], w[1]) for w in words})
+            cur.execute(psycopg.sql.SQL("""create or replace function public.find_meaning(key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null, type_filter text default null, max_rows int default 50)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$
+                             select null::bigint, 1, {}::text, 'c'::text, 'w'::text, 2024, 't'::text, 'l'::text, null::text, {}::int, 0.9::real, 'nearest passage'::text
+                             union all
+                             select null::bigint, 2, {}::text, 'c'::text, 'w'::text, 2024, 't'::text, 'l'::text, null::text, {}::int, 0.8::real, 'another passage'::text $f$""").format(*[psycopg.sql.Literal(v) for v in (last[0], last[1], other[0], other[1])]))
+            cur.execute("select library_id, page, rank, excerpt, log_id from public.find_blend('', 'living wage', %s::real[])", (vec,))
+            rows = cur.fetchall()
+            c.rollback()                                                     # the stub goes
+        keys = [(r[0], r[1]) for r in rows]
+        self.assertEqual(len(keys), len(set(keys)))                          # a page both found is one row
+        self.assertEqual([r[2] for r in rows], list(range(1, len(rows) + 1)))
+        self.assertIn((other[0], other[1]), keys)                            # a page only the meaning found enters
+        self.assertEqual(next(r[3] for r in rows if (r[0], r[1]) == (other[0], other[1])), "another passage")
+        if len(words) > 1:
+            self.assertEqual(keys[0], (last[0], last[1]))                    # found by both: first, though last by words
+        self.assertNotEqual(next(r[3] for r in rows if (r[0], r[1]) == (last[0], last[1])), "nearest passage")   # the words' excerpt is kept
+        self.assertTrue(all(r[4] is not None for r in rows))                 # the search was logged once, by the words
+        self.assertLessEqual(max(sum(1 for k in keys if k[0] == d) for d in {k[0] for k in keys}), 3)
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
+        self.assertIn('rpc("find_blend"', src)
+        self.assertNotIn("Search by meaning (beta)", src)                    # one search, not a choice
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
