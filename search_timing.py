@@ -24,6 +24,94 @@ CASES = [
     ('"just transition"', [], "just transition", None, None),
     ("Nike \"code of conduct\"", [], "code of conduct", "Nike", None),
 ]
+# Questions written in full, as people type them to Ask (13 Nov 2026: a long question about one company ran into the
+# timeout while short searches took 2 s). These are our own sentences, not anyone's: the log is public.
+LONG = [
+    # (label, question, company or None)
+    ("3 words, one company", "scope 1 emissions", "Nike"),
+    ("question of 8 kept words, one company", "What are the main climate transition risks and how does the board oversee progress against sustainability targets?", "Nike"),
+    ("question of 8 kept words, a large company", "What are the main climate transition risks and how does the board oversee progress against sustainability targets?", "Unilever"),
+    ("question of 8 kept words, no company", "What are the main climate transition risks and how does the board oversee progress against sustainability targets?", None),
+    ("question of 5 kept words, one company", "How many employees received human rights training last year?", "Nike"),
+]
+
+
+def level_queries(cur, words):
+    """(every word, every word but one) as tsquery text, built as find_pages builds its levels 0 and 1."""
+    cur.execute("select " + ", ".join(["public.find_word_query(%s)::text"] * len(words)), words)
+    tq = ["(" + t + ")" for t in cur.fetchone()]
+    every = " & ".join(tq)
+    but_one = " | ".join("(" + " & ".join(t for j, t in enumerate(tq) if j != i) + ")" for i in range(len(tq))) if len(tq) > 1 else every
+    return every, but_one
+
+
+def whole_function(cur, conn, md):
+    """The searches as the page asks them, on questions written in full: the two levels of the word index by
+    themselves, then find_pages, find_meaning and find_blend whole. Seconds and row counts only."""
+    md += ["", "### Questions written in full", "",
+           "| Question | Stage | Rows | Seconds |", "| --- | --- | --: | --: |"]
+    for label, question, company in LONG:
+        def row(stage, sql, args, count=True):
+            try:
+                t0 = time.time()
+                cur.execute(sql, args)
+                n = cur.fetchone()[0] if count else len(cur.fetchall())
+                md.append(f"| {label} | {stage} | {n:,} | {time.time() - t0:.2f} |")
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                cur.execute("set statement_timeout = '90s'")
+                md.append(f"| {label} | {stage}: failed after {time.time() - t0:.1f} s ({type(e).__name__}: {str(e).splitlines()[0][:80]}) | | |")
+        try:
+            cur.execute("select words from public.find_terms(%s)", (question,))
+            words = cur.fetchone()[0]
+            ids = None
+            if company:
+                cur.execute("select public.companies_matching(%s)", (company,))
+                ids = cur.fetchone()[0]
+            every, but_one = level_queries(cur, words)
+            a = {"ids": ids}
+            md.append(f"| {label} | words kept by find_terms | {len(words)} | |")
+            if ids:
+                row("pages of the company (no words)", "select count(*) from (select 1 from public.pages p where p.wba_id = any(%(ids)s::text[]) limit 200000) x", a)
+            row("level 0: every word, 800 at most", f"select count(*) from (select p.library_id from public.pages p where {WHERE} limit 800) x", {**a, "q": every})
+            row("level 1: every word but one, 800 at most", f"select count(*) from (select p.library_id from public.pages p where {WHERE} limit 800) x", {**a, "q": but_one})
+            row("level 1 with the word vectors copied, as the function does", f"select count(*) from (select p.library_id, p.page, length(p.words::text) from public.pages p where {WHERE} limit 800) x", {**a, "q": but_one})
+            row("find_pages, whole", "select count(*) from public.find_pages('timing', %s, %s, null, null, null, 50, 'timing')", (question, company))
+            row("find_pages again (pages now in memory)", "select count(*) from public.find_pages('timing', %s, %s, null, null, null, 50, 'timing')", (question, company))
+            t0 = time.time()
+            cur.execute("select public.query_vector_made(%s)", (question,))
+            vec = (cur.fetchone()[0] or {}).get("vec")
+            conn.commit()
+            md.append(f"| {label} | the question's vector | {1 if vec else 0} | {time.time() - t0:.2f} |")
+            if vec:
+                row("find_meaning, whole", "select count(*) from public.find_meaning('timing', %s::real[], %s, null, null, null, 50)", (vec, company))
+                row("find_blend, whole (what Ask reads from)", "select count(*) from public.find_blend('timing', %s, %s::real[], %s, null, null, null, 24, 'timing')", (question, vec, company))
+            if company and label.startswith("question of 8 kept words, one"):
+                cur.execute(f"explain (analyze, buffers) select p.library_id, p.page, p.words from public.pages p where {WHERE} limit 800", {**a, "q": but_one})
+                PLANS.append((label, [r[0][:180] for r in cur.fetchall()][:40]))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            cur.execute("set statement_timeout = '90s'")
+            md.append(f"| {label} | failed: {type(e).__name__}: {str(e).splitlines()[0][:120]} | | |")
+    for label, plan in PLANS:
+        md += ["", f"Plan of level 1 ({label}):", "", "```"] + plan + ["```"]
+    # what the log says of the last seven days: how long searches took, by the number of words and whether a company narrowed them
+    try:
+        cur.execute("""select case when coalesce(btrim(terms), '') = '' then 0 else array_length(regexp_split_to_array(btrim(terms), '[[:space:]]+'), 1) end as nw,
+                              coalesce(company, '') <> '' as narrowed, count(*), percentile_cont(0.5) within group (order by ms),
+                              percentile_cont(0.9) within group (order by ms), max(ms)
+                       from public.search_log where at > now() - interval '7 days' and coalesce(client, '') not in ('timing', 'eval') group by 1, 2 order by 1, 2""")
+        md += ["", "Searches of the last seven days in the log (a search cut by the timeout leaves no row):", "",
+               "| Words | A company | Searches | Median s | 90% under s | Longest s |", "| --: | --- | --: | --: | --: | --: |"]
+        md += [f"| {nw} | {'yes' if nar else 'no'} | {n:,} | {float(p50 or 0) / 1000:.1f} | {float(p90 or 0) / 1000:.1f} | {float(mx or 0) / 1000:.1f} |" for nw, nar, n, p50, p90, mx in cur.fetchall()]
+    except Exception as e:
+        conn.rollback()
+        md.append(f"log summary failed: {type(e).__name__}")
+
+
+PLANS = []
 WHERE = "p.words @@ %(q)s::tsquery and p.wba_id <> '' and (%(ids)s::text[] is null or p.wba_id = any(%(ids)s::text[]))"
 
 
@@ -110,6 +198,8 @@ def main():
                 conn.rollback()
                 cur.execute("set statement_timeout = '90s'")
                 md.append(f"| {label} | failed: {type(e).__name__}: {str(e).splitlines()[0][:120]} | | |")
+        if os.environ.get("TIMING_LONG", "true") != "false":
+            whole_function(cur, conn, md)
         # one plan, to see how the word index is used with a year
         try:
             cur.execute("select (public.find_word_query('sustainability'))::text")
