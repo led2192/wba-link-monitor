@@ -272,7 +272,7 @@
   <form class="box" id="form" autocomplete="off">
     <span class="qwrap">
       <input id="q" type="search" placeholder="Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
-      <button type="button" class="askbtn" id="askBtn" title="Ask: an answer written from the pages found, with its sources. Three questions a day.">
+      <button type="button" class="askbtn" id="askBtn" title="Ask: an answer written from the pages found, with its sources. A question typed in the box is answered without pressing this. Twenty answers a day.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.900 5.300L19 10l-5.100 1.700L12 17l-1.900-5.300L5 10l5.100-1.700z" fill="currentColor"/><path d="M19 15l.8 2.200L22 18l-2.200.8L19 21l-.8-2.200L16 18l2.200-.8z" fill="currentColor"/></svg>Ask
       </button>
     </span>
@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v46 2026-11-13";
+  const CLIENT = "lantern v47 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -367,7 +367,7 @@
   }
 
   let companies = [];
-  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null, blended: false };
+  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null, blended: false, cited: [], lastRows: [] };
   let industries = [], regions = [];
 
   async function rpc(fn, body) {
@@ -536,6 +536,7 @@
       const ico = companyIcon(r.wba_id); if (ico) doc.appendChild(ico);
       const size = el("span", "size", ""); size.dataset.doc = r.library_id;        // "264 pages", filled once the sizes arrive
       doc.append(el("span", "co", r.company || r.wba_id), el("span", null, r.year ? String(r.year) : "no year"), el("span", null, r.doc_type || "untyped document"), el("span", null, `page ${r.page}`), size);
+      if (r.cited) { const c = el("span", null, "cited in the answer"); c.style.cssText = "color:var(--accent);font-weight:600"; doc.appendChild(c); }
       const h = el("h3");
       const href = pageLink(r);
       const a = el("a", null, r.label || r.library_id);
@@ -601,6 +602,7 @@
   async function search(fromChips, more) {
     document.body.classList.remove("playing");                    // a search ends the card game
     if (typeof closeHistory === "function") closeHistory();          // and the suggestions step aside for the results (they stayed open over them when the page opened on a search)
+    if (!more) state.cited = [];                                 // the pages an answer cited belong to that question
     if (!fromChips) {
       const parsed = parse($("q").value);
       state.q = parsed.q;
@@ -647,13 +649,14 @@
                              $("fType").value = ""; search(); };
         st.append(document.createTextNode(" · "), a);
       }
-      if (state.maybe && !more && !fromChips) {             // a word that is also a company's name was read as the word: offer the company
+      if (state.maybe && !state.company && !more && !fromChips) {             // a word that is also a company's name was read as the word: offer the company
         const st = $("status"), mb = state.maybe; const a = el("a", null, `Search the company ${mb.name} instead`); a.href = "#";
         a.onclick = ev => { ev.preventDefault(); $("q").value = $("q").value.replace(new RegExp("(^|\\s)" + mb.word + "(?=\\s|$)", "i"), (m0, pre) => pre + mb.name + ";"); search(false); };
         st.append(document.createTextNode(" · "), a);
       }
       if (!more && !vec && canBlend()) blendWhenReady(seq, rows);
-      render(more ? rows.slice(state.rows - 50) : rows, !!more);
+      if (!more) state.lastRows = rows;
+      render(more ? rows.slice(state.rows - 50) : citedFirst(rows), !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues();
       if (!more && state.q) didYouMean($("q").value.trim());
@@ -711,8 +714,8 @@
       if (seq !== searchSeq || window.scrollY > 300) return;          // a newer search, or the reader is already down the list
       const rows = blend(words, await askMeaning(vec), state.rows);
       if (seq !== searchSeq || window.scrollY > 300 || !rows.length) return;
-      state.blended = true;
-      render(rows, false);
+      state.blended = true; state.lastRows = rows;
+      render(citedFirst(rows), false);
       const st = $("status"), first = st.firstChild;
       if (first && first.nodeType === 3 && /^No /.test(first.nodeValue)) setStatus(`${rows.length} pages that say it in other words: the words as typed are on no page.`);
       else if (first && first.nodeType === 3) first.nodeValue = first.nodeValue.replace(/^\d+\+? pages/, `${rows.length}${rows.length >= state.rows ? "+" : ""} pages`);
@@ -1228,7 +1231,7 @@
       if (ico) { ico.className = "ico"; ico.style.borderRadius = "4px"; row.appendChild(ico); }
       else row.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
       row.append(el("span", null, it.q), el("small", null, it.kind + (it.note ? " · " + it.note : "")));
-      row.onmousedown = ev => { ev.preventDefault(); $("q").value = it.q; closeHistory(); search(false); };
+      row.onmousedown = ev => { ev.preventDefault(); $("q").value = it.q; go(); };
       box.appendChild(row);
     }
     for (const it of items) {
@@ -1237,7 +1240,7 @@
       const t = el("span", null, it.q); const when = el("small", null, ago(it.at)); const x = el("button", null, "×"); x.title = "Forget this search";
       x.onclick = ev => { ev.stopPropagation(); history_.remove(it.q); renderHistory(); };
       row.append(t, when, x);
-      row.onmousedown = ev => { ev.preventDefault(); $("q").value = it.q; closeHistory(); search(false); };
+      row.onmousedown = ev => { ev.preventDefault(); $("q").value = it.q; go(); };
       box.appendChild(row);
     }
     if (items.length) { const f = el("div", "foot"); const c = el("button", null, "Clear my searches"); c.onmousedown = ev => { ev.preventDefault(); history_.clear(); renderHistory(); }; f.appendChild(c); box.appendChild(f); }
@@ -1248,33 +1251,62 @@
   $("q").addEventListener("input", renderHistory);
   $("q").addEventListener("blur", () => setTimeout(closeHistory, 120));
   $("q").addEventListener("keydown", e => { if (e.key === "Escape") closeHistory(); });
-  $("form").addEventListener("submit", e => { e.preventDefault(); closeHistory(); $("answer").innerHTML = ""; search(false); });
+  // A question is answered (13 Nov 2026): text that reads as a question ("does Nike have a scope 1 target?") gets the
+  // answer written from the pages, above the list, without pressing Ask; anything else is searched as before.
+  function isQuestion(text) {
+    const t = (text || "").trim().toLowerCase();
+    if (t.length < 8 || t.split(/\s+/).length < 3) return false;
+    return /[?？]\s*$/.test(t) || t.startsWith("¿")
+      || /^(does|do|did|is|are|was|were|has|have|had|can|could|will|what|which|who|whom|how|when|where|why|qué|que|cuál|cual|cuáles|cuánto|cuanto|cuánta|cuántos|cuantos|cuántas|cuantas|cómo|como|dónde|donde|cuándo|cuando|quién|quien|tiene|tienen|hay|existe|est-ce|quel|quelle|quels|quelles|combien|comment|pourquoi|où|wie|was|welche|welcher|welches|hat|haben|gibt|wann|wo|warum)\s/.test(t);
+  }
+  const go = () => { closeHistory(); $("answer").innerHTML = ""; isQuestion($("q").value) ? ask(true) : search(false); };
+  // The pages an answer cites, first in the list: the person reads the answer and its proof together.
+  function citedFirst(rows) {
+    if (!state.cited.length) return rows;
+    const id = r => r.library_id + "|" + r.page, have = new Map(rows.map(r => [id(r), r])), used = new Set();
+    const top = state.cited.map(c => { used.add(id(c)); return { ...(have.get(id(c)) || c), cited: true }; });
+    return [...top, ...rows.filter(r => !used.has(id(r)))];
+  }
+  $("form").addEventListener("submit", e => { e.preventDefault(); go(); });
   // Ask: the question goes to the database, which finds the pages (the same search), gives the first lines of the best six
-  // to the reader model and returns an answer that cites them. Signed in; three questions a day a person (counted there).
-  async function ask() {
+  // to the reader model and returns an answer that cites them. Signed in; twenty answers a day a person (counted there).
+  // auto: the box held a question and nobody pressed Ask; then nothing interrupts the search (no sign-in form, a short line instead).
+  async function ask(auto) {
+    auto = auto === true;
     const text = $("q").value.trim(), box = $("answer"); box.innerHTML = ""; const c = el("div", "answer"); box.appendChild(c);
     const cap = el("div", "cap"); cap.append(el("span", null, "Ask · an answer written from the pages found"), el("span", null, "")); c.appendChild(cap);
     const note = el("div", "what", ""); c.appendChild(note);
+    if (auto && !(await token())) {
+      note.textContent = "This reads as a question. "; const a = el("a", null, "Sign in with your WBA address to have it answered from the pages"); a.href = "#"; a.onclick = ev => { ev.preventDefault(); ask(); };
+      note.append(a, document.createTextNode(".")); search(false); return; }
     if (text.length < 8) { note.textContent = "Type a question in the box first, for example: What were Unilever’s scope 1 emissions in 2024?"; return; }
     $("head").classList.remove("home"); closeHistory();
     const t = await token();
-    if (!t) { note.textContent = "Ask answers from the pages lanterN finds and shows its sources. Three questions a day; sign in with your WBA address.";
+    if (!t) { note.textContent = "Ask answers from the pages lanterN finds and shows its sources. Three questions a day; sign in with your WBA address.".replace("Three", "Twenty");
               const hold = el("div", "values"); c.appendChild(hold); signInBox(hold, ask); return; }
     note.textContent = "Reading the pages…";
     search(false);                                           // the results under the answer, as for any search; it also reads the filters in the box
+    const seq = searchSeq;
+    let vec = null;                                           // the question's vector, when the language model is at hand within 4 s: the answer then reads the one search's pages
+    if (canBlend()) { try { vec = await Promise.race([queryVector(meaningWords()), new Promise(r => setTimeout(() => r(null), 4000))]); } catch (e) { vec = null; } }
     let j = null;
     try {
       const r = await fetch(`${CONFIG.url}/rest/v1/rpc/ask`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ key, question: text, q: state.q || null, company_filter: state.company || null, year_from: state.from || null, year_to: state.to || null, type_filter: state.type || null, client: CLIENT }) });
+        body: JSON.stringify({ key, question: text, q: state.q || null, company_filter: state.company || null, year_from: state.from || null, year_to: state.to || null, type_filter: state.type || null, client: CLIENT + (auto ? " auto" : ""), qvec: vec }) });
       j = await r.json().catch(() => ({})); if (!r.ok) j = { error: j.message || `HTTP ${r.status}` };
     } catch (e) { j = { error: e.message }; }
-    const left = typeof j.left === "number" ? `${j.left} of ${j.per_day || 3} questions left today` : ""; cap.lastChild.textContent = left;
+    const left = typeof j.left === "number" ? `${j.left} of ${j.per_day || 20} answers left today` : ""; cap.lastChild.textContent = left;
     if (j.off) { note.textContent = `Ask is not switched on yet: ${j.why || "the model key is not in the database’s vault"}.`; return; }
     if (j.limit && j.everyone) { note.textContent = "Ask has answered all the questions it can today, for everyone. It comes back at midnight UTC; the search below still works."; return; }
-    if (j.limit) { note.textContent = `You have asked today’s ${j.per_day || 3} questions. They come back at midnight UTC; the search below still works.`; return; }
+    if (j.limit) { note.textContent = `You have had today’s ${j.per_day || 20} answers. They come back at midnight UTC; the search below still works.`; return; }
     if (j.none) { note.textContent = "No page was found for this question" + (j.keywords ? ` (searched “${j.keywords}”)` : "") + ". Try other words, or name the company and the year." + (j.why ? ` [${j.why}]` : ""); return; }
     if (j.error || !j.answer) { note.textContent = `No answer: ${j.error || "the model returned nothing"}. This one does not count.`; return; }
     note.remove(); const src = j.sources || [];
+    if (seq === searchSeq) {                                  // the pages the answer cites go first in the list under it
+      const nums = [...new Set([...j.answer.matchAll(/\[(\d+)\]/g)].map(m => m[1]))];
+      state.cited = nums.map(n => src.find(x => String(x.n) === n)).filter(x => x && x.library_id).map(x => ({ log_id: state.logId, rank: 0, library_id: x.library_id, company: x.company, wba_id: x.wba_id, year: x.year, doc_type: x.doc_type, label: x.label, url: x.url, page: x.page, score: 0, excerpt: x.excerpt || "" }));
+      if (state.cited.length) { render(citedFirst(state.lastRows), false); window.scrollTo(0, 0); }
+    }
     const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : m; });
     c.appendChild(body);
     const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; li.appendChild(a); ol.appendChild(li); }
@@ -1285,7 +1317,7 @@
   $("funnel").addEventListener("click", () => { const f = $("filters"); f.hidden = !f.hidden; $("funnel").setAttribute("aria-expanded", String(!f.hidden)); if (!f.hidden) $("fCompany").focus(); });
   for (const id of ["fCompany", "fFrom", "fTo", "fType"]) $(id).addEventListener("change", () => { if ($("q").value.trim()) search(false); });
   $("foot").insertAdjacentHTML("beforebegin", '<div style="text-align:center;font-size:13px;margin-top:auto;padding-top:40px"><span id="luckyWrap"><a href="#" id="lucky">I’m feeling lucky</a><span class="sep"> · </span></span><span id="mine"></span></div>');
-  $("goSearch").onclick = () => { closeHistory(); search(false); };
+  $("goSearch").onclick = go;
   $("goLucky").onclick = () => $("lucky").click();
   $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; if (deck.at >= 0 && deck.cards.length) { deck.at--; } lucky("next"); window.scrollTo(0, 0); };
   $("foot").style.cssText = "margin-top:8px;padding-top:0"; showMine(false);
@@ -1294,7 +1326,7 @@
     try { await navigator.clipboard.writeText(link); ev.target.textContent = "Link copied: paste it to a colleague or open it on your other device"; } catch (e) { ev.target.textContent = link; } };
   loadCompanies().then(() => {
     const q0 = new URLSearchParams(location.search).get("q");
-    if (q0) { $("q").value = q0; search(false); }
+    if (q0) { $("q").value = q0; go(); }
   });
 })();
 </script>

@@ -94,7 +94,7 @@ def test_scores_for_one_company_with_places_counted():
 
 def test_ask_is_signed_limited_and_keeps_the_key_out_of_the_page():
     ask = SQL[SQL.index("create or replace function public.ask("):SQL.index("-- A company's benchmark results")]
-    assert "public.email_may_search(who)" in ask and "per_day constant int := 3" in ask
+    assert "public.email_may_search(who)" in ask and "per_day constant int := 20" in ask
     assert "from vault.decrypted_secrets d where d.name = 'anthropic_api_key'" in ask          # the key lives in the vault, nowhere else
     assert "sk-ant" not in SQL
     assert "a.answered and a.at >= date_trunc('day', now())" in ask                               # only answered questions count
@@ -224,7 +224,7 @@ def test_short_company_names_and_long_questions():
 
 
 def test_ask_searches_a_long_question_with_the_models_words():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text)")]
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
     assert "if coalesce(array_length((public.find_terms(search_q)).words, 1), 0) > 4 then" in ask
     assert "case when attempt = 1 then keywords else search_q end" in ask                    # its words first, the question itself if they find nothing
     assert "revoke all on function public.ask_model(text, text, text, text, text, int) from public, anon, authenticated;" in SQL
@@ -239,7 +239,7 @@ def test_a_company_is_asked_for_not_added():
 
 
 def test_ask_has_a_ceiling_for_everyone_together():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text)")]
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
     assert "per_day_all constant int := 300;" in ask and ">= per_day_all then" in ask and "'everyone', true" in ask
     wf = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "propose_values.yml"), encoding="utf-8").read()
     assert "--max-usd ${{ vars.READER_MAX_USD || '5' }}" in wf                       # the owner changes the night's ceiling without a code change
@@ -271,3 +271,12 @@ def test_the_schema_is_guarded_like_the_functions():
     for line in g.split("\n"):                                  # no bare lock-taking line is left at the first column
         assert not line.startswith(("alter table public.documents add column", "create index if not exists", "create unique index if not exists")), line
 
+
+
+def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    assert "from public.find_blend(key, case when attempt = 1 then keywords else search_q end, qvec," in ask      # words and meaning, as the list under it
+    assert "'library_id', r.library_id" in ask and "begin with Yes, No, " in ask
+    assert "drop function if exists public.ask(text, text, text, text, int, int, text, text);" in SQL             # one ask, not two the API could confuse
+    assert "function isQuestion(text)" in PAGE and "citedFirst(" in PAGE
+    assert "isQuestion($(\"q\").value) ? ask(true) : search(false)" in PAGE                                      # no button to press
