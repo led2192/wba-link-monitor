@@ -321,3 +321,9 @@ def test_the_facts_panel_stays_readable():
     assert "const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));" in PAGE     # a confirmed figure is not offered again
     assert 'const known = el("details")' in PAGE                                                          # folded: the robot's values stay in sight
     assert 'const words = f.kind === "text";' in PAGE                                                     # a sentence is not set like a figure
+
+
+def test_a_reporting_year_says_which_fiscal_year_it_is():
+    assert "'fy_end_month', (select mode() within group (order by substring(dd.period_end from 6 for 2))::int" in SQL
+    assert "function fiscalNote(year, month)" in PAGE and "const end = m <= 5 ? y + 1 : y;" in PAGE      # the rule of reporting_year.py
+    assert 'tag("from this answer", "var(--accent)")' in PAGE and "border-left:3px solid var(--accent)" not in PAGE

@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v53 2026-11-13";
+  const CLIENT = "lantern v54 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1002,6 +1002,8 @@
       const row = el("div", "v");
       const left = el("div");
       left.append(el("div", "what", `${v.company} · ${ATTR_NAME[v.attribute] || v.attribute} · ${v.year}`));
+      const fy = fiscalNote(v.year, v.fy_end_month);         // which fiscal year this reporting year is, when it is not the calendar year
+      if (fy) { const n = el("div", "ev", fy); n.title = "WBA counts a fiscal year in the calendar year where at least six months of it fall: a year ending January to May (or before 30 June) is the reporting year before."; n.style.cssText = "grid-column:1;margin:0 0 2px"; left.appendChild(n); }
       const num = el("div", "num", fmt(v.value) + " "); num.append(el("small", null, [v.unit, v.basis].filter(Boolean).join(", "))); left.appendChild(num);
       const btns = el("div", "btns"); const yes = el("button", "yes", "✓"); yes.title = "This value is right"; const no = el("button", "no", "✗"); no.title = "This value is wrong";
       btns.append(yes, no);
@@ -1332,6 +1334,13 @@
     c.append(ol, el("div", "what", (j.keywords ? `Pages found by searching “${j.keywords.replace(/\s+/g, " ")}”. ` : "") + "Written by a model from these pages only. Check the source before using a figure."));
   }
   const pageUrl = s => !s.url ? "#" : (/#/.test(s.url) ? s.url : `${s.url}#page=${s.page || 1}`);
+  // "fiscal year to May 2020 (often printed FY20)" for reporting year 2019 of a company whose year ends in May; nothing for a December year end.
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  function fiscalNote(year, month) {
+    const m = Number(month), y = Number(year); if (!m || m === 12 || !y) return "";
+    const end = m <= 5 ? y + 1 : y;                         // reporting_year.py: January to May end in the following calendar year
+    return `fiscal year to ${MONTHS[m - 1]} ${end}` + (end !== y ? ` (often printed FY${String(end).slice(2)})` : "");
+  }
   // What the answer found (13 Nov 2026): the data points the answer states, each with its page, at the top of the side
   // panel for the person to mark right or wrong. Unconfirmed readings; kept in the search database (ask_facts).
   function showFacts() {
@@ -1339,16 +1348,18 @@
     if (!state.facts.length && !state.confirmed.length) return;
     // v51: the block is set apart quietly (a line of the accent colour down its side), and under the new facts come the
     // facts of earlier answers about the same companies that a colleague marked right.
-    // v53 (the owner, 13 Nov): the line down the side and the faintest tint; clear rules between the cards; a text is
-    // set as text, not as a figure; a new fact that repeats a confirmed figure is not listed again; the confirmed ones
-    // are folded away so the robot's values below stay in sight.
-    const box = el("div", "fromanswer"); box.style.cssText = "border-left:3px solid var(--accent);padding:2px 10px;margin:8px 0 12px;border-radius:0 8px 8px 0;background:color-mix(in srgb, var(--accent) 3%, transparent)";
-    const rule = row => { row.style.borderTop = "1px solid color-mix(in srgb, var(--fg) 16%, transparent)"; row.style.paddingTop = "10px"; row.style.marginTop = "10px"; return row; };
+    // v54 (the owner, 13 Nov: the blue block did not look right): no bar and no tint. The facts are cards like the
+    // robot's, each with a small tag saying where it comes from; a new fact that repeats a confirmed figure is not
+    // listed again; the confirmed ones are folded away so the robot's values below stay in sight.
+    const box = el("div", "fromanswer"); box.style.cssText = "margin:4px 0 10px;padding-bottom:10px;border-bottom:1px solid var(--line)";
+    const tag = (text, colour) => { const t = el("span", null, text); t.style.cssText = `display:inline-block;font-size:11px;line-height:1;padding:3px 7px;border-radius:999px;margin-bottom:4px;color:${colour};border:1px solid color-mix(in srgb, ${colour} 45%, transparent)`; return t; };
+    const rule = row => { row.style.borderTop = "1px solid var(--line)"; row.style.paddingTop = "10px"; row.style.marginTop = "10px"; return row; };
     const same = (a, b) => a.kind === "number" && b.kind === "number" && Math.abs(Number(a.value)) === Math.abs(Number(b.value)) && (!a.period || !b.period || a.period === b.period);
     const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));
     const factLine = f => {
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
-      const left = el("div"); left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
+      const left = el("div"); left.append(f.verdict_at ? tag("confirmed", "#2E8B1F") : tag("from this answer", "var(--accent)"));
+      left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
       const words = f.kind === "text";                                   // a sentence is read, not displayed like a figure
       const num = el("div", words ? null : "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear) num.append(el("small", null, f.unit));
       if (words) num.style.cssText = "font-size:14px;line-height:1.4;margin:2px 0";
@@ -1362,7 +1373,7 @@
     };
     if (state.confirmed.length) {
       const known = el("details"); const head = el("summary", "subhead", `Confirmed before · ${state.confirmed.length}`); head.style.cursor = "pointer"; head.title = "Facts of earlier answers about this company that a person marked right"; known.append(head);
-      known.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb, var(--fg) 16%, transparent)";
+      if (fresh.length) known.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid var(--line)";
       for (const f of state.confirmed) {
         const row = rule(el("div", "v")), tick = el("div", null, "✓"); tick.title = "Marked right by a person"; tick.style.cssText = "color:#4BB42D;font-weight:700;padding:4px 8px";
         row.append(factLine(f), tick, sourceLine(f, f.mine ? "from an earlier answer, confirmed by you" : "from an earlier answer, confirmed by a colleague")); known.appendChild(row);
@@ -1370,6 +1381,7 @@
       box._known = known;
     }
     if (fresh.length) box.append(el("div", "subhead", `Found in this answer · ${fresh.length} · yours to confirm`));
+    if (!fresh.length && !state.confirmed.length) return;
     fresh.forEach((f, at) => {
       const row = el("div", "v"), left = factLine(f); if (at) rule(row);
       const marks = el("div"); marks.style.cssText = "display:flex;gap:4px;align-items:start";
