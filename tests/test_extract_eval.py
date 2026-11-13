@@ -582,6 +582,45 @@ class SemanticPool(unittest.TestCase):
                 raise RuntimeError("timeout")
         self.assertEqual(X.semantic_pool_pages(Broken([]), ["d"], attr, set(), 5, 0.4, embed=lambda t: [1.0]), [])
 
-    def test_off_by_default(self):
-        self.assertEqual(X.SEMANTIC_POOL, 0)
+    def test_on_by_default(self):
+        self.assertEqual(X.SEMANTIC_POOL, 8)                                        # the owner's decision of 13 Nov 2026
+
+    def test_the_vector_comes_from_the_database_where_there_is_no_library(self):
+        import collections
+
+        class Conn:
+            def transaction(self):
+                import contextlib
+                return contextlib.nullcontext()
+
+        class Db:
+            def __init__(self, reply): self.reply, self.asked, self.connection = reply, 0, Conn()
+            def execute(self, sql, params=None):
+                assert "query_vector_made" in sql; self.asked += 1
+                if isinstance(self.reply, Exception):
+                    raise self.reply
+            def fetchone(self): return (self.reply,)
+
+        def no_library(text):
+            raise ImportError("sentence_transformers")
+        keep = (X.embed_query, X._EMBEDDER, dict(X._QUERY_VECS), collections.Counter(X.SEMANTIC_STATS))
+        try:
+            X.embed_query, X._EMBEDDER = no_library, None
+            X._QUERY_VECS.clear(); X.SEMANTIC_STATS.clear()
+            db = Db({"vec": [0.5, 0.25], "held": True})
+            self.assertEqual(X.query_vec(db, "Scope 1: scope 1 emissions"), [0.5, 0.25])
+            self.assertEqual(X.query_vec(db, "Scope 1: scope 1 emissions"), [0.5, 0.25])      # kept for the run: asked once
+            self.assertEqual(db.asked, 1)
+            self.assertIs(X._EMBEDDER, False)                                                 # the library is not tried again
+            self.assertEqual(X.SEMANTIC_STATS["vector from the database"], 1)
+            for reply in ({"busy": True}, {"off": True}, RuntimeError("down")):
+                self.assertIsNone(X.query_vec(Db(reply), "Revenue: total revenue"))           # no vector: nothing added, nothing kept
+            self.assertEqual(X.SEMANTIC_STATS["no vector"], 3)
+            self.assertNotIn("Revenue: total revenue", X._QUERY_VECS)
+            X.embed_query, X._EMBEDDER = (lambda t: [1.0, 0.0]), None                         # a machine with the library uses it
+            self.assertEqual(X.query_vec(Db(RuntimeError("not asked")), "Employees"), [1.0, 0.0])
+            self.assertEqual(X.SEMANTIC_STATS["vector from the library"], 1)
+        finally:
+            X.embed_query, X._EMBEDDER = keep[0], keep[1]
+            X._QUERY_VECS.clear(); X._QUERY_VECS.update(keep[2]); X.SEMANTIC_STATS.clear(); X.SEMANTIC_STATS.update(keep[3])
 
