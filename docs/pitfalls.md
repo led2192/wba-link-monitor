@@ -353,3 +353,6 @@ Ask reads eight pages. A question about one company's figure is answered from th
 
 ## A page that keeps parts of the search before
 The results, the company strip and the values panel are filled by separate calls. When one call of a new search failed (13 Nov 2026, a timeout), the others kept showing the search before, and a later call (the answer) redrew the list from rows kept in memory: Turkish Airlines beside a question about ANA Holdings. Clear every part, and the rows kept in memory, when a new search starts, not when its results arrive.
+
+## A sql function that calls a function defined later in the file
+`ask_pages` was written `language sql` and placed above `find_blend` in `supabase/search.sql`. On the local test database, where `find_blend` already existed, everything passed; on a fresh database (the Tests workflow) the file failed to install: a sql body is checked when the function is created. Use plpgsql for a function that calls one defined further down, and remember that a database kept between runs hides install-order errors.

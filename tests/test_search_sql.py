@@ -275,7 +275,8 @@ def test_the_schema_is_guarded_like_the_functions():
 
 def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
     ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
-    assert "from public.find_blend(key, case when attempt = 1 then keywords else search_q end, qvec," in ask      # words and meaning, as the list under it
+    assert "from public.ask_pages(key, case when attempt = 1 then keywords else search_q end, qvec," in ask       # the one search's pages, the newest reports among them
+    assert "from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask'" in SQL      # words and meaning, as the list under it
     assert "'library_id', r.library_id" in ask and "begin with Yes, No, " in ask
     assert "drop function if exists public.ask(text, text, text, text, int, int, text, text);" in SQL             # one ask, not two the API could confuse
     assert "function isQuestion(text)" in PAGE and "citedFirst(" in PAGE
