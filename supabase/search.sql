@@ -1670,6 +1670,10 @@ end;
 $$;
 revoke all on function public.ask_model(text, text, text, text, text, int) from public, anon, authenticated;
 alter table public.ask_log add column if not exists keywords text;      -- the words the question was searched with, when the model chose them
+-- What the answer's pages were searched with (13 Nov 2026): the words the box sent and its filters, so that ask_eval.py can
+-- ask the same search again. Without it the first run of ask_eval.py had to guess (the question as typed, the
+-- fact's company) and could not tell a search that got worse from a search asked differently.
+alter table public.ask_log add column if not exists search jsonb;
 
 -- The query's vector, made on a server (13 Nov 2026). The search by meaning needs the vector of the words typed, made
 -- by the model the passages were embedded with (intfloat/multilingual-e5-small). Until now the browser made it (a
@@ -2346,9 +2350,10 @@ Excerpts:
   answer := parts ->> 'answer';
   err := coalesce(got ->> 'error', case when answer is null then format('the model returned no text (stop %s, %s tokens out)', got ->> 'stop', got ->> 'out') end);
   tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
-  insert into public.ask_log (asker, question, answered, answer, sources, input_tokens, output_tokens, ms, error, client, keywords)
+  insert into public.ask_log (asker, question, answered, answer, sources, input_tokens, output_tokens, ms, error, client, keywords, search)
     values (who, asked, answer is not null, answer, sources, tok_in, tok_out,
-            extract(epoch from clock_timestamp() - t0)::numeric * 1000, err, left(client, 60), keywords)
+            extract(epoch from clock_timestamp() - t0)::numeric * 1000, err, left(client, 60), keywords,
+            jsonb_build_object('q', search_q, 'company', company_filter, 'from', year_from, 'to', year_to, 'type', type_filter, 'vector', qvec is not null))
     returning id into ask_id;
   if answer is not null then
     begin

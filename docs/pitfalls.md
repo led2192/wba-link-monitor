@@ -356,3 +356,6 @@ The results, the company strip and the values panel are filled by separate calls
 
 ## A sql function that calls a function defined later in the file
 `ask_pages` was written `language sql` and placed above `find_blend` in `supabase/search.sql`. On the local test database, where `find_blend` already existed, everything passed; on a fresh database (the Tests workflow) the file failed to install: a sql body is checked when the function is created. Use plpgsql for a function that calls one defined further down, and remember that a database kept between runs hides install-order errors.
+
+## A search can only be measured again if what was searched was kept
+The first run of `ask_eval.py` (13 Nov 2026) asked again the questions whose answer left a confirmed fact and found the confirmed page for 13 of 27. The number means little: `ask_log` kept the question as typed, not the words the box sent to the search or its filters (the box reads the company and the years out of the text first), so every question was searched differently from the first time. A log that is meant to feed a measure must keep the inputs of the thing measured, not the text the person typed. Fixed the same day: `ask_log.search`.
