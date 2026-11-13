@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v48 2026-11-13";
+  const CLIENT = "lantern v49 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -627,14 +627,18 @@
       // other inside the database, v45 took 5 to 10 s). The meaning needs the language model: when it is in memory the
       // search is blended at once; when it is not, the words answer first and the list is blended when the model has
       // loaded (blendWhenReady). "More results" keeps the list's kind.
-      let vec = null;
-      if (more ? state.blended : (canBlend() && embedder)) { try { vec = await queryVector(meaningWords()); } catch (e) { vec = null; } }
+      // v49: the vector comes from the server (query_vector), asked while the words are searched. If the meaning is not
+      // back 1.5 s after the words, the words are shown and the list is blended when it arrives.
+      let meaningAsked = null, meaning = null;
+      if (more ? state.blended : canBlend()) meaningAsked = queryVector(meaningWords()).then(askMeaning).catch(() => null);
       const args = { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
                      type_filter: state.type, max_rows: state.rows, client: CLIENT,
                      industry_filter: state.industry, country_filter: state.country, region_filter: state.region,
                      typed: $("q").value.trim() };
-      const wordsAsked = rpc("find_pages", args);
-      const rows = vec ? blend(...await Promise.all([wordsAsked, askMeaning(vec)]), state.rows) : await wordsAsked;
+      const words = await rpc("find_pages", args);
+      if (meaningAsked) meaning = more ? await meaningAsked : await Promise.race([meaningAsked, new Promise(r => setTimeout(() => r(null), 1500))]);
+      const vec = !!(meaning && meaning.length);
+      const rows = vec ? blend(words, meaning, state.rows) : words;
       if (seq !== searchSeq) return;                        // a newer search started meanwhile
       if (!more) state.blended = !!vec;
       const s = ((performance.now() - t0) / 1000).toFixed(1);
@@ -654,7 +658,7 @@
         a.onclick = ev => { ev.preventDefault(); $("q").value = $("q").value.replace(new RegExp("(^|\\s)" + mb.word + "(?=\\s|$)", "i"), (m0, pre) => pre + mb.name + ";"); search(false); };
         st.append(document.createTextNode(" · "), a);
       }
-      if (!more && !vec && canBlend()) blendWhenReady(seq, rows);
+      if (!more && !vec && meaningAsked) blendWhenReady(seq, rows, meaningAsked);
       if (!more) state.lastRows = rows;
       render(more ? rows.slice(state.rows - 50) : citedFirst(rows), !!more);
       state.logId = rows.length ? rows[0].log_id : null;
@@ -674,10 +678,10 @@
   // filters stay with the words alone. Until the vector is made on the server, a first search answers by words and
   // is blended a moment later, only while the reader is still at the top of the list.
   let embedder = null, embedderLoading = null, searchSeq = 0;
-  const lastVector = { text: null, vec: null };
+  const lastVector = { text: null, asked: null };
   const meaningWords = () => state.q.replace(/"/g, " ").trim();
   const canBlend = () => !!state.q && !state.q.includes('"') && !state.industry && !state.country && !state.region
-                         && !(navigator.connection && navigator.connection.saveData);
+                         && (serverVector || !(navigator.connection && navigator.connection.saveData));
   function loadEmbedder() {
     if (!embedderLoading) embedderLoading = (async () => {
       const { pipeline } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2");
@@ -685,12 +689,26 @@
     })().catch(e => { embedderLoading = null; throw e; });
     return embedderLoading;
   }
-  async function queryVector(text) {
-    if (lastVector.text === text) return lastVector.vec;
-    await loadEmbedder();
-    const out = await embedder(["query: " + text], { pooling: "mean", normalize: true });
-    lastVector.text = text; lastVector.vec = Array.from(out.data).slice(0, 384);
-    return lastVector.vec;
+  // The vector of the words: from the server (query_vector, Hugging Face's hosted model, the same as the index's); the
+  // browser's own model only when the server says it is not switched on. One call a text, also while it is pending.
+  let serverVector = true;
+  function queryVector(text) {
+    if (lastVector.text === text && lastVector.asked) return lastVector.asked;
+    const asked = (async () => {
+      if (serverVector) {
+        const j = await rpc("query_vector", { key, q: text });
+        if (j && Array.isArray(j.vec) && j.vec.length === 384) return j.vec;
+        if (!(j && j.off)) throw new Error((j && (j.error || (j.busy && "busy"))) || "no vector");
+        serverVector = false;                               // not switched on: the browser makes the vector, as before v49
+        if (navigator.connection && navigator.connection.saveData) throw new Error("no vector on a save-data connection");
+      }
+      await loadEmbedder();
+      const out = await embedder(["query: " + text], { pooling: "mean", normalize: true });
+      return Array.from(out.data).slice(0, 384);
+    })();
+    lastVector.text = text; lastVector.asked = asked;
+    asked.catch(() => { if (lastVector.asked === asked) lastVector.asked = null; });
+    return asked;
   }
   // The pages nearest in meaning; an error there (a timeout, the model) leaves the words' answer alone.
   const askMeaning = vec => rpc("find_meaning", { key, qvec: vec, company_filter: state.company, year_from: state.from, year_to: state.to,
@@ -708,11 +726,11 @@
     }
     return out;
   }
-  async function blendWhenReady(seq, words) {
+  async function blendWhenReady(seq, words, meaningAsked) {
     try {
-      const vec = await queryVector(meaningWords());
-      if (seq !== searchSeq || window.scrollY > 300) return;          // a newer search, or the reader is already down the list
-      const rows = blend(words, await askMeaning(vec), state.rows);
+      const meaning = await meaningAsked;
+      if (!meaning || !meaning.length || seq !== searchSeq || window.scrollY > 300) return;          // nothing by meaning, a newer search, or the reader is already down the list
+      const rows = blend(words, meaning, state.rows);
       if (seq !== searchSeq || window.scrollY > 300 || !rows.length) return;
       state.blended = true; state.lastRows = rows;
       render(citedFirst(rows), false);
