@@ -250,6 +250,7 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([k["what"] for k in kept], ["Scope 1 emissions", "Scope 1 and 2 target", "a year that is none"])   # no page, or no figure: not kept
         self.assertEqual((kept[0]["value"], kept[0]["unit"], kept[0]["year"], kept[0]["period"], kept[0]["page"], kept[0]["library_id"]), (60836, "tCO2e", 2024, "FY24", 23, "L1"))
         self.assertEqual((kept[1]["kind"], kept[1]["answer"], kept[1]["verdict"]), ("yes_no", "yes", None))
+        self.assertIn("doc_year", kept[0]); self.assertIn("doc_type", kept[0])        # the report the fact was read in travels with it
         self.assertIsNone(kept[2]["year"])
         self.assertNotIn("verdict_by", kept[0])
 

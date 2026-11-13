@@ -374,3 +374,8 @@ def test_a_page_without_a_link_can_still_be_read():
 def test_eight_pages_are_not_a_total():
     ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
     assert "do not give a count: say first that a total cannot be read from eight pages" in ask
+
+
+def test_a_figure_with_no_year_says_so_and_names_its_report():
+    assert "a figure is of little use without" in SQL and "jsonb_build_object('doc_year', src -> 'year', 'doc_type', src ->> 'doc_type')" in SQL
+    assert "year not stated on the page" in PAGE

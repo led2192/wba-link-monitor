@@ -1868,7 +1868,8 @@ begin
               case when k <> 'number' then left(btrim(f ->> 'answer'), 300) end, src ->> 'library_id', (src ->> 'page')::int, src ->> 'url')
       returning id into new_id;
     n := n + 1;
-    kept := kept || (select to_jsonb(a) - 'ask_id' - 'verdict_by' - 'verdict_at' from public.ask_facts a where a.id = new_id);
+    kept := kept || ((select to_jsonb(a) - 'ask_id' - 'verdict_by' - 'verdict_at' from public.ask_facts a where a.id = new_id)
+                     || jsonb_build_object('doc_year', src -> 'year', 'doc_type', src ->> 'doc_type'));   -- the report it was read in: a figure with no year stated is at least placed
   end loop;
   return kept;
 end;
@@ -1919,7 +1920,9 @@ as $$
     select * from (
       select distinct on (a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
              a.id, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id, a.verdict_at,
-             (a.verdict_by = lower(who)) as mine
+             (a.verdict_by = lower(who)) as mine,
+             (select dd.year from public.documents dd where dd.library_id = a.library_id) as doc_year,
+             (select dd.doc_type from public.documents dd where dd.library_id = a.library_id) as doc_type
       from public.ask_facts a
       where a.verdict = 'right' and a.ask_id is distinct from the_ask
         and a.wba_id in (select e ->> 'wba_id' from jsonb_array_elements(coalesce(sources, '[]'::jsonb)) e)
@@ -1992,14 +1995,18 @@ begin
         select * from (
           select distinct on (a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
                  a.id, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id, a.verdict_at,
-                 coalesce(a.verdict_by = who, false) as mine
+                 coalesce(a.verdict_by = who, false) as mine,
+                 (select dd.year from public.documents dd where dd.library_id = a.library_id) as doc_year,
+                 (select dd.doc_type from public.documents dd where dd.library_id = a.library_id) as doc_type
           from public.ask_facts a where a.verdict = 'right' and a.wba_id = any(ids)
           order by a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.verdict_at desc
         ) d order by d.verdict_at desc limit 20) x),
     'open', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
         select * from (
           select distinct on (a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
-                 a.id, a.at, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id
+                 a.id, a.at, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id,
+                 (select dd.year from public.documents dd where dd.library_id = a.library_id) as doc_year,
+                 (select dd.doc_type from public.documents dd where dd.library_id = a.library_id) as doc_type
           from public.ask_facts a
           where a.verdict is null and a.wba_id = any(ids)
             and not exists (select 1 from public.ask_facts c where c.verdict is not null and c.wba_id = a.wba_id and c.kind = a.kind
@@ -2150,7 +2157,8 @@ begin
     || 'the excerpts state that answer the question or bear on it. Each item: {"what": a short English name of the metric, target or commitment '
     || '(for example "Scope 1 emissions", "Scope 1 and 2 reduction target"), "kind": "number", "yes_no" or "text", "value": for a number, the figure '
     || 'in full with its scale applied and no separators, "unit": its unit, "answer": "yes" or "no", or for text at most 20 words, '
-    || '"year": the calendar year the figure is for, or null, "period": the period as printed (for example "FY24"), "source": the number of the excerpt '
+    || '"year": the calendar year the figure is for, or null, "period": the period as printed (for example "FY24"; a figure is of little use without '
+    || 'its period, so read it from the column or row heading or the sentence, and leave it out only when the excerpt truly does not say), "source": the number of the excerpt '
     || 'that states it}. Only what an excerpt states, never from memory; never an item saying that something is not stated or could not be found. '
     || 'The message may also list facts a colleague confirmed earlier from these companies'' reports. They are checked by a person: use one '
     || 'when it answers the question, saying "confirmed earlier by a colleague" in place of an excerpt number, and say so plainly when an excerpt '
