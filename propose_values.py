@@ -359,7 +359,22 @@ def set_reader_options(a):
     ones, none worse; it costs several times more per doubtful answer, so the nightly cap went from 1.5 to 5 USD."""
     import extract_eval
     extract_eval.ESCALATE = getattr(a, "escalate", "whole") or "none"
+    extract_eval.SEMANTIC_POOL = max(0, int(getattr(a, "semantic_pool", 8)))      # the pages nearest in meaning join the pool (default since 13 Nov 2026)
     return extract_eval.ESCALATE
+
+
+def semantic_counters(c, run):
+    """The semantic pool's counts of the run, and a failure when it was asked and never had a vector: it is the
+    default, and a default that silently adds nothing reads as "on" for weeks."""
+    import extract_eval
+    st = extract_eval.SEMANTIC_STATS
+    for k, v in st.items():
+        c[f"model reader: semantic pool, {k}"] = v
+    if st["asked"] and st["no vector"] >= st["asked"]:
+        run.failure("DATA_CHECK", "The semantic pool added no page: no vector could be made for any attribute "
+                    "(no embedding library on the machine and public.query_vector_made gave none)", key="semantic_pool_no_vector")
+        return False
+    return True
 
 
 def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
@@ -702,6 +717,8 @@ def main():
     ap.add_argument("--fill-links", action="store_true", help="only give existing model-reader rows their evidence_link, then stop")
     ap.add_argument("--escalate", choices=["none", "whole"], default="whole", help="model reader: a doubtful answer (no figure, or one printed on "
                     "one page only) gets the whole document in chunks (default since 10 Nov 2026); none = the 16 pages only")
+    ap.add_argument("--semantic-pool", type=int, default=8, help="model reader: also rank the N pages nearest in meaning to the attribute "
+                    "(extract_eval.SEMANTIC_POOL; the default since 13 Nov 2026, 0 turns it off)")
     ap.add_argument("--shard", default="", help="i/N: only the i-th of N slices of the companies (parallel jobs)")
     a = ap.parse_args()
     shard_i, shard_n = (int(x) for x in a.shard.split("/")) if a.shard else (1, 1)
@@ -796,6 +813,7 @@ def main():
 
     if "model" in methods:
         proposals += model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c)
+        semantic_counters(c, run)
 
     for p in proposals:
         c[f"{p['method']}: proposals"] += 1

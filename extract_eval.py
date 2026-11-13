@@ -795,9 +795,13 @@ def bm25_pool_pages(cur, ids, attr, have, k, top_rank):
     return [(lid, page, body, (top_rank or 0.1) * sc / best) for sc, lid, page, body in scored[:k] if sc > 0]
 
 
-SEMANTIC_POOL = 0         # --semantic-pool N: also the N pages of the documents nearest in meaning to the attribute (13 Nov 2026)
+SEMANTIC_POOL = 8         # --semantic-pool N: also the N pages of the documents nearest in meaning to the attribute. An option
+                          # on 13 Nov 2026 and the default the same day (owner's decision): held-out +3.4 points with no attribute
+                          # lower, development +2 with none lower by more than 3 points over the two Scope 1 pairs. 0 turns it off.
 SEMANTIC_TIMEOUT = "20s"
 _EMBEDDER = None
+_QUERY_VECS = {}          # the attribute's words -> its vector, for the run
+SEMANTIC_STATS = collections.Counter()      # asked, vector from the library / the database, no vector, pages added: a default that adds nothing must show
 
 
 def semantic_query(attr):
@@ -819,6 +823,39 @@ def embed_query(text):
     return [float(x) for x in _EMBEDDER.embed_query(text)]
 
 
+def query_vec(cur, text):
+    """The vector of an attribute's words, once a run: from the embedding library when the machine has it (the
+    measures of 13 Nov 2026 ran so), else from the database (public.query_vector_made: the same model,
+    multilingual-e5-small with the "query: " prefix, asked of Hugging Face once and kept in public.query_vectors).
+    The nightly reader has no such library (it took 3 to 5 minutes to install on each of its machines), and there
+    are some tens of attributes, so the database's kept vectors serve it. None when neither gives one."""
+    global _EMBEDDER
+    if text in _QUERY_VECS:
+        return _QUERY_VECS[text]
+    vec = None
+    if _EMBEDDER is not False:
+        try:
+            vec = embed_query(text)
+            SEMANTIC_STATS["vector from the library"] += 1
+        except Exception:
+            _EMBEDDER = False                                 # no library here: not tried again this run
+    if vec is None:
+        try:
+            with cur.connection.transaction():
+                cur.execute("select public.query_vector_made(%s)", (text,))
+                got = (cur.fetchone() or [None])[0] or {}
+            if isinstance(got, dict) and got.get("vec"):
+                vec = [float(x) for x in got["vec"]]
+                SEMANTIC_STATS["vector from the database"] += 1
+        except Exception:
+            vec = None
+    if vec is None:
+        SEMANTIC_STATS["no vector"] += 1
+        return None                                           # not kept: the service may answer the next time
+    _QUERY_VECS[text] = vec
+    return vec
+
+
 def semantic_pool_pages(cur, ids, attr, have, k, top_rank, embed=None):
     """[(library_id, page, body, rank)] of the k pages of the documents whose passages are nearest in meaning to the
     attribute, that the pool does not hold yet. Finding the page is where the reader loses most (the oracle run:
@@ -834,7 +871,11 @@ def semantic_pool_pages(cur, ids, attr, have, k, top_rank, embed=None):
     cur.execute("show statement_timeout")
     before = cur.fetchone()[0]
     try:
-        vec = "[" + ",".join(f"{x:.6f}" for x in (embed or embed_query)(text)) + "]"
+        SEMANTIC_STATS["asked"] += 1
+        made = embed(text) if embed else query_vec(cur, text)
+        if not made:
+            return []
+        vec = "[" + ",".join(f"{x:.6f}" for x in made) + "]"
         with cur.connection.transaction():
             cur.execute(f"set local statement_timeout = '{SEMANTIC_TIMEOUT}'")
             cur.execute("with near as (select c.library_id, c.page, min(c.embedding operator(extensions.<=>) %s::extensions.vector) as dist "
@@ -851,6 +892,7 @@ def semantic_pool_pages(cur, ids, attr, have, k, top_rank, embed=None):
             pass
     if not rows:
         return []
+    SEMANTIC_STATS["pages added"] += len(rows)
     best = max(1e-9, 1.0 - float(rows[0][3]))
     return [(lid, page, body, (top_rank or 0.1) * max(0.0, 1.0 - float(dist)) / best) for lid, page, body, dist in rows]
 
@@ -1197,7 +1239,7 @@ def main():
     ap.add_argument("--whole-chars", type=int, default=0, help="with --select whole: characters of document text in one call (0 = 1,200,000 for a Gemini model, 600,000 for a Claude one)")
     ap.add_argument("--period-check", default="all", choices=["all", "currency-only"], help="drop an entry whose period ends in another month than the company's financial year: for every attribute (today) or for money only")
     ap.add_argument("--bm25-pool", type=int, default=0, help="also add the N best pages of the documents by BM25 over any label word to the ranking pool (0: off, today)")
-    ap.add_argument("--semantic-pool", type=int, default=0, help="also add the N pages of the documents nearest in meaning to the attribute to the ranking pool, from the passages' embeddings (0: off, today). An option until measured beside today's pool on the same answers")
+    ap.add_argument("--semantic-pool", type=int, default=8, help="also add the N pages of the documents nearest in meaning to the attribute to the ranking pool, from the passages' embeddings (public.chunks). The default since 13 Nov 2026; 0 turns it off")
     ap.add_argument("--unstated-basis", default="keep", choices=["default-only", "keep"], help="a Scope 2 figure whose basis the page does not state: filed under market-based too (the default since 7 Nov 2026) or under location-based only (default-only, the earlier rule)")
     ap.add_argument("--selector", default="off", choices=["off", "candidates"], help="candidates: a generous extractor proposes up to 3 figures with row, column and footnote, and a second call chooses one against the attribute's definition and notes (model_reader.read_candidates)")
     ap.add_argument("--keys", default="", help="only these answers: WBA|GMC|YEAR, comma separated (8 Nov 2026: to compare with another team's pilot on the same answers)")
@@ -1697,6 +1739,7 @@ def main():
     md.append("")
     if SEMANTIC_POOL:
         md += semantic_table(codes, stats, spec)
+        md += ["Semantic pool, this run: " + ("; ".join(f"{k} {v:,}" for k, v in sorted(SEMANTIC_STATS.items())) or "not asked") + ".", ""]
     for c in codes:
         if wrong[c]:
             md += [f"Wrong proposals, {c} (first {len(wrong[c])}):", ""] + [f"- {w}" for w in wrong[c]] + [""]
