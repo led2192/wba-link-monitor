@@ -22,7 +22,7 @@ import os, tempfile, time
 from urllib.parse import quote
 
 CACHE = os.path.join(tempfile.gettempdir(), "table_text_pdfs")
-MAX_BYTES = 150 * 1024 * 1024
+MAX_BYTES = 200 * 1024 * 1024
 _docling = None
 STATS = {}
 ERRORS = {}

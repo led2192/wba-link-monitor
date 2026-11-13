@@ -25,7 +25,7 @@ class Extension(unittest.TestCase):
         self.assertLess(js.index('rpc("upload_begin"'), js.index("/storage/v1/object/uploads/"))
         self.assertLess(js.index("/storage/v1/object/uploads/"), js.index('rpc("upload_done"'))
         self.assertIn('head.includes("%PDF-")', js)                                       # what is not a PDF is not sent
-        self.assertIn("MAX_BYTES = 150 * 1024 * 1024", js)
+        self.assertIn("MAX_BYTES = 200 * 1024 * 1024", js)
 
     def test_what_is_held_is_not_offered_and_only_reports_are_ticked(self):
         js = read("extension", "send.js")
@@ -49,7 +49,7 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.4.2"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.4.2", read("extension", "config.js"))
+        self.assertIn('"version": "0.4.3"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.4.3", read("extension", "config.js"))
 
     def test_a_large_file_shows_how_far_it_is(self):
         js = read("extension", "send.js")
