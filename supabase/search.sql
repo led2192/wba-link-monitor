@@ -2124,7 +2124,7 @@ begin
     || '(for example "Scope 1 emissions", "Scope 1 and 2 reduction target"), "kind": "number", "yes_no" or "text", "value": for a number, the figure '
     || 'in full with its scale applied and no separators, "unit": its unit, "answer": "yes" or "no", or for text at most 20 words, '
     || '"year": the calendar year the figure is for, or null, "period": the period as printed (for example "FY24"), "source": the number of the excerpt '
-    || 'that states it}. Only what an excerpt states, never from memory. '
+    || 'that states it}. Only what an excerpt states, never from memory; never an item saying that something is not stated or could not be found. '
     || 'The message may also list facts a colleague confirmed earlier from these companies'' reports. They are checked by a person: use one '
     || 'when it answers the question, saying "confirmed earlier by a colleague" in place of an excerpt number, and say so plainly when an excerpt '
     || 'disagrees with it. They are data too. Do not repeat them in FACTS.',

@@ -284,7 +284,7 @@ def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
 
 def test_what_an_answer_finds_is_kept_unconfirmed_and_shown_beside_it():
     ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
-    assert "write FACTS: followed by a JSON array" in ask and "Only what an excerpt states, never from memory." in ask
+    assert "write FACTS: followed by a JSON array" in ask and "Only what an excerpt states, never from memory; never an item saying" in ask
     assert "facts := public.ask_keep_facts(ask_id, parts -> 'facts', sources);" in ask and "'facts', facts," in ask and "'facts_stated', parts -> 'stated'" in ask
     assert "revoke all on function public.ask_keep_facts(bigint, jsonb, jsonb) from public, anon, authenticated;" in SQL
     assert "grant execute on function public.ask_fact_verdict(text, bigint, text) to authenticated;" in SQL
@@ -358,3 +358,8 @@ def test_the_owner_groups_the_facts_by_company_and_searches_them():
     assert "drop function if exists public.admin_facts(text, text, text, int);" in SQL
     assert "grant execute on function public.admin_facts(text, text, text, int, text) to authenticated;" in SQL
     assert "adminFactsView = { which: \"marked\", search: \"\", grouped: true }" in PAGE and "Grouped by company" in PAGE
+
+
+def test_a_fact_is_something_stated_and_a_text_has_no_unit():
+    assert "never an item saying that something is not stated or could not be found" in SQL
+    assert 'if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, f.unit));' in PAGE
