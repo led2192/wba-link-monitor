@@ -120,6 +120,9 @@ class BuildSettings(unittest.TestCase):
         SI.build_vector_index(Cur(), "8GB", 3, say=lambda *a, **k: said.append(a[0]))
         self.assertIn("set maintenance_work_mem = '8GB'", ran); self.assertIn("set max_parallel_maintenance_workers = 3", ran)
         self.assertLess(ran.index("set maintenance_work_mem = '8GB'"), next(i for i, q in enumerate(ran) if "hnsw" in q.lower()))
+        self.assertIn("(embedding::extensions.halfvec(384)) extensions.halfvec_cosine_ops", SI.INDEX_SQL)      # the expression find_meaning searches with
+        sql = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "supabase", "search.sql"), encoding="utf-8").read()
+        self.assertIn("order by (c.embedding::extensions.halfvec(384)) operator(extensions.<=>)", sql)
         self.assertIn("2,900,000 chunks", said[0])
 
 

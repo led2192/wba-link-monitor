@@ -2051,8 +2051,11 @@ begin
     perform set_config('hnsw.ef_search', '200', true);
     return query
       with near as materialized (
-             select c.library_id, c.page, c.body, (c.embedding operator(extensions.<=>) qvec::extensions.vector(384)) as dist
-             from public.chunks c order by c.embedding operator(extensions.<=>) qvec::extensions.vector(384) limit 400),
+             -- the index is on the half-precision embeddings (semantic_index.INDEX_SQL): the same expression here
+             select c.library_id, c.page, c.body,
+                    ((c.embedding::extensions.halfvec(384)) operator(extensions.<=>) qvec::extensions.vector(384)::extensions.halfvec(384)) as dist
+             from public.chunks c
+             order by (c.embedding::extensions.halfvec(384)) operator(extensions.<=>) qvec::extensions.vector(384)::extensions.halfvec(384) limit 400),
            pages as (select distinct on (n.library_id, n.page) n.library_id, n.page, n.body, n.dist from near n order by n.library_id, n.page, n.dist),
            kept as (select p.*, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url,
                            row_number() over (partition by p.library_id order by p.dist) as in_doc
