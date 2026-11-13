@@ -59,6 +59,22 @@ def orphans(rows, seconds=ORPHAN_SECONDS):
     return [r for r in rows if r[3] == "active" and (r[6] or 0) > max(3600, seconds)]
 
 
+def index_progress(cur):
+    """One line per index being built (13 Nov 2026: the build of the vector index ran for hours with nothing to
+    say how far it was). pg_stat_progress_create_index gives the phase and how many blocks or rows are done."""
+    try:
+        cur.execute("select p.pid, coalesce(p.index_relid::regclass::text, p.relid::regclass::text), p.phase, p.blocks_done, p.blocks_total, "
+                    "p.tuples_done, p.tuples_total from pg_stat_progress_create_index p")
+        rows = cur.fetchall()
+    except Exception:
+        return []
+    out = []
+    for pid, name, phase, bd, bt, td, tt in rows:
+        share = f"{100 * bd / bt:.0f}% of blocks" if bt else (f"{100 * td / tt:.0f}% of rows" if tt else "no count yet")
+        out.append(f"  index build pid {pid} on {name}: {phase}, {share} ({bd:,}/{bt:,} blocks, {td:,}/{tt:,} rows)")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--release", action="store_true")
@@ -75,6 +91,8 @@ def main():
     for pid, user, app, state, wtype, wev, secs, q in rows:
         import re
         print(f"  pid {pid} {user} [{app or '-'}] {state} {('waits ' + wtype + '/' + str(wev)) if wtype else ''} {secs}s: {re.sub(chr(92) + 's+', ' ', q)[:160]}")
+    for line in index_progress(cur):
+        print(line)
     stuck = waiting_schema(rows)
     if a.release:
         if not stuck:
