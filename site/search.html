@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v57 2026-11-13";
+  const CLIENT = "lantern v58 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1488,27 +1488,30 @@
     body.appendChild(adminTable(["Person", "Answers, 7 days", "Answers in all", "Facts marked right", "wrong", "Values reviewed", "Last seen"],
       o.people.map(p => [p.email, p.answers_7d, p.answers, p.facts_right, p.facts_wrong, p.value_reviews, adminWhen(p.last_seen)])));
   }
-  async function adminFacts(body, which, company) {
-    which = which || "marked"; company = company || "";
-    const rows = await authed("admin_facts", { key, company_filter: company || null, which, max_rows: 200 }); if (!rows) { body.textContent = "Not available."; return; }
+  // Facts from answers. v58 (the owner): one search box for a word or a company, and the list grouped by company
+  // (each company a block that folds, with its counts) or flat, newest first.
+  const adminFactsView = { which: "marked", search: "", grouped: true };
+  async function adminFacts(body) {
+    const st = adminFactsView;
+    const rows = await authed("admin_facts", { key, company_filter: null, which: st.which, max_rows: 500, search: st.search || null }); if (!rows) { body.textContent = "Not available."; return; }
     body.innerHTML = "";
     const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap";
-    const box = document.createElement("input"); box.placeholder = "company"; box.value = company; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:220px;background:var(--box);color:var(--fg)";
-    box.onkeydown = ev => { if (ev.key === "Enter") adminFacts(body, which, box.value.trim()); };
-    bar.append(box);
-    for (const [w, label] of [["marked", "Marked by a person"], ["open", "Not marked yet"], ["all", "All"]]) { const b = adminBtn(label, () => adminFacts(body, w, box.value.trim())); if (w === which) b.style.fontWeight = "700"; bar.appendChild(b); }
-    bar.append(el("span", null, `${rows.length} shown, newest first`)); body.appendChild(bar);
-    body.appendChild(adminTable(["Company", "Fact", "Value", "Page", "Mark", "By", "Question", ""], rows.map(f => {
+    const box = document.createElement("input"); box.placeholder = "search: a company or a word (revenue, target, FY24…)"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:340px;background:var(--box);color:var(--fg)";
+    box.onkeydown = ev => { if (ev.key === "Enter") { st.search = box.value.trim(); adminFacts(body); } };
+    bar.append(box, adminBtn("Search", () => { st.search = box.value.trim(); adminFacts(body); }));
+    for (const [w, label] of [["marked", "Marked by a person"], ["open", "Not marked yet"], ["all", "All"]]) { const b = adminBtn(label, () => { st.which = w; st.search = box.value.trim(); adminFacts(body); }); if (w === st.which) { b.style.fontWeight = "700"; b.style.borderColor = "var(--fg)"; } bar.appendChild(b); }
+    const g = adminBtn(st.grouped ? "Grouped by company" : "One list, newest first", () => { st.grouped = !st.grouped; adminFacts(body); }); g.title = "Switch between a block a company and one list"; g.style.marginLeft = "8px"; bar.appendChild(g);
+    bar.append(el("span", null, `${rows.length}${rows.length >= 500 ? "+" : ""} facts`)); body.appendChild(bar);
+    const line = f => {
       const value = f.kind === "number" ? [fmt(Number(f.value)), f.unit].filter(Boolean).join(" ") : f.answer;
       const src = /^https?:\/\//i.test(f.url || "") ? (() => { const a = el("a", null, `p. ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; return a; })() : (f.page ? `p. ${f.page}` : "");
-      // v56: the mark a fact carries is painted on its button, and a click says "saved" in the row before the list is
-      // read again (the owner, 13 Nov: marking a fact already marked right changed nothing he could see).
+      // the mark a fact carries is painted on its button, and a click says "saved" in the row before the list is read again
       const acts = el("span"), said = el("span"); said.style.cssText = "font-size:12px;color:#2E8B1F;margin-left:4px";
       for (const [v, label] of [["right", "✓"], ["wrong", "✗"], ["none", "clear"]]) {
         const b = adminBtn(label, async () => {
           const r = await authed("admin_fact_set", { key, fact_id: f.id, verdict: v });
           said.style.color = r && r.ok ? "#2E8B1F" : "#C8321E"; said.textContent = r && r.ok ? (v === "none" ? "cleared" : "saved") : "not saved";
-          if (r && r.ok) setTimeout(() => adminFacts(body, which, box.value.trim()), 900);
+          if (r && r.ok) setTimeout(() => adminFacts(body), 900);
         });
         b.title = v === "right" ? "The page says this" : v === "wrong" ? "The page does not say this" : "Take the mark off";
         if (f.verdict === v) { b.style.background = v === "right" ? "#4BB42D" : "#FF3C23"; b.style.color = "#fff"; b.style.borderColor = "transparent"; }
@@ -1516,8 +1519,20 @@
       }
       acts.appendChild(said);
       const q = el("span", null, (f.question || "").slice(0, 90)); q.title = (f.question || "") + (f.asker ? " · asked by " + f.asker : "");
-      return [f.company, [f.what, f.period || f.year].filter(Boolean).join(" · "), value, src, f.verdict || "", f.verdict_by ? `${f.verdict_by}, ${adminWhen(f.verdict_at)}` : "", q, acts];
-    })));
+      return [[f.what, f.period || f.year].filter(Boolean).join(" · "), value, src, f.verdict || "", f.verdict_by ? `${f.verdict_by}, ${adminWhen(f.verdict_at)}` : "", q, acts];
+    };
+    const cols = ["Fact", "Value", "Page", "Mark", "By", "Question", ""];
+    if (!rows.length) { body.append(el("p", null, "No fact matches.")); return; }
+    if (!st.grouped) { body.appendChild(adminTable(["Company", ...cols], rows.map(f => [f.company, ...line(f)]))); return; }
+    const by = new Map(); for (const f of rows) { const k = f.company || "(no company)"; if (!by.has(k)) by.set(k, []); by.get(k).push(f); }
+    const names = [...by.keys()].sort((a, b) => a.localeCompare(b));
+    for (const name of names) {
+      const list = by.get(name), right = list.filter(f => f.verdict === "right").length, wrong = list.filter(f => f.verdict === "wrong").length, open = list.length - right - wrong;
+      const block = el("details"); block.open = names.length <= 6 || !!st.search; block.style.cssText = "border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin-bottom:10px;background:var(--box)";
+      const head = el("summary"); head.style.cssText = "cursor:pointer;font-weight:600;padding:2px 0"; head.textContent = name;
+      const counts = el("span", null, ` · ${list.length} fact${list.length === 1 ? "" : "s"}` + (right ? ` · ${right} right` : "") + (wrong ? ` · ${wrong} wrong` : "") + (open ? ` · ${open} not marked` : "")); counts.style.fontWeight = "400"; head.appendChild(counts);
+      block.append(head, adminTable(cols, list.map(line))); body.appendChild(block);
+    }
   }
   async function adminCost(body) {
     const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available."; return; }
