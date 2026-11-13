@@ -68,7 +68,7 @@ def cosine(a, b):
 
 def refusal(body, token):
     """What the service said when it refused, short and on one line, with the token struck out should it be echoed."""
-    return " ".join(str(body).replace(token, "***").split())[:240]
+    return " ".join((str(body).replace(token, "***") if token else str(body)).split())[:240]
 
 
 def hosted_vector(text, token, send=post):

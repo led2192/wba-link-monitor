@@ -28,7 +28,7 @@ class QueryVectorProbe(unittest.TestCase):
 
     def test_a_refusal_or_another_model_fails_the_probe(self):
         lines = []
-        self.assertFalse(P.probe("t", ["q"], send=lambda u, t, p: (404, "Not Found"), out=lines.append))
+        self.assertFalse(P.probe("tok-abc", ["q"], send=lambda u, t, p: (404, "Not Found"), out=lines.append))
         self.assertIn("HTTP 404", lines[0]); self.assertIn("the service said: Not Found", lines[0])
         said = []
         P.probe("tok123", ["q"], send=lambda u, t, p: (402, '{"error": "no credit for tok123"}'), out=said.append)
