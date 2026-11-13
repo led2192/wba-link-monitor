@@ -159,7 +159,7 @@ class SearchOnPostgres(unittest.TestCase):
         for bad_type, bad_year in (("Brochure", None), (None, 1066)):
             with self.assertRaises(psycopg.Error):
                 cur.execute("select public.upload_begin('PT_00000', 'y.pdf', 5000, %s, sent_type => %s, sent_year => %s)", ("ee" * 32, bad_type, bad_year))
-        for bad in (("PT_nope", "a.pdf", 5000, sha, None), ("PT_00000", "a.pdf", 10, sha, None), ("PT_00000", "a.pdf", 60000000, sha, None),
+        for bad in (("PT_nope", "a.pdf", 5000, sha, None), ("PT_00000", "a.pdf", 10, sha, None), ("PT_00000", "a.pdf", 160000000, sha, None),
                     ("PT_00000", "a.pdf", 5000, "zz", None), ("PT_00000", "a.pdf", 5000, "cd" * 32, "not a link")):
             with self.assertRaises(Exception):
                 cur.execute("select public.upload_begin(%s, %s, %s, %s, %s)", bad)

@@ -3275,8 +3275,10 @@ begin
   if sent_year is not null and sent_year not between 1990 and 2100 then
     raise exception 'a year between 1990 and 2100' using errcode = '22023';
   end if;
-  if bytes is null or bytes < 1000 or bytes > 52428800 then
-    raise exception 'a file of 1 KB to 50 MB' using errcode = '22023';
+  -- 150 MB (13 Nov 2026; it was 50): the size the rest of the pipeline reads (pc_fetch.py, table_text.py). The storage's
+  -- own limit is set in the Supabase dashboard (Storage, settings, upload file size limit) and must be at least this.
+  if bytes is null or bytes < 1000 or bytes > 157286400 then
+    raise exception 'a file of 1 KB to 150 MB' using errcode = '22023';
   end if;
   if src is not null and (src !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(src) > 1000) then
     raise exception 'the address the file came from is not a link' using errcode = '22023';

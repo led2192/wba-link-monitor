@@ -3,7 +3,7 @@
 // evidence database's private bucket, registered first with public.upload_begin (who, company, where from, size,
 // SHA-256). browser_uploads.py turns them into rows of the library. Nothing is sent anywhere else.
 "use strict";
-const MAX_BYTES = 50 * 1024 * 1024;
+const MAX_BYTES = 150 * 1024 * 1024;      // as the database and the rest of the pipeline (it was 50 until 0.4.1)
 const args = new URLSearchParams(location.search);
 const TAB = { id: Number(args.get("tab")), url: args.get("url") || "", title: args.get("title") || "" };
 const $ = id => document.getElementById(id);
@@ -199,7 +199,7 @@ async function sendOne(doc, company) {
   // a PDF chosen from this computer (0.4.0: a site that only downloads after a captcha) is read as it is; it has no address
   const { buf, disposition } = doc.file ? { buf: await doc.file.arrayBuffer(), disposition: "" } : await download(doc.url);
   if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");
-  if (buf.byteLength > MAX_BYTES) throw new Error(`larger than 50 MB (${Math.round(buf.byteLength / 1048576)} MB)`);
+  if (buf.byteLength > MAX_BYTES) throw new Error(`larger than 150 MB (${Math.round(buf.byteLength / 1048576)} MB)`);
   const sha = hex(await crypto.subtle.digest("SHA-256", buf));
   const name = doc.file ? nameOf("", "", doc.file.name.replace(/\.pdf$/i, "")) : nameOf(doc.url, disposition, doc.text);
   const page = /^https?:/.test(TAB.url || "") ? TAB.url : null;
@@ -218,6 +218,7 @@ async function sendOne(doc, company) {
   }
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
+    if (r.status === 413 || /maximum allowed size|too large/i.test(e.message || e.error || "")) throw new Error(`not stored: lanterN's storage takes smaller files than this one (${Math.round(buf.byteLength / 1048576)} MB); tell the owner`);
     if (!(r.status === 409 || /exists|duplicate/i.test(e.message || e.error || ""))) throw new Error(`not stored: ${e.message || e.error || "HTTP " + r.status}`);
   }
   await rpc("upload_done", { upload_id: j.id });
