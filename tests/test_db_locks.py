@@ -31,3 +31,18 @@ class Orphans(unittest.TestCase):
         self.assertEqual([r[0] for r in D.orphans(rows, 300 * 60)], [1])                      # a known-dead job's statement, five hours old
         self.assertEqual([r[0] for r in D.orphans(rows, 60)], [1])                             # never under an hour, whatever is asked
 
+
+class IndexProgress(unittest.TestCase):
+    def test_one_line_an_index_and_nothing_when_the_view_fails(self):
+        import db_locks as D
+
+        class Cur:
+            def __init__(self, rows=None, fail=False): self.rows, self.fail = rows or [], fail
+            def execute(self, q, *a):
+                if self.fail: raise RuntimeError("no such view")
+            def fetchall(self): return self.rows
+        got = D.index_progress(Cur([(48065, "chunks_embedding", "building index: loading tuples", 250000, 1000000, 1000000, 0)]))
+        self.assertEqual(len(got), 1); self.assertIn("25% of blocks", got[0]); self.assertIn("loading tuples", got[0])
+        self.assertIn("no count yet", D.index_progress(Cur([(1, "x", "initializing", 0, 0, 0, 0)]))[0])
+        self.assertEqual(D.index_progress(Cur(fail=True)), [])
+
