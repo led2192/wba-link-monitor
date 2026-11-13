@@ -416,6 +416,25 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(sorted((r["value"], r["this"]) for r in g["readings"]), [(66830, True), (66831, False)])
         self.assertIsNone(none)
 
+    def test_a_gap_card_shows_a_company_with_a_main_report_missing(self):
+        import datetime, psycopg
+        last = datetime.date.today().year - 1
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("create table if not exists public.companies (wba_id text primary key, name text, industry text, country text, region text, website text, lantern_id text)")
+            cur.execute("delete from public.companies")
+            cur.execute("insert into public.companies (wba_id, name, industry, country, website) values ('GAP_FULL', 'Full Co', 'I', 'C', 'full.example'), ('GAP_HOLE', 'Hole Co', 'I', 'C', 'hole.example')")
+            for wba, year, kind in [("GAP_FULL", y, k) for y in (last, last - 1, last - 2) for k in ("Integrated Report",)] + [("GAP_HOLE", last, "Annual Report"), ("GAP_HOLE", last - 1, "Policy Documents")]:
+                cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year) values (%s, %s, %s, %s, %s)", (f"{wba}-{year}-{kind}", wba, wba, kind, year))
+            cur.execute("select public.gap_card('k', null), public.gap_card('k', array['GAP_HOLE'])")
+            got, skipped = cur.fetchone()
+            c.rollback()
+        self.assertEqual((got["wba_id"], got["gaps"], got["website"]), ("GAP_HOLE", 3, "hole.example"))       # an integrated report is both: Full Co has no gap
+        years = {y["year"]: y for y in got["years"]}
+        self.assertEqual((years[last]["annual"], years[last]["sustainability"]), (["Annual Report"], []))
+        self.assertEqual((years[last - 1]["annual"], years[last - 1]["documents"]), ([], 1))                    # a policy document is not a main report
+        self.assertIsNone(skipped)                                                                               # already shown to this person
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:

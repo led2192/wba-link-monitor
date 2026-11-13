@@ -404,3 +404,9 @@ def test_a_value_opens_its_details_and_its_page_inside_lantern():
 
 def test_the_figure_is_looked_for_the_way_pages_print_it():
     assert "const asPrinted = v =>" in PAGE and 'printed under “${head}”' in PAGE
+
+
+def test_contribute_offers_two_ways_and_the_old_name_is_gone():
+    assert "grant execute on function public.gap_card(text, text[]) to anon, authenticated;" in SQL
+    assert '<button type="button" id="goLucky">Contribute</button>' in PAGE and "I’m feeling lucky" not in PAGE
+    assert 'choice("Review a value"' in PAGE and 'choice("Fill a document gap"' in PAGE and "addSourceForm(hold, g.wba_id)" in PAGE
