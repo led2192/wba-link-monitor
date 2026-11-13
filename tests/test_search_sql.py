@@ -291,3 +291,14 @@ def test_what_an_answer_finds_is_kept_unconfirmed_and_shown_beside_it():
     assert "(a.verdict_by is null or a.verdict_by = who)" in SQL                                  # one person's mark is not replaced by another's
     assert "alter table public.ask_facts enable row level security;" in SQL
     assert "Found in this answer" in PAGE and 'authed("ask_fact_verdict"' in PAGE
+
+
+def test_the_querys_vector_is_made_on_a_server_with_a_token_the_page_never_sees():
+    made = SQL[SQL.index("create or replace function public.query_vector_made(q text)"):SQL.index("create or replace function public.query_vector(key text, q text)")]
+    assert "from vault.decrypted_secrets d where d.name = 'hf_token'" in made and "hf_" + "token" not in PAGE
+    assert "'query: ' || words" in made and "multilingual-e5-small" in made                       # the index's model, with its prefix
+    assert "jsonb_array_length(reply) <> 384" in made and "on conflict (q) do nothing" in made     # kept once a text
+    assert ">= 120 then" in made and "'off', true" in made
+    assert "sqlerrm" not in made                                                                   # an error's text may hold the request
+    assert "revoke all on function public.query_vector_made(text) from public, anon, authenticated;" in SQL
+    assert 'rpc("query_vector", { key, q: text })' in PAGE and "serverVector = false" in PAGE     # the browser's model only when the server is off
