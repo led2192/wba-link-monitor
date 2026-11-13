@@ -400,3 +400,7 @@ def test_a_value_opens_its_details_and_its_page_inside_lantern():
     assert "'column_label', p.column_label," in SQL                              # the company's own heading travels with the value
     assert "async function openValue(v)" in PAGE and 'row("Column or row heading", g.column_label);' in PAGE
     assert "openReader(v.library_id, v.page, printedNeedle(v))" in PAGE          # read here, on a robot value too
+
+
+def test_the_figure_is_looked_for_the_way_pages_print_it():
+    assert "const asPrinted = v =>" in PAGE and 'printed under “${head}”' in PAGE

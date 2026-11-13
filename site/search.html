@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v64 2026-11-13";
+  const CLIENT = "lantern v65 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1348,9 +1348,11 @@
   // "fiscal year to May 2020 (often printed FY20)" for reporting year 2019 of a company whose year ends in May; nothing for a December year end.
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   function fiscalNote(year, month, heading) {
-    const m = Number(month), y = Number(year); if (!m || m === 12 || !y) return "";
-    const end = m <= 5 ? y + 1 : y;                         // reporting_year.py: January to May end in the following calendar year
+    const m = Number(month), y = Number(year);
     const head = String(heading || "").trim();              // the column the figure was read under, when the reader kept it: the company's own label
+    if (!m && head && head.length <= 24 && !head.includes(String(y))) return `printed under “${head}”`;   // the month is not known yet, the label is: say that much
+    if (!m || m === 12 || !y) return "";
+    const end = m <= 5 ? y + 1 : y;                         // reporting_year.py: January to May end in the following calendar year
     return `fiscal year to ${MONTHS[m - 1]} ${end}` + (head && head.length <= 24 ? ` (printed under “${head}”)` : end !== y ? ` (often printed FY${String(end).slice(2)})` : "");
   }
   // What the answer found (13 Nov 2026): the data points the answer states, each with its page, at the top of the side
@@ -1479,7 +1481,9 @@
   const periodShown = f => { const p = f.period || f.year; return p && f.wba_year && !String(p).includes(String(f.wba_year)) ? `${p} (WBA year ${f.wba_year})` : p; };
   const factNeedle = f => f.kind === "number" ? Math.abs(Number(f.value)).toLocaleString("en-US") : "";
   // What to look for on the page: the figure as printed when the reader kept it, else the stored figure with separators.
-  const printedNeedle = v => { const p = String(v.printed || "").trim(); return p && /\d/.test(p) && p.length <= 24 ? p : (Number.isFinite(Number(v.value)) ? Math.abs(Number(v.value)).toLocaleString("en-US") : ""); };
+  // The reader often keeps "60836.0" as printed: that is the number, not the page's "60,836", so it is written the way pages print it.
+  const asPrinted = v => { const p = String(v.printed || "").trim(); return /^-?\d+(\.0+)?$/.test(p) ? Math.abs(Number(p)).toLocaleString("en-US") : p; };
+  const printedNeedle = v => { const p = asPrinted(v); return p && /\d/.test(p) && p.length <= 24 ? p : (Number.isFinite(Number(v.value)) ? Math.abs(Number(v.value)).toLocaleString("en-US") : ""); };
   // The detail window of a value the robot read (v64): every field held, the other readings, how its year was assigned.
   async function openValue(v) {
     let d = $("valueDetail");
@@ -1495,9 +1499,9 @@
     let g = null; try { g = await rpc("value_detail", { key, version_id: v.version_id }); } catch (e) { g = null; }
     if (!g) { body.textContent = "The details of this value could not be read."; return; }
     body.innerHTML = "";
-    const big = el("div", "num", fmt(g.value) + " "); big.append(el("small", null, [g.unit, g.basis].filter(Boolean).join(", "))); body.appendChild(big);
+    const big = el("div", null, fmt(g.value) + " "); big.style.cssText = "font-size:26px;font-weight:700;margin-bottom:8px"; const u = el("small", null, [g.unit, g.basis].filter(Boolean).join(", ")); u.style.cssText = "font-size:14px;font-weight:400;color:var(--muted)"; big.append(u); body.appendChild(big);
     const row = (name, value) => { if (value === null || value === undefined || value === "") return; const r = el("div"); r.style.cssText = "display:grid;grid-template-columns:190px 1fr;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"; const k = el("div", null, name); k.style.color = "var(--muted)"; const val = el("div"); if (value instanceof Node) val.appendChild(value); else val.textContent = String(value); r.append(k, val); body.appendChild(r); };
-    row("As printed on the page", g.printed ? `${g.printed}` + (g.scale && Number(g.scale) !== 1 ? `  (× ${Number(g.scale).toLocaleString("en-US")})` : "") : null);
+    row("As printed on the page", g.printed ? `${asPrinted(g)}` + (g.scale && Number(g.scale) !== 1 ? `  (× ${Number(g.scale).toLocaleString("en-US")})` : "") : null);
     row("Column or row heading", g.column_label);
     row("WBA reporting year", g.year);
     const fy = fiscalNote(g.year, g.fy_end_month, g.column_label);
