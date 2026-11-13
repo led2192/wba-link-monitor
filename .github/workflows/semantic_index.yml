@@ -19,6 +19,12 @@ on:
       remaining:
         description: "true to print how many documents are done and left, and stop (seconds)"
         default: "false"
+      try_query:
+        description: "check the search by meaning: words to search (prints ids and scores, and stops)"
+        default: ""
+      try_company:
+        description: "with try_query: a company (wba id or name); empty = every company, through the index"
+        default: ""
       commit:
         description: "write the chunks and embeddings (false = read, embed and print, write nothing)"
         type: boolean
@@ -40,7 +46,7 @@ on:
         default: "2024-"
 
 concurrency:
-  group: semantic-index-${{ inputs.remaining == 'true' && 'count' || inputs.partition || 'all' }}
+  group: semantic-index-${{ (inputs.remaining == 'true' || inputs.try_query != '') && github.run_id || inputs.partition || 'all' }}
   cancel-in-progress: false
 
 jobs:
@@ -66,10 +72,13 @@ jobs:
           [ "${{ inputs.pairs }}" = "false" ] && ARGS="$ARGS --no-pairs"
           [ "${{ inputs.build_index }}" = "true" ] && ARGS="--build-index --commit --build-memory ${{ inputs.build_memory || '512MB' }} --build-workers ${{ inputs.build_workers || '2' }}"
           [ "${{ inputs.remaining }}" = "true" ] && ARGS="--remaining --years ${{ inputs.years }}"
+          if [ -n "$TRY_QUERY" ]; then python semantic_index.py --try-query "$TRY_QUERY" --try-company "$TRY_COMPANY"; exit $?; fi
           echo "python semantic_index.py $ARGS"
           python semantic_index.py $ARGS
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          TRY_QUERY: ${{ inputs.try_query }}
+          TRY_COMPANY: ${{ inputs.try_company }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           TOKENIZERS_PARALLELISM: "false"
