@@ -704,6 +704,12 @@ create or replace function public.type_words(doc_type text) returns text
 create table if not exists public.search_options (name text primary key, is_on boolean not null default false, note text, changed timestamptz not null default now());
 alter table public.search_options enable row level security;
 insert into public.search_options (name, is_on, note) values ('pairs', false, 'ask page_pairs first for quoted phrases and neighbouring words') on conflict (name) do nothing;
+-- 'company_first' (13 Nov 2026): a question of four words or more within one company reads that company's pages and
+-- checks the words on them, in place of asking the word index. search_timing.py, run 43492865629: "level 1" (every
+-- word but one, eight words with their longer forms) took 24 to 27 s in the word index, which lists every page of the
+-- library holding the words (5,784) before the company's 5 are kept, while the company's 7,522 pages are listed in
+-- 0.2 s. That was the long question about one company that ran into the timeout. Off until measured beside the default.
+insert into public.search_options (name, is_on, note) values ('company_first', false, 'four words or more within a company: read the company''s pages, not the word index') on conflict (name) do nothing;
 
 -- The lines of a page around a quoted phrase, the phrase marked as one piece (11 Nov 2026: the excerpt of
 -- "human rights due diligence" marked "rights" here and "diligence" there, wherever each word stood). Null when
@@ -764,6 +770,7 @@ declare
   pair_or tsquery;
   all_q tsquery := null;           -- every word asked, for the excerpt: the lines where they all come together
   use_pairs boolean := false;      -- the word-pair index is asked first (option 'pairs')
+  company_first boolean := false;  -- the company's pages are read and the words checked on them (option 'company_first')
   pp_req tsquery := null;          -- the pairs of every quoted phrase: all required
   pp_all tsquery := null;          -- ... and every two neighbouring words asked
   pp_any tsquery := null;          -- ... and at least one two neighbouring words asked
@@ -938,6 +945,10 @@ begin
     -- "living wage" gave 33 rows with the option where it gave 50 without)
     select count(distinct c.library_id) into via_pairs from find_cand c;
   end if;
+  company_first := ids is not null and cardinality(ids) <= 5 and nw >= 4
+                   and (coalesce(current_setting('lantern.company_first', true), '') = 'on'
+                        or (coalesce(current_setting('lantern.company_first', true), '') <> 'off'
+                            and exists (select 1 from public.search_options o where o.name = 'company_first' and o.is_on)));
   <<levels>>
   for drop_n in 0..least(case when nw >= 5 then 1 else 2 end, greatest(nw - 1, 0)) loop
     exit levels when via_pairs >= need;                -- the pair index filled the list (documents, not pages): the word index is not asked
@@ -958,7 +969,22 @@ begin
     loose_q := regexp_replace(lvl_q::text, '<[0-9-]+>', '&', 'g')::tsquery;     -- the same words, anywhere on the page
     for pass in 1..(case when split then 2 else 1 end) loop
       lim := case when split and pass = 1 then recent_cap when drop_n = 0 then greatest(cap - got, 1) else cap end;
-      if phrase_q is null then
+      if company_first then
+        -- the same pages as the statements below find, reached through the company ("offset 0" keeps the words out
+        -- of the inner query, so the word index is not asked)
+        insert into find_cand
+          select x.library_id, x.page, x.words, x.year, x.doc_type
+          from (select p.library_id, p.page, p.words, p.year, p.doc_type
+                from public.pages p
+                where p.wba_id = any(ids)
+                  and p.wba_id <> ''
+                  and (types is null or p.doc_type = any(types))
+                  and (year_from is null or p.year + 0 >= year_from) and (year_to is null or p.year + 0 <= year_to)
+                offset 0) x
+          where x.words @@ lvl_q
+          limit lim
+        on conflict do nothing;
+      elsif phrase_q is null then
         insert into find_cand
           select p.library_id, p.page, p.words, p.year, p.doc_type
           from public.pages p
