@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v63 2026-11-13";
+  const CLIENT = "lantern v64 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1011,7 +1011,7 @@
       const row = el("div", "v");
       const left = el("div");
       left.append(el("div", "what", `${v.company} · ${ATTR_NAME[v.attribute] || v.attribute} · ${v.year}`));
-      const fy = fiscalNote(v.year, v.fy_end_month);         // which fiscal year this reporting year is, when it is not the calendar year
+      const fy = fiscalNote(v.year, v.fy_end_month, v.column_label);         // which fiscal year this reporting year is, when it is not the calendar year
       if (fy) { const n = el("div", "ev", fy); n.title = "WBA counts a fiscal year in the calendar year where at least six months of it fall: a year ending January to May (or before 30 June) is the reporting year before."; n.style.cssText = "grid-column:1;margin:0 0 2px"; left.appendChild(n); }
       const num = el("div", "num", fmt(v.value) + " "); num.append(el("small", null, [v.unit, v.basis].filter(Boolean).join(", "))); left.appendChild(num);
       const btns = el("div", "btns"); const yes = el("button", "yes", "✓"); yes.title = "This value is right"; const no = el("button", "no", "✗"); no.title = "This value is wrong";
@@ -1020,6 +1020,8 @@
       const evidence = v.readings > 1 ? `${v.agree} of ${v.readings} documents read give this figure` + (v.variants > 1 ? `, ${v.variants} different figures in all` : "") : "read in one document";
       ev.append(document.createTextNode(evidence + " · "));
       if (v.url) { const a = el("a", null, `source, page ${v.page || "?"}`); a.href = /\.pdf(\?|$)/i.test(v.url) || !/#/.test(v.url) ? `${v.url}#page=${v.page || 1}` : v.url; a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); }
+      if (v.library_id && v.page) { const r = el("a", null, "read here"); r.href = "#"; r.title = "The page's text, inside lanterN, with the figure marked"; r.onclick = e => { e.preventDefault(); openReader(v.library_id, v.page, printedNeedle(v)); }; ev.append(document.createTextNode(v.url ? " · " : ""), r); }
+      { const dlink = el("a", null, "details"); dlink.href = "#"; dlink.title = "Everything held about this value: as printed, its report, the other readings, how its year was assigned"; dlink.onclick = e => { e.preventDefault(); openValue(v); }; ev.append(document.createTextNode(" · "), dlink); }
       if (v.ok || v.wrong) ev.append(document.createTextNode(` · reviews: ${v.ok} ✓ ${v.wrong} ✗`));
       if (v.confidence && v.confidence.n) {                 // measured, not felt: how often a reading like this matched the validated answer
         const cf = el("div", "conf", `Readings like this were right ${Math.round(v.confidence.share * 100)}% of the time`);
@@ -1345,10 +1347,11 @@
   const pageUrl = s => !s.url ? "#" : (/#/.test(s.url) ? s.url : `${s.url}#page=${s.page || 1}`);
   // "fiscal year to May 2020 (often printed FY20)" for reporting year 2019 of a company whose year ends in May; nothing for a December year end.
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  function fiscalNote(year, month) {
+  function fiscalNote(year, month, heading) {
     const m = Number(month), y = Number(year); if (!m || m === 12 || !y) return "";
     const end = m <= 5 ? y + 1 : y;                         // reporting_year.py: January to May end in the following calendar year
-    return `fiscal year to ${MONTHS[m - 1]} ${end}` + (end !== y ? ` (often printed FY${String(end).slice(2)})` : "");
+    const head = String(heading || "").trim();              // the column the figure was read under, when the reader kept it: the company's own label
+    return `fiscal year to ${MONTHS[m - 1]} ${end}` + (head && head.length <= 24 ? ` (printed under “${head}”)` : end !== y ? ` (often printed FY${String(end).slice(2)})` : "");
   }
   // What the answer found (13 Nov 2026): the data points the answer states, each with its page, at the top of the side
   // panel for the person to mark right or wrong. Unconfirmed readings; kept in the search database (ask_facts).
@@ -1475,6 +1478,50 @@
   // The period as printed, with WBA's reporting year when it is another year ("FY24 (WBA year 2023)").
   const periodShown = f => { const p = f.period || f.year; return p && f.wba_year && !String(p).includes(String(f.wba_year)) ? `${p} (WBA year ${f.wba_year})` : p; };
   const factNeedle = f => f.kind === "number" ? Math.abs(Number(f.value)).toLocaleString("en-US") : "";
+  // What to look for on the page: the figure as printed when the reader kept it, else the stored figure with separators.
+  const printedNeedle = v => { const p = String(v.printed || "").trim(); return p && /\d/.test(p) && p.length <= 24 ? p : (Number.isFinite(Number(v.value)) ? Math.abs(Number(v.value)).toLocaleString("en-US") : ""); };
+  // The detail window of a value the robot read (v64): every field held, the other readings, how its year was assigned.
+  async function openValue(v) {
+    let d = $("valueDetail");
+    if (!d) {
+      d = document.createElement("dialog"); d.id = "valueDetail";
+      d.style.cssText = "width:min(760px,92vw);max-height:86vh;border:1px solid var(--line);border-radius:14px;padding:0;background:var(--bg);color:var(--fg);font:inherit";
+      document.body.appendChild(d); d.addEventListener("click", ev => { if (ev.target === d) d.close(); });
+    }
+    d.innerHTML = ""; const head = el("div"); head.style.cssText = "display:flex;align-items:center;gap:8px;padding:12px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)";
+    head.append(el("b", null, `${v.company} · ${ATTR_NAME[v.attribute] || v.attribute} · ${v.year}`));
+    const x = el("button", null, "Close"); x.type = "button"; x.style.cssText = "margin-left:auto;font:inherit;font-size:13px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer"; x.onclick = () => d.close(); head.appendChild(x);
+    const body = el("div"); body.style.cssText = "padding:14px 18px;font-size:14px;line-height:1.5"; body.textContent = "Loading…"; d.append(head, body); if (!d.open) d.showModal();
+    let g = null; try { g = await rpc("value_detail", { key, version_id: v.version_id }); } catch (e) { g = null; }
+    if (!g) { body.textContent = "The details of this value could not be read."; return; }
+    body.innerHTML = "";
+    const big = el("div", "num", fmt(g.value) + " "); big.append(el("small", null, [g.unit, g.basis].filter(Boolean).join(", "))); body.appendChild(big);
+    const row = (name, value) => { if (value === null || value === undefined || value === "") return; const r = el("div"); r.style.cssText = "display:grid;grid-template-columns:190px 1fr;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"; const k = el("div", null, name); k.style.color = "var(--muted)"; const val = el("div"); if (value instanceof Node) val.appendChild(value); else val.textContent = String(value); r.append(k, val); body.appendChild(r); };
+    row("As printed on the page", g.printed ? `${g.printed}` + (g.scale && Number(g.scale) !== 1 ? `  (× ${Number(g.scale).toLocaleString("en-US")})` : "") : null);
+    row("Column or row heading", g.column_label);
+    row("WBA reporting year", g.year);
+    const fy = fiscalNote(g.year, g.fy_end_month, g.column_label);
+    row("Fiscal year", fy ? fy + ". WBA counts a fiscal year in the calendar year where at least six months of it fall, so a year ending January to May is the reporting year before." : (g.fy_end_month === 12 ? "ends in December: the calendar year" : "the month this company's fiscal year ends is not known yet"));
+    const src = el("span"); src.append(document.createTextNode([g.doc_year, g.doc_type].filter(Boolean).join(" · ") + (g.label ? ` · ${g.label}` : "") + ` · page ${g.page || "?"}` + (g.pages ? ` of ${g.pages}` : "") + " · "));
+    if (g.library_id && g.page) { const r = el("a", null, "read here"); r.href = "#"; r.onclick = e => { e.preventDefault(); openReader(g.library_id, g.page, printedNeedle(g)); }; src.appendChild(r); }
+    if (/^https?:\/\//i.test(g.url || "")) { const a = el("a", null, "open the document"); a.href = pageUrl({ url: g.url, page: g.page }); a.target = "_blank"; a.rel = "noopener"; src.append(document.createTextNode(" · "), a); } else src.append(document.createTextNode(" · no public link"));
+    row("Read in", src);
+    row("Read by", g.method ? `the robot (${g.method})` + (g.read_for && g.read_for !== g.year ? `, while reading for ${g.read_for}` : "") : null);
+    row("First and last seen", g.first_seen ? `${new Date(g.first_seen).toLocaleDateString("en-GB")} · ${new Date(g.last_seen).toLocaleDateString("en-GB")}` : null);
+    if (v.confidence && v.confidence.n) row("Readings like this", `were right ${Math.round(v.confidence.share * 100)}% of the time (${v.confidence.n} checked against validated answers)`);
+    const others = (g.readings || []);
+    if (others.length > 1) {
+      const h = el("div", "subhead", `Every reading of this figure · ${others.length}`); h.style.marginTop = "14px"; body.appendChild(h);
+      for (const o of others) {
+        const li = el("div"); li.style.cssText = "padding:6px 0;border-bottom:1px solid var(--line)";
+        li.append(el("b", null, Number(o.value).toLocaleString("en", { maximumFractionDigits: 2 }) + (o.unit ? " " + o.unit : "")));
+        li.append(document.createTextNode(" · " + [o.doc_year, o.doc_type].filter(Boolean).join(" ") + (o.column_label ? ` · under “${o.column_label}”` : "") + ` · page ${o.page || "?"} · `));
+        if (o.library_id && o.page) { const r = el("a", null, "read here"); r.href = "#"; r.onclick = e => { e.preventDefault(); openReader(o.library_id, o.page, printedNeedle(o)); }; li.appendChild(r); }
+        const tags = [o.this ? "this value" : "", Number(o.value) !== Number(g.value) ? "another figure" : ""].filter(Boolean); if (tags.length) { const t = el("span", null, "  " + tags.join(" · ")); t.style.color = "var(--muted)"; li.appendChild(t); }
+        body.appendChild(li);
+      }
+    } else { const n = el("p", null, "Read in this one document only."); n.style.color = "var(--muted)"; body.appendChild(n); }
+  }
   // The owner's panel (13 Nov 2026): links and people, the facts of answers and who marked them, and what Ask costs.
   // Shown only when the page was opened with the owner's link and the person is signed in (admin_ok); every admin
   // function checks the same on the server. A window inside the page: the search under it stays as it is.

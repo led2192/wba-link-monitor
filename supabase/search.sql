@@ -1281,7 +1281,7 @@ begin
     tot as (select wba_id, attribute, year, sum(docs)::int as readings, count(*)::int as variants from g group by 1, 2, 3),
     best as (select distinct on (wba_id, attribute, year) * from g order by wba_id, attribute, year, docs desc, seen desc),
     pick as (
-      select distinct on (b.wba_id, b.attribute, b.year) vv.version_id, vv.unit, vv.printed, vv.basis, vv.library_id, vv.page,
+      select distinct on (b.wba_id, b.attribute, b.year) vv.version_id, vv.unit, vv.printed, vv.basis, vv.library_id, vv.page, vv.column_label,
              b.wba_id, b.attribute, b.year, b.value, b.docs
       from best b join public.value_versions vv on vv.wba_id = b.wba_id and vv.attribute = b.attribute and vv.year = b.year and vv.value = b.value
       order by b.wba_id, b.attribute, b.year, vv.last_seen desc)
@@ -1289,6 +1289,7 @@ begin
       select d.company, p.attribute, p.year,
              jsonb_build_object('version_id', p.version_id, 'wba_id', p.wba_id, 'company', coalesce(d.company, p.wba_id), 'attribute', p.attribute,
                'year', p.year, 'value', p.value, 'unit', public.unit_shown(p.unit, p.value::numeric, p.printed::text), 'printed', p.printed, 'basis', p.basis, 'library_id', p.library_id, 'page', p.page,
+               'column_label', p.column_label,                 -- the heading the figure was read under ("FY20"): the company's own name for the period
                'url', d.url, 'label', d.label, 'doc_type', d.doc_type, 'agree', p.docs, 'readings', t.readings, 'variants', t.variants,
                'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants),
                -- the month the company's fiscal year ends (the commonest among its documents' period ends), so the page can say
@@ -1981,6 +1982,42 @@ as $$
   from jsonb_array_elements(coalesce(confirmed, '[]'::jsonb)) with ordinality x(e, i)
 $$;
 revoke all on function public.ask_confirmed_lines(jsonb) from public, anon, authenticated;
+
+-- Everything lanterN holds about one value the robot read, for the detail window of its card (13 Nov 2026, the
+-- owner: "see more details in a window inside the page, without leaving the search"): the figure as stored and as
+-- printed, its basis, the report and page it was read on, the month the company's fiscal year ends, and every
+-- reading of the same company, attribute and year in other documents (newest report first).
+create or replace function public.value_detail(key text, version_id text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '10s'
+as $$
+#variable_conflict use_variable
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    select jsonb_build_object(
+      'version_id', v.version_id, 'wba_id', v.wba_id, 'company', coalesce(d.company, v.wba_id), 'attribute', v.attribute, 'year', v.year,
+      'value', v.value, 'unit', public.unit_shown(v.unit, v.value::numeric, v.printed::text), 'printed', v.printed, 'basis', v.basis,
+      'column_label', v.column_label, 'scale', v.scale, 'method', v.method, 'read_for', v.read_for,
+      'library_id', v.library_id, 'page', v.page, 'url', d.url, 'label', d.label, 'doc_type', d.doc_type, 'doc_year', d.year, 'pages', d.pages,
+      'first_seen', v.first_seen, 'last_seen', v.last_seen,
+      'fy_end_month', (select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = v.wba_id),
+      'readings', (select coalesce(jsonb_agg(jsonb_build_object('value', o.value, 'unit', public.unit_shown(o.unit, o.value::numeric, o.printed::text), 'printed', o.printed,
+                            'column_label', o.column_label, 'basis', o.basis, 'page', o.page, 'library_id', o.library_id, 'label', od.label, 'doc_type', od.doc_type, 'doc_year', od.year, 'url', od.url,
+                            'this', o.version_id = v.version_id) order by od.year desc nulls last, o.last_seen desc), '[]'::jsonb)
+                   from (select * from public.value_versions o where o.wba_id = v.wba_id and o.attribute = v.attribute and o.year = v.year
+                         order by o.last_seen desc limit 20) o
+                   left join public.documents od on od.library_id = o.library_id))
+    from public.value_versions v left join public.documents d on d.library_id = v.library_id
+    where v.version_id = version_id limit 1);
+end;
+$$;
+revoke all on function public.value_detail(text, text) from public;
+grant execute on function public.value_detail(text, text) to anon, authenticated;
 
 -- One page of a document, as text, for reading inside lanterN (13 Nov 2026). Some documents have no public address
 -- (the library holds their text, not a link), so a fact or a value read on their page 65 could not be checked by

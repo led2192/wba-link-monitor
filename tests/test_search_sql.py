@@ -326,7 +326,7 @@ def test_the_facts_panel_stays_readable():
 
 def test_a_reporting_year_says_which_fiscal_year_it_is():
     assert "(select mode() within group (order by substring(dd.period_end from 6 for 2))::int from public.documents dd" in SQL
-    assert "function fiscalNote(year, month)" in PAGE and "const end = m <= 5 ? y + 1 : y;" in PAGE      # the rule of reporting_year.py
+    assert "function fiscalNote(year, month, heading)" in PAGE and "const end = m <= 5 ? y + 1 : y;" in PAGE      # the rule of reporting_year.py
     assert 'tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)")' in PAGE and "border-left:3px solid var(--accent)" not in PAGE
 
 
@@ -393,3 +393,10 @@ def test_fiscal_years_are_said_in_both_ways():
     assert "coalesce((select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = p.wba_id)," in SQL
     assert "coalesce(a.period, '')" not in SQL                                    # one period however written
     assert "const periodShown = f =>" in PAGE and "periodKey(a.period) === periodKey(b.period)" in PAGE
+
+
+def test_a_value_opens_its_details_and_its_page_inside_lantern():
+    assert "grant execute on function public.value_detail(text, text) to anon, authenticated;" in SQL
+    assert "'column_label', p.column_label," in SQL                              # the company's own heading travels with the value
+    assert "async function openValue(v)" in PAGE and 'row("Column or row heading", g.column_label);' in PAGE
+    assert "openReader(v.library_id, v.page, printedNeedle(v))" in PAGE          # read here, on a robot value too
