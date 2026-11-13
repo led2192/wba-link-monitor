@@ -326,7 +326,7 @@ def test_the_facts_panel_stays_readable():
 def test_a_reporting_year_says_which_fiscal_year_it_is():
     assert "'fy_end_month', (select mode() within group (order by substring(dd.period_end from 6 for 2))::int" in SQL
     assert "function fiscalNote(year, month)" in PAGE and "const end = m <= 5 ? y + 1 : y;" in PAGE      # the rule of reporting_year.py
-    assert 'tag("from this answer", "var(--accent)")' in PAGE and "border-left:3px solid var(--accent)" not in PAGE
+    assert 'tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)")' in PAGE and "border-left:3px solid var(--accent)" not in PAGE
 
 
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
