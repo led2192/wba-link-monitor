@@ -2015,6 +2015,75 @@ as $$
 $$;
 revoke all on function public.review_score(text) from public, anon, authenticated;
 
+-- Search by meaning (13 Nov 2026), an option beside the search by words. The page turns the words typed into a
+-- vector with the model the passages were embedded with (multilingual-e5-small, 384 numbers, "query: " in front) and
+-- sends the vector; this function returns the pages whose passages are nearest to it, so a page that says the same
+-- in other words or in another language is found. With a company named the search is exact, over that company's
+-- passages. Without one it uses the index on the embeddings (chunks_embedding), and says so while that index is
+-- not built. Passages exist for the main document types of 2024 and later (semantic_index.py). The same shape of
+-- rows as find_pages, at most three pages a document; the excerpt is the nearest passage. Not logged yet.
+create or replace function public.find_meaning(
+  key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 50)
+returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
+               label text, url text, page int, score real, excerpt text)
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '25s'
+as $$
+#variable_conflict use_column
+declare
+  k text := public.search_key_name(key);
+  ids text[] := public.companies_matching(company_filter);
+  types text[] := public.types_matching(type_filter);
+  need int := least(greatest(coalesce(max_rows, 50), 1), 100);
+begin
+  if k is null then
+    raise exception 'not allowed to search' using errcode = '42501';
+  end if;
+  if qvec is null or coalesce(array_length(qvec, 1), 0) <> 384 then
+    raise exception 'the query vector must have 384 numbers' using errcode = '22023';
+  end if;
+  if ids is null then
+    if to_regclass('public.chunks_embedding') is null then
+      raise exception 'the index of meanings is still being built: name a company to search by meaning for now' using errcode = '22023';
+    end if;
+    perform set_config('hnsw.ef_search', '200', true);
+    return query
+      with near as materialized (
+             select c.library_id, c.page, c.body, (c.embedding operator(extensions.<=>) qvec::extensions.vector(384)) as dist
+             from public.chunks c order by c.embedding operator(extensions.<=>) qvec::extensions.vector(384) limit 400),
+           pages as (select distinct on (n.library_id, n.page) n.library_id, n.page, n.body, n.dist from near n order by n.library_id, n.page, n.dist),
+           kept as (select p.*, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url,
+                           row_number() over (partition by p.library_id order by p.dist) as in_doc
+                    from pages p join public.documents d on d.library_id = p.library_id
+                    where (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+                      and (types is null or d.doc_type = any(types)))
+      select null::bigint, (row_number() over (order by x.dist))::int, x.library_id, x.company, x.wba_id, x.year, x.doc_type, x.label, x.url, x.page,
+             (1 - x.dist)::real, left(regexp_replace(x.body, '\s+', ' ', 'g'), 420)
+      from kept x where x.in_doc <= 3 order by x.dist limit need;
+  else
+    return query
+      with docs as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url from public.documents d
+                    where d.wba_id = any(ids) and (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+                      and (types is null or d.doc_type = any(types))),
+           near as materialized (
+             select c.library_id, c.page, c.body, (c.embedding operator(extensions.<=>) qvec::extensions.vector(384)) as dist
+             from public.chunks c where c.library_id in (select library_id from docs)
+             order by dist limit 400),
+           pages as (select distinct on (n.library_id, n.page) n.library_id, n.page, n.body, n.dist from near n order by n.library_id, n.page, n.dist),
+           kept as (select p.*, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url,
+                           row_number() over (partition by p.library_id order by p.dist) as in_doc
+                    from pages p join docs d on d.library_id = p.library_id)
+      select null::bigint, (row_number() over (order by x.dist))::int, x.library_id, x.company, x.wba_id, x.year, x.doc_type, x.label, x.url, x.page,
+             (1 - x.dist)::real, left(regexp_replace(x.body, '\s+', ' ', 'g'), 420)
+      from kept x where x.in_doc <= 3 order by x.dist limit need;
+  end if;
+end;
+$$;
+revoke all on function public.find_meaning(text, real[], text, int, int, text, int) from public;
+grant execute on function public.find_meaning(text, real[], text, int, int, text, int) to anon, authenticated;
+
 -- The unit of a value after its scale was applied (12 Nov 2026). value_versions keeps the printed number times the
 -- page's scale, with the unit as printed: "0.39 Mt-CO2e" is stored as 390,000 "Mt-CO2e", which reads as 390,000
 -- megatonnes. When the value is a thousand, a million or a billion times the printed number and the unit names that

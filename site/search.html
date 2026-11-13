@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v43 2026-11-12";
+  const CLIENT = "lantern v44 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -640,6 +640,11 @@
         a.onclick = ev => { ev.preventDefault(); $("q").value = $("q").value.replace(new RegExp("(^|\\s)" + mb.word + "(?=\\s|$)", "i"), (m0, pre) => pre + mb.name + ";"); search(false); };
         st.append(document.createTextNode(" · "), a);
       }
+      if (state.q && !more) {                               // the same words, searched by what they mean (an option, 13 Nov 2026)
+        const a = el("a", null, "Search by meaning (beta)"); a.href = "#"; a.title = "Pages that say this in other words or in another language. Reports of 2024 and later.";
+        a.onclick = ev => { ev.preventDefault(); searchByMeaning(); };
+        $("status").append(document.createTextNode(" · "), a);
+      }
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues();
@@ -649,6 +654,41 @@
     } catch (e) {
       setStatus(e.message.includes("not allowed") ? "This link no longer works; ask for a new one." : `Search failed: ${e.message}`);
       $("results").innerHTML = ""; $("values").hidden = true;
+    }
+  }
+  // Search by meaning (13 Nov 2026, an option). The words typed become a vector in the browser, with the same model
+  // the passages were embedded with (multilingual-e5-small), and find_meaning returns the pages nearest to it. The
+  // model (about 120 MB) is fetched the first time the option is used and kept by the browser; nothing loads before.
+  let embedder = null;
+  async function queryVector(text) {
+    if (!embedder) {
+      const { pipeline } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2");
+      embedder = await pipeline("feature-extraction", "Xenova/multilingual-e5-small", { dtype: "q8" });
+    }
+    const out = await embedder(["query: " + text], { pooling: "mean", normalize: true });
+    return Array.from(out.data).slice(0, 384);
+  }
+  async function searchByMeaning() {
+    const words = state.q.replace(/"/g, " ").trim();
+    if (!words) return;
+    setStatus(embedder ? "Searching by meaning…" : "Loading the language model, about 120 MB the first time…");
+    const t0 = performance.now();
+    try {
+      const embedding = await queryVector(words);
+      setStatus("Searching by meaning…");
+      const rows = await rpc("find_meaning", { key, qvec: embedding, company_filter: state.company, year_from: state.from, year_to: state.to, type_filter: state.type, max_rows: 50 });
+      const s = ((performance.now() - t0) / 1000).toFixed(1);
+      setStatus(rows.length ? `${rows.length} pages nearest in meaning, at most three a document (beta: the words need not be on the page; reports of 2024 and later). (${s} s)`
+                            : "No page found by meaning: passages exist for reports of 2024 and later only.");
+      const back = el("a", null, "Search by words"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); search(true); };
+      $("status").append(document.createTextNode(" · "), back);
+      state.rows = 200;                                   // no "more results" under a search by meaning
+      render(rows, false);
+      state.rows = 50; state.logId = null;
+    } catch (e) {
+      setStatus(`Search by meaning failed: ${e.message}`);
+      const back = el("a", null, "Search by words"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); search(true); };
+      $("status").append(document.createTextNode(" · "), back);
     }
   }
   // "Did you mean": a word typed wrong, set right from the words the library knows (did_you_mean). Asked after the
