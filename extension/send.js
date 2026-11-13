@@ -171,13 +171,35 @@ async function fetchInTab(url) {
     return { b64: btoa(s), disposition: r.headers.get("content-disposition") || "" };
   } catch (e) { return { error: String(e && e.message || e) }; }
 }
-async function download(url) {
+// The body of a reply read piece by piece, so that a large file shows how far it is (0.4.2: a report of 100 MB said
+// "downloading…" for minutes and nobody knew whether it was moving).
+async function readAll(r, say) {
+  if (!r.body || !say) return r.arrayBuffer();
+  const reader = r.body.getReader(), parts = []; let n = 0, last = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    parts.push(value); n += value.byteLength;
+    if (n - last > 2 * 1048576) { last = n; say(`downloading… ${Math.round(n / 1048576)} MB`); }
+  }
+  const out = new Uint8Array(n); let at = 0; for (const p of parts) { out.set(p, at); at += p.byteLength; }
+  return out.buffer;
+}
+// The file stored, with its progress. Resolves to { status, body } as fetch would give them; rejects when the storage cannot be reached.
+function putFile(url, headers, buf, say) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest(); x.open("POST", url); for (const [k, v] of Object.entries(headers)) x.setRequestHeader(k, v);
+    x.upload.onprogress = e => { if (e.lengthComputable && say) say(`sending… ${Math.round(100 * e.loaded / e.total)}% of ${Math.round(e.total / 1048576)} MB`); };
+    x.onload = () => resolve({ status: x.status, body: x.responseText }); x.onerror = x.ontimeout = () => reject(new Error("unreachable"));
+    x.send(buf);
+  });
+}
+async function download(url, say) {
   // first as the extension (any site, the person's session); if the site says no or sends something else, as the page
   let why = "";
   try {
     const r = await fetch(url, { credentials: "include", referrer: TAB.url || undefined });
     if (r.ok) {
-      const buf = await r.arrayBuffer();
+      const buf = await readAll(r, say);
       if (looksPdf(buf)) return { buf, disposition: r.headers.get("content-disposition") || "" };
       why = "not a PDF";
     } else why = `the site answered ${r.status}`;
@@ -197,7 +219,9 @@ async function download(url) {
 
 async function sendOne(doc, company) {
   // a PDF chosen from this computer (0.4.0: a site that only downloads after a captcha) is read as it is; it has no address
-  const { buf, disposition } = doc.file ? { buf: await doc.file.arrayBuffer(), disposition: "" } : await download(doc.url);
+  const say = t => { if (doc.status) doc.status.textContent = t; }, t0 = Date.now();
+  const { buf, disposition } = doc.file ? { buf: await doc.file.arrayBuffer(), disposition: "" } : await download(doc.url, say);
+  const got = Date.now();
   if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");
   if (buf.byteLength > MAX_BYTES) throw new Error(`larger than 150 MB (${Math.round(buf.byteLength / 1048576)} MB)`);
   const sha = hex(await crypto.subtle.digest("SHA-256", buf));
@@ -211,18 +235,20 @@ async function sendOne(doc, company) {
   if (j.again) return "already sent";
   const t = await token(); let r;
   for (let i = 0; ; i++) {
-    try { r = await fetch(`${conf.url}/storage/v1/object/uploads/${j.path}`, { method: "POST",
-      headers: { apikey: conf.key, Authorization: `Bearer ${t}`, "Content-Type": "application/pdf" }, body: buf }); if (r.status < 500 || i >= 2) break; }
+    try { r = await putFile(`${conf.url}/storage/v1/object/uploads/${j.path}`, { apikey: conf.key, Authorization: `Bearer ${t}`, "Content-Type": "application/pdf" }, buf, say);
+      if (r.status < 500 || i >= 2) break; }
     catch (e) { if (i >= 2) throw new Error("lanterN's storage did not answer (busy): try again in a few minutes"); }
     await pause(2000 * (i + 1));
   }
-  if (!r.ok) {
-    const e = await r.json().catch(() => ({}));
+  if (!(r.status >= 200 && r.status < 300)) {
+    let e = {}; try { e = JSON.parse(r.body); } catch (x) {}
     if (r.status === 413 || /maximum allowed size|too large/i.test(e.message || e.error || "")) throw new Error(`not stored: lanterN's storage takes smaller files than this one (${Math.round(buf.byteLength / 1048576)} MB); tell the owner`);
     if (!(r.status === 409 || /exists|duplicate/i.test(e.message || e.error || ""))) throw new Error(`not stored: ${e.message || e.error || "HTTP " + r.status}`);
   }
   await rpc("upload_done", { upload_id: j.id });
-  return `sent (${(buf.byteLength / 1048576).toFixed(1)} MB)`;
+  // where the time went: a slow site and a slow line look the same from the outside
+  const secs = ms => `${Math.max(1, Math.round(ms / 1000))} s`;
+  return `sent (${(buf.byteLength / 1048576).toFixed(1)} MB${buf.byteLength > 10 * 1048576 ? `; ${doc.file ? "read" : "downloaded"} in ${secs(got - t0)}, stored in ${secs(Date.now() - got)}` : ""})`;
 }
 
 // A link that may be a PDF is asked what it is (the headers only, nothing downloaded): the ones the site calls a PDF
@@ -355,12 +381,17 @@ async function sendAll() {
   const company = chosenCompany(); if (!company) { $("msg").textContent = "Choose the company from the list first."; $("company").focus(); return; }
   const todo = docs.filter(d => d.box.checked && !d.done && !d.held); if (!todo.length) return;
   $("go").disabled = true; let ok = 0, bad = 0;
-  for (const d of todo) {
-    d.status.className = "s"; d.status.textContent = "downloading…";
-    try { d.status.textContent = await sendOne(d, company); d.status.className = "s ok"; d.done = true; d.box.checked = false; d.box.disabled = true; ok++; }
-    catch (e) { d.status.textContent = `not sent: ${e.message}`; d.status.className = "s bad"; bad++; }
-    $("msg").textContent = `${ok + bad} of ${todo.length}…`;
-  }
+  // two at a time (0.4.2): a large report no longer holds the small ones behind it; more would only share the same line
+  const queue = todo.slice();
+  const worker = async () => {
+    for (let d; (d = queue.shift());) {
+      d.status.className = "s"; d.status.textContent = "downloading…";
+      try { d.status.textContent = await sendOne(d, company); d.status.className = "s ok"; d.done = true; d.box.checked = false; d.box.disabled = true; ok++; }
+      catch (e) { d.status.textContent = `not sent: ${e.message}`; d.status.className = "s bad"; bad++; }
+      $("msg").textContent = `${ok + bad} of ${todo.length}…`;
+    }
+  };
+  await Promise.all([worker(), worker()]);
   if (ok) await rememberHost(company);
   $("msg").textContent = `${ok} sent to ${company.name}${bad ? `, ${bad} not sent` : ""}. ` + (/^REQ_/.test(company.id) ? "They wait for the company to be approved (company_requests in Airtable)."
     : "They appear in the library within the half hour, and in the search after the night's load.");

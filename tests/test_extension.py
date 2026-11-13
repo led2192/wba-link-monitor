@@ -49,7 +49,14 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.4.1"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.4.1", read("extension", "config.js"))
+        self.assertIn('"version": "0.4.2"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.4.2", read("extension", "config.js"))
+
+    def test_a_large_file_shows_how_far_it_is(self):
+        js = read("extension", "send.js")
+        self.assertIn("say(`downloading… ${Math.round(n / 1048576)} MB`)", js)
+        self.assertIn("x.upload.onprogress", js)
+        self.assertIn("await Promise.all([worker(), worker()]);", js)                    # two at a time, not one behind the other
+        self.assertIn("stored in ${secs(Date.now() - got)}", js)                          # the result says where the time went
 
     def test_one_level_deeper_stays_on_the_site_and_is_bounded(self):
         js = read("extension", "send.js")
