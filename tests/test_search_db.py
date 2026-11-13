@@ -212,7 +212,7 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertTrue(all(r[4] is not None for r in rows))                 # the search was logged once, by the words
         self.assertLessEqual(max(sum(1 for k in keys if k[0] == d) for d in {k[0] for k in keys}), 3)
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
-        self.assertIn('rpc("find_blend"', src)
+        self.assertIn('rpc("find_meaning"', src); self.assertIn("function blend(words, meaning, need)", src)   # the page merges the two itself, asked at once
         self.assertNotIn("Search by meaning (beta)", src)                    # one search, not a choice
 
     def test_did_you_mean(self):
