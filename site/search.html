@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v55 2026-11-13";
+  const CLIENT = "lantern v56 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1442,7 +1442,7 @@
     const views = { "People and links": adminPeople, "Facts from answers": adminFacts, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.style.cssText = "font:inherit;padding:4px 12px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer";
-      b.onclick = () => { for (const x of tabs.children) x.style.fontWeight = "400"; b.style.fontWeight = "700"; body.textContent = "Loading…"; views[name](body); };
+      b.onclick = () => { for (const x of tabs.children) { x.style.fontWeight = "400"; x.style.borderColor = "var(--line)"; } b.style.fontWeight = "700"; b.style.borderColor = "var(--fg)"; b.blur(); body.textContent = "Loading…"; views[name](body); };
       tabs.appendChild(b);
     }
     d.showModal(); tabs.firstChild.click();
@@ -1490,7 +1490,20 @@
     body.appendChild(adminTable(["Company", "Fact", "Value", "Page", "Mark", "By", "Question", ""], rows.map(f => {
       const value = f.kind === "number" ? [fmt(Number(f.value)), f.unit].filter(Boolean).join(" ") : f.answer;
       const src = /^https?:\/\//i.test(f.url || "") ? (() => { const a = el("a", null, `p. ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; return a; })() : (f.page ? `p. ${f.page}` : "");
-      const acts = el("span"); for (const [v, label] of [["right", "✓"], ["wrong", "✗"], ["none", "clear"]]) acts.appendChild(adminBtn(label, async () => { await authed("admin_fact_set", { key, fact_id: f.id, verdict: v }); adminFacts(body, which, box.value.trim()); }));
+      // v56: the mark a fact carries is painted on its button, and a click says "saved" in the row before the list is
+      // read again (the owner, 13 Nov: marking a fact already marked right changed nothing he could see).
+      const acts = el("span"), said = el("span"); said.style.cssText = "font-size:12px;color:#2E8B1F;margin-left:4px";
+      for (const [v, label] of [["right", "✓"], ["wrong", "✗"], ["none", "clear"]]) {
+        const b = adminBtn(label, async () => {
+          const r = await authed("admin_fact_set", { key, fact_id: f.id, verdict: v });
+          said.style.color = r && r.ok ? "#2E8B1F" : "#C8321E"; said.textContent = r && r.ok ? (v === "none" ? "cleared" : "saved") : "not saved";
+          if (r && r.ok) setTimeout(() => adminFacts(body, which, box.value.trim()), 900);
+        });
+        b.title = v === "right" ? "The page says this" : v === "wrong" ? "The page does not say this" : "Take the mark off";
+        if (f.verdict === v) { b.style.background = v === "right" ? "#4BB42D" : "#FF3C23"; b.style.color = "#fff"; b.style.borderColor = "transparent"; }
+        acts.appendChild(b);
+      }
+      acts.appendChild(said);
       const q = el("span", null, (f.question || "").slice(0, 90)); q.title = (f.question || "") + (f.asker ? " · asked by " + f.asker : "");
       return [f.company, [f.what, f.period || f.year].filter(Boolean).join(" · "), value, src, f.verdict || "", f.verdict_by ? `${f.verdict_by}, ${adminWhen(f.verdict_at)}` : "", q, acts];
     })));

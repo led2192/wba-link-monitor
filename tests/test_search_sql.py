@@ -341,3 +341,8 @@ def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
         assert re.search(rf"revoke all on function public\.{n}\([^)]*\) from public, anon;", SQL), n
     assert "public.search_key_name(key) = 'owner' and public.email_may_search(auth.jwt() ->> 'email')" in SQL      # the link and the sign-in, both
     assert 'authed("admin_ok", { key })' in PAGE and "it is not shown again" in PAGE
+
+
+def test_a_mark_in_the_owners_panel_shows_and_says_saved():
+    assert 'if (f.verdict === v) { b.style.background = v === "right" ? "#4BB42D" : "#FF3C23";' in PAGE
+    assert '(v === "none" ? "cleared" : "saved") : "not saved"' in PAGE
