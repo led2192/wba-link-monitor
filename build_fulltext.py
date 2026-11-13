@@ -54,7 +54,7 @@ and a shard stops by itself before the job limit (--budget-min) with everything 
 
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, AIRTABLE_LIBRARY_TABLE (default report_library),
      TEXT_STORE_REPO + TEXT_STORE_TOKEN (private GitHub repository), or TEXT_STORE_DIR (folder),
-     FULLTEXT_DOC_TIMEOUT (default 240 s), FULLTEXT_MAX_MB (default 150)
+     FULLTEXT_DOC_TIMEOUT (default 240 s), FULLTEXT_MAX_MB (default 200; 150 until 13 Nov 2026, when people began sending reports of 153 and 174 MB)
 """
 import os, io, sys, json, gzip, time, math, signal, hashlib, logging, argparse, collections, tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -97,7 +97,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
                     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 DL_TIMEOUT = 90
 DL_TRIES = 3
-MAX_MB = int(os.environ.get("FULLTEXT_MAX_MB", "150"))            # skip files above this size
+MAX_MB = int(os.environ.get("FULLTEXT_MAX_MB", "200"))            # skip files above this size
 MAX_PAGES = 3000             # read at most this many pages of one document
 MIN_CHARS = 200              # less text than this over a whole document = no text layer
 DOC_TIMEOUT = int(os.environ.get("FULLTEXT_DOC_TIMEOUT", "240"))  # seconds per document, download included

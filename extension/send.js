@@ -3,7 +3,7 @@
 // evidence database's private bucket, registered first with public.upload_begin (who, company, where from, size,
 // SHA-256). browser_uploads.py turns them into rows of the library. Nothing is sent anywhere else.
 "use strict";
-const MAX_BYTES = 150 * 1024 * 1024;      // as the database and the rest of the pipeline (it was 50 until 0.4.1)
+const MAX_BYTES = 200 * 1024 * 1024;      // as the database, the storage and the text reader (50 until 0.4.1, 150 until 0.4.3)
 const args = new URLSearchParams(location.search);
 const TAB = { id: Number(args.get("tab")), url: args.get("url") || "", title: args.get("title") || "" };
 const $ = id => document.getElementById(id);
@@ -223,7 +223,7 @@ async function sendOne(doc, company) {
   const { buf, disposition } = doc.file ? { buf: await doc.file.arrayBuffer(), disposition: "" } : await download(doc.url, say);
   const got = Date.now();
   if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");
-  if (buf.byteLength > MAX_BYTES) throw new Error(`larger than 150 MB (${Math.round(buf.byteLength / 1048576)} MB)`);
+  if (buf.byteLength > MAX_BYTES) throw new Error(`larger than 200 MB (${Math.round(buf.byteLength / 1048576)} MB)`);
   const sha = hex(await crypto.subtle.digest("SHA-256", buf));
   const name = doc.file ? nameOf("", "", doc.file.name.replace(/\.pdf$/i, "")) : nameOf(doc.url, disposition, doc.text);
   const page = /^https?:/.test(TAB.url || "") ? TAB.url : null;
