@@ -1,0 +1,45 @@
+# The month each company's fiscal year ends, written to public.company_fiscal (fiscal_months.py). Reads the search
+# database only. Weekly for new companies; by hand for a first fill (several runs of 400 companies).
+name: Fiscal months
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "write the months (false = print what would be written)"
+        type: boolean
+        default: false
+      limit:
+        description: "companies a run"
+        default: "400"
+      minutes:
+        description: "time budget, minutes"
+        default: "20"
+      refresh:
+        description: "look again at companies that already have a row"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 4 * * 0"        # Sundays 04:17 UTC
+
+concurrency:
+  group: fiscal-months
+  cancel-in-progress: false
+
+jobs:
+  months:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Months
+        run: python fiscal_months.py --limit "${{ inputs.limit || '400' }}" --minutes "${{ inputs.minutes || '20' }}" ${{ inputs.refresh && '--refresh' || '' }} ${{ (github.event_name == 'schedule' || inputs.commit) && '--commit' || '' }}
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

@@ -325,7 +325,7 @@ def test_the_facts_panel_stays_readable():
 
 
 def test_a_reporting_year_says_which_fiscal_year_it_is():
-    assert "'fy_end_month', (select mode() within group (order by substring(dd.period_end from 6 for 2))::int" in SQL
+    assert "(select mode() within group (order by substring(dd.period_end from 6 for 2))::int from public.documents dd" in SQL
     assert "function fiscalNote(year, month)" in PAGE and "const end = m <= 5 ? y + 1 : y;" in PAGE      # the rule of reporting_year.py
     assert 'tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)")' in PAGE and "border-left:3px solid var(--accent)" not in PAGE
 
@@ -385,3 +385,11 @@ def test_a_figure_with_no_year_says_so_and_names_its_report():
 def test_nothing_of_the_search_before_stays_when_a_search_runs_or_fails():
     assert 'state.lastRows = []; $("strip").innerHTML = ""; $("results").innerHTML = ""; const pv = $("values"); pv.innerHTML = ""; pv.hidden = true;' in PAGE
     assert "if (wordsFailed) { meaning = await meaningAsked; if (!meaning || !meaning.length) throw wordsFailed; }" in PAGE     # the meaning answers alone
+
+
+def test_fiscal_years_are_said_in_both_ways():
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    assert "fiscal := public.ask_fiscal_lines(sources);" in ask and 'for example "fiscal 2023 (WBA reporting year 2022)"' in ask
+    assert "coalesce((select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = p.wba_id)," in SQL
+    assert "coalesce(a.period, '')" not in SQL                                    # one period however written
+    assert "const periodShown = f =>" in PAGE and "periodKey(a.period) === periodKey(b.period)" in PAGE

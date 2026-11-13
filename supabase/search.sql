@@ -1293,8 +1293,9 @@ begin
                'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants),
                -- the month the company's fiscal year ends (the commonest among its documents' period ends), so the page can say
                -- which fiscal year a reporting year is: Nike's 2019 is the year to May 2020, printed FY20 (the owner, 13 Nov 2026)
-               'fy_end_month', (select mode() within group (order by substring(dd.period_end from 6 for 2))::int from public.documents dd
-                                where dd.wba_id = p.wba_id and dd.period_end ~ '^[0-9]{4}-[0-9]{2}'),
+               'fy_end_month', coalesce((select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = p.wba_id),
+                                        (select mode() within group (order by substring(dd.period_end from 6 for 2))::int from public.documents dd
+                                         where dd.wba_id = p.wba_id and dd.period_end ~ '^[0-9]{4}-[0-9]{2}')),
                'ok', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'ok'),
                'wrong', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'wrong')) as j
       from pick p
@@ -1771,6 +1772,38 @@ $$;
 revoke all on function public.query_vector(text, text) from public;
 grant execute on function public.query_vector(text, text) to anon, authenticated;
 
+-- The month each company's fiscal year ends (13 Nov 2026). The reader worked it out at each run and threw it away,
+-- so the page could not say which fiscal year a reporting year is, and an answer gave "fiscal 2023" for a company
+-- whose fiscal 2023 is WBA's reporting year 2022 (Nike, year end May) without saying so. fiscal_months.py fills
+-- this table (the commonest month among the company's documents' period ends, else read from the first pages of
+-- its latest annual documents); find_values, Ask and the facts of answers read it.
+create table if not exists public.company_fiscal (
+  wba_id        text primary key,
+  fy_end_month  int check (fy_end_month between 1 and 12),      -- null: looked for and not found
+  source        text,                                           -- period_end, pages
+  at            timestamptz not null default now()
+);
+alter table public.company_fiscal enable row level security;
+
+-- WBA's reporting year of a fiscal year that ends in `end_year`, month `month`: January to May belong to the year
+-- before (reporting_year.py). Null when either is unknown.
+create or replace function public.wba_year(end_year int, month int) returns int
+  language sql immutable as $$ select case when end_year is null or month is null then null when month between 1 and 5 then end_year - 1 else end_year end $$;
+
+-- The year a printed fiscal label ends in: "FY24", "FY2024", "fiscal 2024", "Fiscal Year 2024" give 2024. Null for
+-- anything else (a range "FY20-25", a plain year, a date).
+create or replace function public.fiscal_label_year(period text) returns int
+  language sql immutable as $$
+    select case when m is null then null when length(m[1]) = 2 then 2000 + m[1]::int else m[1]::int end
+    from (select regexp_match(lower(btrim(coalesce(period, ''))), '^(?:fy|fiscal(?:\s+year)?)\s*''?([0-9]{4}|[0-9]{2})$') as m) x $$;
+
+-- A period for comparing two facts: "FY23", "fy 2023" and "FISCAL 2023" are one period; anything else is compared
+-- without case or spaces. '' for none.
+create or replace function public.period_key(period text) returns text
+  language sql immutable as $$
+    select case when public.fiscal_label_year(period) is not null then 'fy' || public.fiscal_label_year(period)::text
+                else regexp_replace(lower(btrim(coalesce(period, ''))), '\s+', '', 'g') end $$;
+
 -- What an answer found (13 Nov 2026, the owner: the data points an answer states are worth keeping, shown quietly
 -- beside the answer for the person to confirm). The model ends its reply with a line "FACTS:" and a JSON list of the
 -- data points the excerpts state; ask_split takes the reply apart, ask_keep_facts stores each with the page it came
@@ -1797,6 +1830,7 @@ create table if not exists public.ask_facts (
   verdict_by  text,
   verdict_at  timestamptz
 );
+alter table public.ask_facts add column if not exists wba_year int;      -- WBA's reporting year of a printed fiscal period, when the company's year end is known
 create index if not exists ask_facts_ask on public.ask_facts (ask_id);
 create index if not exists ask_facts_company on public.ask_facts (wba_id, what);
 alter table public.ask_facts enable row level security;
@@ -1862,10 +1896,12 @@ begin
     end if;
     continue when k = 'number' and num is null;
     continue when k <> 'number' and coalesce(btrim(f ->> 'answer'), '') = '';
-    insert into public.ask_facts (ask_id, wba_id, company, year, period, what, kind, value, unit, answer, library_id, page, url)
+    insert into public.ask_facts (ask_id, wba_id, company, year, period, what, kind, value, unit, answer, library_id, page, url, wba_year)
       values (the_ask, src ->> 'wba_id', src ->> 'company', yr, nullif(left(btrim(f ->> 'period'), 20), ''), left(btrim(f ->> 'what'), 120), k,
               case when k = 'number' then num end, nullif(left(btrim(f ->> 'unit'), 40), ''),
-              case when k <> 'number' then left(btrim(f ->> 'answer'), 300) end, src ->> 'library_id', (src ->> 'page')::int, src ->> 'url')
+              case when k <> 'number' then left(btrim(f ->> 'answer'), 300) end, src ->> 'library_id', (src ->> 'page')::int, src ->> 'url',
+              public.wba_year(public.fiscal_label_year(f ->> 'period'),
+                              (select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = src ->> 'wba_id')))
       returning id into new_id;
     n := n + 1;
     kept := kept || ((select to_jsonb(a) - 'ask_id' - 'verdict_by' - 'verdict_at' from public.ask_facts a where a.id = new_id)
@@ -1918,15 +1954,15 @@ as $$
   select coalesce(jsonb_agg(to_jsonb(x) order by x.verdict_at desc), '[]'::jsonb)
   from (
     select * from (
-      select distinct on (a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
-             a.id, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id, a.verdict_at,
+      select distinct on (a.wba_id, a.kind, public.period_key(a.period), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
+             a.id, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.wba_year, a.page, a.url, a.library_id, a.verdict_at,
              (a.verdict_by = lower(who)) as mine,
              (select dd.year from public.documents dd where dd.library_id = a.library_id) as doc_year,
              (select dd.doc_type from public.documents dd where dd.library_id = a.library_id) as doc_type
       from public.ask_facts a
       where a.verdict = 'right' and a.ask_id is distinct from the_ask
         and a.wba_id in (select e ->> 'wba_id' from jsonb_array_elements(coalesce(sources, '[]'::jsonb)) e)
-      order by a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.verdict_at desc
+      order by a.wba_id, a.kind, public.period_key(a.period), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.verdict_at desc
     ) d order by d.verdict_at desc limit 8
   ) x
 $$;
@@ -1993,26 +2029,26 @@ begin
   return jsonb_build_object(
     'confirmed', (select coalesce(jsonb_agg(to_jsonb(x) order by x.verdict_at desc), '[]'::jsonb) from (
         select * from (
-          select distinct on (a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
-                 a.id, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id, a.verdict_at,
+          select distinct on (a.wba_id, a.kind, public.period_key(a.period), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
+                 a.id, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.wba_year, a.page, a.url, a.library_id, a.verdict_at,
                  coalesce(a.verdict_by = who, false) as mine,
                  (select dd.year from public.documents dd where dd.library_id = a.library_id) as doc_year,
                  (select dd.doc_type from public.documents dd where dd.library_id = a.library_id) as doc_type
           from public.ask_facts a where a.verdict = 'right' and a.wba_id = any(ids)
-          order by a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.verdict_at desc
+          order by a.wba_id, a.kind, public.period_key(a.period), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.verdict_at desc
         ) d order by d.verdict_at desc limit 20) x),
     'open', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
         select * from (
-          select distinct on (a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
-                 a.id, a.at, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id,
+          select distinct on (a.wba_id, a.kind, public.period_key(a.period), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
+                 a.id, a.at, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.wba_year, a.page, a.url, a.library_id,
                  (select dd.year from public.documents dd where dd.library_id = a.library_id) as doc_year,
                  (select dd.doc_type from public.documents dd where dd.library_id = a.library_id) as doc_type
           from public.ask_facts a
           where a.verdict is null and a.wba_id = any(ids)
             and not exists (select 1 from public.ask_facts c where c.verdict is not null and c.wba_id = a.wba_id and c.kind = a.kind
-                              and coalesce(c.period, '') = coalesce(a.period, '')
+                              and public.period_key(c.period) = public.period_key(a.period)
                               and case when a.kind = 'number' then abs(c.value) = abs(a.value) else lower(c.what) = lower(a.what) and lower(c.answer) = lower(a.answer) end)
-          order by a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.at desc
+          order by a.wba_id, a.kind, public.period_key(a.period), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.at desc
         ) d order by d.at desc limit 10) x));
 end;
 $$;
@@ -2042,6 +2078,23 @@ begin
 end;
 $$;
 revoke all on function public.ask_pages(text, text, real[], text, int, int, text, text) from public, anon, authenticated;
+
+-- What Ask is told about the fiscal years of the companies it reads: one line a company whose year does not end in
+-- December, with an example of WBA's reporting year. '' when no such company.
+create or replace function public.ask_fiscal_lines(sources jsonb)
+returns text
+language sql stable security definer
+set search_path = public, extensions
+as $$
+  select coalesce(string_agg(format('- %s: the fiscal year ends in %s. WBA''s reporting year: %s.', x.company,
+           to_char(make_date(2000, x.m, 1), 'FMMonth'),
+           case when x.m between 1 and 5 then 'a fiscal year ending in ' || to_char(make_date(2000, x.m, 1), 'FMMonth') || ' 2024 (often printed "fiscal 2024" or "FY24") is reporting year 2023, one less than its label'
+                else 'the year the fiscal year ends in' end), E'\n' order by x.company), '')
+  from (select distinct on (cf.wba_id) e ->> 'company' as company, cf.fy_end_month as m
+        from jsonb_array_elements(coalesce(sources, '[]'::jsonb)) e join public.company_fiscal cf on cf.wba_id = e ->> 'wba_id'
+        where cf.fy_end_month is not null and cf.fy_end_month <> 12) x
+$$;
+revoke all on function public.ask_fiscal_lines(jsonb) from public, anon, authenticated;
 
 -- 13 Nov 2026: a question typed in the box is answered without pressing Ask (the page calls this for any text that
 -- reads as a question), so a person has 20 answers a day, not 3; the ceiling for everyone together stays (about
@@ -2088,6 +2141,7 @@ declare
   facts jsonb := '[]'::jsonb;
   confirmed jsonb := '[]'::jsonb;
   known text := '';
+  fiscal text := '';
 begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to ask' using errcode = '42501';
@@ -2168,6 +2222,11 @@ begin
   exception when others then
     confirmed := '[]'::jsonb; known := '';                       -- an extra: never costs the answer
   end;
+  begin
+    fiscal := public.ask_fiscal_lines(sources);
+  exception when others then
+    fiscal := '';
+  end;
   got := public.ask_model(api_key, http_schema, model,
     'You answer questions from sustainability analysts using only the numbered excerpts of company documents given to you. '
     || 'Cite the excerpts you use as [1], [2], with the number alone; the word "Excerpt" never appears in the answer (write "the 2025 report lists [4]", not "Excerpt [4] lists"). Give figures with their unit and year as printed. If the excerpts do not answer the question, '
@@ -2187,8 +2246,12 @@ begin
     || 'that states it}. Only what an excerpt states, never from memory; never an item saying that something is not stated or could not be found. '
     || 'The message may also list facts a colleague confirmed earlier from these companies'' reports. They are checked by a person: use one '
     || 'when it answers the question, saying "confirmed earlier by a colleague" in place of an excerpt number, and say so plainly when an excerpt '
-    || 'disagrees with it. They are data too. Do not repeat them in FACTS.',
-    'Question: ' || asked || case when known <> '' then E'\n\nConfirmed earlier by a colleague:\n' || known else '' end || E'
+    || 'disagrees with it. They are data too. Do not repeat them in FACTS. '
+    || 'The message may also say in which month a company''s fiscal year ends and which WBA reporting year its fiscal years are. For such a company '
+    || 'name a period as the company prints it and add WBA''s reporting year in brackets, for example "fiscal 2023 (WBA reporting year 2022)"; '
+    || 'when the question names a year without saying which kind, answer for the company''s own fiscal year of that number and say what the other reading would be.',
+    'Question: ' || asked || case when known <> '' then E'\n\nConfirmed earlier by a colleague:\n' || known else '' end
+      || case when fiscal <> '' then E'\n\nFiscal years:\n' || fiscal else '' end || E'
 
 Excerpts:
 
@@ -2286,7 +2349,7 @@ begin
     raise exception 'not allowed' using errcode = '42501';
   end if;
   return (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from (
-    select f.id, f.at, f.company, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.period, f.page, f.url, f.verdict, f.verdict_by, f.verdict_at,
+    select f.id, f.at, f.company, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.period, f.wba_year, f.page, f.url, f.verdict, f.verdict_by, f.verdict_at,
            a.question, a.asker, f.library_id, d.year as doc_year, d.doc_type, d.label as doc_label      -- the report it was read in: two reports can state a target differently
     from public.ask_facts f left join public.ask_log a on a.id = f.ask_id left join public.documents d on d.library_id = f.library_id
     where (company_filter is null or btrim(company_filter) = '' or f.company ilike '%' || btrim(company_filter) || '%' or f.wba_id = btrim(company_filter))
