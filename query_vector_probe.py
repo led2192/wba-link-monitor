@@ -66,10 +66,16 @@ def cosine(a, b):
     return sum(x * y for x, y in zip(unit(a), unit(b)))
 
 
+def refusal(body, token):
+    """What the service said when it refused, short and on one line, with the token struck out should it be echoed."""
+    return " ".join(str(body).replace(token, "***").split())[:240]
+
+
 def hosted_vector(text, token, send=post):
     """(vector or None, status, seconds). The e5 models want "query: " before a question."""
     t0 = time.time()
     status, body = send(URL, token, {"inputs": "query: " + text, "normalize": True})
+    hosted_vector.said = "" if status == 200 else refusal(body, token)
     return (as_vector(body) if status == 200 else None), status, time.time() - t0
 
 
@@ -80,7 +86,8 @@ def probe(token, questions=QUESTIONS, local=None, send=post, out=print):
     for i, q in enumerate(questions, 1):
         v, status, s = hosted_vector(q, token, send)
         if v is None or len(v) != 384:
-            out(f"question {i}: HTTP {status}, no usable vector ({'length ' + str(len(v)) if v else 'none'}), {s:.2f} s")
+            out(f"question {i}: HTTP {status}, no usable vector ({'length ' + str(len(v)) if v else 'none'}), {s:.2f} s"
+                + (f"; the service said: {hosted_vector.said}" if getattr(hosted_vector, "said", "") and i == 1 else ""))
             good = False
             continue
         line = f"question {i}: HTTP 200, 384 numbers, {s:.2f} s"
