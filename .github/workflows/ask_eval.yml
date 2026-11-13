@@ -1,0 +1,36 @@
+# Do the pages an answer reads still include the pages people confirmed? (ask_eval.py). Manual: run before and after
+# a change to the search or to ask_pages. Calls no model. Prints counts only.
+name: Ask evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "keep the run's counts in public.ask_eval"
+        type: boolean
+        default: false
+      limit:
+        description: "questions at most"
+        default: "300"
+
+concurrency:
+  group: ask-eval
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Evaluate
+        run: python ask_eval.py --limit "${{ inputs.limit || '300' }}" ${{ inputs.commit && '--commit' || '' }}
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
