@@ -347,3 +347,6 @@ The build of a vector index is fast only while its graph fits in `maintenance_wo
 
 ## "on conflict (q)" inside a function whose parameter is q
 In a PL/pgSQL function with `#variable_conflict use_variable`, a column named like a parameter is replaced by the parameter everywhere, also in `on conflict (column)`. `query_vector_made(q text)` failed on its first live call (13 Nov 2026) with "there is no unique or exclusion constraint matching the ON CONFLICT specification". Name the constraint (`on conflict on constraint query_vectors_pkey`). The offline tests had not run the function to its insert, because it needs the http extension: a function that calls a service gets a test with the service stubbed.
+
+## An answer written from the best pages cannot count
+Ask reads eight pages. A question about one company's figure is answered from them; "how many companies do X" is not, and the model answered it anyway with the number of companies among its eight pages (13 Nov 2026: "six", against 33 in the first 50 results). A retrieval answer needs to be told what its pages are (a sample) and questions that need the whole library need a query that counts, not a model that reads.
