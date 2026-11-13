@@ -2212,7 +2212,10 @@ revoke all on function public.admin_overview(text) from public, anon;
 grant execute on function public.admin_overview(text) to authenticated;
 
 -- The facts of answers, newest first: marked ones ('marked'), unmarked ('open') or all, for one company or every company.
-create or replace function public.admin_facts(key text, company_filter text default null, which text default 'marked', max_rows int default 100)
+-- 13 Nov 2026 (the owner): also by word. "search" is looked for in the company, the fact's name, its value or answer
+-- and the question that produced it; every word must be there.
+drop function if exists public.admin_facts(text, text, text, int);
+create or replace function public.admin_facts(key text, company_filter text default null, which text default 'marked', max_rows int default 100, search text default null)
 returns jsonb
 language plpgsql stable security definer
 set search_path = public, extensions
@@ -2228,12 +2231,14 @@ begin
     from public.ask_facts f left join public.ask_log a on a.id = f.ask_id
     where (company_filter is null or btrim(company_filter) = '' or f.company ilike '%' || btrim(company_filter) || '%' or f.wba_id = btrim(company_filter))
       and (which = 'all' or (which = 'open' and f.verdict is null) or (which not in ('all', 'open') and f.verdict is not null))
+      and not exists (select 1 from regexp_split_to_table(lower(btrim(coalesce(search, ''))), '\s+') w
+                      where w <> '' and position(w in lower(concat_ws(' ', f.company, f.what, f.answer, f.value::text, f.unit, f.period, f.year::text, a.question))) = 0)
     order by coalesce(f.verdict_at, f.at) desc
     limit least(greatest(coalesce(max_rows, 100), 1), 500)) x);
 end;
 $$;
-revoke all on function public.admin_facts(text, text, text, int) from public, anon;
-grant execute on function public.admin_facts(text, text, text, int) to authenticated;
+revoke all on function public.admin_facts(text, text, text, int, text) from public, anon;
+grant execute on function public.admin_facts(text, text, text, int, text) to authenticated;
 
 -- The owner's own mark on a fact: right, wrong, or none (the mark is taken off). It replaces anybody's mark.
 create or replace function public.admin_fact_set(key text, fact_id bigint, verdict text)

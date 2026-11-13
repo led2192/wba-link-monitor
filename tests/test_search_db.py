@@ -332,6 +332,9 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertFalse(cur.fetchone()[0])
             cur.execute("select jsonb_array_length(public.admin_facts('k', 'nike', 'open', 10)), public.admin_fact_set('k', %s, 'wrong')", (fact,))
             self.assertEqual(cur.fetchone()[0], 1)
+            cur.execute("select jsonb_array_length(public.admin_facts('k', null, 'all', 10, 'nike scope')), jsonb_array_length(public.admin_facts('k', null, 'all', 10, 'nike revenue')), "
+                        "jsonb_array_length(public.admin_facts('k', null, 'all', 10, 'q?'))")
+            self.assertEqual(cur.fetchone(), (1, 0, 1))                         # every word must be there; the question counts too
             cur.execute("select public.admin_facts('k', null, 'marked', 10)")
             marked = cur.fetchone()[0]
             self.assertEqual((marked[0]["verdict"], marked[0]["question"], marked[0]["asker"]), ("wrong", "q?", "p@x.org"))

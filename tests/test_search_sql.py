@@ -352,3 +352,9 @@ def test_a_company_search_shows_what_answers_found():
     assert "grant execute on function public.company_facts(text, text) to anon, authenticated;" in SQL
     assert 'authed("company_facts", args)) || (await rpc("company_facts", args))' in PAGE
     assert "if (!state.company || state.answered || seq !== searchSeq) return;" in PAGE          # an answer takes their place
+
+
+def test_the_owner_groups_the_facts_by_company_and_searches_them():
+    assert "drop function if exists public.admin_facts(text, text, text, int);" in SQL
+    assert "grant execute on function public.admin_facts(text, text, text, int, text) to authenticated;" in SQL
+    assert "adminFactsView = { which: \"marked\", search: \"\", grouped: true }" in PAGE and "Grouped by company" in PAGE
