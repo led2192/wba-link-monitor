@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v60 2026-11-13";
+  const CLIENT = "lantern v61 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1369,6 +1369,9 @@
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
       const left = el("div"); left.append(f.verdict_at ? tag("confirmed", "#2E8B1F") : tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)"));
       left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
+      if (f.kind === "number" && !f.period && !f.year) {      // v61 (the owner): a figure with no year says so, and says which report printed it
+        const n = el("div", "ev", "year not stated on the page" + (f.doc_year ? `; printed in the ${f.doc_year} ${f.doc_type || "report"}` : "")); n.style.cssText = "margin:0 0 2px;color:#B4540A"; left.appendChild(n);
+      }
       const words = f.kind === "text";                                   // a sentence is read, not displayed like a figure
       const num = el("div", words ? null : "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, f.unit));   // a unit belongs to a figure ("month not stated text" showed the model's "text")
       if (words) num.style.cssText = "font-size:14px;line-height:1.4;margin:2px 0";
@@ -1376,7 +1379,7 @@
       return left;
     };
     const sourceLine = (f, lead) => {
-      const ev = el("div", "ev"); ev.append(document.createTextNode(lead + " · "));
+      const ev = el("div", "ev"); ev.append(document.createTextNode(lead + (f.doc_year ? `, ${f.doc_year} ${f.doc_type || "report"}` : "") + " · "));
       if (/^https?:\/\//i.test(f.url || "")) { const a = el("a", null, `source, page ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); ev.append(document.createTextNode(" · ")); }
       if (f.library_id && f.page) { const r = el("a", null, /^https?:\/\//i.test(f.url || "") ? "read here" : `read page ${f.page} here`); r.href = "#"; r.title = "The page's text, inside lanterN"; r.onclick = e => { e.preventDefault(); openReader(f.library_id, f.page, factNeedle(f)); }; ev.appendChild(r); }
       else if (!/^https?:\/\//i.test(f.url || "")) ev.append(document.createTextNode(`page ${f.page}`));
