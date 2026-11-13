@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v49 2026-11-13";
+  const CLIENT = "lantern v50 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1342,14 +1342,21 @@
     for (const f of state.facts) {
       const row = el("div", "v"), left = el("div");
       left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
-      const num = el("div", "num", (f.kind === "number" ? fmt(Number(f.value)) : f.answer) + " "); if (f.unit) num.append(el("small", null, f.unit)); left.appendChild(num);
+      const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
+      const num = el("div", "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear) num.append(el("small", null, f.unit)); left.appendChild(num);
       const marks = el("div"); marks.style.cssText = "display:flex;gap:4px;align-items:start";
       for (const [verdict, sign, tip] of [["right", "✓", "The page says this"], ["wrong", "✗", "The page does not say this"]]) {
         const bt = el("button", null, sign); bt.type = "button"; bt.title = tip;
         bt.style.cssText = "font:inherit;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer";
-        const paint = () => { for (const b of marks.children) { b.style.background = "var(--box)"; b.style.color = "var(--fg)"; } if (f.verdict === verdict) { bt.style.background = verdict === "right" ? "#4BB42D" : "#FF3C23"; bt.style.color = "#fff"; } };
-        bt.onclick = async () => { const r = await authed("ask_fact_verdict", { key, fact_id: f.id, verdict }); if (r && r.ok) { f.verdict = verdict; for (const b of marks.children) b.paint(); } };
-        bt.paint = paint; marks.appendChild(bt);
+        // each mark paints itself only (v49 painted the row from every mark, so the second mark wiped the first: a click on ✓ showed nothing)
+        const paint = () => { const on = f.verdict === verdict; bt.style.background = on ? (verdict === "right" ? "#4BB42D" : "#FF3C23") : "var(--box)"; bt.style.color = on ? "#fff" : "var(--fg)"; bt.style.borderColor = on ? "transparent" : "var(--line)"; };
+        bt.onclick = async () => {
+          bt.disabled = true; let r = null; try { r = await authed("ask_fact_verdict", { key, fact_id: f.id, verdict }); } catch (e) { r = null; } bt.disabled = false;
+          if (r && r.ok) { f.verdict = verdict; for (const b of marks.children) b.paint(); bt.title = "Saved"; }
+          else bt.title = r ? "Someone else already marked this one" : "Not saved: sign in with your WBA address and try again";
+          if (!(r && r.ok)) { bt.textContent = "!"; setTimeout(() => { bt.textContent = sign; }, 1500); }
+        };
+        bt.paint = paint; paint(); marks.appendChild(bt);
       }
       const ev = el("div", "ev"); ev.append(document.createTextNode("read by the model while answering · "));
       if (/^https?:\/\//i.test(f.url || "")) { const a = el("a", null, `source, page ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); } else ev.append(document.createTextNode(`page ${f.page}`));
