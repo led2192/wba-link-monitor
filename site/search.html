@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v51 2026-11-13";
+  const CLIENT = "lantern v52 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1339,7 +1339,7 @@
     if (!state.facts.length && !state.confirmed.length) return;
     // v51: the block is set apart quietly (a line of the accent colour down its side), and under the new facts come the
     // facts of earlier answers about the same companies that a colleague marked right.
-    const box = el("div", "fromanswer"); box.style.cssText = "border-left:3px solid var(--accent);padding-left:10px;margin:8px 0 12px";
+    const box = el("div", "fromanswer"); box.style.cssText = "border-left:3px solid var(--accent);padding:6px 10px;margin:8px 0 12px;border-radius:0 8px 8px 0;background:color-mix(in srgb, var(--accent) 7%, transparent)";   // a faint tint of the accent: these come from an answer, not from the robot's readings
     const factLine = f => {
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
       const left = el("div"); left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
