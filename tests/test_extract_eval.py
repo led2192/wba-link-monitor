@@ -540,6 +540,21 @@ class SemanticPool(unittest.TestCase):
         self.assertEqual(X.semantic_query({"name": "Employees"}), "Employees")
         self.assertEqual(X.semantic_query({}), "")
 
+    def test_where_the_figure_was_read(self):
+        got = ((1.0, 1.0, 1, "the model"), "d", 7)
+        self.assertEqual(X.semantic_read({"proposal": True, "got": got, "semantic_added": {("d", 7)}}), "added")
+        self.assertEqual(X.semantic_read({"proposal": True, "got": got, "semantic_added": {("d", 8)}}), "other")
+        self.assertEqual(X.semantic_read({"proposal": True, "got": got}), "other")
+        self.assertIsNone(X.semantic_read({"proposal": False, "got": None, "semantic_added": {("d", 7)}}))
+
+    def test_the_table_of_where_figures_were_read(self):
+        import collections
+        st = {"A": collections.Counter({"answers": 4, "semantic pages given": 6, "semantic read added": 2, "semantic read added right": 1,
+                                        "semantic read other": 1, "semantic read other right": 1}), "B": collections.Counter()}
+        md = X.semantic_table(["A", "B"], st, {"attributes": {"A": {"name": "Scope 1"}, "B": {"name": "Empty"}}})
+        self.assertIn("| A Scope 1 | 4 | 1.5 | 2 | 50% | 1 | 100% |", md)
+        self.assertIn("| B Empty | 0 | 0.0 | 0 | 0% | 0 | 0% |", md)
+
     def test_adds_the_nearest_new_pages_scaled_to_the_pool(self):
         cur = self.Cur([("d", 7, "our workforce totalled 45,000", 0.10), ("d", 4, "already in the pool", 0.12), ("d", 9, "plantilla media 44.000", 0.28),
                         ("e", 2, "something else", 0.55)])
