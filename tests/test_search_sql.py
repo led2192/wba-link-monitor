@@ -94,7 +94,7 @@ def test_scores_for_one_company_with_places_counted():
 
 def test_ask_is_signed_limited_and_keeps_the_key_out_of_the_page():
     ask = SQL[SQL.index("create or replace function public.ask("):SQL.index("-- A company's benchmark results")]
-    assert "public.email_may_search(who)" in ask and "per_day constant int := 20" in ask
+    assert "public.email_may_search(who)" in ask and "per_day constant int := 50;" in ask
     assert "from vault.decrypted_secrets d where d.name = 'anthropic_api_key'" in ask          # the key lives in the vault, nowhere else
     assert "sk-ant" not in SQL
     assert "a.answered and a.at >= date_trunc('day', now())" in ask                               # only answered questions count
@@ -240,7 +240,7 @@ def test_a_company_is_asked_for_not_added():
 
 def test_ask_has_a_ceiling_for_everyone_together():
     ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
-    assert "per_day_all constant int := 300;" in ask and ">= per_day_all then" in ask and "'everyone', true" in ask
+    assert "per_day_all constant int := 1000;" in ask and ">= per_day_all then" in ask and "'everyone', true" in ask
     wf = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "propose_values.yml"), encoding="utf-8").read()
     assert "--max-usd ${{ vars.READER_MAX_USD || '5' }}" in wf                       # the owner changes the night's ceiling without a code change
 
@@ -327,3 +327,17 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
     assert "'fy_end_month', (select mode() within group (order by substring(dd.period_end from 6 for 2))::int" in SQL
     assert "function fiscalNote(year, month)" in PAGE and "const end = m <= 5 ? y + 1 : y;" in PAGE      # the rule of reporting_year.py
     assert 'tag("from this answer", "var(--accent)")' in PAGE and "border-left:3px solid var(--accent)" not in PAGE
+
+
+def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
+    import re
+    names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
+    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set"}
+    for n in names:
+        body = SQL[SQL.index(f"create or replace function public.{n}("):]
+        body = body[:body.index("$$;")]
+        first = body[body.index("begin"):]
+        assert first.lstrip("begin").lstrip().startswith("if not public.admin_ok(key) then"), n
+        assert re.search(rf"revoke all on function public\.{n}\([^)]*\) from public, anon;", SQL), n
+    assert "public.search_key_name(key) = 'owner' and public.email_may_search(auth.jwt() ->> 'email')" in SQL      # the link and the sign-in, both
+    assert 'authed("admin_ok", { key })' in PAGE and "it is not shown again" in PAGE

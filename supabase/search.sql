@@ -1959,8 +1959,8 @@ set statement_timeout = '75s'
 as $$
 #variable_conflict use_variable
 declare
-  per_day constant int := 20;
-  per_day_all constant int := 300;      -- every person together: the most Ask can cost in a day is fixed (about 3 USD), however many people come (11 Nov 2026)
+  per_day constant int := 50;           -- 13 Nov 2026 (the owner): 20 were used up in a morning of ordinary use, and 20 answers cost under 0.10 USD
+  per_day_all constant int := 1000;     -- every person together: the most Ask can cost in a day is fixed (about 5 USD), however many people come (11 Nov 2026; 300 until 13 Nov)
   model constant text := 'claude-haiku-5-5';
   who text := lower(auth.jwt() ->> 'email');
   asked text := btrim(coalesce(question, ''));
@@ -2113,6 +2113,163 @@ end;
 $$;
 revoke all on function public.ask(text, text, text, text, int, int, text, text, real[]) from public, anon;
 grant execute on function public.ask(text, text, text, text, int, int, text, text, real[]) to authenticated;
+
+-- The owner's panel (13 Nov 2026). lanterN is now used by colleagues: the owner needs to tell the people and the
+-- links apart, to see and correct what people confirmed among the facts of answers, and to see what Ask costs.
+-- The owner is whoever opens the page with the owner's link AND is signed in with an allowed address: both, so that
+-- neither the link alone nor an account alone opens it. Every function here checks admin_ok first.
+create or replace function public.admin_ok(key text) returns boolean
+  language sql stable security definer set search_path = public, extensions
+  as $$ select coalesce(public.search_key_name(key) = 'owner' and public.email_may_search(auth.jwt() ->> 'email'), false) $$;
+revoke all on function public.admin_ok(text) from public, anon;
+grant execute on function public.admin_ok(text) to authenticated;
+
+-- Links (who searched with which link), people (who signed in and did what) and days (answers and their cost at the
+-- list price of the reader model: 0.10 USD a million tokens in, 0.50 out).
+create or replace function public.admin_overview(key text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'links', (select coalesce(jsonb_agg(to_jsonb(x) order by x.name), '[]'::jsonb) from (
+        select k.name, k.active, k.created,
+               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '7 days') as searches_7d,
+               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '30 days') as searches_30d,
+               (select max(l.at) from public.search_log l where l.key_name = k.name) as last_used
+        from public.search_keys k) x),
+    'people', (select coalesce(jsonb_agg(to_jsonb(x) order by x.last_seen desc nulls last), '[]'::jsonb) from (
+        select e.email,
+               (select count(*) from public.ask_log a where a.asker = e.email and a.answered and a.at > now() - interval '7 days') as answers_7d,
+               (select count(*) from public.ask_log a where a.asker = e.email and a.answered) as answers,
+               (select count(*) from public.ask_facts f where f.verdict_by = e.email and f.verdict = 'right') as facts_right,
+               (select count(*) from public.ask_facts f where f.verdict_by = e.email and f.verdict = 'wrong') as facts_wrong,
+               (select count(*) from public.value_reviews r where r.reviewer = e.email) as value_reviews,
+               greatest((select max(a.at) from public.ask_log a where a.asker = e.email),
+                        (select max(f.verdict_at) from public.ask_facts f where f.verdict_by = e.email),
+                        (select max(r.at) from public.value_reviews r where r.reviewer = e.email)) as last_seen
+        from (select asker as email from public.ask_log union select verdict_by from public.ask_facts where verdict_by is not null
+              union select reviewer from public.value_reviews) e) x),
+    'days', (select coalesce(jsonb_agg(to_jsonb(x) order by x.day desc), '[]'::jsonb) from (
+        select (a.at at time zone 'utc')::date as day, count(*) filter (where a.answered) as answers, count(*) as asked,
+               count(distinct a.asker) as people, coalesce(sum(a.input_tokens), 0) as tokens_in, coalesce(sum(a.output_tokens), 0) as tokens_out,
+               round((coalesce(sum(a.input_tokens), 0) * 0.10 + coalesce(sum(a.output_tokens), 0) * 0.50) / 1000000.0, 3) as usd
+        from public.ask_log a where a.at > now() - interval '30 days' group by 1) x),
+    'facts', (select jsonb_build_object('all', count(*), 'right', count(*) filter (where f.verdict = 'right'),
+                                        'wrong', count(*) filter (where f.verdict = 'wrong')) from public.ask_facts f));
+end;
+$$;
+revoke all on function public.admin_overview(text) from public, anon;
+grant execute on function public.admin_overview(text) to authenticated;
+
+-- The facts of answers, newest first: marked ones ('marked'), unmarked ('open') or all, for one company or every company.
+create or replace function public.admin_facts(key text, company_filter text default null, which text default 'marked', max_rows int default 100)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from (
+    select f.id, f.at, f.company, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.period, f.page, f.url, f.verdict, f.verdict_by, f.verdict_at,
+           a.question, a.asker
+    from public.ask_facts f left join public.ask_log a on a.id = f.ask_id
+    where (company_filter is null or btrim(company_filter) = '' or f.company ilike '%' || btrim(company_filter) || '%' or f.wba_id = btrim(company_filter))
+      and (which = 'all' or (which = 'open' and f.verdict is null) or (which not in ('all', 'open') and f.verdict is not null))
+    order by coalesce(f.verdict_at, f.at) desc
+    limit least(greatest(coalesce(max_rows, 100), 1), 500)) x);
+end;
+$$;
+revoke all on function public.admin_facts(text, text, text, int) from public, anon;
+grant execute on function public.admin_facts(text, text, text, int) to authenticated;
+
+-- The owner's own mark on a fact: right, wrong, or none (the mark is taken off). It replaces anybody's mark.
+create or replace function public.admin_fact_set(key text, fact_id bigint, verdict text)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  done int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if verdict not in ('right', 'wrong', 'none') then
+    raise exception 'right, wrong or none' using errcode = '22023';
+  end if;
+  update public.ask_facts f
+    set verdict = nullif(verdict, 'none'), verdict_by = case when verdict = 'none' then null else who end,
+        verdict_at = case when verdict = 'none' then null else now() end
+    where f.id = fact_id;
+  get diagnostics done = row_count;
+  return jsonb_build_object('ok', done = 1);
+end;
+$$;
+revoke all on function public.admin_fact_set(text, bigint, text) from public, anon;
+grant execute on function public.admin_fact_set(text, bigint, text) to authenticated;
+
+-- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
+-- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
+create or replace function public.admin_link_new(key text, name text)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  label text := lower(btrim(coalesce(name, '')));
+  fresh text;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if label !~ '^[a-z0-9][a-z0-9-]{1,29}$' then
+    return jsonb_build_object('error', 'a name of 2 to 30 letters, digits or hyphens');
+  end if;
+  if exists (select 1 from public.search_keys k where k.name = label) then
+    return jsonb_build_object('error', 'that name is taken');
+  end if;
+  fresh := encode(extensions.gen_random_bytes(18), 'hex');
+  insert into public.search_keys (name, key_hash) values (label, encode(extensions.digest(fresh, 'sha256'), 'hex'));
+  return jsonb_build_object('name', label, 'key', fresh);
+end;
+$$;
+revoke all on function public.admin_link_new(text, text) from public, anon;
+grant execute on function public.admin_link_new(text, text) to authenticated;
+
+-- Switch a link off or on again. The owner's own link cannot be switched off from here.
+create or replace function public.admin_link_set(key text, name text, active boolean)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  done int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if name = 'owner' then
+    return jsonb_build_object('error', 'the owner''s link stays on');
+  end if;
+  update public.search_keys k set active = coalesce(active, true) where k.name = name;
+  get diagnostics done = row_count;
+  return jsonb_build_object('ok', done = 1);
+end;
+$$;
+revoke all on function public.admin_link_set(text, text, boolean) from public, anon;
+grant execute on function public.admin_link_set(text, text, boolean) to authenticated;
 
 -- A company's benchmark results, for the card beside a search for that company (10 Nov 2026): for each benchmark
 -- it was scored in (company_scores, loaded nightly from the WBA Data API by load_scores.py), the score, its place

@@ -272,7 +272,7 @@
   <form class="box" id="form" autocomplete="off">
     <span class="qwrap">
       <input id="q" type="search" placeholder="Unilever scope 1 2024, or &quot;living wage&quot;" aria-label="Search" autofocus>
-      <button type="button" class="askbtn" id="askBtn" title="Ask: an answer written from the pages found, with its sources. A question typed in the box is answered without pressing this. Twenty answers a day.">
+      <button type="button" class="askbtn" id="askBtn" title="Ask: an answer written from the pages found, with its sources. A question typed in the box is answered without pressing this. Fifty answers a day.">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.900 5.300L19 10l-5.100 1.700L12 17l-1.900-5.300L5 10l5.100-1.700z" fill="currentColor"/><path d="M19 15l.8 2.200L22 18l-2.200.8L19 21l-.8-2.200L16 18l2.200-.8z" fill="currentColor"/></svg>Ask
       </button>
     </span>
@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v54 2026-11-13";
+  const CLIENT = "lantern v55 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1302,7 +1302,7 @@
     if (text.length < 8) { note.textContent = "Type a question in the box first, for example: What were Unilever’s scope 1 emissions in 2024?"; return; }
     $("head").classList.remove("home"); closeHistory();
     const t = await token();
-    if (!t) { note.textContent = "Ask answers from the pages lanterN finds and shows its sources. Three questions a day; sign in with your WBA address.".replace("Three", "Twenty");
+    if (!t) { note.textContent = "Ask answers from the pages lanterN finds and shows its sources. Three questions a day; sign in with your WBA address.".replace("Three", "Fifty");
               const hold = el("div", "values"); c.appendChild(hold); signInBox(hold, ask); return; }
     note.textContent = "Reading the pages…";
     search(false);                                           // the results under the answer, as for any search; it also reads the filters in the box
@@ -1315,10 +1315,10 @@
         body: JSON.stringify({ key, question: text, q: state.q || null, company_filter: state.company || null, year_from: state.from || null, year_to: state.to || null, type_filter: state.type || null, client: CLIENT + (auto ? " auto" : ""), qvec: vec }) });
       j = await r.json().catch(() => ({})); if (!r.ok) j = { error: j.message || `HTTP ${r.status}` };
     } catch (e) { j = { error: e.message }; }
-    const left = typeof j.left === "number" ? `${j.left} of ${j.per_day || 20} answers left today` : ""; cap.lastChild.textContent = left;
+    const left = typeof j.left === "number" ? `${j.left} of ${j.per_day || 50} answers left today` : ""; cap.lastChild.textContent = left;
     if (j.off) { note.textContent = `Ask is not switched on yet: ${j.why || "the model key is not in the database’s vault"}.`; return; }
     if (j.limit && j.everyone) { note.textContent = "Ask has answered all the questions it can today, for everyone. It comes back at midnight UTC; the search below still works."; return; }
-    if (j.limit) { note.textContent = `You have had today’s ${j.per_day || 20} answers. They come back at midnight UTC; the search below still works.`; return; }
+    if (j.limit) { note.textContent = `You have had today’s ${j.per_day || 50} answers. They come back at midnight UTC; the search below still works.`; return; }
     if (j.none) { note.textContent = "No page was found for this question" + (j.keywords ? ` (searched “${j.keywords}”)` : "") + ". Try other words, or name the company and the year." + (j.why ? ` [${j.why}]` : ""); return; }
     if (j.error || !j.answer) { note.textContent = `No answer: ${j.error || "the model returned nothing"}. This one does not count.`; return; }
     note.remove(); const src = j.sources || [];
@@ -1415,6 +1415,94 @@
   $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lanterN</a>';
   $("share").onclick = async ev => { ev.preventDefault(); const link = location.origin + location.pathname + "#k=" + key;       // the same key on another device or for a colleague: searching needs only the link; reviews, Ask and adding need a WBA sign-in
     try { await navigator.clipboard.writeText(link); ev.target.textContent = "Link copied: paste it to a colleague or open it on your other device"; } catch (e) { ev.target.textContent = link; } };
+  // The owner's panel (13 Nov 2026): links and people, the facts of answers and who marked them, and what Ask costs.
+  // Shown only when the page was opened with the owner's link and the person is signed in (admin_ok); every admin
+  // function checks the same on the server. A window inside the page: the search under it stays as it is.
+  async function adminLink() {
+    let ok = false; try { ok = (await authed("admin_ok", { key })) === true; } catch (e) { ok = false; }
+    if (!ok || $("adminOpen")) return;
+    const a = el("a", null, "Admin"); a.id = "adminOpen"; a.href = "#"; a.onclick = ev => { ev.preventDefault(); openAdmin(); };
+    $("foot").append(document.createTextNode(" · "), a);
+  }
+  function openAdmin() {
+    let d = $("admin");
+    if (!d) {
+      d = document.createElement("dialog"); d.id = "admin";
+      d.style.cssText = "width:min(1100px,94vw);max-height:88vh;border:1px solid var(--line);border-radius:14px;padding:0;background:var(--bg);color:var(--fg);font:inherit";
+      document.body.appendChild(d);
+      d.addEventListener("click", ev => { if (ev.target === d) d.close(); });      // a click outside closes it
+    }
+    d.innerHTML = "";
+    const head = el("div"); head.style.cssText = "display:flex;align-items:center;gap:8px;padding:14px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)";
+    head.append(el("b", null, "lanterN · admin"));
+    const tabs = el("div"); tabs.style.cssText = "display:flex;gap:6px;margin-left:16px"; head.appendChild(tabs);
+    const close = el("button", null, "Close"); close.type = "button"; close.style.cssText = "margin-left:auto;font:inherit;padding:4px 12px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer"; close.onclick = () => d.close(); head.appendChild(close);
+    const body = el("div"); body.style.cssText = "padding:16px 20px;overflow:auto;font-size:14px";
+    d.append(head, body);
+    const views = { "People and links": adminPeople, "Facts from answers": adminFacts, "Cost": adminCost };
+    for (const name of Object.keys(views)) {
+      const b = el("button", null, name); b.type = "button"; b.style.cssText = "font:inherit;padding:4px 12px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer";
+      b.onclick = () => { for (const x of tabs.children) x.style.fontWeight = "400"; b.style.fontWeight = "700"; body.textContent = "Loading…"; views[name](body); };
+      tabs.appendChild(b);
+    }
+    d.showModal(); tabs.firstChild.click();
+  }
+  const adminTable = (cols, rows) => {
+    const t = el("table"); t.style.cssText = "border-collapse:collapse;width:100%;margin:6px 0 18px";
+    const tr = el("tr"); for (const c of cols) { const th = el("th", null, c); th.style.cssText = "text-align:left;font-weight:600;padding:6px 10px 6px 0;border-bottom:1px solid var(--line);white-space:nowrap"; tr.appendChild(th); } t.appendChild(tr);
+    for (const r of rows) { const row = el("tr"); for (const c of r) { const td = el("td"); td.style.cssText = "padding:6px 10px 6px 0;border-bottom:1px solid var(--line);vertical-align:top"; if (c instanceof Node) td.appendChild(c); else td.textContent = c == null ? "" : String(c); row.appendChild(td); } t.appendChild(row); }
+    return t;
+  };
+  const adminWhen = t => t ? new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "never";
+  const adminBtn = (text, fn) => { const b = el("button", null, text); b.type = "button"; b.style.cssText = "font:inherit;font-size:13px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer;margin-right:4px"; b.onclick = fn; return b; };
+  async function adminPeople(body) {
+    const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available: open lanterN with the owner's link and sign in."; return; }
+    body.innerHTML = "";
+    body.append(el("h3", null, "Links"));
+    const note = el("p", null, "A link of its own for a person or a group: their searches are counted under its name and it can be switched off alone. A person who only searches is known by the link, not by name."); note.style.color = "var(--muted, #667)"; body.appendChild(note);
+    const form = el("div"); form.style.cssText = "display:flex;gap:8px;align-items:center;margin:8px 0";
+    const name = document.createElement("input"); name.placeholder = "name of the new link, e.g. luis"; name.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--box);color:var(--fg)";
+    const out = el("span"); out.style.cssText = "font-size:13px";
+    form.append(name, adminBtn("Create link", async () => {
+      const r = await authed("admin_link_new", { key, name: name.value }); if (!r) { out.textContent = "Not created."; return; }
+      if (r.error) { out.textContent = r.error; return; }
+      const link = location.origin + location.pathname + "#k=" + r.key;        // shown this once: only its hash is kept
+      let copied = false; try { await navigator.clipboard.writeText(link); copied = true; } catch (e) {}
+      out.textContent = copied ? `Link "${r.name}" created and copied: paste it to its person now, it is not shown again.` : link;
+      adminPeople(body).then(() => { const again = body.querySelector("[data-out]"); if (again) again.textContent = out.textContent; });
+    }), out); out.dataset.out = "1"; body.appendChild(form);
+    body.appendChild(adminTable(["Link", "State", "Searches, 7 days", "30 days", "Last used", ""], o.links.map(l => [l.name, l.active ? "on" : "off", l.searches_7d, l.searches_30d, adminWhen(l.last_used),
+      l.name === "owner" ? "" : adminBtn(l.active ? "Switch off" : "Switch on", async () => { await authed("admin_link_set", { key, name: l.name, active: !l.active }); adminPeople(body); })])));
+    body.append(el("h3", null, "People who signed in"));
+    body.appendChild(adminTable(["Person", "Answers, 7 days", "Answers in all", "Facts marked right", "wrong", "Values reviewed", "Last seen"],
+      o.people.map(p => [p.email, p.answers_7d, p.answers, p.facts_right, p.facts_wrong, p.value_reviews, adminWhen(p.last_seen)])));
+  }
+  async function adminFacts(body, which, company) {
+    which = which || "marked"; company = company || "";
+    const rows = await authed("admin_facts", { key, company_filter: company || null, which, max_rows: 200 }); if (!rows) { body.textContent = "Not available."; return; }
+    body.innerHTML = "";
+    const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap";
+    const box = document.createElement("input"); box.placeholder = "company"; box.value = company; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:220px;background:var(--box);color:var(--fg)";
+    box.onkeydown = ev => { if (ev.key === "Enter") adminFacts(body, which, box.value.trim()); };
+    bar.append(box);
+    for (const [w, label] of [["marked", "Marked by a person"], ["open", "Not marked yet"], ["all", "All"]]) { const b = adminBtn(label, () => adminFacts(body, w, box.value.trim())); if (w === which) b.style.fontWeight = "700"; bar.appendChild(b); }
+    bar.append(el("span", null, `${rows.length} shown, newest first`)); body.appendChild(bar);
+    body.appendChild(adminTable(["Company", "Fact", "Value", "Page", "Mark", "By", "Question", ""], rows.map(f => {
+      const value = f.kind === "number" ? [fmt(Number(f.value)), f.unit].filter(Boolean).join(" ") : f.answer;
+      const src = /^https?:\/\//i.test(f.url || "") ? (() => { const a = el("a", null, `p. ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; return a; })() : (f.page ? `p. ${f.page}` : "");
+      const acts = el("span"); for (const [v, label] of [["right", "✓"], ["wrong", "✗"], ["none", "clear"]]) acts.appendChild(adminBtn(label, async () => { await authed("admin_fact_set", { key, fact_id: f.id, verdict: v }); adminFacts(body, which, box.value.trim()); }));
+      const q = el("span", null, (f.question || "").slice(0, 90)); q.title = (f.question || "") + (f.asker ? " · asked by " + f.asker : "");
+      return [f.company, [f.what, f.period || f.year].filter(Boolean).join(" · "), value, src, f.verdict || "", f.verdict_by ? `${f.verdict_by}, ${adminWhen(f.verdict_at)}` : "", q, acts];
+    })));
+  }
+  async function adminCost(body) {
+    const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available."; return; }
+    body.innerHTML = "";
+    const total = o.days.reduce((a, d) => a + Number(d.usd), 0), answers = o.days.reduce((a, d) => a + Number(d.answers), 0);
+    body.append(el("p", null, `Last 30 days: ${answers} answers, about ${total.toFixed(2)} USD` + (answers ? ` (${(100 * total / answers).toFixed(2)} cents an answer, ${(20 * total / answers).toFixed(2)} USD for twenty)` : "") + `. At the reader model's list price: 0.10 USD a million tokens read, 0.50 written. Facts kept from answers: ${o.facts.all} (${o.facts.right} marked right, ${o.facts.wrong} wrong).`));
+    body.appendChild(adminTable(["Day (UTC)", "Questions", "Answered", "People", "Tokens read", "Tokens written", "USD"], o.days.map(d => [d.day, d.asked, d.answers, d.people, Number(d.tokens_in).toLocaleString("en-GB"), Number(d.tokens_out).toLocaleString("en-GB"), Number(d.usd).toFixed(3)])));
+  }
+  adminLink();
   loadCompanies().then(() => {
     const q0 = new URLSearchParams(location.search).get("q");
     if (q0) { $("q").value = q0; go(); }
