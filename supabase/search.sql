@@ -1811,13 +1811,15 @@ begin
     return jsonb_build_object('answer', nullif(btrim(coalesce(raw, ''), E' \n\r\t'), ''), 'facts', facts);
   end if;
   tail := btrim(regexp_replace(substr(raw, at + 6), '```(json)?', '', 'g'), E' \n\r\t');
+  if tail ~ '\]' then tail := left(tail, length(tail) - strpos(reverse(tail), ']') + 1); end if;      -- words after the list are dropped
   begin
     facts := tail::jsonb;
     if jsonb_typeof(facts) <> 'array' then facts := '[]'::jsonb; end if;
   exception when others then
     facts := '[]'::jsonb;
   end;
-  return jsonb_build_object('answer', nullif(btrim(regexp_replace(left(raw, at - 1), '```(json)?\s*$', ''), E' \n\r\t'), ''), 'facts', facts);
+  return jsonb_build_object('answer', nullif(btrim(regexp_replace(left(raw, at - 1), '```(json)?\s*$', ''), E' \n\r\t'), ''), 'facts', facts,
+                            'stated', jsonb_array_length(facts), 'tail', length(tail));
 end;
 $$;
 revoke all on function public.ask_split(text) from public, anon, authenticated;
@@ -1842,13 +1844,18 @@ begin
   for f in select e from jsonb_array_elements(coalesce(facts, '[]'::jsonb)) e loop
     exit when n >= 8;
     continue when jsonb_typeof(f) <> 'object' or coalesce(btrim(f ->> 'what'), '') = '';
-    select e into src from jsonb_array_elements(coalesce(sources, '[]'::jsonb)) e where e ->> 'n' = f ->> 'source' limit 1;
+    -- the source as the model wrote it: 3, "3", "[3]" or [3, 5] (the first number counts)
+    select e into src from jsonb_array_elements(coalesce(sources, '[]'::jsonb)) e where e ->> 'n' = substring(f ->> 'source' from '[0-9]+') limit 1;
     continue when src is null;                                   -- a fact with no page behind it is not kept
     k := case when lower(f ->> 'kind') in ('number', 'yes_no', 'text') then lower(f ->> 'kind') else 'text' end;
     num := null; yr := null;
-    begin num := (f ->> 'value')::numeric; exception when others then num := null; end;
+    begin num := nullif(regexp_replace(f ->> 'value', '[^0-9.eE+-]', '', 'g'), '')::numeric; exception when others then num := null; end;   -- "60,836" is a number too
     begin yr := (f ->> 'year')::int; exception when others then yr := null; end;
     if yr is not null and (yr < 1990 or yr > 2100) then yr := null; end if;
+    if k = 'number' and num is null and coalesce(btrim(f ->> 'answer'), '') <> '' then k := 'text'; end if;    -- called a number, written as words
+    if k <> 'number' and coalesce(btrim(f ->> 'answer'), '') = '' and coalesce(btrim(f ->> 'value'), '') <> '' then
+      f := f || jsonb_build_object('answer', f ->> 'value');                                                  -- the words put under "value"
+    end if;
     continue when k = 'number' and num is null;
     continue when k <> 'number' and coalesce(btrim(f ->> 'answer'), '') = '';
     insert into public.ask_facts (ask_id, wba_id, company, year, period, what, kind, value, unit, answer, library_id, page, url)
@@ -2045,7 +2052,8 @@ Excerpts:
   if answer is null then
     return jsonb_build_object('error', coalesce(err, 'no answer'), 'left', per_day - used, 'per_day', per_day);
   end if;
-  return jsonb_build_object('answer', answer, 'sources', sources, 'left', per_day - used - 1, 'per_day', per_day, 'keywords', keywords, 'facts', facts);
+  return jsonb_build_object('answer', answer, 'sources', sources, 'left', per_day - used - 1, 'per_day', per_day, 'keywords', keywords, 'facts', facts,
+                            'facts_stated', parts -> 'stated', 'facts_tail', parts -> 'tail');   -- for telling apart: no list written, a list not readable, facts with no page
 end;
 $$;
 revoke all on function public.ask(text, text, text, text, int, int, text, text, real[]) from public, anon;

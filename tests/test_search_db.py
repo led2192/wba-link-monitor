@@ -236,7 +236,17 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual((plain["answer"], plain["facts"], broken["answer"], broken["facts"]), ("Only an answer.", [], "A.", []))
             cur.execute("select public.ask_keep_facts(7, %s::jsonb, %s::jsonb)", (json.dumps(parts["facts"]), json.dumps(sources)))
             kept = cur.fetchone()[0]
+            loose = [{"what": "Net zero target year", "kind": "number", "value": "2,040", "source": "[2]"},
+                     {"what": "Net zero target", "kind": "yes_no", "value": "yes", "source": [1, 2]},
+                     {"what": "Target scope", "kind": "number", "value": "n/a", "answer": "Scopes 1, 2 and 3", "source": "1"}]
+            cur.execute("select public.ask_keep_facts(8, %s::jsonb, %s::jsonb)", (json.dumps(loose), json.dumps(sources)))
+            tolerant = cur.fetchone()[0]
+            cur.execute("select public.ask_split(%s)", ('A.\nFACTS: [{"what":"x","kind":"text","answer":"y","source":1}]\nThat is all.',))
+            trailing = cur.fetchone()[0]
             c.rollback()
+        self.assertEqual([(k["kind"], k["value"], k["answer"], k["page"]) for k in tolerant],
+                         [("number", 2040, None, 10), ("yes_no", None, "yes", 23), ("text", None, "Scopes 1, 2 and 3", 23)])   # the model's small liberties are read
+        self.assertEqual((trailing["stated"], len(trailing["facts"])), (1, 1))                                                  # words after the list do not lose it
         self.assertEqual([k["what"] for k in kept], ["Scope 1 emissions", "Scope 1 and 2 target", "a year that is none"])   # no page, or no figure: not kept
         self.assertEqual((kept[0]["value"], kept[0]["unit"], kept[0]["year"], kept[0]["period"], kept[0]["page"], kept[0]["library_id"]), (60836, "tCO2e", 2024, "FY24", 23, "L1"))
         self.assertEqual((kept[1]["kind"], kept[1]["answer"], kept[1]["verdict"]), ("yes_no", "yes", None))
