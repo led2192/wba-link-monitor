@@ -161,8 +161,14 @@ def write_document(cur, lid, chunks, vectors, model, pairs=None):
                 (lid, len(rows), model))
 
 
-INDEX_SQL = ("create index if not exists chunks_embedding on public.chunks using hnsw (embedding extensions.vector_cosine_ops) "
-             "with (m = 16, ef_construction = 64)")
+# The index is on the embeddings at half precision (13 Nov 2026). The first build, on the full vectors of 4,063,845
+# chunks with 6 GB of maintenance_work_mem (the most the machine's shared memory gave; 8 GB was refused), loaded
+# 81% in 2 h 07 min and then 3% in the next 37 minutes: the graph no longer fitted in memory and pgvector went on
+# from disk, about nine times slower. At half precision a vector takes 768 bytes instead of 1,536, the graph of
+# every chunk fits in that memory, and the index is half the size on disk and in the cache of a smaller machine.
+# The vectors in the table stay whole; find_meaning searches the index with the same cast (search.sql).
+INDEX_SQL = ("create index if not exists chunks_embedding on public.chunks using hnsw "
+             "((embedding::extensions.halfvec(384)) extensions.halfvec_cosine_ops) with (m = 16, ef_construction = 64)")
 PAIRS_INDEX_SQL = "create index if not exists page_pairs_pairs on public.page_pairs using gin (pairs)"
 FILL_INDEXES = ("chunks_embedding", "page_pairs_pairs")      # dropped for the fill, built once at the end
 
