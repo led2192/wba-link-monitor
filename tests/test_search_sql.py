@@ -315,3 +315,9 @@ def test_confirmed_facts_come_back_with_the_next_answer():
     assert "Confirmed earlier by a colleague:" in ask and "Do not repeat them in FACTS." in ask          # the answer reads them too
     assert "revoke all on function public.ask_confirmed_facts(bigint, jsonb, text) from public, anon, authenticated;" in SQL
     assert "confirmed by a colleague" in PAGE and "Confirmed before" in PAGE
+
+
+def test_the_facts_panel_stays_readable():
+    assert "const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));" in PAGE     # a confirmed figure is not offered again
+    assert 'const known = el("details")' in PAGE                                                          # folded: the robot's values stay in sight
+    assert 'const words = f.kind === "text";' in PAGE                                                     # a sentence is not set like a figure

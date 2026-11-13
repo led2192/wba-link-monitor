@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v52 2026-11-13";
+  const CLIENT = "lantern v53 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1339,11 +1339,20 @@
     if (!state.facts.length && !state.confirmed.length) return;
     // v51: the block is set apart quietly (a line of the accent colour down its side), and under the new facts come the
     // facts of earlier answers about the same companies that a colleague marked right.
-    const box = el("div", "fromanswer"); box.style.cssText = "border-left:3px solid var(--accent);padding:6px 10px;margin:8px 0 12px;border-radius:0 8px 8px 0;background:color-mix(in srgb, var(--accent) 7%, transparent)";   // a faint tint of the accent: these come from an answer, not from the robot's readings
+    // v53 (the owner, 13 Nov): the line down the side and the faintest tint; clear rules between the cards; a text is
+    // set as text, not as a figure; a new fact that repeats a confirmed figure is not listed again; the confirmed ones
+    // are folded away so the robot's values below stay in sight.
+    const box = el("div", "fromanswer"); box.style.cssText = "border-left:3px solid var(--accent);padding:2px 10px;margin:8px 0 12px;border-radius:0 8px 8px 0;background:color-mix(in srgb, var(--accent) 3%, transparent)";
+    const rule = row => { row.style.borderTop = "1px solid color-mix(in srgb, var(--fg) 16%, transparent)"; row.style.paddingTop = "10px"; row.style.marginTop = "10px"; return row; };
+    const same = (a, b) => a.kind === "number" && b.kind === "number" && Math.abs(Number(a.value)) === Math.abs(Number(b.value)) && (!a.period || !b.period || a.period === b.period);
+    const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));
     const factLine = f => {
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
       const left = el("div"); left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
-      const num = el("div", "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear) num.append(el("small", null, f.unit)); left.appendChild(num);
+      const words = f.kind === "text";                                   // a sentence is read, not displayed like a figure
+      const num = el("div", words ? null : "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear) num.append(el("small", null, f.unit));
+      if (words) num.style.cssText = "font-size:14px;line-height:1.4;margin:2px 0";
+      left.appendChild(num);
       return left;
     };
     const sourceLine = (f, lead) => {
@@ -1352,16 +1361,17 @@
       return ev;
     };
     if (state.confirmed.length) {
-      const known = el("div"); known.append(el("div", "subhead", `Confirmed before · ${state.confirmed.length}`));
+      const known = el("details"); const head = el("summary", "subhead", `Confirmed before · ${state.confirmed.length}`); head.style.cursor = "pointer"; head.title = "Facts of earlier answers about this company that a person marked right"; known.append(head);
+      known.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb, var(--fg) 16%, transparent)";
       for (const f of state.confirmed) {
-        const row = el("div", "v"), tick = el("div", null, "✓"); tick.title = "Marked right by a person"; tick.style.cssText = "color:#4BB42D;font-weight:700;padding:4px 8px";
+        const row = rule(el("div", "v")), tick = el("div", null, "✓"); tick.title = "Marked right by a person"; tick.style.cssText = "color:#4BB42D;font-weight:700;padding:4px 8px";
         row.append(factLine(f), tick, sourceLine(f, f.mine ? "from an earlier answer, confirmed by you" : "from an earlier answer, confirmed by a colleague")); known.appendChild(row);
       }
       box._known = known;
     }
-    if (state.facts.length) box.append(el("div", "subhead", `Found in this answer · ${state.facts.length} · yours to confirm`));
-    for (const f of state.facts) {
-      const row = el("div", "v"), left = factLine(f);
+    if (fresh.length) box.append(el("div", "subhead", `Found in this answer · ${fresh.length} · yours to confirm`));
+    fresh.forEach((f, at) => {
+      const row = el("div", "v"), left = factLine(f); if (at) rule(row);
       const marks = el("div"); marks.style.cssText = "display:flex;gap:4px;align-items:start";
       for (const [verdict, sign, tip] of [["right", "✓", "The page says this"], ["wrong", "✗", "The page does not say this"]]) {
         const bt = el("button", null, sign); bt.type = "button"; bt.title = tip;
@@ -1377,7 +1387,7 @@
         bt.paint = paint; paint(); marks.appendChild(bt);
       }
       row.append(left, marks, sourceLine(f, "read by the model while answering")); box.appendChild(row);
-    }
+    });
     if (box._known) box.appendChild(box._known);
     const first = panel.querySelector("summary"); if (first) first.after(box); else panel.prepend(box);
     panel.hidden = false;
