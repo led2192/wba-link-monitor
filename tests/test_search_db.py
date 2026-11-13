@@ -451,6 +451,52 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((years[last - 1]["annual"], years[last - 1]["documents"]), ([], 1))                    # a policy document is not a main report
         self.assertIsNone(skipped)                                                                               # already shown to this person
 
+    def test_a_gap_a_person_explained_and_a_sustainability_chapter_are_not_gaps(self):
+        import datetime, psycopg
+        last = datetime.date.today().year - 1
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("create table if not exists public.companies (wba_id text primary key, name text, industry text, country text, region text, website text, lantern_id text)")
+            cur.execute("delete from public.companies"); cur.execute("delete from public.gap_notes")
+            cur.execute("insert into public.companies (wba_id, name) values ('GAP_CSRD', 'Chapter Co'), ('GAP_PRIV', 'Private Co')")
+            for y in (last, last - 1, last - 2):                 # Chapter Co: an annual report each year, no sustainability report
+                cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year) values (%s, 'GAP_CSRD', 'Chapter Co', 'Annual Report', %s)", (f"csrd-{y}", y))
+                for page in (1, 2, 3):
+                    body = "sustainability statements prepared under ESRS" if y >= last - 1 else "the year in brief"
+                    cur.execute("insert into public.pages (library_id, page, body, words, year, doc_type, wba_id) values (%s, %s, %s, to_tsvector('simple', %s), %s, 'Annual Report', 'GAP_CSRD')",
+                                (f"csrd-{y}", page, body, body, y))
+                cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year) values (%s, 'GAP_PRIV', 'Private Co', 'Sustainability Report', %s)", (f"priv-{y}", y))
+            cur.execute("select public.gap_card('k', array['GAP_PRIV'])")
+            chapter = cur.fetchone()[0]
+            # a person says so: Private Co publishes no accounts (every year); Chapter Co's oldest year is not published
+            cur.execute("select public.gap_note_set('k', 'GAP_PRIV', 'annual', 0, 'not_published')")
+            cur.execute("select public.gap_card('k', array['GAP_CSRD'])")
+            private = cur.fetchone()[0]
+            cur.execute("select public.gap_note_set('k', 'GAP_PRIV', 'annual', %s, 'gap')", (last,))            # one year taken back
+            cur.execute("select public.gap_card('k', array['GAP_CSRD'])")
+            back = cur.fetchone()[0]
+            cur.execute("select public.gap_note_set('k', 'GAP_CSRD', 'sustainability', %s, 'not_published')", (last - 2,))
+            cur.execute("select public.gap_card('k', array['GAP_PRIV'])")
+            explained = cur.fetchone()[0]
+            bad = []
+            for args in (("GAP_PRIV", "annual", 0, "inside_annual"), ("GAP_PRIV", "annual", 0, "not_yet"), ("GAP_PRIV", "annual", 0, "because"), ("NO_SUCH", "annual", 0, "parent")):
+                try:
+                    with c.transaction():
+                        cur.execute("select public.gap_note_set('k', %s, %s, %s, %s)", args)
+                    bad.append(args)
+                except psycopg.Error:
+                    pass
+            c.rollback()
+        years = {y["year"]: y for y in chapter["years"]}
+        self.assertEqual(chapter["gaps"], 1)                                             # the two years whose annual report carries the statements are not gaps
+        self.assertTrue(years[last]["sustainability_inside"] and years[last - 1]["sustainability_inside"])
+        self.assertNotIn("sustainability_inside", years[last - 2])
+        self.assertIsNone(private)                                                       # every gap explained: no card
+        self.assertEqual((back["wba_id"], back["gaps"]), ("GAP_PRIV", 1))
+        self.assertEqual({y["year"]: y["annual_note"] for y in back["years"]}, {last: "gap", last - 1: "not_published", last - 2: "not_published"})
+        self.assertIsNone(explained)
+        self.assertEqual(bad, [])                                                        # only the answers of the list, for a company that exists
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
