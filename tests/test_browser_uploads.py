@@ -101,6 +101,21 @@ class Store(unittest.TestCase):
 
 
 class Rules(unittest.TestCase):
+    def test_what_the_sender_said_goes_to_the_row(self):
+        import browser_uploads as B
+        self.assertEqual(B.sender_fields({"sent_type": "Annual Report", "sent_year": 2024}), {"source_type_check": "Annual Report", "doc_year": "2024"})
+        self.assertEqual(B.sender_fields({"sent_type": "Brochure", "sent_year": 1066}), {})          # not a type of the library, not a year: nothing written
+        self.assertEqual(B.sender_fields({"sent_type": None, "sent_year": None}), {})
+        self.assertIn("The sender says: Annual Report, year 2024.", B.note_for("a.pdf", None, "Annual Report", 2024))
+        self.assertNotIn("sender says", B.note_for("a.pdf", "https://x.example/a.pdf"))
+        import os
+        sql = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "supabase", "search.sql"), encoding="utf-8").read()
+        js = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "extension", "send.js"), encoding="utf-8").read()
+        for t in B.SENT_TYPES:                                                                       # one list: the library's, the database's, the extension's
+            self.assertIn("'" + t + "'", sql); self.assertIn('"' + t + '"', js)
+        self.assertIn("drop function if exists public.upload_begin(text, text, bigint, text, text, text, text);", sql)
+        self.assertIn("doc.file ? null : doc.url", js)                                               # a file from the computer has no address
+
     def test_the_script_keeps_the_house_rules(self):
         src = open(os.path.join(ROOT, "browser_uploads.py"), encoding="utf-8").read()
         self.assertIn('ap.add_argument("--commit", action="store_true")', src)               # dry run by default
@@ -110,7 +125,7 @@ class Rules(unittest.TestCase):
         self.assertIsNone(re.search(r"^\s+requests\s*=", src.split("def main")[1], re.M))      # the name of the library is not given to anything else (11 Nov 2026: the first real run died on it)
         sql = open(os.path.join(ROOT, "supabase", "search.sql"), encoding="utf-8").read()
         self.assertIn("with check (bucket_id = ''uploads'' and public.upload_expected(name))", sql)   # a person can store the registered object only
-        self.assertIn("revoke all on function public.upload_begin(text, text, bigint, text, text, text, text) from public, anon;", sql)
+        self.assertIn("revoke all on function public.upload_begin(text, text, bigint, text, text, text, text, text, int) from public, anon;", sql)
 
 
 if __name__ == "__main__":

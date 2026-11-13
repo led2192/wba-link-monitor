@@ -145,6 +145,8 @@ async function listDocuments() {
     return /^https?:/.test(TAB.url) ? [{ url: TAB.url.split("#")[0], text: TAB.title, sure: false }] : [];
   }
 }
+// The library's document types, for the sender who knows what the document is (0.4.0). The same list the database checks.
+const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Impact Report", "Climate Report", "Environmental Reports", "Social Reports", "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "CDP Report", "GRI", "SASB Index", "Human Rights Policy", "Code of Conduct", "Policy Documents", "Statutory Documents", "Company Presentations", "Engagement Report", "Certifications"];
 function nameOf(url, disposition, text) {
   const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition || "");
   let n = m ? m[1] : "";
@@ -194,12 +196,17 @@ async function download(url) {
 }
 
 async function sendOne(doc, company) {
-  const { buf, disposition } = await download(doc.url);
+  // a PDF chosen from this computer (0.4.0: a site that only downloads after a captcha) is read as it is; it has no address
+  const { buf, disposition } = doc.file ? { buf: await doc.file.arrayBuffer(), disposition: "" } : await download(doc.url);
+  if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");
   if (buf.byteLength > MAX_BYTES) throw new Error(`larger than 50 MB (${Math.round(buf.byteLength / 1048576)} MB)`);
   const sha = hex(await crypto.subtle.digest("SHA-256", buf));
-  const name = nameOf(doc.url, disposition, doc.text);
-  const j = await rpc("upload_begin", { company: company.id, filename: name, bytes: buf.byteLength, sha256: sha, source_url: doc.url,
-                                         page_url: doc.url === TAB.url.split("#")[0] ? null : TAB.url, client: CLIENT });
+  const name = doc.file ? nameOf("", "", doc.file.name.replace(/\.pdf$/i, "")) : nameOf(doc.url, disposition, doc.text);
+  const page = /^https?:/.test(TAB.url || "") ? TAB.url : null;
+  const year = doc.year && /^(19|20)\d\d$/.test(doc.year.value.trim()) ? +doc.year.value.trim() : null;
+  const j = await rpc("upload_begin", { company: company.id, filename: name, bytes: buf.byteLength, sha256: sha, source_url: doc.file ? null : doc.url,
+                                         page_url: doc.file ? page : (doc.url === TAB.url.split("#")[0] ? null : TAB.url), client: CLIENT,
+                                         sent_type: doc.kind && doc.kind.value || null, sent_year: year });
   if (j.known) return "already in lanterN";
   if (j.again) return "already sent";
   const t = await token(); let r;
@@ -279,9 +286,17 @@ function render() {
   const list = $("list"); list.innerHTML = "";
   if (!docs.length) list.append(el("div", "empty", "No link to a PDF on this page. If its buttons lead to the reports, use \"Look one level deeper\" above; or open the page that lists the documents, or the PDF itself, and click the button again."));
   docs.forEach((d, i) => {
-    const row = el("label", "doc" + (d.sure ? "" : " maybe")); const box = el("input"); box.type = "checkbox"; box.checked = d.sure && looksReport(d) && !d.held; box.dataset.i = i;
+    const row = el("label", "doc" + (d.sure ? "" : " maybe")); const box = el("input"); box.type = "checkbox"; box.checked = d.file ? !d.done : (d.sure && looksReport(d) && !d.held); if (d.done) box.disabled = true; box.dataset.i = i;
     box.onchange = count;
-    row.append(box, el("span", "t", d.text || d.url.split("/").pop()), el("span", "u", d.url)); const s = el("span", "s", ""); row.append(s); d.status = s; d.box = box;
+    row.append(box, el("span", "t", d.text || d.url.split("/").pop()), el("span", "u", d.file ? "from this computer" : d.url)); const s = el("span", "s", ""); row.append(s); d.status = s; d.box = box;
+    // optional: what the sender knows of the document. Kept across repaints; nothing is asked of anyone who leaves it closed.
+    const more = el("span", "more"); const open = el("a", null, "type and year (optional)"); open.href = "#";
+    const kind = el("select"); const none = el("option", null, "type: let lanterN decide"); none.value = ""; kind.append(none); for (const t of TYPES) { const o = el("option", null, t); o.value = t; kind.append(o); }
+    const year = el("input"); year.placeholder = "year on the report"; year.maxLength = 4; year.inputMode = "numeric"; year.size = 14;
+    kind.value = d.kindValue || ""; year.value = d.yearValue || ""; kind.hidden = year.hidden = !(d.kindValue || d.yearValue); open.hidden = !kind.hidden;
+    kind.onchange = () => { d.kindValue = kind.value; }; year.oninput = () => { d.yearValue = year.value.trim(); };
+    open.onclick = e => { e.preventDefault(); kind.hidden = year.hidden = false; open.hidden = true; };
+    more.append(open, kind, year); row.append(more); d.kind = kind; d.year = year;
     if (d.held) { box.disabled = true; s.textContent = "already in lanterN"; s.className = "s ok"; }
     list.append(row);
   });
@@ -297,7 +312,7 @@ const looksReport = d => { const t = d.text + " " + pathWords(d.url); return REP
 // Before anything is downloaded: the links lanterN already holds for the chosen company are shown as held, not offered.
 async function markHeld() {
   const company = chosenCompany(); docs.forEach(d => { d.held = false; });
-  if (company && docs.length) { try { const held = new Set(await rpc("upload_known", { company: company.id, urls: docs.map(d => d.url) })); docs.forEach(d => { d.held = held.has(d.url); }); } catch (e) {} }
+  if (company && docs.length) { try { const held = new Set(await rpc("upload_known", { company: company.id, urls: docs.filter(d => !d.file).map(d => d.url) })); docs.forEach(d => { d.held = !d.file && held.has(d.url); }); } catch (e) {} }
   render();
 }
 function count() { const n = docs.filter(d => d.box && d.box.checked).length; const h = docs.filter(d => d.held).length; $("count").textContent = `${docs.length} document link${docs.length === 1 ? "" : "s"} on this page, ${n} ticked${h ? `, ${h} already in lanterN` : ""}`; $("go").disabled = !n; }
@@ -315,6 +330,8 @@ async function start() {
   hostMemory = (await store.get("hosts")) || {};
   const guess = companyOfHost(hostOf(TAB.url)) || companies.find(c => c.id === hostMemory[hostOf(TAB.url)]); if (guess) $("company").value = guess.name;
   docs = await listDocuments(); await confirmMaybes(docs); await markHeld();
+  // PDFs from this computer (0.4.0): a file the site only hands over after a captcha is downloaded by the person and chosen here
+  $("files").onchange = () => { for (const f of $("files").files) { if (!docs.some(d => d.file && d.file.name === f.name && d.file.size === f.size)) docs.push({ url: "", text: f.name.replace(/\.pdf$/i, ""), sure: true, file: f, held: false }); } $("files").value = ""; render(); };
   $("company").onchange = markHeld;
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };

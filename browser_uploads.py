@@ -26,7 +26,7 @@ invented for it (orphans are logged, never fabricated).
 Dry run prints what it would do, by company, never who sent it. Env: SUPABASE_DB_URL, SUPABASE_URL,
 SUPABASE_SERVICE_KEY, AIRTABLE_TOKEN, AIRTABLE_BASE; AIRTABLE_QA_TOKEN for the run record.
 """
-import argparse, collections, hashlib, os, re, sys, time
+import argparse, collections, hashlib, json, os, re, sys, time
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -43,8 +43,25 @@ def library_id(wba, source_url, filename, size):
     return f"{wba}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
 
 
-def note_for(filename, source_url):
-    return f"Sent from a person's browser ({filename})" + (f", downloaded from {source_url}." if source_url else ".")
+def note_for(filename, source_url, sent_type=None, sent_year=None):
+    said = [x for x in (sent_type, f"year {sent_year}" if sent_year else None) if x]
+    return (f"Sent from a person's browser ({filename})" + (f", downloaded from {source_url}." if source_url else ".")
+            + (f" The sender says: {', '.join(said)}." if said else ""))
+
+
+SENT_TYPES = set(json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "source_type_terms.json"), encoding="utf-8")))
+
+
+def sender_fields(u):
+    """What the sender said of the document, as fields of the row (extension 0.4.0). The type goes to source_type_check,
+    the field a person corrects and the robot fills only where it is empty; the year to doc_year, the rules' input to
+    the year. Both are a person's word: written on a new row and on a row that gets its file."""
+    f = {}
+    if u.get("sent_type") in SENT_TYPES:
+        f["source_type_check"] = u["sent_type"]
+    if u.get("sent_year") and 1990 <= int(u["sent_year"]) <= 2100:
+        f["doc_year"] = str(int(u["sent_year"]))
+    return f
 
 
 REQ = re.compile(r"^REQ_(\d+)$")
@@ -198,8 +215,9 @@ def main():
             print("public.browser_uploads is not there yet: nothing to do.")
             run.finish("ok", rows_in=0, rows_out=0, notes="no table yet")
             return 0
-        cur.execute("select id, wba_id, source_url, filename, bytes, path from public.browser_uploads where status = 'stored' order by id limit %s", (a.limit,))
-        uploads = [dict(zip(("id", "wba_id", "source_url", "filename", "bytes", "path"), r)) for r in cur.fetchall()]
+        cur.execute("select id, wba_id, source_url, filename, bytes, path, to_jsonb(b) ->> 'sent_type', (to_jsonb(b) ->> 'sent_year')::int "
+                    "from public.browser_uploads b where status = 'stored' order by id limit %s", (a.limit,))      # to_jsonb: the two columns may not be installed yet
+        uploads = [dict(zip(("id", "wba_id", "source_url", "filename", "bytes", "path", "sent_type", "sent_year"), r)) for r in cur.fetchall()]
         if not uploads:
             print("No new file sent from a browser.")
             run.finish("ok", rows_in=0, rows_out=0, notes="nothing new")
@@ -287,14 +305,15 @@ def main():
             if not fname.lower().endswith(".pdf"):
                 fname += ".pdf"
             file_cell = [{"url": storage.signed(u["path"]), "filename": fname}]
-            note = note_for(fname, u["source_url"])
+            note = note_for(fname, u["source_url"], u.get("sent_type"), u.get("sent_year"))
             if act == "fill":
-                airtable_request("PATCH", f"{url}/{rec}", headers, payload={"fields": {"file": file_cell, "Reviewer notes": note}})
+                airtable_request("PATCH", f"{url}/{rec}", headers, payload={"fields": {"file": file_cell, "Reviewer notes": note, **sender_fields(u)}, "typecast": True})   # no link field among them
             else:
                 fields = {"library_id": lid, "wba_id": u["wba_id"], "company_name": companies[u["wba_id"]], "file": file_cell,
                           "doc_year": HR.year_of(u["source_url"] or fname) or HR.year_of(fname), "first_seen": today, "Reviewer notes": note}
                 if u["source_url"]:
                     fields["document_url"] = u["source_url"]
+                fields.update(sender_fields(u))
                 airtable_request("POST", url, headers, payload={"fields": {k: v for k, v in fields.items() if v not in (None, "")}, "typecast": True})   # no link field among them
             mark(u, "taken", f"{'file put on the existing row' if act == 'fill' else 'new row'} {lid}")
             time.sleep(0.25)
