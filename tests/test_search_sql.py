@@ -280,3 +280,14 @@ def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
     assert "drop function if exists public.ask(text, text, text, text, int, int, text, text);" in SQL             # one ask, not two the API could confuse
     assert "function isQuestion(text)" in PAGE and "citedFirst(" in PAGE
     assert "isQuestion($(\"q\").value) ? ask(true) : search(false)" in PAGE                                      # no button to press
+
+
+def test_what_an_answer_finds_is_kept_unconfirmed_and_shown_beside_it():
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    assert "write FACTS: followed by a JSON array" in ask and "Only what an excerpt states, never from memory." in ask
+    assert "facts := public.ask_keep_facts(ask_id, parts -> 'facts', sources);" in ask and "'facts', facts)" in ask
+    assert "revoke all on function public.ask_keep_facts(bigint, jsonb, jsonb) from public, anon, authenticated;" in SQL
+    assert "grant execute on function public.ask_fact_verdict(text, bigint, text) to authenticated;" in SQL
+    assert "(a.verdict_by is null or a.verdict_by = who)" in SQL                                  # one person's mark is not replaced by another's
+    assert "alter table public.ask_facts enable row level security;" in SQL
+    assert "Found in this answer" in PAGE and 'authed("ask_fact_verdict"' in PAGE
