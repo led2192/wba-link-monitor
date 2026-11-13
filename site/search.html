@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v50 2026-11-13";
+  const CLIENT = "lantern v51 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -367,7 +367,7 @@
   }
 
   let companies = [];
-  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null, blended: false, cited: [], lastRows: [], facts: [] };
+  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null, blended: false, cited: [], lastRows: [], facts: [], confirmed: [] };
   let industries = [], regions = [];
 
   async function rpc(fn, body) {
@@ -602,7 +602,7 @@
   async function search(fromChips, more) {
     document.body.classList.remove("playing");                    // a search ends the card game
     if (typeof closeHistory === "function") closeHistory();          // and the suggestions step aside for the results (they stayed open over them when the page opened on a search)
-    if (!more) { state.cited = []; state.facts = []; }                                 // the pages an answer cited belong to that question
+    if (!more) { state.cited = []; state.facts = []; state.confirmed = []; }                                 // the pages an answer cited belong to that question
     if (!fromChips) {
       const parsed = parse($("q").value);
       state.q = parsed.q;
@@ -1324,7 +1324,7 @@
       const nums = [...new Set([...j.answer.matchAll(/\[(\d+)\]/g)].map(m => m[1]))];
       state.cited = nums.map(n => src.find(x => String(x.n) === n)).filter(x => x && x.library_id).map(x => ({ log_id: state.logId, rank: 0, library_id: x.library_id, company: x.company, wba_id: x.wba_id, year: x.year, doc_type: x.doc_type, label: x.label, url: x.url, page: x.page, score: 0, excerpt: x.excerpt || "" }));
       if (state.cited.length) { render(citedFirst(state.lastRows), false); window.scrollTo(0, 0); }
-      state.facts = Array.isArray(j.facts) ? j.facts : []; showFacts();
+      state.facts = Array.isArray(j.facts) ? j.facts : []; state.confirmed = Array.isArray(j.confirmed) ? j.confirmed : []; showFacts();
     }
     const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : m; });
     c.appendChild(body);
@@ -1335,15 +1335,33 @@
   // What the answer found (13 Nov 2026): the data points the answer states, each with its page, at the top of the side
   // panel for the person to mark right or wrong. Unconfirmed readings; kept in the search database (ask_facts).
   function showFacts() {
-    const panel = $("values"), old = panel.querySelector(".fromanswer"); if (old) old.remove();
-    if (!state.facts.length) return;
-    const box = el("div", "fromanswer");
-    box.append(el("div", "subhead", `Found in this answer · ${state.facts.length} · yours to confirm`));
-    for (const f of state.facts) {
-      const row = el("div", "v"), left = el("div");
-      left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
+    const panel = $("values"); for (const old of panel.querySelectorAll(".fromanswer")) old.remove();
+    if (!state.facts.length && !state.confirmed.length) return;
+    // v51: the block is set apart quietly (a line of the accent colour down its side), and under the new facts come the
+    // facts of earlier answers about the same companies that a colleague marked right.
+    const box = el("div", "fromanswer"); box.style.cssText = "border-left:3px solid var(--accent);padding-left:10px;margin:8px 0 12px";
+    const factLine = f => {
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
+      const left = el("div"); left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
       const num = el("div", "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear) num.append(el("small", null, f.unit)); left.appendChild(num);
+      return left;
+    };
+    const sourceLine = (f, lead) => {
+      const ev = el("div", "ev"); ev.append(document.createTextNode(lead + " · "));
+      if (/^https?:\/\//i.test(f.url || "")) { const a = el("a", null, `source, page ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); } else ev.append(document.createTextNode(`page ${f.page}`));
+      return ev;
+    };
+    if (state.confirmed.length) {
+      const known = el("div"); known.append(el("div", "subhead", `Confirmed before · ${state.confirmed.length}`));
+      for (const f of state.confirmed) {
+        const row = el("div", "v"), tick = el("div", null, "✓"); tick.title = "Marked right by a person"; tick.style.cssText = "color:#4BB42D;font-weight:700;padding:4px 8px";
+        row.append(factLine(f), tick, sourceLine(f, f.mine ? "from an earlier answer, confirmed by you" : "from an earlier answer, confirmed by a colleague")); known.appendChild(row);
+      }
+      box._known = known;
+    }
+    if (state.facts.length) box.append(el("div", "subhead", `Found in this answer · ${state.facts.length} · yours to confirm`));
+    for (const f of state.facts) {
+      const row = el("div", "v"), left = factLine(f);
       const marks = el("div"); marks.style.cssText = "display:flex;gap:4px;align-items:start";
       for (const [verdict, sign, tip] of [["right", "✓", "The page says this"], ["wrong", "✗", "The page does not say this"]]) {
         const bt = el("button", null, sign); bt.type = "button"; bt.title = tip;
@@ -1358,10 +1376,9 @@
         };
         bt.paint = paint; paint(); marks.appendChild(bt);
       }
-      const ev = el("div", "ev"); ev.append(document.createTextNode("read by the model while answering · "));
-      if (/^https?:\/\//i.test(f.url || "")) { const a = el("a", null, `source, page ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); } else ev.append(document.createTextNode(`page ${f.page}`));
-      row.append(left, marks, ev); box.appendChild(row);
+      row.append(left, marks, sourceLine(f, "read by the model while answering")); box.appendChild(row);
     }
+    if (box._known) box.appendChild(box._known);
     const first = panel.querySelector("summary"); if (first) first.after(box); else panel.prepend(box);
     panel.hidden = false;
   }
