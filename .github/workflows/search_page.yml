@@ -49,6 +49,10 @@ jobs:
           sed -i -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" build/send-to-lantern/config.js
           grep -q "__SUPABASE_" build/send-to-lantern/config.js && { echo "placeholders left in the extension"; exit 1; } || true
           (cd build && zip -qr ../public/send-to-lantern.zip send-to-lantern)
+          # the download link carries the version: a browser that kept the last zip served 0.4.2 after 0.4.3 was out (13 Nov 2026)
+          V=$(python3 -c "import json;print(json.load(open('extension/manifest.json'))['version'])")
+          sed -i -e "s#href=\"send-to-lantern.zip\">Download the extension (zip)#href=\"send-to-lantern.zip?v=$V\">Download the extension, version $V (zip)#" public/send-to-lantern.html
+          grep -q "send-to-lantern.zip?v=$V" public/send-to-lantern.html || { echo "the download link was not given its version"; exit 1; }
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

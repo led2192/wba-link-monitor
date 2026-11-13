@@ -91,7 +91,8 @@ class Extension(unittest.TestCase):
         wf = read(".github", "workflows", "search_page.yml")
         self.assertIn("extension/**", wf); self.assertIn("public/send-to-lantern.zip", wf)
         self.assertIn('placeholders left in the extension', wf)
-        self.assertIn('href="send-to-lantern.zip"', read("site", "send-to-lantern.html"))
+        self.assertIn('href="send-to-lantern.zip">Download the extension (zip)', read("site", "send-to-lantern.html"))
+        self.assertIn('send-to-lantern.zip?v=$V', wf)                                     # the published link carries the version, past the browser's cache
 
 
 if __name__ == "__main__":

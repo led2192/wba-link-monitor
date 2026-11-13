@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-13 Leaving Airtable, phase 2, first steps: an upload now records the document it became (`browser_uploads.library_id`), so that what the sender said of a document can be read in the database; and the extension's download link carries its version, past the browser's cache (0.4.2 was served after 0.4.3 was out). The live schema has 97 fields in `report_library` and 84 in `companies`; `docs/fields.md` (generated 24 Oct) lists 75 and 71. (#520)
 - 2026-11-13 Send to lanterN 0.4.3: files up to 200 MB (150 since #517), the storage's limit as the owner set it; two extended reports of 153 and 174 MB were refused at 150. The text reader takes files up to 200 MB too (`build_fulltext.py` FULLTEXT_MAX_MB default, `table_text.py`), or such a file would be stored and never read. (#519)
 - 2026-11-13 Send to lanterN 0.4.2: a large file shows how far it is (megabytes downloaded, per cent stored), two documents are sent at a time, and a file over 10 MB says how long the download and the storing took. Sending itself is no faster: the file is downloaded to the person's browser and sent up their own line. (#518)
 - 2026-11-13 Send to lanterN 0.4.1: files up to 150 MB (it was 50), the size the rest of the pipeline reads. The storage's own limit is a setting of the Supabase project (Storage, settings) and has to be raised there by the owner; until then a larger file is refused by the storage and the extension says so. (#517)
