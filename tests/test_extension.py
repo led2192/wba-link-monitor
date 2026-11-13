@@ -57,6 +57,21 @@ class Extension(unittest.TestCase):
         self.assertIn('method: "HEAD"', js)                                               # the site is asked what a doubtful link is, nothing downloaded
         self.assertIn("await confirmMaybes(docs)", js)
 
+    def test_a_company_on_a_two_level_country_domain_is_recognised(self):
+        """ana.co.jp is ANA's site, not "co.jp" shared with every Japanese company. Run in node when it is there."""
+        import shutil, subprocess
+        js = read("extension", "send.js")
+        self.assertIn("const SECOND_LEVEL = /^(co|com|org|net|ac|gov|edu|ne|or|go|gob|ltd|plc|nom)$/;", js)
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        body = js[js.index("const hostOf ="):js.index("let hostMemory = {};")]
+        script = ("const companies=[{id:'A',website:'https://www.ana.co.jp/group/en/'},{id:'J',website:'jal.co.jp'},{id:'T',website:'https://www.tesco.co.uk'},"
+                  "{id:'N',website:'nike.com'},{id:'G1',website:'group.example.com'},{id:'G2',website:'unit.example.com'}];" + body +
+                  "console.log(JSON.stringify(['ana.co.jp','ir.jal.co.jp','tescoplc.co.uk','investors.nike.com','unit.example.com','www3.example.com','sony.co.jp']"
+                  ".map(h => (companyOfHost(h) || {}).id || null)))")
+        out = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(json.loads(out.stdout), ["A", "J", None, "N", "G2", None, None], out.stderr)
+
     def test_the_site_builds_and_offers_it(self):
         wf = read(".github", "workflows", "search_page.yml")
         self.assertIn("extension/**", wf); self.assertIn("public/send-to-lantern.zip", wf)

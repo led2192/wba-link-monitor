@@ -236,11 +236,21 @@ async function confirmMaybes(list) {
 // ---- the window ---------------------------------------------------------------------------------------------------
 const fold = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 const hostOf = u => { try { return new URL(/^https?:/.test(u) ? u : "https://" + u).hostname.replace(/^www\./, "").toLowerCase(); } catch (e) { return ""; } };
+// The site a host belongs to: its last two labels, or three when the last two are a country's second level
+// ("ana.co.jp", "tesco.co.uk", "vale.com.br"). 0.3.1 took two labels always, so every company on .co.jp shared the
+// site "co.jp", none was the only candidate, and no company was offered on any such site (13 Nov 2026, ANA Holdings).
+const SECOND_LEVEL = /^(co|com|org|net|ac|gov|edu|ne|or|go|gob|ltd|plc|nom)$/;
+function siteOf(host) {
+  const p = (host || "").split(".");
+  return p.slice(p.length >= 3 && p[p.length - 1].length === 2 && SECOND_LEVEL.test(p[p.length - 2]) ? -3 : -2).join(".");
+}
 function companyOfHost(host) {
   if (!host) return null;
-  const parts = host.split(".");
-  const cands = companies.filter(c => { const h = hostOf(c.website || ""); return h && (h === host || host.endsWith("." + h) || h.endsWith("." + parts.slice(-2).join(".")) || h === parts.slice(-2).join(".")); });
-  return cands.length === 1 ? cands[0] : null;
+  const site = siteOf(host);
+  const cands = companies.filter(c => { const h = hostOf(c.website || ""); return h && siteOf(h) === site; });
+  if (cands.length === 1) return cands[0];
+  const exact = cands.filter(c => hostOf(c.website || "") === host);      // several companies on one site (a group and its units): the one whose own host this is
+  return exact.length === 1 ? exact[0] : null;
 }
 let hostMemory = {};
 async function rememberHost(company) { const h = hostOf(TAB.url); if (!h || /^REQ_/.test(company.id) || hostMemory[h] === company.id) return; hostMemory[h] = company.id; await store.set("hosts", hostMemory); }
