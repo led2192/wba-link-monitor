@@ -290,6 +290,9 @@ class SearchOnPostgres(unittest.TestCase):
                     (3, "PT_1", "Scope 1 emissions", "number", 60836, None, None, None, "1 hour"),               # nobody confirmed it
                     (4, "PT_1", "Employees", "number", 100, None, "wrong", "a@x.org", "1 hour"),                 # marked wrong
                     (5, "PT_2", "Revenue", "number", 5, None, "right", "a@x.org", "1 hour"),                     # another company
+                    (6, "PT_1", "Reduction achieved", "number", 69, None, "right", "a@x.org", "5 hours"),     # one figure under three names and two signs: once
+                    (7, "PT_1", "Absolute reduction vs FY20", "number", -69, None, "right", "a@x.org", "4 hours"),
+                    (8, "PT_1", "Scope 1 and 2 reduction", "number", 69, None, "right", "a@x.org", "3 hours"),
                     (9, "PT_1", "Asked now", "text", None, "x", "right", "a@x.org", "1 minute")]                 # this very answer
             for ask_id, wba, what, kind, value, answer, verdict, by, ago in rows:
                 cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value, answer, verdict, verdict_by, verdict_at) "
@@ -303,7 +306,7 @@ class SearchOnPostgres(unittest.TestCase):
             c.rollback()
         self.assertEqual(lines, "- Nike, Scope 1 emissions FY24: 60836 tCO2e (page 23)\n- Nike, Scope 1 and 2 target: yes (page 10)")
         self.assertEqual(none, "")
-        self.assertEqual([(g["what"], g["mine"]) for g in got], [("net zero target", True)])
+        self.assertEqual([(g["what"], g["mine"]) for g in got], [("net zero target", True), ("Scope 1 and 2 reduction", False)])
         self.assertNotIn("verdict_by", got[0])                                     # who confirmed is not sent
 
     def test_did_you_mean(self):
