@@ -825,6 +825,28 @@ def embed_query(text):
     return [float(x) for x in _EMBEDDER.embed_query(text)]
 
 
+def ask_vector(cur, text):
+    """public.query_vector_made(text), asked on a connection of its own that commits at once. The reader's connection
+    is one long transaction that is never committed: the vector the function keeps in public.query_vectors stayed
+    uncommitted there, and every other run asking for the same words waited on that row until its statement
+    timeout (13 Nov 2026: 80 answers of 80 with no vector, 30 s lost on each; run 43500091765 named it,
+    QueryCanceled). With no SUPABASE_DB_URL (tests) the cursor given is used."""
+    if os.environ.get("SUPABASE_DB_URL", "").strip():
+        import evidence_db
+        conn = evidence_db.connect(wait_minutes=1)
+        try:
+            conn.autocommit = True
+            c = conn.cursor()
+            c.execute("set statement_timeout = '25s'")
+            c.execute("select public.query_vector_made(%s)", (text,))
+            return (c.fetchone() or [None])[0] or {}
+        finally:
+            conn.close()
+    with cur.connection.transaction():
+        cur.execute("select public.query_vector_made(%s)", (text,))
+        return (cur.fetchone() or [None])[0] or {}
+
+
 def query_vec(cur, text):
     """The vector of an attribute's words, once a run: from the embedding library when the machine has it (the
     measures of 13 Nov 2026 ran so), else from the database (public.query_vector_made: the same model,
@@ -849,9 +871,7 @@ def query_vec(cur, text):
         why = "the call failed"
         t0 = time.time()
         try:
-            with cur.connection.transaction():
-                cur.execute("select public.query_vector_made(%s)", (text,))
-                got = (cur.fetchone() or [None])[0] or {}
+            got = ask_vector(cur, text)
             if isinstance(got, dict) and got.get("vec"):
                 vec = [float(x) for x in got["vec"]]
                 SEMANTIC_STATS["vector from the database"] += 1
