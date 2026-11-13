@@ -399,6 +399,23 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertIn("May Co: the fiscal year ends in May", lines); self.assertNotIn("Dec Co", lines)
         self.assertEqual(later["open"], [])                                       # "FY23" repeats the confirmed "FISCAL 2023": not offered again
 
+    def test_the_details_of_a_value_and_its_other_readings(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select library_id, wba_id from public.documents where wba_id is not null order by library_id limit 2")
+            (l1, wba), (l2, _) = cur.fetchall()
+            for vid, lid, value, head in (("v-one", l1, 66830, "FY20"), ("v-two", l2, 66831, "FY2020")):
+                cur.execute("insert into public.value_versions (version_id, wba_id, attribute, year, value, unit, printed, scale, column_label, library_id, page, method) "
+                            "values (%s, %s, 'GMC_00001.1', 2019, %s, 'tCO2e', '66,830', 1, %s, %s, 23, 'model')", (vid, wba, value, head, lid))
+            cur.execute("insert into public.company_fiscal (wba_id, fy_end_month, source) values (%s, 5, 'pages') on conflict (wba_id) do update set fy_end_month = 5", (wba,))
+            cur.execute("select public.value_detail('k', 'v-one'), public.value_detail('k', 'no such value')")
+            g, none = cur.fetchone()
+            c.rollback()
+        self.assertEqual((g["column_label"], g["printed"], g["year"], g["fy_end_month"], g["page"]), ("FY20", "66,830", 2019, 5, 23))
+        self.assertEqual(sorted((r["value"], r["this"]) for r in g["readings"]), [(66830, True), (66831, False)])
+        self.assertIsNone(none)
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
