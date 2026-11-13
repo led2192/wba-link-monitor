@@ -606,6 +606,34 @@ class SemanticPool(unittest.TestCase):
         self.assertTrue(own.autocommit and own.closed)            # committed at once: no row left waiting in a long transaction
         self.assertIn("query_vector_made", own.sql[-1])
 
+    def test_the_vector_comes_from_the_service_when_the_machine_has_its_token(self):
+        import collections, os, sys, types
+
+        def no_library(text):
+            raise ImportError("sentence_transformers")
+        fake = types.ModuleType("query_vector_probe"); calls = []
+        fake.hosted_vector = lambda text, token: (calls.append((text, token)) or ([0.6, 0.8] if text != "bad" else None), 200 if text != "bad" else 503, 0.3)
+        keep = (X.embed_query, X._EMBEDDER, dict(X._QUERY_VECS), collections.Counter(X.SEMANTIC_STATS), sys.modules.get("query_vector_probe"), os.environ.get("HF_TOKEN"))
+        sys.modules["query_vector_probe"] = fake; os.environ["HF_TOKEN"] = "hf_test"
+        try:
+            X.embed_query, X._EMBEDDER = no_library, None
+            X._QUERY_VECS.clear(); X.SEMANTIC_STATS.clear(); X._NO_VECTOR.clear(); X._VEC_TRIES.clear()
+
+            class NoDb:
+                connection = None
+                def execute(self, *a): raise AssertionError("the database is not asked when the service answers")
+            self.assertEqual(X.query_vec(NoDb(), "Scope 1"), [0.6, 0.8])
+            self.assertEqual(X.query_vec(NoDb(), "Scope 1"), [0.6, 0.8]); self.assertEqual(len(calls), 1)      # once a run
+            self.assertEqual(X.SEMANTIC_STATS["vector from the service"], 1)
+            self.assertNotIn("hf_test", " ".join(X.SEMANTIC_STATS))                                             # the token is in no counter
+        finally:
+            X.embed_query, X._EMBEDDER = keep[0], keep[1]
+            X._QUERY_VECS.clear(); X._QUERY_VECS.update(keep[2]); X.SEMANTIC_STATS.clear(); X.SEMANTIC_STATS.update(keep[3]); X._NO_VECTOR.clear(); X._VEC_TRIES.clear()
+            if keep[4] is not None: sys.modules["query_vector_probe"] = keep[4]
+            else: sys.modules.pop("query_vector_probe", None)
+            if keep[5] is None: os.environ.pop("HF_TOKEN", None)
+            else: os.environ["HF_TOKEN"] = keep[5]
+
     def test_on_by_default(self):
         self.assertEqual(X.SEMANTIC_POOL, 8)                                        # the owner's decision of 13 Nov 2026
 

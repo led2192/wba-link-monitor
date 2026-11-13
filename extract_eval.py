@@ -866,6 +866,19 @@ def query_vec(cur, text):
             SEMANTIC_STATS["vector from the library"] += 1
         except Exception:
             _EMBEDDER = False                                 # no library here: not tried again this run
+    if vec is None and len(_NO_VECTOR) < 3 and _VEC_TRIES[text] < 2 and os.environ.get("HF_TOKEN", "").strip():
+        # the service itself, from this machine (13 Nov 2026: through the database the call was cancelled every time,
+        # runs 43500091765 and 43506906044, on the reader's connection and on one of its own; the cause is not found)
+        try:
+            import query_vector_probe
+            got, status, _ = query_vector_probe.hosted_vector(text, os.environ["HF_TOKEN"].strip())
+            if got:
+                vec = [float(x) for x in got]
+                SEMANTIC_STATS["vector from the service"] += 1
+            else:
+                SEMANTIC_STATS[f"service gave no vector (HTTP {int(status or 0)})"] += 1
+        except Exception as e:
+            SEMANTIC_STATS[f"service gave no vector ({type(e).__name__})"] += 1
     if vec is None and len(_NO_VECTOR) < 3 and _VEC_TRIES[text] < 2:
         _VEC_TRIES[text] += 1
         why = "the call failed"

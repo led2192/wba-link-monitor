@@ -100,6 +100,7 @@ jobs:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}                 # the semantic pool's query vector (extract_eval.query_vec)
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
