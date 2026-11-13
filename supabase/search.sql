@@ -708,8 +708,11 @@ insert into public.search_options (name, is_on, note) values ('pairs', false, 'a
 -- checks the words on them, in place of asking the word index. search_timing.py, run 43492865629: "level 1" (every
 -- word but one, eight words with their longer forms) took 24 to 27 s in the word index, which lists every page of the
 -- library holding the words (5,784) before the company's 5 are kept, while the company's 7,522 pages are listed in
--- 0.2 s. That was the long question about one company that ran into the timeout. Off until measured beside the default.
+-- 0.2 s. That was the long question about one company that ran into the timeout.
 insert into public.search_options (name, is_on, note) values ('company_first', false, 'four words or more within a company: read the company''s pages, not the word index') on conflict (name) do nothing;
+-- On since 13 Nov 2026: measured beside the default (run 43495398192): the same pages in the four searches tried,
+-- 12.2 s to 1.5 s and 9.8 s to 0.3 s for questions within one company, 2.1 s to 1.3 s for a large one, 0.8 s to 0.6 s for three words.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 13 Nov 2026, run 43495398192)' where name = 'company_first' and not is_on and note not like '%on since%';
 
 -- The lines of a page around a quoted phrase, the phrase marked as one piece (11 Nov 2026: the excerpt of
 -- "human rights due diligence" marked "rights" here and "diligence" there, wherever each word stood). Null when
@@ -2055,6 +2058,64 @@ grant execute on function public.value_detail(text, text) to anon, authenticated
 -- or financial reports held and the sustainability reports held (an integrated report counts as both). Sixty
 -- companies are drawn at random and the first with a gap is returned, so a card costs the same whatever the size of
 -- the library; "skip" holds the companies this person has already been shown.
+-- What a person says of a gap (13 Nov 2026, the owner: "this is not a gap, the company publishes nothing"; and Volvo,
+-- shown as missing its sustainability report of 2024, which is a chapter of its annual report). A closed list, not
+-- free text, so that the completeness of a company can be counted without anything reading sentences:
+--   inside_annual  the sustainability report is part of the annual report
+--   not_published  the company does not publish this report (a private company with no public accounts)
+--   parent         its parent company publishes it
+--   not_yet        not published yet (one year only)
+--   held_as_other  the library holds it, under another type or year
+--   gap            it is a gap after all (takes back one of the above)
+-- year 0 is every year. One row a company, kind and year: the last person's answer stands, with who and when.
+create table if not exists public.gap_notes (
+  wba_id  text not null,
+  kind    text not null check (kind in ('annual', 'sustainability')),
+  year    int not null default 0,
+  reason  text not null check (reason in ('inside_annual', 'not_published', 'parent', 'not_yet', 'held_as_other', 'gap')),
+  by      text,
+  at      timestamptz not null default now(),
+  primary key (wba_id, kind, year)
+);
+alter table public.gap_notes enable row level security;
+
+create or replace function public.gap_note_set(key text, wba_id text, kind text, year int, reason text)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address' using errcode = '42501';
+  end if;
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if kind not in ('annual', 'sustainability') or reason not in ('inside_annual', 'not_published', 'parent', 'not_yet', 'held_as_other', 'gap')
+     or (reason = 'inside_annual' and kind <> 'sustainability') or (reason = 'not_yet' and coalesce(year, 0) = 0)
+     or coalesce(year, 0) <> 0 and coalesce(year, 0) not between 1990 and 2100 then
+    raise exception 'not one of the answers' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.companies c where c.wba_id = wba_id) then
+    raise exception 'no such company' using errcode = '22023';
+  end if;
+  insert into public.gap_notes (wba_id, kind, year, reason, by) values (wba_id, kind, coalesce(year, 0), reason, who)
+    on conflict on constraint gap_notes_pkey do update set reason = excluded.reason, by = excluded.by, at = now();
+  return jsonb_build_object('ok', true);
+end;
+$$;
+revoke all on function public.gap_note_set(text, text, text, int, text) from public, anon;
+grant execute on function public.gap_note_set(text, text, text, int, text) to authenticated;
+
+-- A company with a gap among its main reports of the last three years, drawn at random. A cell is not a gap when a
+-- person said so (gap_notes; the year's own note before the every-year one), nor when the annual report of that year
+-- reads as carrying the sustainability statements ("sustainability_inside": at least three of its pages print
+-- "sustainability statements", "ESRS", "non-financial statement" or the same in other languages; European companies
+-- report so since 2024). That reading is a guess and is shown as one; a person can confirm it or say it is a gap.
+-- The pages are reached through the company and the year, not the word index (see 'company_first').
 create or replace function public.gap_card(key text, skip text[] default null)
 returns jsonb
 language plpgsql stable security definer
@@ -2066,33 +2127,75 @@ declare
   y2 int := extract(year from now())::int - 1;
   y1 int := y2 - 2;
   got jsonb;
+  years jsonb;
+  cell jsonb;
+  tried text[] := coalesce(skip, '{}');
+  inside_q tsquery := phraseto_tsquery('simple', 'sustainability statement') || phraseto_tsquery('simple', 'sustainability statements')
+                      || to_tsquery('simple', 'esrs') || phraseto_tsquery('simple', 'non-financial statement')
+                      || phraseto_tsquery('simple', 'statement of non-financial information') || phraseto_tsquery('simple', 'non-financial information statement')
+                      || to_tsquery('simple', 'nachhaltigkeitserklärung') || phraseto_tsquery('simple', 'état de durabilité')
+                      || phraseto_tsquery('simple', 'rapport de durabilité') || phraseto_tsquery('simple', 'estado de información no financiera')
+                      || to_tsquery('simple', 'hållbarhetsrapport') || to_tsquery('simple', 'hållbarhetsredovisning');
+  annual_types text[] := array['Annual Report', 'Integrated Report', '10K Form', 'Registration Document', 'Financial Statement'];
+  n int;
+  left_gaps int;
 begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
   end if;
-  with drawn as materialized (
-         select c.wba_id, c.name, c.industry, c.country, c.website from public.companies c
-         where c.wba_id is not null and (skip is null or c.wba_id <> all(skip)) order by random() limit 60),
-       ys as (select generate_series(y1, y2) as year),
-       held as (
-         select d.wba_id, d.year,
-                array_agg(distinct d.doc_type) filter (where d.doc_type in ('Annual Report', 'Integrated Report', '10K Form', 'Registration Document', 'Financial Statement')) as annual,
-                array_agg(distinct d.doc_type) filter (where d.doc_type in ('Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Integrated Report',
-                                                                              'Climate Report', 'Environmental Reports', 'Social Reports')) as sustainability,
-                count(*) as documents
-         from public.documents d join drawn on drawn.wba_id = d.wba_id where d.year between y1 and y2 group by 1, 2),
-       grid as (
-         select drawn.wba_id, ys.year, coalesce(h.annual, '{}') as annual, coalesce(h.sustainability, '{}') as sustainability, coalesce(h.documents, 0) as documents
-         from drawn cross join ys left join held h on h.wba_id = drawn.wba_id and h.year = ys.year),
-       gaps as (select g.wba_id, count(*) filter (where cardinality(g.annual) = 0 or cardinality(g.sustainability) = 0) as n from grid g group by 1)
-  select jsonb_build_object('wba_id', drawn.wba_id, 'company', drawn.name, 'industry', drawn.industry, 'country', drawn.country, 'website', drawn.website,
-                            'gaps', gaps.n,
-                            'documents', (select count(*) from public.documents d where d.wba_id = drawn.wba_id),
-                            'years', (select jsonb_agg(jsonb_build_object('year', g.year, 'annual', to_jsonb(g.annual), 'sustainability', to_jsonb(g.sustainability),
-                                                                         'documents', g.documents) order by g.year desc) from grid g where g.wba_id = drawn.wba_id))
-    into got
-  from drawn join gaps on gaps.wba_id = drawn.wba_id where gaps.n > 0 order by random() limit 1;
-  return got;
+  for attempt in 1..4 loop
+    with drawn as materialized (
+           select c.wba_id, c.name, c.industry, c.country, c.website from public.companies c
+           where c.wba_id is not null and c.wba_id <> all(tried) order by random() limit 60),
+         ys as (select generate_series(y1, y2) as year),
+         held as (
+           select d.wba_id, d.year,
+                  array_agg(distinct d.doc_type) filter (where d.doc_type = any(annual_types)) as annual,
+                  array_agg(distinct d.doc_type) filter (where d.doc_type in ('Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Integrated Report',
+                                                                                'Climate Report', 'Environmental Reports', 'Social Reports')) as sustainability,
+                  count(*) as documents
+           from public.documents d join drawn on drawn.wba_id = d.wba_id where d.year between y1 and y2 group by 1, 2),
+         grid as (
+           select drawn.wba_id, ys.year, coalesce(h.annual, '{}') as annual, coalesce(h.sustainability, '{}') as sustainability, coalesce(h.documents, 0) as documents,
+                  (select g.reason from public.gap_notes g where g.wba_id = drawn.wba_id and g.kind = 'annual' and g.year in (ys.year, 0) order by g.year desc limit 1) as annual_note,
+                  (select g.reason from public.gap_notes g where g.wba_id = drawn.wba_id and g.kind = 'sustainability' and g.year in (ys.year, 0) order by g.year desc limit 1) as sustainability_note
+           from drawn cross join ys left join held h on h.wba_id = drawn.wba_id and h.year = ys.year),
+         gaps as (select g.wba_id, count(*) filter (where (cardinality(g.annual) = 0 and coalesce(g.annual_note, 'gap') = 'gap')
+                                                       or (cardinality(g.sustainability) = 0 and coalesce(g.sustainability_note, 'gap') = 'gap')) as n from grid g group by 1)
+    select jsonb_build_object('wba_id', drawn.wba_id, 'company', drawn.name, 'industry', drawn.industry, 'country', drawn.country, 'website', drawn.website,
+                              'documents', (select count(*) from public.documents d where d.wba_id = drawn.wba_id)),
+           (select jsonb_agg(jsonb_build_object('year', g.year, 'annual', to_jsonb(g.annual), 'sustainability', to_jsonb(g.sustainability), 'documents', g.documents,
+                                                'annual_note', g.annual_note, 'sustainability_note', g.sustainability_note) order by g.year desc)
+            from grid g where g.wba_id = drawn.wba_id)
+      into got, years
+    from drawn join gaps on gaps.wba_id = drawn.wba_id where gaps.n > 0 order by random() limit 1;
+    if got is null then
+      return null;
+    end if;
+    left_gaps := 0;
+    for i in 0..jsonb_array_length(years) - 1 loop
+      cell := years -> i;
+      if jsonb_array_length(cell -> 'sustainability') = 0 and cell ->> 'sustainability_note' is null and jsonb_array_length(cell -> 'annual') > 0 then
+        select count(*) into n from (
+          select 1 from (select p.words from public.pages p
+                         where p.wba_id = got ->> 'wba_id' and p.year + 0 = (cell ->> 'year')::int and p.doc_type = any(annual_types) offset 0) x
+          where x.words @@ inside_q limit 3) z;
+        if n >= 3 then
+          cell := cell || jsonb_build_object('sustainability_inside', true);
+          years := jsonb_set(years, array[i::text], cell);
+        end if;
+      end if;
+      if (jsonb_array_length(cell -> 'annual') = 0 and coalesce(cell ->> 'annual_note', 'gap') = 'gap')
+         or (jsonb_array_length(cell -> 'sustainability') = 0 and coalesce(cell ->> 'sustainability_note', 'gap') = 'gap' and not coalesce((cell ->> 'sustainability_inside')::boolean, false)) then
+        left_gaps := left_gaps + 1;
+      end if;
+    end loop;
+    if left_gaps > 0 then
+      return got || jsonb_build_object('gaps', left_gaps, 'years', years);
+    end if;
+    tried := tried || (got ->> 'wba_id');           -- every gap of this company is explained: another company
+  end loop;
+  return null;
 end;
 $$;
 revoke all on function public.gap_card(text, text[]) from public;

@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v66 2026-11-13";
+  const CLIENT = "lantern v67 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1546,6 +1546,8 @@
     c.appendChild(two); box.appendChild(c);
   }
   const gapSeen = [];
+  const GAP_REASONS = { inside_annual: "It is inside the annual report", not_published: "The company does not publish it", parent: "Its parent company publishes it",
+                        not_yet: "Not published yet", held_as_other: "lanterN holds it under another type or year", gap: "It is a gap" };
   async function gapCard() {
     const box = $("results"); $("values").hidden = true; setStatus(""); document.body.classList.add("playing");
     box.innerHTML = ""; const c = el("div", "lucky"); box.appendChild(c);
@@ -1558,13 +1560,40 @@
     c.appendChild(el("h2", null, g.company));
     const sub = el("p", "what", [g.industry, g.country].filter(Boolean).join(" · ")); if (g.website) { const host = String(g.website).replace(/^https?:\/\//, "").replace(/\/.*$/, ""); const w = el("a", null, host + " ↗"); w.href = /^https?:/.test(g.website) ? g.website : "https://" + g.website; w.target = "_blank"; w.rel = "noopener"; sub.append(document.createTextNode(sub.textContent ? " · " : ""), w); }
     c.appendChild(sub);
-    c.appendChild(el("p", null, `The main reports the library holds for the last three years. “Missing” is a report lanterN could not find: it may exist.`));
+    c.appendChild(el("p", null, `The main reports the library holds for the last three years. “Missing” is a report lanterN could not find: it may exist. If it is not a gap, say why.`));
     const t = el("table"); t.style.cssText = "border-collapse:collapse;width:100%;margin:6px 0 12px;font-size:14px";
     const hr = el("tr"); for (const h of ["Year", "Annual or financial report", "Sustainability report"]) { const th = el("th", null, h); th.style.cssText = "text-align:left;font-weight:600;padding:7px 10px 7px 0;border-bottom:1px solid var(--line)"; hr.appendChild(th); } t.appendChild(hr);
     for (const y of g.years || []) {
       const tr = el("tr"); const cell = v => { const td = el("td"); td.style.cssText = "padding:7px 10px 7px 0;border-bottom:1px solid var(--line);vertical-align:top"; if (v instanceof Node) td.appendChild(v); else td.textContent = v; return td; };
-      const held = list => { const sp = el("span"); if (list && list.length) { const k = el("span", null, "✓ "); k.style.color = "#2E8B1F"; sp.append(k, document.createTextNode(list.join(", "))); } else { sp.textContent = "Missing"; sp.style.cssText = "color:#B4540A;font-weight:600"; } return sp; };
-      tr.append(cell(String(y.year)), cell(held(y.annual)), cell(held(y.sustainability))); t.appendChild(tr);
+      // A cell: the types held; or what a person said of the gap; or lanterN's guess that the annual report carries the
+      // sustainability statements; or "Missing". Under a gap or a guess, "Not a gap?" opens a closed list of answers
+      // (v67, the owner: a private company publishes no accounts, and that is not a gap; no free text, so it can be counted).
+      const held = (list, kind) => {
+        const sp = el("span"), note = y[kind + "_note"], inside = kind === "sustainability" && y.sustainability_inside;
+        if (list && list.length) { const k = el("span", null, "✓ "); k.style.color = "#2E8B1F"; sp.append(k, document.createTextNode(list.join(", "))); return sp; }
+        const say = el("span"); sp.appendChild(say);
+        const paint = r => { say.textContent = r && r !== "gap" ? GAP_REASONS[r] + " (said by a person)" : inside && r !== "gap" ? "Likely inside the annual report" : "Missing";
+          say.style.cssText = r && r !== "gap" || inside && r !== "gap" ? "color:var(--mute)" : "color:#B45309;font-weight:600"; };
+        paint(note);
+        const ask = el("a", null, note && note !== "gap" ? "change" : "Not a gap?"); ask.href = "#"; ask.style.cssText = "margin-left:8px;font-size:12px"; sp.appendChild(ask);
+        ask.onclick = ev => {
+          ev.preventDefault(); if (sp.querySelector("select")) return;
+          const form = el("div"); form.style.cssText = "margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center";
+          const why = el("select"), when = el("select"), ok = el("button", null, "Save"), msg = el("span", "what"); ok.type = "button";
+          for (const [v, label] of Object.entries(GAP_REASONS)) { if (v === "inside_annual" && kind !== "sustainability") continue; const o = el("option", null, label); o.value = v; why.appendChild(o); }
+          if (inside) why.value = "inside_annual";
+          for (const [v, label] of [[String(y.year), `${y.year} only`], ["0", "every year"]]) { const o = el("option", null, label); o.value = v; when.appendChild(o); }
+          why.onchange = () => { if (why.value === "not_yet") when.value = String(y.year); };
+          ok.onclick = async () => {
+            if (why.value === "not_yet" && when.value === "0") { msg.textContent = "“Not published yet” is for one year."; return; }
+            ok.disabled = true; const r = await authed("gap_note_set", { key, wba_id: g.wba_id, kind, year: +when.value, reason: why.value });
+            if (r && r.ok) { paint(why.value); ask.textContent = "change"; form.remove(); } else { ok.disabled = false; msg.textContent = "Not saved. Sign in with your WBA address (Review a value asks for it) and try again."; }
+          };
+          form.append(why, when, ok, msg); sp.appendChild(form);
+        };
+        return sp;
+      };
+      tr.append(cell(String(y.year)), cell(held(y.annual, "annual")), cell(held(y.sustainability, "sustainability"))); t.appendChild(tr);
     }
     c.appendChild(t);
     const all = el("p", "what", `${g.documents} document${g.documents === 1 ? "" : "s"} of this company in the library in all. `);
