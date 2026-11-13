@@ -654,3 +654,23 @@ The decision above left these rows alone and rejected "guessing MT from the size
 
 ## Semantic pages enter the reader as an addition to the pool, not as a new ranking (13 Nov 2026)
 The semantic index (passages of 2024 and later main documents, multilingual-e5-small) is connected to the reader as `--semantic-pool N`: the N pages nearest in meaning to the attribute are added to the pool, and the existing scoring then ranks them with the others. Chosen because of what was measured before: finding the page costs about 7 points (oracle run), re-ordering the same pool never recovered them (BM25, the learned selector, the reranker, the map: all closed), and the one change that helped changed which pages are in the pool (`--escalate whole`). Replacing the text score had lost pages (5 Nov), so nothing is replaced. The search is exact within the answer's documents, which keeps the reader independent of the vector index and its build. Off by default until run beside today's pool on the same answers: development attributes, held-out kinds, and revenue and employees with the retrieval query of a colleague's pipeline (`semantic_query`). Rejected: semantic ranking alone (no evidence it keeps the pages the label query finds), and a hybrid score tuned on the development answers before any measure.
+
+## Semantic pool, first numbers: a reason to run the paid measure (13 Nov 2026)
+Two free runs of `extract_eval.py` with the rules reader on the same validated answers (10 development attributes, 68 answers each, 650 in all; both stopped at the 100-minute budget): 43335410437 with today's pool, 43335421397 with `--semantic-pool 8`. What is compared is retrieval: the share of answers whose validated number is printed on one of the 16 pages the model would read.
+
+| Attribute | Today | With the semantic pool |
+| --- | --: | --: |
+| Revenue | 76% | 84% |
+| Scope 1 emissions | 76% | 78% |
+| Scope 2, location-based | 66% | 66% |
+| Scope 2, market-based | 72% | 72% |
+| Low-carbon capital expenditure | 54% | 56% |
+| Total number of employees | 74% | 74% |
+| Capital expenditure | 71% | 72% |
+| Scope 3 emissions | 75% | 75% |
+| Scope 1 + Scope 2 | 62% | 70% |
+| R&D spending | 78% | 79% |
+
+Average 70.4% to 73.3%, no attribute lower. The pages it adds are the ones the label query cannot find: answers missed because no label is on the page fall from 8 to 2 for revenue, 9 to 4 for R&D, 17 to 13 for low-carbon capex. Some of those pages enter the pool and still rank below the 16th place (R&D: ranked too low 1 to 5), so part of the gain is left to the ranking. The rules reader's own accuracy does not move (it is a weak reader, 2% to 19%), which says nothing either way.
+
+What this is: a proxy on retrieval, and the house rule says a proxy is a reason to try, not to switch. The number left on the table is known: the figure is in the documents for 78% to 97% of answers and on the model's pages for 56% to 84%. Next: the same comparison with the model reader on the development attributes and on the held-out kinds, and revenue and employees also with the retrieval query of a colleague's pipeline as `semantic_query`. Estimated cost from earlier model runs (about 1 to 3 USD for some 250 answers; 3.25 USD with the second level): 8 to 15 USD for the six runs. Waits for the owner's yes.
