@@ -379,3 +379,8 @@ def test_eight_pages_are_not_a_total():
 def test_a_figure_with_no_year_says_so_and_names_its_report():
     assert "a figure is of little use without" in SQL and "jsonb_build_object('doc_year', src -> 'year', 'doc_type', src ->> 'doc_type')" in SQL
     assert "year not stated on the page" in PAGE
+
+
+def test_nothing_of_the_search_before_stays_when_a_search_runs_or_fails():
+    assert 'state.lastRows = []; $("strip").innerHTML = ""; $("results").innerHTML = ""; const pv = $("values"); pv.innerHTML = ""; pv.hidden = true;' in PAGE
+    assert "if (wordsFailed) { meaning = await meaningAsked; if (!meaning || !meaning.length) throw wordsFailed; }" in PAGE     # the meaning answers alone

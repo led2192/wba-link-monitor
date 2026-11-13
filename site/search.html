@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v61 2026-11-13";
+  const CLIENT = "lantern v62 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -619,6 +619,9 @@
     $("head").classList.remove("home");
     renderChips();
     setStatus("Searching…");
+    if (!more) {                                              // v62: nothing of the search before stays in sight while this one runs, or if it fails
+      state.lastRows = []; $("strip").innerHTML = ""; $("results").innerHTML = ""; const pv = $("values"); pv.innerHTML = ""; pv.hidden = true;
+    }
     const t0 = performance.now();
     const seq = ++searchSeq;
     try {
@@ -635,8 +638,12 @@
                      type_filter: state.type, max_rows: state.rows, client: CLIENT,
                      industry_filter: state.industry, country_filter: state.country, region_filter: state.region,
                      typed: $("q").value.trim() };
-      const words = await rpc("find_pages", args);
-      if (meaningAsked) meaning = more ? await meaningAsked : await Promise.race([meaningAsked, new Promise(r => setTimeout(() => r(null), 1500))]);
+      // The words can fail on their own (a timeout when the database is busy): the meaning then answers alone, and says so.
+      let words = [], wordsFailed = null;
+      try { words = await rpc("find_pages", args); }
+      catch (e) { if (e.message.includes("not allowed") || !meaningAsked || more) throw e; wordsFailed = e; }
+      if (wordsFailed) { meaning = await meaningAsked; if (!meaning || !meaning.length) throw wordsFailed; }
+      else if (meaningAsked) meaning = more ? await meaningAsked : await Promise.race([meaningAsked, new Promise(r => setTimeout(() => r(null), 1500))]);
       const vec = !!(meaning && meaning.length);
       const rows = vec ? blend(words, meaning, state.rows) : words;
       if (seq !== searchSeq) return;                        // a newer search started meanwhile
@@ -659,6 +666,7 @@
         st.append(document.createTextNode(" · "), a);
       }
       if (!more && !vec && meaningAsked) blendWhenReady(seq, rows, meaningAsked);
+      if (wordsFailed) setStatus(`${rows.length} pages nearest in meaning. The search by words took too long and was stopped, so pages that only hold the exact words may be missing: try again in a moment.`);
       if (!more) state.lastRows = rows;
       render(more ? rows.slice(state.rows - 50) : citedFirst(rows), !!more);
       state.logId = rows.length ? rows[0].log_id : null;
@@ -667,8 +675,9 @@
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
     } catch (e) {
-      setStatus(e.message.includes("not allowed") ? "This link no longer works; ask for a new one." : `Search failed: ${e.message}`);
-      $("results").innerHTML = ""; $("values").hidden = true;
+      setStatus(e.message.includes("not allowed") ? "This link no longer works; ask for a new one."
+        : /timeout/i.test(e.message) ? "The search took too long and was stopped (the database is busy). Try again in a moment, or add a company or a year." : `Search failed: ${e.message}`);
+      state.lastRows = []; $("results").innerHTML = ""; $("strip").innerHTML = ""; $("values").hidden = true;
     }
   }
   // The meaning half of the one search (13 Nov 2026). The words typed become a vector in the browser, with the same
