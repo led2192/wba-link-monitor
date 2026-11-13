@@ -360,6 +360,23 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertIsNone(beyond["body"]); self.assertEqual(beyond["library_id"], lid)      # the document is there, the page is not
         self.assertIsNone(none)
 
+    def test_an_answer_reads_the_newest_reports_among_the_best_pages(self):
+        """ask_pages: the best five, then pages of the two newest years, then the rest. The search is replaced by a stub."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
+                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null,
+                             region_filter text default null, typed text default null)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$
+                             select null::bigint, g, 'L' || g, 'C', 'W', case when g in (9, 14) then 2026 when g = 20 then 2025 else 2021 end, 't', 'l', null::text, g, 0::real, 'e'
+                             from generate_series(1, least(max_rows, 24)) g $f$""")
+            cur.execute("select page, year from public.ask_pages('k', 'q', null, null, null, null, null, 'q?')")
+            got = cur.fetchall()
+            c.rollback()
+        self.assertEqual([p for p, _ in got], [1, 2, 3, 4, 5, 9, 14, 20])       # the best five, then 2026 and 2025 before older pages ranked above them
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
