@@ -582,6 +582,30 @@ class SemanticPool(unittest.TestCase):
                 raise RuntimeError("timeout")
         self.assertEqual(X.semantic_pool_pages(Broken([]), ["d"], attr, set(), 5, 0.4, embed=lambda t: [1.0]), [])
 
+    def test_the_vector_is_asked_on_a_connection_of_its_own(self):
+        import os, sys, types
+
+        class C:
+            def __init__(self): self.sql, self.closed, self.autocommit = [], False, False
+            def cursor(self): return self
+            def execute(self, sql, params=None): self.sql.append(sql)
+            def fetchone(self): return ({"vec": [0.1], "held": False},)
+            def close(self): self.closed = True
+        own = C()
+        fake = types.ModuleType("evidence_db"); fake.connect = lambda **k: own
+        keep_mod, keep_env = sys.modules.get("evidence_db"), os.environ.get("SUPABASE_DB_URL")
+        sys.modules["evidence_db"] = fake; os.environ["SUPABASE_DB_URL"] = "postgresql://example"
+        try:
+            got = X.ask_vector(object(), "Scope 1")              # the reader's cursor is not touched
+        finally:
+            if keep_mod is not None: sys.modules["evidence_db"] = keep_mod
+            else: sys.modules.pop("evidence_db", None)
+            if keep_env is None: os.environ.pop("SUPABASE_DB_URL", None)
+            else: os.environ["SUPABASE_DB_URL"] = keep_env
+        self.assertEqual(got["vec"], [0.1])
+        self.assertTrue(own.autocommit and own.closed)            # committed at once: no row left waiting in a long transaction
+        self.assertIn("query_vector_made", own.sql[-1])
+
     def test_on_by_default(self):
         self.assertEqual(X.SEMANTIC_POOL, 8)                                        # the owner's decision of 13 Nov 2026
 
