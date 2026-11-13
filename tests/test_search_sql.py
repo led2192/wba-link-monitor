@@ -307,3 +307,10 @@ def test_the_querys_vector_is_made_on_a_server_with_a_token_the_page_never_sees(
 def test_a_mark_on_a_fact_shows():
     assert "for (const b of marks.children) { b.style.background" not in PAGE        # a mark that repaints the whole row wipes the other mark's colour
     assert "bt.paint = paint; paint(); marks.appendChild(bt);" in PAGE and "Not saved: sign in" in PAGE
+
+
+def test_confirmed_facts_come_back_with_the_next_answer():
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    assert "'confirmed', public.ask_confirmed_facts(ask_id, sources, who)" in ask
+    assert "revoke all on function public.ask_confirmed_facts(bigint, jsonb, text) from public, anon, authenticated;" in SQL
+    assert "confirmed by a colleague" in PAGE and "Confirmed before" in PAGE

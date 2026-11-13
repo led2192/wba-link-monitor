@@ -281,6 +281,25 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertAlmostEqual(first["vec"][1], 0.002, places=5)                # in the service's order
         self.assertTrue(second.get("held")); self.assertEqual(second["vec"], first["vec"]); self.assertEqual(n, 1)
 
+    def test_a_confirmed_fact_serves_the_next_answer_about_the_company(self):
+        import json, psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            rows = [(1, "PT_1", "Net zero target", "yes_no", None, "yes", "right", "a@x.org", "2 hours"),
+                    (2, "PT_1", "net zero target", "yes_no", None, "yes", "right", "b@x.org", "1 hour"),       # the same fact again: once
+                    (3, "PT_1", "Scope 1 emissions", "number", 60836, None, None, None, "1 hour"),               # nobody confirmed it
+                    (4, "PT_1", "Employees", "number", 100, None, "wrong", "a@x.org", "1 hour"),                 # marked wrong
+                    (5, "PT_2", "Revenue", "number", 5, None, "right", "a@x.org", "1 hour"),                     # another company
+                    (9, "PT_1", "Asked now", "text", None, "x", "right", "a@x.org", "1 minute")]                 # this very answer
+            for ask_id, wba, what, kind, value, answer, verdict, by, ago in rows:
+                cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value, answer, verdict, verdict_by, verdict_at) "
+                            "values (%s, %s, 'C', %s, %s, %s, %s, %s, %s, now() - %s::interval)", (ask_id, wba, what, kind, value, answer, verdict, by, ago))
+            cur.execute("select public.ask_confirmed_facts(9, %s::jsonb, 'B@x.org')", (json.dumps([{"n": 1, "wba_id": "PT_1"}]),))
+            got = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual([(g["what"], g["mine"]) for g in got], [("net zero target", True)])
+        self.assertNotIn("verdict_by", got[0])                                     # who confirmed is not sent
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:

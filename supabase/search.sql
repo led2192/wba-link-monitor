@@ -1900,6 +1900,29 @@ $$;
 revoke all on function public.ask_fact_verdict(text, bigint, text) from public, anon;
 grant execute on function public.ask_fact_verdict(text, bigint, text) to authenticated;
 
+-- The facts of earlier answers that a person marked right, for the companies of this answer (13 Nov 2026, the owner:
+-- a confirmed fact should serve the next person who asks). The newest eight, one a company, name, period and value.
+-- Who confirmed is not sent, only whether it was the asker.
+create or replace function public.ask_confirmed_facts(the_ask bigint, sources jsonb, who text)
+returns jsonb
+language sql stable security definer
+set search_path = public, extensions
+as $$
+  select coalesce(jsonb_agg(to_jsonb(x) order by x.verdict_at desc), '[]'::jsonb)
+  from (
+    select * from (
+      select distinct on (a.wba_id, lower(a.what), coalesce(a.period, ''), coalesce(a.value::text, lower(a.answer)))
+             a.id, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id, a.verdict_at,
+             (a.verdict_by = lower(who)) as mine
+      from public.ask_facts a
+      where a.verdict = 'right' and a.ask_id is distinct from the_ask
+        and a.wba_id in (select e ->> 'wba_id' from jsonb_array_elements(coalesce(sources, '[]'::jsonb)) e)
+      order by a.wba_id, lower(a.what), coalesce(a.period, ''), coalesce(a.value::text, lower(a.answer)), a.verdict_at desc
+    ) d order by d.verdict_at desc limit 8
+  ) x
+$$;
+revoke all on function public.ask_confirmed_facts(bigint, jsonb, text) from public, anon, authenticated;
+
 -- 13 Nov 2026: a question typed in the box is answered without pressing Ask (the page calls this for any text that
 -- reads as a question), so a person has 20 answers a day, not 3; the ceiling for everyone together stays (about
 -- 3 USD a day at most). The pages given to the model are the one search's (find_blend: the words and, when the page
@@ -2053,7 +2076,8 @@ Excerpts:
     return jsonb_build_object('error', coalesce(err, 'no answer'), 'left', per_day - used, 'per_day', per_day);
   end if;
   return jsonb_build_object('answer', answer, 'sources', sources, 'left', per_day - used - 1, 'per_day', per_day, 'keywords', keywords, 'facts', facts,
-                            'facts_stated', parts -> 'stated', 'facts_tail', parts -> 'tail');   -- for telling apart: no list written, a list not readable, facts with no page
+                            'facts_stated', parts -> 'stated', 'facts_tail', parts -> 'tail',
+                            'confirmed', public.ask_confirmed_facts(ask_id, sources, who));   -- for telling apart: no list written, a list not readable, facts with no page
 end;
 $$;
 revoke all on function public.ask(text, text, text, text, int, int, text, text, real[]) from public, anon;
