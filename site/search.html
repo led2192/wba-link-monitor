@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v45 2026-11-13";
+  const CLIENT = "lantern v46 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -620,16 +620,19 @@
     const t0 = performance.now();
     const seq = ++searchSeq;
     try {
-      // One search (13 Nov 2026): the words and their meaning together, in one list (find_blend). The meaning needs the
-      // language model: when it is already in memory the search is blended at once; when it is not, the words answer
-      // first and the list is blended when the model has loaded (blendWhenReady). "More results" keeps the list's kind.
+      // One search (13 Nov 2026): the words and their meaning together, in one list. The two searches are asked at the
+      // same time and merged here (blend), so the wait is the slower of the two, not their sum (asked one after the
+      // other inside the database, v45 took 5 to 10 s). The meaning needs the language model: when it is in memory the
+      // search is blended at once; when it is not, the words answer first and the list is blended when the model has
+      // loaded (blendWhenReady). "More results" keeps the list's kind.
       let vec = null;
       if (more ? state.blended : (canBlend() && embedder)) { try { vec = await queryVector(meaningWords()); } catch (e) { vec = null; } }
       const args = { key, q: state.q, company_filter: state.company, year_from: state.from, year_to: state.to,
                      type_filter: state.type, max_rows: state.rows, client: CLIENT,
                      industry_filter: state.industry, country_filter: state.country, region_filter: state.region,
                      typed: $("q").value.trim() };
-      const rows = vec ? await rpc("find_blend", { ...args, qvec: vec }) : await rpc("find_pages", args);
+      const wordsAsked = rpc("find_pages", args);
+      const rows = vec ? blend(...await Promise.all([wordsAsked, askMeaning(vec)]), state.rows) : await wordsAsked;
       if (seq !== searchSeq) return;                        // a newer search started meanwhile
       if (!more) state.blended = !!vec;
       const s = ((performance.now() - t0) / 1000).toFixed(1);
@@ -649,7 +652,7 @@
         a.onclick = ev => { ev.preventDefault(); $("q").value = $("q").value.replace(new RegExp("(^|\\s)" + mb.word + "(?=\\s|$)", "i"), (m0, pre) => pre + mb.name + ";"); search(false); };
         st.append(document.createTextNode(" · "), a);
       }
-      if (!more && !vec && canBlend()) blendWhenReady(seq, args);
+      if (!more && !vec && canBlend()) blendWhenReady(seq, rows);
       render(more ? rows.slice(state.rows - 50) : rows, !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues();
@@ -662,8 +665,8 @@
     }
   }
   // The meaning half of the one search (13 Nov 2026). The words typed become a vector in the browser, with the same
-  // model the passages were embedded with (multilingual-e5-small), and find_blend merges the pages nearest to it with
-  // the pages the words find. The model (about 120 MB) is fetched in the background after the first search and kept
+  // model the passages were embedded with (multilingual-e5-small), and the pages nearest to it (find_meaning) are merged with
+  // the pages the words find (blend). The model (about 120 MB) is fetched in the background after the first search and kept
   // by the browser; not on a connection that asks to save data. Words in quotes and the industry, country and region
   // filters stay with the words alone. Until the vector is made on the server, a first search answers by words and
   // is blended a moment later, only while the reader is still at the top of the list.
@@ -686,13 +689,29 @@
     lastVector.text = text; lastVector.vec = Array.from(out.data).slice(0, 384);
     return lastVector.vec;
   }
-  async function blendWhenReady(seq, args) {
+  // The pages nearest in meaning; an error there (a timeout, the model) leaves the words' answer alone.
+  const askMeaning = vec => rpc("find_meaning", { key, qvec: vec, company_filter: state.company, year_from: state.from, year_to: state.to,
+                                                  type_filter: state.type, max_rows: 60 }).catch(() => []);
+  // Reciprocal rank fusion, as find_blend does in the database: a page's score is 1/(60 + place by words) +
+  // 1/(60 + place by meaning). At most three pages a document; the words' excerpt (with its highlights) is kept.
+  function blend(words, meaning, need) {
+    const by = new Map(), id = r => r.library_id + "|" + r.page, logId = words.length ? words[0].log_id : null;
+    for (const r of words) by.set(id(r), { ...r, s: 1 / (60 + r.rank) });
+    for (const r of meaning) { const e = by.get(id(r)); if (e) e.s += 1 / (60 + r.rank); else by.set(id(r), { ...r, log_id: logId, s: 1 / (60 + r.rank) }); }
+    const perDoc = new Map(), out = [];
+    for (const r of [...by.values()].sort((a, b) => b.s - a.s || (a.library_id < b.library_id ? -1 : a.library_id > b.library_id ? 1 : a.page - b.page))) {
+      const n = (perDoc.get(r.library_id) || 0) + 1; perDoc.set(r.library_id, n);
+      if (n <= 3 && out.length < need) out.push({ ...r, rank: out.length + 1, score: r.s });
+    }
+    return out;
+  }
+  async function blendWhenReady(seq, words) {
     try {
       const vec = await queryVector(meaningWords());
       if (seq !== searchSeq || window.scrollY > 300) return;          // a newer search, or the reader is already down the list
-      const rows = await rpc("find_blend", { ...args, qvec: vec, client: CLIENT + " blended after" });
+      const rows = blend(words, await askMeaning(vec), state.rows);
       if (seq !== searchSeq || window.scrollY > 300 || !rows.length) return;
-      state.blended = true; state.logId = rows[0].log_id;
+      state.blended = true;
       render(rows, false);
       const st = $("status"), first = st.firstChild;
       if (first && first.nodeType === 3 && /^No /.test(first.nodeValue)) setStatus(`${rows.length} pages that say it in other words: the words as typed are on no page.`);
