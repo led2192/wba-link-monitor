@@ -1719,7 +1719,7 @@ begin
     return jsonb_build_object('busy', true);
   end if;
   begin
-    execute format('select %I.http_set_curlopt(''CURLOPT_TIMEOUT'', ''8'')', http_schema);
+    execute format('select %I.http_set_curlopt(''CURLOPT_TIMEOUT'', ''12'')', http_schema);
     execute format(
       'select h.status, h.content from %1$I.http(row(''POST'', $1, array[%1$I.http_header(''Authorization'', $2)], $4, $3)::%1$I.http_request) h',
       http_schema)
@@ -1745,7 +1745,7 @@ begin
     return jsonb_build_object('error', 'the service''s reply could not be read');
   end;
   insert into public.query_vectors (q, vec, ms) values (words, held, extract(epoch from clock_timestamp() - t0)::numeric * 1000)
-    on conflict (q) do nothing;
+    on conflict on constraint query_vectors_pkey do nothing;      -- by its name: "(q)" would be read as this function's parameter q
   return jsonb_build_object('vec', to_jsonb(held));
 end;
 $$;

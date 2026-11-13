@@ -243,6 +243,34 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertIsNone(kept[2]["year"])
         self.assertNotIn("verdict_by", kept[0])
 
+    def test_a_querys_vector_is_kept_once_a_text(self):
+        """query_vector_made with the service replaced by a stub (no http extension here): the reply is read, kept, and
+        the second call for the same words is answered from the table."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("create schema if not exists vault")
+            cur.execute("create table if not exists vault.decrypted_secrets (name text, decrypted_secret text)")
+            cur.execute("insert into vault.decrypted_secrets values ('hf_token', 'tok')")
+            cur.execute("create schema fakehttp")
+            cur.execute("create type fakehttp.http_header as (field text, value text)")
+            cur.execute("create type fakehttp.http_request as (method text, uri text, headers fakehttp.http_header[], content_type text, content text)")
+            cur.execute("create function fakehttp.http_header(text, text) returns fakehttp.http_header language sql as $f$ select row($1, $2)::fakehttp.http_header $f$")
+            cur.execute("create function fakehttp.http_set_curlopt(text, text) returns boolean language sql as $f$ select true $f$")
+            cur.execute("""create function fakehttp.http(r fakehttp.http_request) returns table (status int, content text) language sql as
+                           $f$ select 200, (select jsonb_build_array(jsonb_agg(g::real / 1000))::text from generate_series(1, 384) g) $f$""")
+            cur.execute("insert into pg_extension (oid, extname, extowner, extnamespace, extrelocatable, extversion) select 999999, 'http', 10, n.oid, false, '0' from pg_namespace n where n.nspname = 'fakehttp'")
+            cur.execute("select public.query_vector_made('  how   many people ')")
+            first = cur.fetchone()[0]
+            cur.execute("select public.query_vector_made('how many people')")
+            second = cur.fetchone()[0]
+            cur.execute("select count(*) from public.query_vectors where q = 'how many people'")
+            n = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual(len(first["vec"]), 384); self.assertNotIn("held", first)
+        self.assertAlmostEqual(first["vec"][1], 0.002, places=5)                # in the service's order
+        self.assertTrue(second.get("held")); self.assertEqual(second["vec"], first["vec"]); self.assertEqual(n, 1)
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:

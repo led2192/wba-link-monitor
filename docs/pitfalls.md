@@ -344,3 +344,6 @@ The build of a vector index is fast only while its graph fits in `maintenance_wo
 
 ## Two searches inside one database function add their times
 `find_blend` (13 Nov 2026) called the search by words and the search by meaning one after the other in one function: correct, and 5 to 10 s live where each alone took about 3 s. A browser can ask both at once and merge the lists itself; the wait is then the slower one. Before putting two slow queries behind one call, ask whether the caller can run them side by side. Measure the live time of a new search path before calling it done: the local test database has no vectors and says nothing about speed.
+
+## "on conflict (q)" inside a function whose parameter is q
+In a PL/pgSQL function with `#variable_conflict use_variable`, a column named like a parameter is replaced by the parameter everywhere, also in `on conflict (column)`. `query_vector_made(q text)` failed on its first live call (13 Nov 2026) with "there is no unique or exclusion constraint matching the ON CONFLICT specification". Name the constraint (`on conflict on constraint query_vectors_pkey`). The offline tests had not run the function to its insert, because it needs the http extension: a function that calls a service gets a test with the service stubbed.
