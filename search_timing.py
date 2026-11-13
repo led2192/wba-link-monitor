@@ -45,6 +45,15 @@ def level_queries(cur, words):
     return every, but_one
 
 
+def usual_pages(cur, question, company):
+    """The pages find_pages gives today (option off), sorted, to compare an option's list with."""
+    cur.execute("select set_config('lantern.company_first', 'off', false)")
+    cur.execute("select coalesce(array_agg(library_id || '|' || page order by library_id, page), '{}') from public.find_pages('timing', %s, %s, null, null, null, 50, 'timing')", (question, company))
+    got = cur.fetchone()[0]
+    cur.execute("select set_config('lantern.company_first', 'on', false)")
+    return got
+
+
 def whole_function(cur, conn, md):
     """The searches as the page asks them, on questions written in full: the two levels of the word index by
     themselves, then find_pages, find_meaning and find_blend whole. Seconds and row counts only."""
@@ -79,6 +88,13 @@ def whole_function(cur, conn, md):
             row("level 1 with the word vectors copied, as the function does", f"select count(*) from (select p.library_id, p.page, length(p.words::text) from public.pages p where {WHERE} limit 800) x", {**a, "q": but_one})
             row("find_pages, whole", "select count(*) from public.find_pages('timing', %s, %s, null, null, null, 50, 'timing')", (question, company))
             row("find_pages again (pages now in memory)", "select count(*) from public.find_pages('timing', %s, %s, null, null, null, 50, 'timing')", (question, company))
+            if company:
+                cur.execute("select set_config('lantern.company_first', 'on', false)")
+                row("find_pages with the option company_first", "select count(*) from public.find_pages('timing', %s, %s, null, null, null, 50, 'timing')", (question, company))
+                row("the same pages as without it (1 = yes)", "select ((select coalesce(array_agg(library_id || '|' || page order by library_id, page), '{}') "
+                    "from public.find_pages('timing', %s, %s, null, null, null, 50, 'timing')) = %s::text[])::int", (question, company, usual_pages(cur, question, company)))
+                cur.execute("select set_config('lantern.company_first', 'off', false)")
+                conn.commit()
             t0 = time.time()
             cur.execute("select public.query_vector_made(%s)", (question,))
             vec = (cur.fetchone()[0] or {}).get("vec")

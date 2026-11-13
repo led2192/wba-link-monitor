@@ -43,6 +43,22 @@ class SearchOnPostgres(unittest.TestCase):
             c.commit()
             self.assertEqual(len(L.refresh_derived(c)), 2)
 
+    def test_company_first_finds_the_same_pages(self):
+        """Option company_first: four words or more within a company read the company's pages; the list is the same."""
+        cur = self.conn.cursor()
+        cur.execute("select set_config('lantern.company_first', 'off', false)")
+        usual = self.find("zebra scope 3 emissions target", "PT_00000")
+        cur.execute("select set_config('lantern.company_first', 'on', false)")
+        try:
+            first = self.find("zebra scope 3 emissions target", "PT_00000")
+            short = self.find("zebra target", "PT_00000")                     # under four words: the word index, as before
+        finally:
+            cur.execute("select set_config('lantern.company_first', 'off', false)")
+        self.assertTrue(usual)
+        self.assertEqual([(r[0], r[1]) for r in first], [(r[0], r[1]) for r in usual])
+        self.assertEqual(first[0][0], "targetpage")
+        self.assertTrue(short)
+
     def test_words_together_first(self):
         rows = self.find("living wage")
         self.assertTrue(rows)

@@ -359,3 +359,7 @@ The results, the company strip and the values panel are filled by separate calls
 
 ## A search can only be measured again if what was searched was kept
 The first run of `ask_eval.py` (13 Nov 2026) asked again the questions whose answer left a confirmed fact and found the confirmed page for 13 of 27. The number means little: `ask_log` kept the question as typed, not the words the box sent to the search or its filters (the box reads the company and the years out of the text first), so every question was searched differently from the first time. A log that is meant to feed a measure must keep the inputs of the thing measured, not the text the person typed. Fixed the same day: `ask_log.search`.
+
+## The word index is slow for many words, even within one company
+A question of eight words about one company ran into the 25 s timeout while "scope 1 emissions" for the same company took 1.3 s (13 Nov 2026). The word index (`pages_search`) is asked first whatever else narrows the search: with eight words in their longer forms ("main" also finds "maintenance") and "every word but one" written as eight alternatives, the index alone took 27 s to list 5,784 pages of the whole library, of which 5 were the company's. The company's own 7,522 pages are listed in 0.2 s. When a filter leaves few rows, read those rows and check the words on them; the planner does not choose that by itself, because it believes the word index returns one row. `search_timing.py` (Search check, mode timing) shows it stage by stage.
+
