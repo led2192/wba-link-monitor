@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-13 The answer reads what colleagues confirmed. Before answering, `ask` gives the model the confirmed facts of earlier answers about the same companies (`ask_confirmed_lines`, one line a fact with its page), to use when one answers the question ("confirmed earlier by a colleague"), to say when an excerpt disagrees, and not to list again as new facts. (#487)
 - 2026-11-13 lanterN v52: the facts that come from an answer sit on a faint tint of the accent colour, so they are not taken for the robot's readings below them. (#486)
 - 2026-11-13 lanterN v51: a fact of an answer that a person marked right serves the next person. `ask` returns, with each answer, the confirmed facts of earlier answers about the same companies (`ask_confirmed_facts`: the newest eight, each fact once), and the page lists them under the new ones as "Confirmed before", each "confirmed by a colleague" or "by you"; who confirmed is not sent. The block of facts beside an answer is set apart by a line of the accent colour. (#485)
 - 2026-11-13 lanterN v50: a click on ✓ beside a fact of an answer showed nothing (the owner, 13:00 Madrid). The mark was saved, but each mark repainted the whole row, so the second wiped the colour of the first. Each mark now paints itself, and a mark that could not be saved says so. A year among the facts shows as 2040, not "2,040 year". (#484)

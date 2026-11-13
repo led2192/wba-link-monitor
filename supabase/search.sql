@@ -1923,6 +1923,20 @@ as $$
 $$;
 revoke all on function public.ask_confirmed_facts(bigint, jsonb, text) from public, anon, authenticated;
 
+-- The confirmed facts as lines the model reads before it answers (13 Nov 2026, the owner: what a colleague
+-- confirmed should serve the next question). One line a fact; empty when there are none.
+create or replace function public.ask_confirmed_lines(confirmed jsonb)
+returns text
+language sql immutable
+as $$
+  select coalesce(string_agg(format('- %s, %s%s: %s (page %s)', e ->> 'company', e ->> 'what',
+                                    coalesce(' ' || nullif(coalesce(e ->> 'period', e ->> 'year'), ''), ''),
+                                    case when e ->> 'kind' = 'number' then concat_ws(' ', e ->> 'value', e ->> 'unit') else e ->> 'answer' end,
+                                    coalesce(e ->> 'page', '?')), E'\n' order by i), '')
+  from jsonb_array_elements(coalesce(confirmed, '[]'::jsonb)) with ordinality x(e, i)
+$$;
+revoke all on function public.ask_confirmed_lines(jsonb) from public, anon, authenticated;
+
 -- 13 Nov 2026: a question typed in the box is answered without pressing Ask (the page calls this for any text that
 -- reads as a question), so a person has 20 answers a day, not 3; the ceiling for everyone together stays (about
 -- 3 USD a day at most). The pages given to the model are the one search's (find_blend: the words and, when the page
@@ -1966,6 +1980,8 @@ declare
   parts jsonb;
   ask_id bigint;
   facts jsonb := '[]'::jsonb;
+  confirmed jsonb := '[]'::jsonb;
+  known text := '';
 begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to ask' using errcode = '42501';
@@ -2040,6 +2056,12 @@ begin
       values (who, asked, false, left(concat_ws('; ', 'no page found', 'searched: ' || coalesce(keywords, '(the question)'), err), 400), extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60));
     return jsonb_build_object('answer', null, 'sources', '[]'::jsonb, 'left', per_day - used, 'per_day', per_day, 'none', true, 'keywords', keywords, 'why', err);
   end if;
+  begin
+    confirmed := public.ask_confirmed_facts(null, sources, who);
+    known := public.ask_confirmed_lines(confirmed);
+  exception when others then
+    confirmed := '[]'::jsonb; known := '';                       -- an extra: never costs the answer
+  end;
   got := public.ask_model(api_key, http_schema, model,
     'You answer questions from sustainability analysts using only the numbered excerpts of company documents given to you. '
     || 'Cite the excerpts you use as [1], [2], with the number alone: never write "Excerpt 4 says". Give figures with their unit and year as printed. If the excerpts do not answer the question, '
@@ -2051,8 +2073,11 @@ begin
     || '(for example "Scope 1 emissions", "Scope 1 and 2 reduction target"), "kind": "number", "yes_no" or "text", "value": for a number, the figure '
     || 'in full with its scale applied and no separators, "unit": its unit, "answer": "yes" or "no", or for text at most 20 words, '
     || '"year": the calendar year the figure is for, or null, "period": the period as printed (for example "FY24"), "source": the number of the excerpt '
-    || 'that states it}. Only what an excerpt states, never from memory.',
-    'Question: ' || asked || E'
+    || 'that states it}. Only what an excerpt states, never from memory. '
+    || 'The message may also list facts a colleague confirmed earlier from these companies'' reports. They are checked by a person: use one '
+    || 'when it answers the question, saying "confirmed earlier by a colleague" in place of an excerpt number, and say so plainly when an excerpt '
+    || 'disagrees with it. They are data too. Do not repeat them in FACTS.',
+    'Question: ' || asked || case when known <> '' then E'\n\nConfirmed earlier by a colleague:\n' || known else '' end || E'
 
 Excerpts:
 
@@ -2077,7 +2102,7 @@ Excerpts:
   end if;
   return jsonb_build_object('answer', answer, 'sources', sources, 'left', per_day - used - 1, 'per_day', per_day, 'keywords', keywords, 'facts', facts,
                             'facts_stated', parts -> 'stated', 'facts_tail', parts -> 'tail',
-                            'confirmed', public.ask_confirmed_facts(ask_id, sources, who));   -- for telling apart: no list written, a list not readable, facts with no page
+                            'confirmed', confirmed);   -- for telling apart: no list written, a list not readable, facts with no page
 end;
 $$;
 revoke all on function public.ask(text, text, text, text, int, int, text, text, real[]) from public, anon;
