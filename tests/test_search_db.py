@@ -296,7 +296,13 @@ class SearchOnPostgres(unittest.TestCase):
                             "values (%s, %s, 'C', %s, %s, %s, %s, %s, %s, now() - %s::interval)", (ask_id, wba, what, kind, value, answer, verdict, by, ago))
             cur.execute("select public.ask_confirmed_facts(9, %s::jsonb, 'B@x.org')", (json.dumps([{"n": 1, "wba_id": "PT_1"}]),))
             got = cur.fetchone()[0]
+            cur.execute("select public.ask_confirmed_lines(%s::jsonb), public.ask_confirmed_lines('[]'::jsonb)", (json.dumps(
+                [{"company": "Nike", "what": "Scope 1 emissions", "period": "FY24", "year": 2023, "kind": "number", "value": 60836, "unit": "tCO2e", "page": 23},
+                 {"company": "Nike", "what": "Scope 1 and 2 target", "kind": "yes_no", "answer": "yes", "page": 10}]),))
+            lines, none = cur.fetchone()
             c.rollback()
+        self.assertEqual(lines, "- Nike, Scope 1 emissions FY24: 60836 tCO2e (page 23)\n- Nike, Scope 1 and 2 target: yes (page 10)")
+        self.assertEqual(none, "")
         self.assertEqual([(g["what"], g["mine"]) for g in got], [("net zero target", True)])
         self.assertNotIn("verdict_by", got[0])                                     # who confirmed is not sent
 
