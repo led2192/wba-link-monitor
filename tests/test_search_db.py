@@ -309,6 +309,40 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([(g["what"], g["mine"]) for g in got], [("net zero target", True), ("Scope 1 and 2 reduction", False)])
         self.assertNotIn("verdict_by", got[0])                                     # who confirmed is not sent
 
+    def test_the_owners_panel_links_facts_and_cost(self):
+        import hashlib, psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.ask_log (asker, question, answered, input_tokens, output_tokens) values ('p@x.org', 'q?', true, 1000000, 200000) returning id")
+            ask_id = cur.fetchone()[0]
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value) values (%s, 'PT_1', 'Nike', 'Scope 1', 'number', 5) returning id", (ask_id,))
+            fact = cur.fetchone()[0]
+            cur.execute("select public.admin_ok('any')")
+            self.assertTrue(cur.fetchone()[0])                                  # the test session is the owner
+            cur.execute("select public.admin_link_new('k', 'Luis'), public.admin_link_new('k', 'no spaces please')")
+            made, bad = cur.fetchone()
+            cur.execute("select key_hash, active from public.search_keys where name = 'luis'")
+            kept, active = cur.fetchone()
+            self.assertEqual(kept, hashlib.sha256(made["key"].encode()).hexdigest())      # only the hash is kept
+            self.assertTrue(active); self.assertIn("error", bad)
+            cur.execute("select public.admin_link_new('k', 'luis') ->> 'error', public.admin_link_set('k', 'luis', false), public.admin_link_set('k', 'owner', false)")
+            taken, off, owner = cur.fetchone()
+            self.assertEqual(taken, "that name is taken"); self.assertTrue(off["ok"]); self.assertIn("error", owner)
+            cur.execute("select active from public.search_keys where name = 'luis'")
+            self.assertFalse(cur.fetchone()[0])
+            cur.execute("select jsonb_array_length(public.admin_facts('k', 'nike', 'open', 10)), public.admin_fact_set('k', %s, 'wrong')", (fact,))
+            self.assertEqual(cur.fetchone()[0], 1)
+            cur.execute("select public.admin_facts('k', null, 'marked', 10)")
+            marked = cur.fetchone()[0]
+            self.assertEqual((marked[0]["verdict"], marked[0]["question"], marked[0]["asker"]), ("wrong", "q?", "p@x.org"))
+            cur.execute("select public.admin_fact_set('k', %s, 'none'), public.admin_overview('k')", (fact,))
+            _, o = cur.fetchone()
+            c.rollback()
+        today = [d for d in o["days"] if d["tokens_in"] >= 1000000][0]
+        self.assertAlmostEqual(float(today["usd"]), 0.2, places=3)             # 1M read at 0.10 + 0.2M written at 0.50
+        self.assertIn("luis", [l["name"] for l in o["links"]])
+        self.assertIn("p@x.org", [p["email"] for p in o["people"]])
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
