@@ -1291,6 +1291,10 @@ begin
                'year', p.year, 'value', p.value, 'unit', public.unit_shown(p.unit, p.value::numeric, p.printed::text), 'printed', p.printed, 'basis', p.basis, 'library_id', p.library_id, 'page', p.page,
                'url', d.url, 'label', d.label, 'doc_type', d.doc_type, 'agree', p.docs, 'readings', t.readings, 'variants', t.variants,
                'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants),
+               -- the month the company's fiscal year ends (the commonest among its documents' period ends), so the page can say
+               -- which fiscal year a reporting year is: Nike's 2019 is the year to May 2020, printed FY20 (the owner, 13 Nov 2026)
+               'fy_end_month', (select mode() within group (order by substring(dd.period_end from 6 for 2))::int from public.documents dd
+                                where dd.wba_id = p.wba_id and dd.period_end ~ '^[0-9]{4}-[0-9]{2}'),
                'ok', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'ok'),
                'wrong', (select count(*) from public.value_reviews r where r.version_id = p.version_id and r.verdict = 'wrong')) as j
       from pick p
