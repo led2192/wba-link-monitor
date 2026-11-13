@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v58 2026-11-13";
+  const CLIENT = "lantern v59 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1370,7 +1370,7 @@
       const left = el("div"); left.append(f.verdict_at ? tag("confirmed", "#2E8B1F") : tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)"));
       left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
       const words = f.kind === "text";                                   // a sentence is read, not displayed like a figure
-      const num = el("div", words ? null : "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear) num.append(el("small", null, f.unit));
+      const num = el("div", words ? null : "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, f.unit));   // a unit belongs to a figure ("month not stated text" showed the model's "text")
       if (words) num.style.cssText = "font-size:14px;line-height:1.4;margin:2px 0";
       left.appendChild(num);
       return left;
