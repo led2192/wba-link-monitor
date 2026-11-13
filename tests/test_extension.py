@@ -25,7 +25,7 @@ class Extension(unittest.TestCase):
         self.assertLess(js.index('rpc("upload_begin"'), js.index("/storage/v1/object/uploads/"))
         self.assertLess(js.index("/storage/v1/object/uploads/"), js.index('rpc("upload_done"'))
         self.assertIn('head.includes("%PDF-")', js)                                       # what is not a PDF is not sent
-        self.assertIn("MAX_BYTES = 50 * 1024 * 1024", js)
+        self.assertIn("MAX_BYTES = 150 * 1024 * 1024", js)
 
     def test_what_is_held_is_not_offered_and_only_reports_are_ticked(self):
         js = read("extension", "send.js")
