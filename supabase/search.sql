@@ -1943,6 +1943,30 @@ as $$
 $$;
 revoke all on function public.ask_confirmed_lines(jsonb) from public, anon, authenticated;
 
+-- One page of a document, as text, for reading inside lanterN (13 Nov 2026). Some documents have no public address
+-- (the library holds their text, not a link), so a fact or a value read on their page 65 could not be checked by
+-- anyone; and the owner wants to check a fact without leaving the panel. Returns the page's text with the document's
+-- company, year, type, title, address when it has one, and how many pages it has.
+create or replace function public.doc_page(key text, library_id text, page int)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '10s'
+as $$
+#variable_conflict use_variable
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select jsonb_build_object('library_id', d.library_id, 'company', d.company, 'year', d.year, 'doc_type', d.doc_type, 'label', d.label,
+                                    'url', d.url, 'pages', d.pages, 'page', p.page, 'body', left(p.body, 20000))
+          from public.documents d left join public.pages p on p.library_id = d.library_id and p.page = page
+          where d.library_id = library_id limit 1);
+end;
+$$;
+revoke all on function public.doc_page(text, text, int) from public;
+grant execute on function public.doc_page(text, text, int) to anon, authenticated;
+
 -- The facts of answers about a company, for a search that names the company and asks nothing (13 Nov 2026, the
 -- owner: what answers found should be in sight there too, in the background): the confirmed ones (as
 -- ask_confirmed_facts lists them, up to twenty) and the ones nobody has marked yet (each figure once, not one already
@@ -2227,8 +2251,8 @@ begin
   end if;
   return (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from (
     select f.id, f.at, f.company, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.period, f.page, f.url, f.verdict, f.verdict_by, f.verdict_at,
-           a.question, a.asker
-    from public.ask_facts f left join public.ask_log a on a.id = f.ask_id
+           a.question, a.asker, f.library_id, d.year as doc_year, d.doc_type, d.label as doc_label      -- the report it was read in: two reports can state a target differently
+    from public.ask_facts f left join public.ask_log a on a.id = f.ask_id left join public.documents d on d.library_id = f.library_id
     where (company_filter is null or btrim(company_filter) = '' or f.company ilike '%' || btrim(company_filter) || '%' or f.wba_id = btrim(company_filter))
       and (which = 'all' or (which = 'open' and f.verdict is null) or (which not in ('all', 'open') and f.verdict is not null))
       and not exists (select 1 from regexp_split_to_table(lower(btrim(coalesce(search, ''))), '\s+') w

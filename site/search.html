@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v59 2026-11-13";
+  const CLIENT = "lantern v60 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1377,7 +1377,9 @@
     };
     const sourceLine = (f, lead) => {
       const ev = el("div", "ev"); ev.append(document.createTextNode(lead + " · "));
-      if (/^https?:\/\//i.test(f.url || "")) { const a = el("a", null, `source, page ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); } else ev.append(document.createTextNode(`page ${f.page}`));
+      if (/^https?:\/\//i.test(f.url || "")) { const a = el("a", null, `source, page ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); ev.append(document.createTextNode(" · ")); }
+      if (f.library_id && f.page) { const r = el("a", null, /^https?:\/\//i.test(f.url || "") ? "read here" : `read page ${f.page} here`); r.href = "#"; r.title = "The page's text, inside lanterN"; r.onclick = e => { e.preventDefault(); openReader(f.library_id, f.page, factNeedle(f)); }; ev.appendChild(r); }
+      else if (!/^https?:\/\//i.test(f.url || "")) ev.append(document.createTextNode(`page ${f.page}`));
       return ev;
     };
     if (state.confirmed.length) {
@@ -1426,6 +1428,37 @@
   $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lanterN</a>';
   $("share").onclick = async ev => { ev.preventDefault(); const link = location.origin + location.pathname + "#k=" + key;       // the same key on another device or for a colleague: searching needs only the link; reviews, Ask and adding need a WBA sign-in
     try { await navigator.clipboard.writeText(link); ev.target.textContent = "Link copied: paste it to a colleague or open it on your other device"; } catch (e) { ev.target.textContent = link; } };
+  // A page of a document read inside lanterN (v60): for documents with no public address, and to check a fact
+  // without leaving the page. The text as the library holds it; previous and next page; the document's link when it has one.
+  async function openReader(libraryId, page, find) {
+    let d = $("reader");
+    if (!d) {
+      d = document.createElement("dialog"); d.id = "reader";
+      d.style.cssText = "width:min(900px,92vw);max-height:86vh;border:1px solid var(--line);border-radius:14px;padding:0;background:var(--bg);color:var(--fg);font:inherit";
+      document.body.appendChild(d); d.addEventListener("click", ev => { if (ev.target === d) d.close(); });
+    }
+    d.innerHTML = ""; const head = el("div"); head.style.cssText = "display:flex;align-items:center;gap:8px;padding:12px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);flex-wrap:wrap";
+    const title = el("b", null, "Loading…"), body = el("div"); body.style.cssText = "padding:16px 18px;white-space:pre-wrap;line-height:1.55;font-size:14px;overflow-wrap:anywhere";
+    head.appendChild(title); d.append(head, body); if (!d.open) d.showModal();
+    let got = null; try { got = await rpc("doc_page", { key, library_id: libraryId, page: Number(page) || 1 }); } catch (e) { got = null; }
+    if (!got) { title.textContent = "This page could not be read."; return; }
+    title.textContent = [got.company, got.year, got.doc_type].filter(Boolean).join(" · ") + ` · page ${got.page || page}` + (got.pages ? ` of ${got.pages}` : "");
+    const nav = el("span"); nav.style.cssText = "margin-left:auto;display:flex;gap:6px;align-items:center";
+    const step = (label, to) => { const b = el("button", null, label); b.type = "button"; b.style.cssText = "font:inherit;font-size:13px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer"; b.disabled = to < 1 || (got.pages && to > got.pages); b.onclick = () => openReader(libraryId, to, find); return b; };
+    const at = Number(got.page || page) || 1; nav.append(step("‹ previous page", at - 1), step("next page ›", at + 1));
+    if (/^https?:\/\//i.test(got.url || "")) { const a = el("a", null, "open the document"); a.href = pageUrl({ url: got.url, page: at }); a.target = "_blank"; a.rel = "noopener"; a.style.fontSize = "13px"; nav.appendChild(a); }
+    else { const n = el("span", null, "no public link for this document"); n.style.cssText = "font-size:12px;color:var(--muted)"; nav.appendChild(n); }
+    const x = el("button", null, "Close"); x.type = "button"; x.style.cssText = "font:inherit;font-size:13px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer"; x.onclick = () => d.close(); nav.appendChild(x);
+    head.appendChild(nav);
+    if (got.label) { const sub = el("div", null, got.label); sub.style.cssText = "width:100%;font-size:12.5px;color:var(--muted)"; head.appendChild(sub); }
+    const text = got.body || "(the library holds no text for this page)";
+    const needle = String(find || "").trim();                 // the figure or the words looked for, marked where the page prints them
+    const i = needle.length >= 2 ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1;
+    if (i < 0) { body.textContent = text; return; }
+    const mark = el("mark", null, text.slice(i, i + needle.length)); body.append(document.createTextNode(text.slice(0, i)), mark, document.createTextNode(text.slice(i + needle.length)));
+    mark.scrollIntoView({ block: "center" });
+  }
+  const factNeedle = f => f.kind === "number" ? Math.abs(Number(f.value)).toLocaleString("en-US") : "";
   // The owner's panel (13 Nov 2026): links and people, the facts of answers and who marked them, and what Ask costs.
   // Shown only when the page was opened with the owner's link and the person is signed in (admin_ok); every admin
   // function checks the same on the server. A window inside the page: the search under it stays as it is.
@@ -1504,7 +1537,10 @@
     bar.append(el("span", null, `${rows.length}${rows.length >= 500 ? "+" : ""} facts`)); body.appendChild(bar);
     const line = f => {
       const value = f.kind === "number" ? [fmt(Number(f.value)), f.unit].filter(Boolean).join(" ") : f.answer;
-      const src = /^https?:\/\//i.test(f.url || "") ? (() => { const a = el("a", null, `p. ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; return a; })() : (f.page ? `p. ${f.page}` : "");
+      const src = el("span");
+      if (/^https?:\/\//i.test(f.url || "")) { const a = el("a", null, `p. ${f.page}`); a.href = pageUrl(f); a.target = "_blank"; a.rel = "noopener"; a.title = "Open the document at this page"; src.append(a, document.createTextNode(" ")); } else if (f.page) src.append(document.createTextNode(`p. ${f.page} `));
+      if (f.library_id && f.page) { const r = el("a", null, "read"); r.href = "#"; r.title = "The page's text, here"; r.onclick = e => { e.preventDefault(); openReader(f.library_id, f.page, factNeedle(f)); }; src.appendChild(r); }
+      const report = [f.doc_year, f.doc_type].filter(Boolean).join(" · "); const rep = el("span", null, report); rep.title = f.doc_label || "";
       // the mark a fact carries is painted on its button, and a click says "saved" in the row before the list is read again
       const acts = el("span"), said = el("span"); said.style.cssText = "font-size:12px;color:#2E8B1F;margin-left:4px";
       for (const [v, label] of [["right", "✓"], ["wrong", "✗"], ["none", "clear"]]) {
@@ -1519,9 +1555,9 @@
       }
       acts.appendChild(said);
       const q = el("span", null, (f.question || "").slice(0, 90)); q.title = (f.question || "") + (f.asker ? " · asked by " + f.asker : "");
-      return [[f.what, f.period || f.year].filter(Boolean).join(" · "), value, src, f.verdict || "", f.verdict_by ? `${f.verdict_by}, ${adminWhen(f.verdict_at)}` : "", q, acts];
+      return [[f.what, f.period || f.year].filter(Boolean).join(" · "), value, rep, src, f.verdict || "", f.verdict_by ? `${f.verdict_by}, ${adminWhen(f.verdict_at)}` : "", q, acts];
     };
-    const cols = ["Fact", "Value", "Page", "Mark", "By", "Question", ""];
+    const cols = ["Fact", "Value", "Report", "Page", "Mark", "By", "Question", ""];
     if (!rows.length) { body.append(el("p", null, "No fact matches.")); return; }
     if (!st.grouped) { body.appendChild(adminTable(["Company", ...cols], rows.map(f => [f.company, ...line(f)]))); return; }
     const by = new Map(); for (const f of rows) { const k = f.company || "(no company)"; if (!by.has(k)) by.set(k, []); by.get(k).push(f); }

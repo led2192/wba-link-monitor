@@ -137,3 +137,6 @@ Decisions and what was rejected: [decisions.md](decisions.md), 24 and 26 Oct 202
 
 ## The owner's panel
 "Admin" appears in the footer for whoever opens lanterN with the owner's link and is signed in. People and links: make a link for a person or a group (the link is copied once; only its hash is kept), switch a link off, see searches by link and what each signed-in person did. Facts from answers: the data points Ask kept, with their mark, who marked them and the question; the owner can mark or clear any. Cost: answers, tokens and USD by day. Functions: `admin_ok`, `admin_overview`, `admin_facts`, `admin_fact_set`, `admin_link_new`, `admin_link_set` in `supabase/search.sql`.
+
+## Reading a page inside lanterN
+Some documents have no public address: the library holds their text, not a link. `doc_page` returns one page's text (at most 20,000 characters) with the document's company, year, type, title, address and page count, to anyone with a link to lanterN, as the excerpts already are. The page opens it in a window ("read here", "read page 65 here") with previous and next page.
