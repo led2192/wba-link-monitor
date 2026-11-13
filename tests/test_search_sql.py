@@ -369,3 +369,8 @@ def test_a_page_without_a_link_can_still_be_read():
     assert "grant execute on function public.doc_page(text, text, int) to anon, authenticated;" in SQL
     assert "async function openReader(libraryId, page, find)" in PAGE and "no public link for this document" in PAGE
     assert '"Fact", "Value", "Report", "Page"' in PAGE                                      # the owner sees which report states a fact
+
+
+def test_eight_pages_are_not_a_total():
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    assert "do not give a count: say first that a total cannot be read from eight pages" in ask
