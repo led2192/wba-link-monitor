@@ -2027,15 +2027,19 @@ grant execute on function public.company_facts(text, text) to anon, authenticate
 create or replace function public.ask_pages(
   key text, q text, qvec real[], company_filter text, year_from int, year_to int, type_filter text, asked text)
 returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text)
-language sql security definer
+language plpgsql security definer           -- plpgsql, not sql: find_blend is defined further down this file, and a sql body is checked when it is created
 set search_path = public, extensions
 as $$
-  with c as materialized (select * from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask', null, null, null, asked)),
-       newest as (select max(c.year) as y from c)
-  select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt
-  from c, newest
-  order by case when c.rank <= 5 then 0 when c.year is not null and c.year >= newest.y - 1 then 1 else 2 end, c.rank
-  limit 8
+#variable_conflict use_column
+begin
+  return query
+    with c as materialized (select * from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask', null, null, null, asked)),
+         newest as (select max(c.year) as y from c)
+    select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt
+    from c, newest
+    order by case when c.rank <= 5 then 0 when c.year is not null and c.year >= newest.y - 1 then 1 else 2 end, c.rank
+    limit 8;
+end;
 $$;
 revoke all on function public.ask_pages(text, text, real[], text, int, int, text, text) from public, anon, authenticated;
 
