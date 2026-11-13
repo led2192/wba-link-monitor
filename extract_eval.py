@@ -801,6 +801,8 @@ SEMANTIC_POOL = 8         # --semantic-pool N: also the N pages of the documents
 SEMANTIC_TIMEOUT = "20s"
 _EMBEDDER = None
 _QUERY_VECS = {}          # the attribute's words -> its vector, for the run
+_VEC_TRIES = collections.Counter()     # the attribute's words -> times the database was asked this run
+_NO_VECTOR = set()                    # texts the database gave no vector for, twice
 SEMANTIC_STATS = collections.Counter()      # asked, vector from the library / the database, no vector, pages added: a default that adds nothing must show
 
 
@@ -828,7 +830,10 @@ def query_vec(cur, text):
     measures of 13 Nov 2026 ran so), else from the database (public.query_vector_made: the same model,
     multilingual-e5-small with the "query: " prefix, asked of Hugging Face once and kept in public.query_vectors).
     The nightly reader has no such library (it took 3 to 5 minutes to install on each of its machines), and there
-    are some tens of attributes, so the database's kept vectors serve it. None when neither gives one."""
+    are some tens of attributes, so the database's kept vectors serve it. None when neither gives one.
+    A text is asked of the database twice at most in a run, and after three texts with no vector nothing more is
+    asked: the call waits up to 15 s on the service, and a service that is down must not cost every answer of a
+    night that wait (the pool then adds nothing, and the run says so)."""
     global _EMBEDDER
     if text in _QUERY_VECS:
         return _QUERY_VECS[text]
@@ -839,7 +844,10 @@ def query_vec(cur, text):
             SEMANTIC_STATS["vector from the library"] += 1
         except Exception:
             _EMBEDDER = False                                 # no library here: not tried again this run
-    if vec is None:
+    if vec is None and len(_NO_VECTOR) < 3 and _VEC_TRIES[text] < 2:
+        _VEC_TRIES[text] += 1
+        why = "the call failed"
+        t0 = time.time()
         try:
             with cur.connection.transaction():
                 cur.execute("select public.query_vector_made(%s)", (text,))
@@ -847,11 +855,18 @@ def query_vec(cur, text):
             if isinstance(got, dict) and got.get("vec"):
                 vec = [float(x) for x in got["vec"]]
                 SEMANTIC_STATS["vector from the database"] += 1
-        except Exception:
-            vec = None
+            elif isinstance(got, dict):
+                why = next((k for k in ("off", "busy", "error") if got.get(k)), "no answer")      # the key only, never a text
+        except Exception as e:
+            why = type(e).__name__
+        SEMANTIC_STATS["seconds asking the database"] += int(round(time.time() - t0))
+        if vec is None:
+            SEMANTIC_STATS[f"database gave no vector ({why})"] += 1
+            if _VEC_TRIES[text] >= 2:
+                _NO_VECTOR.add(text)
     if vec is None:
         SEMANTIC_STATS["no vector"] += 1
-        return None                                           # not kept: the service may answer the next time
+        return None
     _QUERY_VECS[text] = vec
     return vec
 

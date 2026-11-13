@@ -606,21 +606,31 @@ class SemanticPool(unittest.TestCase):
         keep = (X.embed_query, X._EMBEDDER, dict(X._QUERY_VECS), collections.Counter(X.SEMANTIC_STATS))
         try:
             X.embed_query, X._EMBEDDER = no_library, None
-            X._QUERY_VECS.clear(); X.SEMANTIC_STATS.clear()
+            X._QUERY_VECS.clear(); X.SEMANTIC_STATS.clear(); X._NO_VECTOR.clear(); X._VEC_TRIES.clear()
             db = Db({"vec": [0.5, 0.25], "held": True})
             self.assertEqual(X.query_vec(db, "Scope 1: scope 1 emissions"), [0.5, 0.25])
             self.assertEqual(X.query_vec(db, "Scope 1: scope 1 emissions"), [0.5, 0.25])      # kept for the run: asked once
             self.assertEqual(db.asked, 1)
             self.assertIs(X._EMBEDDER, False)                                                 # the library is not tried again
             self.assertEqual(X.SEMANTIC_STATS["vector from the database"], 1)
-            for reply in ({"busy": True}, {"off": True}, RuntimeError("down")):
-                self.assertIsNone(X.query_vec(Db(reply), "Revenue: total revenue"))           # no vector: nothing added, nothing kept
-            self.assertEqual(X.SEMANTIC_STATS["no vector"], 3)
+            busy = Db({"busy": True})
+            for _ in range(5):
+                self.assertIsNone(X.query_vec(busy, "Revenue: total revenue"))                # no vector: nothing added, nothing kept
+            self.assertEqual(busy.asked, 2)                                                   # a text is asked twice at most in a run
+            self.assertEqual(X.SEMANTIC_STATS["database gave no vector (busy)"], 2)
+            self.assertEqual(X.SEMANTIC_STATS["no vector"], 5)
             self.assertNotIn("Revenue: total revenue", X._QUERY_VECS)
+            down = Db(RuntimeError("down"))
+            for text in ("a", "a", "b", "b", "c", "d", "e"):
+                self.assertIsNone(X.query_vec(down, text))
+            self.assertEqual(down.asked, 4)                                                   # three texts with no vector: nothing more is asked
+            self.assertEqual(X.SEMANTIC_STATS["database gave no vector (RuntimeError)"], 4)
+            X._NO_VECTOR.clear(); X._VEC_TRIES.clear()
             X.embed_query, X._EMBEDDER = (lambda t: [1.0, 0.0]), None                         # a machine with the library uses it
             self.assertEqual(X.query_vec(Db(RuntimeError("not asked")), "Employees"), [1.0, 0.0])
             self.assertEqual(X.SEMANTIC_STATS["vector from the library"], 1)
         finally:
             X.embed_query, X._EMBEDDER = keep[0], keep[1]
             X._QUERY_VECS.clear(); X._QUERY_VECS.update(keep[2]); X.SEMANTIC_STATS.clear(); X.SEMANTIC_STATS.update(keep[3])
+            X._NO_VECTOR.clear(); X._VEC_TRIES.clear()
 
