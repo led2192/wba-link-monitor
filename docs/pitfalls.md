@@ -350,3 +350,6 @@ In a PL/pgSQL function with `#variable_conflict use_variable`, a column named li
 
 ## An answer written from the best pages cannot count
 Ask reads eight pages. A question about one company's figure is answered from them; "how many companies do X" is not, and the model answered it anyway with the number of companies among its eight pages (13 Nov 2026: "six", against 33 in the first 50 results). A retrieval answer needs to be told what its pages are (a sample) and questions that need the whole library need a query that counts, not a model that reads.
+
+## A page that keeps parts of the search before
+The results, the company strip and the values panel are filled by separate calls. When one call of a new search failed (13 Nov 2026, a timeout), the others kept showing the search before, and a later call (the answer) redrew the list from rows kept in memory: Turkish Airlines beside a question about ANA Holdings. Clear every part, and the rows kept in memory, when a new search starts, not when its results arrive.
