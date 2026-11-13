@@ -49,7 +49,7 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.4.0"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.4.0", read("extension", "config.js"))
+        self.assertIn('"version": "0.4.1"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.4.1", read("extension", "config.js"))
 
     def test_one_level_deeper_stays_on_the_site_and_is_bounded(self):
         js = read("extension", "send.js")
