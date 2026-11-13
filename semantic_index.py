@@ -247,6 +247,8 @@ def main():
     ap.add_argument("--batch", type=int, default=64)
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--build-index", action="store_true", help="build the index on the embeddings (once, when the documents are in) and stop")
+    ap.add_argument("--try-query", default="", help="check the search by meaning: embed these words and print the ids of the nearest pages")
+    ap.add_argument("--try-company", default="", help="with --try-query: a company (wba id or name); empty searches every company through the index")
     ap.add_argument("--remaining", action="store_true", help="print how many documents are done and left, and stop")
     ap.add_argument("--build-memory", default="512MB", help="maintenance_work_mem for --build-index: about half the database machine's RAM")
     ap.add_argument("--build-workers", type=int, default=2, help="parallel workers for --build-index: the machine's processors minus one")
@@ -265,6 +267,22 @@ def main():
             secs = build_vector_index(conn.cursor(), a.build_memory, a.build_workers)
         print(f"The indexes on the embeddings and on the word pairs are built ({secs / 60:.1f} min).", flush=True)
         run.finish("ok", rows_in=0, rows_out=0, notes="index built")
+        return 0
+    if a.try_query:
+        # A check of the search by meaning from outside the page (13 Nov 2026): the query embedded here, find_meaning
+        # called as the owner. Prints counts, ids and scores only, never a page's text.
+        vec = [float(x) for x in Embedder(a.model, a.batch).embed_query(a.try_query)]
+        with evidence_db.connect() as conn:
+            cur = conn.cursor()
+            t = time.time()
+            cur.execute("select rank, library_id, page, year, doc_type, score from public.find_meaning(%s, %s::real[], %s, null, null, null, 10)",
+                        ("", vec, a.try_company or None))
+            rows = cur.fetchall()
+        print(f"find_meaning: {len(rows)} pages in {time.time() - t:.1f} s for a query of {len(a.try_query.split())} words"
+              + (f", company {a.try_company}" if a.try_company else ", every company"), flush=True)
+        for r in rows:
+            print(f"  {r[0]:>2}  {r[1]}  page {r[2]}  {r[3]}  {r[4]}  score {r[5]:.3f}", flush=True)
+        run.finish("ok", rows_in=0, rows_out=0, notes="search by meaning tried")
         return 0
     if a.remaining:
         with evidence_db.connect() as conn:
