@@ -346,3 +346,9 @@ def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
 def test_a_mark_in_the_owners_panel_shows_and_says_saved():
     assert 'if (f.verdict === v) { b.style.background = v === "right" ? "#4BB42D" : "#FF3C23";' in PAGE
     assert '(v === "none" ? "cleared" : "saved") : "not saved"' in PAGE
+
+
+def test_a_company_search_shows_what_answers_found():
+    assert "grant execute on function public.company_facts(text, text) to anon, authenticated;" in SQL
+    assert 'authed("company_facts", args)) || (await rpc("company_facts", args))' in PAGE
+    assert "if (!state.company || state.answered || seq !== searchSeq) return;" in PAGE          # an answer takes their place

@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v56 2026-11-13";
+  const CLIENT = "lantern v57 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -367,7 +367,7 @@
   }
 
   let companies = [];
-  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null, blended: false, cited: [], lastRows: [], facts: [], confirmed: [] };
+  const state = { q: "", company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null, rows: 50, logId: null, blended: false, cited: [], lastRows: [], facts: [], confirmed: [], earlier: false, answered: false };
   let industries = [], regions = [];
 
   async function rpc(fn, body) {
@@ -602,7 +602,7 @@
   async function search(fromChips, more) {
     document.body.classList.remove("playing");                    // a search ends the card game
     if (typeof closeHistory === "function") closeHistory();          // and the suggestions step aside for the results (they stayed open over them when the page opened on a search)
-    if (!more) { state.cited = []; state.facts = []; state.confirmed = []; }                                 // the pages an answer cited belong to that question
+    if (!more) { state.cited = []; state.facts = []; state.confirmed = []; state.earlier = false; state.answered = false; }                                 // the pages an answer cited belong to that question
     if (!fromChips) {
       const parsed = parse($("q").value);
       state.q = parsed.q;
@@ -662,7 +662,7 @@
       if (!more) state.lastRows = rows;
       render(more ? rows.slice(state.rows - 50) : citedFirst(rows), !!more);
       state.logId = rows.length ? rows[0].log_id : null;
-      if (!more) loadValues().then(showFacts, showFacts);
+      if (!more) loadValues().then(showFacts, showFacts).then(() => earlierFacts(seq));
       if (!more && state.q) didYouMean($("q").value.trim());
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
@@ -1326,7 +1326,7 @@
       const nums = [...new Set([...j.answer.matchAll(/\[(\d+)\]/g)].map(m => m[1]))];
       state.cited = nums.map(n => src.find(x => String(x.n) === n)).filter(x => x && x.library_id).map(x => ({ log_id: state.logId, rank: 0, library_id: x.library_id, company: x.company, wba_id: x.wba_id, year: x.year, doc_type: x.doc_type, label: x.label, url: x.url, page: x.page, score: 0, excerpt: x.excerpt || "" }));
       if (state.cited.length) { render(citedFirst(state.lastRows), false); window.scrollTo(0, 0); }
-      state.facts = Array.isArray(j.facts) ? j.facts : []; state.confirmed = Array.isArray(j.confirmed) ? j.confirmed : []; showFacts();
+      state.facts = Array.isArray(j.facts) ? j.facts : []; state.confirmed = Array.isArray(j.confirmed) ? j.confirmed : []; state.earlier = false; state.answered = true; showFacts();
     }
     const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : m; });
     c.appendChild(body);
@@ -1343,6 +1343,15 @@
   }
   // What the answer found (13 Nov 2026): the data points the answer states, each with its page, at the top of the side
   // panel for the person to mark right or wrong. Unconfirmed readings; kept in the search database (ask_facts).
+  // v57: a search that names a company and asks nothing shows, at the foot of the panel, what earlier answers found
+  // about it: the confirmed facts and the ones nobody has marked yet. An answer, when one comes, takes their place at the top.
+  async function earlierFacts(seq) {
+    if (!state.company || state.answered || seq !== searchSeq) return;
+    let got = null; const args = { key, company_filter: state.company };
+    try { got = (await authed("company_facts", args)) || (await rpc("company_facts", args)); } catch (e) { got = null; }
+    if (!got || state.answered || seq !== searchSeq) return;
+    state.confirmed = got.confirmed || []; state.facts = got.open || []; state.earlier = true; showFacts();
+  }
   function showFacts() {
     const panel = $("values"); for (const old of panel.querySelectorAll(".fromanswer")) old.remove();
     if (!state.facts.length && !state.confirmed.length) return;
@@ -1358,7 +1367,7 @@
     const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));
     const factLine = f => {
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
-      const left = el("div"); left.append(f.verdict_at ? tag("confirmed", "#2E8B1F") : tag("from this answer", "var(--accent)"));
+      const left = el("div"); left.append(f.verdict_at ? tag("confirmed", "#2E8B1F") : tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)"));
       left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
       const words = f.kind === "text";                                   // a sentence is read, not displayed like a figure
       const num = el("div", words ? null : "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear) num.append(el("small", null, f.unit));
@@ -1380,7 +1389,7 @@
       }
       box._known = known;
     }
-    if (fresh.length) box.append(el("div", "subhead", `Found in this answer · ${fresh.length} · yours to confirm`));
+    if (fresh.length) box.append(el("div", "subhead", `${state.earlier ? "Found in earlier answers" : "Found in this answer"} · ${fresh.length} · yours to confirm`));
     if (!fresh.length && !state.confirmed.length) return;
     fresh.forEach((f, at) => {
       const row = el("div", "v"), left = factLine(f); if (at) rule(row);
@@ -1401,7 +1410,9 @@
       row.append(left, marks, sourceLine(f, "read by the model while answering")); box.appendChild(row);
     });
     if (box._known) box.appendChild(box._known);
-    const first = panel.querySelector("summary"); if (first) first.after(box); else panel.prepend(box);
+    const first = panel.querySelector("summary");
+    if (state.earlier) { box.style.cssText = "margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--line)"; panel.appendChild(box); }   // in the background: after the robot's values
+    else if (first) first.after(box); else panel.prepend(box);
     panel.hidden = false;
   }
   $("askBtn").onclick = ask;
