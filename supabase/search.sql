@@ -1943,6 +1943,51 @@ as $$
 $$;
 revoke all on function public.ask_confirmed_lines(jsonb) from public, anon, authenticated;
 
+-- The facts of answers about a company, for a search that names the company and asks nothing (13 Nov 2026, the
+-- owner: what answers found should be in sight there too, in the background): the confirmed ones (as
+-- ask_confirmed_facts lists them, up to twenty) and the ones nobody has marked yet (each figure once, not one already
+-- confirmed, the newest ten). Facts marked wrong are left out. One to five companies, as find_values.
+create or replace function public.company_facts(key text, company_filter text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  ids text[] := public.find_company_ids(company_filter);
+  who text := lower(auth.jwt() ->> 'email');
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if ids is null or coalesce(array_length(ids, 1), 0) = 0 or array_length(ids, 1) > 5 then
+    return jsonb_build_object('confirmed', '[]'::jsonb, 'open', '[]'::jsonb);
+  end if;
+  return jsonb_build_object(
+    'confirmed', (select coalesce(jsonb_agg(to_jsonb(x) order by x.verdict_at desc), '[]'::jsonb) from (
+        select * from (
+          select distinct on (a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
+                 a.id, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id, a.verdict_at,
+                 coalesce(a.verdict_by = who, false) as mine
+          from public.ask_facts a where a.verdict = 'right' and a.wba_id = any(ids)
+          order by a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.verdict_at desc
+        ) d order by d.verdict_at desc limit 20) x),
+    'open', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
+        select * from (
+          select distinct on (a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end)
+                 a.id, a.at, a.company, a.what, a.kind, a.value, a.unit, a.answer, a.year, a.period, a.page, a.url, a.library_id
+          from public.ask_facts a
+          where a.verdict is null and a.wba_id = any(ids)
+            and not exists (select 1 from public.ask_facts c where c.verdict is not null and c.wba_id = a.wba_id and c.kind = a.kind
+                              and coalesce(c.period, '') = coalesce(a.period, '')
+                              and case when a.kind = 'number' then abs(c.value) = abs(a.value) else lower(c.what) = lower(a.what) and lower(c.answer) = lower(a.answer) end)
+          order by a.wba_id, a.kind, coalesce(a.period, ''), case when a.kind = 'number' then abs(a.value)::text else lower(a.what) || '=' || lower(a.answer) end, a.at desc
+        ) d order by d.at desc limit 10) x));
+end;
+$$;
+revoke all on function public.company_facts(text, text) from public;
+grant execute on function public.company_facts(text, text) to anon, authenticated;
+
 -- 13 Nov 2026: a question typed in the box is answered without pressing Ask (the page calls this for any text that
 -- reads as a question), so a person has 20 answers a day, not 3; the ceiling for everyone together stays (about
 -- 3 USD a day at most). The pages given to the model are the one search's (find_blend: the words and, when the page

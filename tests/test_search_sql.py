@@ -326,7 +326,7 @@ def test_the_facts_panel_stays_readable():
 def test_a_reporting_year_says_which_fiscal_year_it_is():
     assert "'fy_end_month', (select mode() within group (order by substring(dd.period_end from 6 for 2))::int" in SQL
     assert "function fiscalNote(year, month)" in PAGE and "const end = m <= 5 ? y + 1 : y;" in PAGE      # the rule of reporting_year.py
-    assert 'tag("from this answer", "var(--accent)")' in PAGE and "border-left:3px solid var(--accent)" not in PAGE
+    assert 'tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)")' in PAGE and "border-left:3px solid var(--accent)" not in PAGE
 
 
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
@@ -346,3 +346,9 @@ def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
 def test_a_mark_in_the_owners_panel_shows_and_says_saved():
     assert 'if (f.verdict === v) { b.style.background = v === "right" ? "#4BB42D" : "#FF3C23";' in PAGE
     assert '(v === "none" ? "cleared" : "saved") : "not saved"' in PAGE
+
+
+def test_a_company_search_shows_what_answers_found():
+    assert "grant execute on function public.company_facts(text, text) to anon, authenticated;" in SQL
+    assert 'authed("company_facts", args)) || (await rpc("company_facts", args))' in PAGE
+    assert "if (!state.company || state.answered || seq !== searchSeq) return;" in PAGE          # an answer takes their place
