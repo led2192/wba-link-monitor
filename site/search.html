@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v62 2026-11-13";
+  const CLIENT = "lantern v63 2026-11-13";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1372,12 +1372,12 @@
     const box = el("div", "fromanswer"); box.style.cssText = "margin:4px 0 10px;padding-bottom:10px;border-bottom:1px solid var(--line)";
     const tag = (text, colour) => { const t = el("span", null, text); t.style.cssText = `display:inline-block;font-size:11px;line-height:1;padding:3px 7px;border-radius:999px;margin-bottom:4px;color:${colour};border:1px solid color-mix(in srgb, ${colour} 45%, transparent)`; return t; };
     const rule = row => { row.style.borderTop = "1px solid var(--line)"; row.style.paddingTop = "10px"; row.style.marginTop = "10px"; return row; };
-    const same = (a, b) => a.kind === "number" && b.kind === "number" && Math.abs(Number(a.value)) === Math.abs(Number(b.value)) && (!a.period || !b.period || a.period === b.period);
+    const same = (a, b) => a.kind === "number" && b.kind === "number" && Math.abs(Number(a.value)) === Math.abs(Number(b.value)) && (!a.period || !b.period || periodKey(a.period) === periodKey(b.period));
     const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));
     const factLine = f => {
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
       const left = el("div"); left.append(f.verdict_at ? tag("confirmed", "#2E8B1F") : tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)"));
-      left.append(el("div", "what", [f.company, f.what, f.period || f.year].filter(Boolean).join(" · ")));
+      left.append(el("div", "what", [f.company, f.what, periodShown(f)].filter(Boolean).join(" · ")));
       if (f.kind === "number" && !f.period && !f.year) {      // v61 (the owner): a figure with no year says so, and says which report printed it
         const n = el("div", "ev", "year not stated on the page" + (f.doc_year ? `; printed in the ${f.doc_year} ${f.doc_type || "report"}` : "")); n.style.cssText = "margin:0 0 2px;color:#B4540A"; left.appendChild(n);
       }
@@ -1470,6 +1470,10 @@
     const mark = el("mark", null, text.slice(i, i + needle.length)); body.append(document.createTextNode(text.slice(0, i)), mark, document.createTextNode(text.slice(i + needle.length)));
     mark.scrollIntoView({ block: "center" });
   }
+  // "FY23", "fy 2023" and "FISCAL 2023" are one period (period_key in the database).
+  const periodKey = p => { const t = String(p || "").trim().toLowerCase(), m = t.match(/^(?:fy|fiscal(?:\s+year)?)\s*'?(\d{4}|\d{2})$/); return m ? "fy" + (m[1].length === 2 ? 2000 + Number(m[1]) : Number(m[1])) : t.replace(/\s+/g, ""); };
+  // The period as printed, with WBA's reporting year when it is another year ("FY24 (WBA year 2023)").
+  const periodShown = f => { const p = f.period || f.year; return p && f.wba_year && !String(p).includes(String(f.wba_year)) ? `${p} (WBA year ${f.wba_year})` : p; };
   const factNeedle = f => f.kind === "number" ? Math.abs(Number(f.value)).toLocaleString("en-US") : "";
   // The owner's panel (13 Nov 2026): links and people, the facts of answers and who marked them, and what Ask costs.
   // Shown only when the page was opened with the owner's link and the person is signed in (admin_ok); every admin
@@ -1567,7 +1571,7 @@
       }
       acts.appendChild(said);
       const q = el("span", null, (f.question || "").slice(0, 90)); q.title = (f.question || "") + (f.asker ? " · asked by " + f.asker : "");
-      return [[f.what, f.period || f.year].filter(Boolean).join(" · "), value, rep, src, f.verdict || "", f.verdict_by ? `${f.verdict_by}, ${adminWhen(f.verdict_at)}` : "", q, acts];
+      return [[f.what, periodShown(f)].filter(Boolean).join(" · "), value, rep, src, f.verdict || "", f.verdict_by ? `${f.verdict_by}, ${adminWhen(f.verdict_at)}` : "", q, acts];
     };
     const cols = ["Fact", "Value", "Report", "Page", "Mark", "By", "Question", ""];
     if (!rows.length) { body.append(el("p", null, "No fact matches.")); return; }

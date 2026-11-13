@@ -377,6 +377,28 @@ class SearchOnPostgres(unittest.TestCase):
             c.rollback()
         self.assertEqual([p for p, _ in got], [1, 2, 3, 4, 5, 9, 14, 20])       # the best five, then 2026 and 2025 before older pages ranked above them
 
+    def test_a_fiscal_period_gets_wbas_year_and_is_one_period_however_written(self):
+        import json, psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.fiscal_label_year('FY24'), public.fiscal_label_year('FISCAL 2023'), public.fiscal_label_year('FY20–25'), public.fiscal_label_year('2024'), "
+                        "public.period_key('fy 23') = public.period_key('Fiscal Year 2023'), public.wba_year(2024, 5), public.wba_year(2024, 6), public.wba_year(2024, null)")
+            self.assertEqual(cur.fetchone(), (2024, 2023, None, None, True, 2023, 2024, None))
+            cur.execute("insert into public.company_fiscal (wba_id, fy_end_month, source) values ('PT_MAY', 5, 'pages'), ('PT_DEC', 12, 'period_end')")
+            facts = [{"what": "Revenue", "kind": "number", "value": 51217, "unit": "USD m", "period": "FISCAL 2023", "source": 1},
+                     {"what": "Revenue", "kind": "number", "value": 35120, "unit": "EUR m", "period": "FY25", "source": 2}]
+            sources = [{"n": 1, "company": "May Co", "wba_id": "PT_MAY", "library_id": "L1", "page": 35}, {"n": 2, "company": "Dec Co", "wba_id": "PT_DEC", "library_id": "L2", "page": 12}]
+            cur.execute("select public.ask_keep_facts(77, %s::jsonb, %s::jsonb), public.ask_fiscal_lines(%s::jsonb)", (json.dumps(facts), json.dumps(sources), json.dumps(sources)))
+            kept, lines = cur.fetchone()
+            cur.execute("update public.ask_facts set verdict = 'right', verdict_by = 'a@x.org', verdict_at = now() where ask_id = 77 and wba_id = 'PT_MAY'")
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value, period) values (78, 'PT_MAY', 'May Co', 'Total revenues', 'number', 51217, 'FY23')")
+            cur.execute("select public.company_facts('k', 'PT_MAY')")
+            later = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual([k["wba_year"] for k in kept], [2022, 2025])            # a year ending in May is the reporting year before; December is its own
+        self.assertIn("May Co: the fiscal year ends in May", lines); self.assertNotIn("Dec Co", lines)
+        self.assertEqual(later["open"], [])                                       # "FY23" repeats the confirmed "FISCAL 2023": not offered again
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
