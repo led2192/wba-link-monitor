@@ -215,6 +215,34 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertIn('rpc("find_meaning"', src); self.assertIn("function blend(words, meaning, need)", src)   # the page merges the two itself, asked at once
         self.assertNotIn("Search by meaning (beta)", src)                    # one search, not a choice
 
+    def test_the_facts_of_an_answer_are_taken_apart_and_kept_with_their_page(self):
+        import json, psycopg
+        reply = ('Yes. Nike has a combined target [1].\nFACTS: ```json\n'
+                 '[{"what":"Scope 1 emissions","kind":"number","value":"60836","unit":"tCO2e","year":2024,"period":"FY24","source":1},'
+                 '{"what":"Scope 1 and 2 target","kind":"yes_no","answer":"yes","source":2},'
+                 '{"what":"no page behind it","kind":"text","answer":"x","source":9},'
+                 '{"what":"not a number","kind":"number","value":"n/a","source":1},'
+                 '{"what":"a year that is none","kind":"text","answer":"y","year":"FY24","source":1}]\n```')
+        sources = [{"n": 1, "company": "Nike", "wba_id": "PT_1", "library_id": "L1", "page": 23, "url": "https://x/y.pdf"},
+                   {"n": 2, "company": "Nike", "wba_id": "PT_1", "library_id": "L2", "page": 10, "url": None}]
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.ask_split(%s)", (reply,))
+            parts = cur.fetchone()[0]
+            self.assertEqual(parts["answer"], "Yes. Nike has a combined target [1].")       # the person never sees the list
+            self.assertEqual(len(parts["facts"]), 5)
+            cur.execute("select public.ask_split('Only an answer.'), public.ask_split(E'A.\nFACTS: not json')")
+            plain, broken = cur.fetchone()
+            self.assertEqual((plain["answer"], plain["facts"], broken["answer"], broken["facts"]), ("Only an answer.", [], "A.", []))
+            cur.execute("select public.ask_keep_facts(7, %s::jsonb, %s::jsonb)", (json.dumps(parts["facts"]), json.dumps(sources)))
+            kept = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual([k["what"] for k in kept], ["Scope 1 emissions", "Scope 1 and 2 target", "a year that is none"])   # no page, or no figure: not kept
+        self.assertEqual((kept[0]["value"], kept[0]["unit"], kept[0]["year"], kept[0]["period"], kept[0]["page"], kept[0]["library_id"]), (60836, "tCO2e", 2024, "FY24", 23, "L1"))
+        self.assertEqual((kept[1]["kind"], kept[1]["answer"], kept[1]["verdict"]), ("yes_no", "yes", None))
+        self.assertIsNone(kept[2]["year"])
+        self.assertNotIn("verdict_by", kept[0])
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
