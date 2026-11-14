@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-14 Network compare, first run: 400 monitored pages, the same answer from GitHub's machine and from the server on 94%; answered 331 on GitHub and 335 on the server (9 on GitHub only, 13 on the server only). The Library mirror can run on the server (`LANTERN_JOBS` names `library_mirror`); pip's cache step is dropped there because the server keeps its packages. (#541)
 - 2026-11-14 The Scan now watcher runs on the rented server since 14:26 UTC (machine `lantern-4`; set-up in 9 seconds; its side jobs write their quality rows as before). New measure `network_compare.py` (workflow Network compare, manual): the same sample of monitored pages read from GitHub's machine and from the server with the monitor's request, compared page by page, because a site may refuse one network address and serve another. (#540)
 - 2026-11-14 Server check: the browser's system packages are installed the way the jobs install them (`python -m playwright install --with-deps`); through `sudo` playwright did not find its own module and the first prepare run failed. (#539)
 - 2026-11-14 The Scan now watcher can run on the rented server: it chooses its machine from the repository variable `LANTERN_JOBS` (a job named there runs on the server; taking the name out is the way back, with no pull request). Server check can install the system packages the browser needs (`prepare`) and now opens a page with it. (#538)
