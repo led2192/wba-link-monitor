@@ -88,6 +88,17 @@ class Sql(unittest.TestCase):
         self.assertIn("alter table public.page_scans enable row level security;", SQL)
 
 
+class AlreadySent(unittest.TestCase):
+    def test_a_second_address_of_a_file_already_sent_is_remembered_and_shown_as_held(self):
+        begin = SQL[SQL.index("create or replace function public.upload_begin("):SQL.index("create or replace function public.upload_known(")]
+        known = SQL[SQL.index("create or replace function public.upload_known("):SQL.index("create or replace function public.upload_done(")]
+        self.assertIn("insert into public.browser_upload_urls (wba_id, url, upload_id) values (co, left(src, 1000), row.id) on conflict do nothing;", begin)
+        self.assertLess(begin.index("insert into public.browser_upload_urls"), begin.index("return jsonb_build_object('again', true);"))
+        self.assertIn("from public.browser_upload_urls a where a.wba_id = co and a.url = x.u", known)
+        self.assertIn("alter table public.browser_upload_urls enable row level security;", SQL)
+        self.assertLess(SQL.index("create table if not exists public.browser_upload_urls"), SQL.index("create or replace function public.upload_begin("))
+
+
 class Extension(unittest.TestCase):
     def test_the_button_asks_for_a_scan_and_shows_what_became_of_it(self):
         js = open(os.path.join(ROOT, "extension", "send.js"), encoding="utf-8").read()

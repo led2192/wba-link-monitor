@@ -3326,6 +3326,18 @@ revoke all on function public.upload_companies() from public, anon;
 grant execute on function public.upload_companies() to authenticated;
 
 drop function if exists public.upload_begin(text, text, bigint, text, text, text, text);        -- one upload_begin, not two the API could confuse
+-- The other addresses of a file already sent: the same PDF often sits under two links (a company's page and its
+-- file host, or a renamed copy). upload_begin knows the file by its hash only after the browser has downloaded
+-- it; the address is kept here so that upload_known can say "held" before the next download.
+create table if not exists public.browser_upload_urls (
+  wba_id    text not null,
+  url       text not null,
+  upload_id bigint not null,
+  at        timestamptz not null default now(),
+  primary key (wba_id, url)
+);
+alter table public.browser_upload_urls enable row level security;
+
 create or replace function public.upload_begin(
   company text, filename text, bytes bigint, sha256 text, source_url text default null, page_url text default null, client text default null,
   sent_type text default null, sent_year int default null)
@@ -3386,7 +3398,12 @@ begin
   end if;
   select * into row from public.browser_uploads u where u.wba_id = co and u.sha256 = sha;
   if found and row.status <> 'expected' then
-    return jsonb_build_object('again', true);                        -- this very file was sent before
+    -- this very file was sent before, perhaps from another address: remember this address too, so that the next
+    -- time the window opens the link is shown as held and not downloaded again (14 Nov 2026)
+    if src is not null and src is distinct from row.source_url then
+      insert into public.browser_upload_urls (wba_id, url, upload_id) values (co, left(src, 1000), row.id) on conflict do nothing;
+    end if;
+    return jsonb_build_object('again', true);
   end if;
   if not found then
     insert into public.browser_uploads (uploader, wba_id, source_url, page_url, filename, bytes, sha256, path, client, sent_type, sent_year)
@@ -3424,7 +3441,8 @@ begin
   end if;
   return (select coalesce(jsonb_agg(x.u), '[]'::jsonb) from unnest(coalesce(urls, '{}')) as x(u)
           where exists (select 1 from public.documents d where d.url = x.u and coalesce(d.pages, 0) > 0)
-             or exists (select 1 from public.browser_uploads b where b.wba_id = co and b.source_url = x.u and b.status in ('stored', 'taken', 'known')));
+             or exists (select 1 from public.browser_uploads b where b.wba_id = co and b.source_url = x.u and b.status in ('stored', 'taken', 'known'))
+             or exists (select 1 from public.browser_upload_urls a where a.wba_id = co and a.url = x.u));
 end;
 $$;
 revoke all on function public.upload_known(text, text[]) from public, anon;
