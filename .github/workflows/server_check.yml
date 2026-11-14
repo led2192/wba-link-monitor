@@ -27,4 +27,8 @@ jobs:
           echo "runner services running: $(systemctl list-units 'actions.runner.*' --state=running --no-legend | wc -l)"
       - name: Peek
         run: |
-          f=$(sudo sh -c 'ls -t /home/runner/actions-runner-4/_diag/pages/*.log' 2>/dev/null | head -1); echo "FILE $f"; sudo tail -n 80 "$f" | cut -c1-220
+          pid=$(pgrep -f "scan_now.py --watch" | head -1); echo "PID $pid started $(ps -o lstart= -p $pid) cpu $(ps -o time= -p $pid)"
+          pgrep -af "python" | cut -c1-150
+          sudo ss -tnp 2>/dev/null | grep "pid=$pid," | awk '{print $1,$4,$5}' | head
+          pip install -q py-spy && sudo env "PATH=$PATH" py-spy dump --pid $pid | cut -c1-200 | head -60
+          echo "TAIL"; f=$(sudo sh -c 'ls -t /home/runner/actions-runner-4/_diag/pages/*.log' | head -1); sudo tail -n 12 "$f" | cut -c1-200
