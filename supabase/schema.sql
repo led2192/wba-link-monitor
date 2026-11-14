@@ -34,6 +34,10 @@ alter table public.documents add column if not exists period_end text;
 -- found: "2026-11-03", the day the pipeline found the document (report_library.created_time), shown beside a
 -- result in the search page as a web search shows a page's date (11 Nov 2026).
 alter table public.documents add column if not exists found text;
+-- year_by: 'sender' when the year is the one a person gave when sending the document (the year printed on the
+-- report, taken as the year its period ends, with WBA's reporting-year rule applied: 14 Nov 2026); null when it is
+-- Airtable's `year`. The first fact about a document decided in this database and not in Airtable.
+alter table public.documents add column if not exists year_by text;        -- not "year_from": the search functions have a parameter of that name
 create index if not exists documents_wba_id on public.documents (wba_id);
 create index if not exists documents_year on public.documents (year);
 create index if not exists documents_doc_type on public.documents (doc_type);

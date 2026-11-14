@@ -381,21 +381,50 @@ def upsert_documents(conn, rows, batch=DOC_BATCH, say=print):
     sets = ", ".join(f"{k} = excluded.{k}" for k in rest)
     same = "(" + ", ".join(f"d.{k}" for k in rest) + ") is not distinct from (" + ", ".join(f"excluded.{k}" for k in rest) + ")"
     rows = list(rows)
-    n, t0 = 0, time.time()
+    n, n_said, t0 = 0, 0, time.time()
     for i in range(0, len(rows), batch):
         with conn.cursor() as c:
             c.execute("create temp table tmp_docs (like public.documents including defaults) on commit drop")
             with c.copy(f"copy tmp_docs ({cols}) from stdin") as cp:
                 for r in rows[i:i + batch]:
                     cp.write_row(r)
-            c.execute(f"insert into public.documents as d ({cols}) select distinct on (library_id) {cols} from tmp_docs "
-                      f"on conflict (library_id) do update set {sets}, loaded_at = now() where not ({same})")
+            said = sender_years(c)
+            n_said += said
+            c.execute(f"insert into public.documents as d ({cols}, year_by) select distinct on (library_id) {cols}, year_by from tmp_docs "
+                      f"on conflict (library_id) do update set {sets}, year_by = excluded.year_by, loaded_at = now() "
+                      f"where not ({same} and d.year_by is not distinct from excluded.year_by)")
             n += c.rowcount
         conn.commit()
         done = min(i + batch, len(rows))
         if done == len(rows) or (i // batch) % 10 == 9:
             say(f"  documents: {done:,} of {len(rows):,} looked at, {n:,} written, {(time.time() - t0) / 60:.1f} min", flush=True)
+    if n_said:
+        say(f"  documents: {n_said:,} carry the year their sender gave", flush=True)
     return n
+
+
+SENDER_YEARS_SQL = """
+update tmp_docs t set year = s.y, year_by = 'sender'
+from (select distinct on (b.library_id) b.library_id, coalesce(public.wba_year(b.sent_year, f.fy_end_month), b.sent_year) as y
+      from public.browser_uploads b left join public.company_fiscal f on f.wba_id = b.wba_id
+      where b.library_id is not null and b.sent_year is not null
+      order by b.library_id, b.at desc) s
+where s.library_id = t.library_id"""
+
+
+def sender_years(c):
+    """The year a person gave when sending a document replaces Airtable's, on the rows about to be written
+    (tmp_docs). It is the year printed on the report, taken as the year its period ends; WBA's rule then gives the
+    reporting year (a year ending January to May is the year before), from the company's fiscal month when it is
+    known. Done here, before the rows are compared with what the table holds, so the year does not flip between
+    Airtable's and the sender's every night. The uploads table belongs to the search functions (search.sql): where
+    it is not installed, nothing is done. Returns the rows changed."""
+    c.execute("select to_regclass('public.browser_uploads') is not null and to_regclass('public.company_fiscal') is not null "
+              "and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'browser_uploads' and column_name = 'library_id')")
+    if not c.fetchone()[0]:
+        return 0
+    c.execute(SENDER_YEARS_SQL)
+    return c.rowcount
 
 
 def load_pages(conn, name, rows):

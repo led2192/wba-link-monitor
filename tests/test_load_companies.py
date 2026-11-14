@@ -46,5 +46,11 @@ class Unheld(unittest.TestCase):
         self.assertIn("NOT({discard})", L.UNHELD_FORMULA)
 
 
+    def test_the_fiscal_month_airtable_holds(self):
+        recs = [{"fields": {"wba_id": "PT_1", "fy_end_month": 3}}, {"fields": {"wba_id": "PT_2", "fy_end_month": "12"}},
+                {"fields": {"wba_id": "PT_3"}}, {"fields": {"wba_id": "PT_4", "fy_end_month": 13}}, {"fields": {"fy_end_month": 6}}]
+        self.assertEqual(L.fiscal_rows(recs), [("PT_1", 3), ("PT_2", 12)])                # no month, a month out of range, no company: left out
+
+
 if __name__ == "__main__":
     unittest.main()

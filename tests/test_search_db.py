@@ -43,6 +43,28 @@ class SearchOnPostgres(unittest.TestCase):
             c.commit()
             self.assertEqual(len(L.refresh_derived(c)), 2)
 
+    def test_the_year_a_sender_gave_replaces_airtables_before_the_documents_are_written(self):
+        import psycopg, load_supabase as L
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("alter table public.documents add column if not exists year_by text")
+            cur.execute("create temp table tmp_docs (like public.documents including defaults) on commit drop")
+            cur.execute("insert into tmp_docs (library_id, wba_id, year) values ('s-may', 'PT_MAY', 2022), ('s-dec', 'PT_DEC', 2022), "
+                        "('s-unknown', 'PT_NONE', 2022), ('s-nobody', 'PT_MAY', 2022)")
+            cur.execute("insert into public.company_fiscal (wba_id, fy_end_month, source) values ('PT_MAY', 5, 'pages'), ('PT_DEC', 12, 'pages') on conflict (wba_id) do update set fy_end_month = excluded.fy_end_month")
+            for lid, wba, sha, year in (("s-may", "PT_MAY", "1" * 64, 2024), ("s-dec", "PT_DEC", "2" * 64, 2024), ("s-unknown", "PT_NONE", "3" * 64, 2024)):
+                cur.execute("insert into public.browser_uploads (uploader, wba_id, filename, bytes, sha256, path, status, sent_year, library_id) "
+                            "values ('t@example.org', %s, 'a.pdf', 5000, %s, %s, 'taken', %s, %s)", (wba, sha, wba + "/" + sha + ".pdf", year, lid))
+            n = L.sender_years(cur)
+            cur.execute("select library_id, year, year_by from tmp_docs order by library_id")
+            got = cur.fetchall()
+            c.rollback()
+        self.assertEqual(n, 3)
+        self.assertEqual(got, [("s-dec", 2024, "sender"),          # a year ending in December: the year printed
+                               ("s-may", 2023, "sender"),          # a year ending in May: WBA's reporting year is the one before
+                               ("s-nobody", 2022, None),           # nobody said anything: Airtable's year stays
+                               ("s-unknown", 2024, "sender")])     # no fiscal month known: the year printed
+
     def test_company_first_finds_the_same_pages(self):
         """Option company_first: four words or more within a company read the company's pages; the list is the same."""
         cur = self.conn.cursor()

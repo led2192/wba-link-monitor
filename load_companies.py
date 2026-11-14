@@ -19,6 +19,38 @@ import argparse, collections, os, sys, time
 FIELDS = ["wba_id", "company_name", "wba_industry", "hq_country", "hq_region", "website", "lantern_id"]
 
 
+def fiscal_rows(records):
+    """[(wba_id, month)] for the companies whose fiscal year end month Airtable holds (companies.fy_end_month, written
+    by key_reports.py). On 13 Nov 2026 the database's own table (company_fiscal, read from the pages) had no month for
+    860 of 1,979 companies and this field was not being used."""
+    out = []
+    for rec in records:
+        f = rec.get("fields", {})
+        wba, m = (f.get("wba_id") or "").strip(), f.get("fy_end_month")
+        try:
+            m = int(m)
+        except (TypeError, ValueError):
+            continue
+        if wba and 1 <= m <= 12:
+            out.append((wba, m))
+    return out
+
+
+def fill_fiscal(conn, rows):
+    """Writes Airtable's month where the database has none (no row, or a row with no month). A month the database
+    read from the pages or the period ends is left as it is. Returns the rows written; 0 where the table is not installed."""
+    with conn.cursor() as c:
+        c.execute("select to_regclass('public.company_fiscal') is not null")
+        if not c.fetchone()[0] or not rows:
+            return 0
+        c.executemany("insert into public.company_fiscal (wba_id, fy_end_month, source, at) values (%s, %s, 'airtable', now()) "
+                      "on conflict (wba_id) do update set fy_end_month = excluded.fy_end_month, source = 'airtable', at = now() "
+                      "where public.company_fiscal.fy_end_month is null", rows)
+        n = c.rowcount
+    conn.commit()
+    return n
+
+
 def company_rows(records):
     """[(wba_id, name, industry, country, region, website, lantern_id)] from Airtable records; rows without a wba_id are
     skipped. lantern_id is lanterN's own id for the company (lantern_ids.py), None until it is written."""
@@ -113,7 +145,8 @@ def main():
         os.environ["QA_COMMIT"] = "true"
     run = qa.Run("load_companies.py")
     t0 = time.time()
-    rows = company_rows(sweep("companies", FIELDS))
+    records = sweep("companies", FIELDS + ["fy_end_month"])
+    rows, fiscal = company_rows(records), fiscal_rows(records)
     by_ind = collections.Counter(r[2] or "(none)" for r in rows)
     by_reg = collections.Counter(r[4] or "(none)" for r in rows)
     print(f"{len(rows):,} companies read from Airtable in {time.time() - t0:.0f}s; {len(by_ind):,} industries, {len(by_reg):,} regions", flush=True)
@@ -122,7 +155,8 @@ def main():
     if a.commit:
         with evidence_db.connect() as conn:
             upsert(conn, rows)
-        print(f"  {len(rows):,} rows upserted into public.companies", flush=True)
+            filled = fill_fiscal(conn, fiscal)
+        print(f"  {len(rows):,} rows upserted into public.companies; fiscal year end month: {len(fiscal):,} held by Airtable, {filled:,} written where the database had none", flush=True)
     unheld = unheld_rows(sweep("report_library", UNHELD_FIELDS + ["file", "discard"], UNHELD_FORMULA))
     print(f"{len(unheld):,} documents known by their address with no file, of {len({r[1] for r in unheld}):,} companies", flush=True)
     if a.commit:
