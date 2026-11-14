@@ -766,3 +766,11 @@ Why the rules in Python and not as database functions: the same code runs in the
 The rule of the plan: nothing reads `public.library` until its year and type agree with Airtable's for a stated number of days. The sender's year (`documents.year_by`) is the one place where they differ on purpose.
 Rejected: one typed column a field from the start; a trigger-based sync (Airtable has no change feed).
 
+## The rented server is attached to this public repository, behind an approval rule (14 Nov 2026)
+What (owner's decision): the server's runners are registered on this repository now, while it is still public. Before that, Settings, Actions, General was set to "Require approval for all external contributors", so no pull request from outside runs anything until the owner approves it. Workflows that run on pull requests (only `tests.yml`) stay on GitHub's machines.
+Why: the rule of 23 October ("a runner is never attached to a public repository", written for the owner's own computer) would mean making the repository private first, and a private repository has 2,000 free job minutes a month against about 6,800 used a day: every job would have to move in one step. Moving them one at a time, with GitHub as the fallback, is the safer order for the service.
+Until when: the repository becomes private once the jobs run on the server; the exception ends there.
+Rejected: private first (all jobs at once); runners on the private repository `wba-text-store` with copies of every workflow and secret (two places to keep in step).
+
+## The copy of the validated answers answers by default (14 Nov 2026)
+What: `gold_store.serves` is on unless `GOLD_COPY=off`. Why: the verify run of 14 Nov found no record that differs on any question Airtable and the copy could both answer. Not covered: the monthly bases' Sources tables (the token is refused) and two questions those bases cannot answer in Airtable either; a job with no `SUPABASE_DB_URL` keeps asking Airtable. The token for the bases stays until every reader has had a good night on the copy.

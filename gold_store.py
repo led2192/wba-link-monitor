@@ -16,8 +16,9 @@ database is private; this script prints counts only.
 
 How it is used: import_source_library.get_all asks serves(base, table) first. When the copy holds that table of that
 base, the rows come from the copy, filtered by the same formula text the scripts send to Airtable (a small reader of
-the few formula shapes they use: AND, OR, NOT, {Field}, {Field}!='', {Field}='x', FIND('x', {Field})). The copy is
-used only with GOLD_COPY=on until --verify has shown it gives the same records as Airtable.
+the few formula shapes they use: AND, OR, NOT, {Field}, {Field}!='', {Field}='x', FIND('x', {Field})). The copy
+answers by default since 14 Nov 2026 (--verify: the same records on every question compared); GOLD_COPY=off asks
+Airtable again.
 
     python gold_store.py --take [--commit]     copy the bases (dry run: counts only)
     python gold_store.py --verify              the same questions asked of Airtable and of the copy: the ids must match
@@ -187,10 +188,11 @@ def _connect():
 
 def serves(base, table, force=False):
     """True when this table of this base is answered from the copy: one of the three tables, the copy holds it, and
-    GOLD_COPY is on (the copy runs beside Airtable until --verify has shown the same records; then on becomes the
-    default). Any trouble reading the database means "no": the caller goes to Airtable."""
+    GOLD_COPY is not off. On is the default since 14 Nov 2026, when --verify found the same records in Airtable and
+    in the copy for every question both could answer (GOLD_COPY=off goes back to Airtable). Any trouble reading the
+    database means "no": the caller goes to Airtable."""
     global _HELD
-    on = os.environ.get("GOLD_COPY", "").strip().lower() in ("on", "1", "true")
+    on = os.environ.get("GOLD_COPY", "").strip().lower() not in ("off", "0", "false")
     if not (on or force) or table not in TABLES or not os.environ.get("SUPABASE_DB_URL", "").strip():
         return False
     if _HELD is None:
