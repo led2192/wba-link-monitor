@@ -37,7 +37,9 @@ HEALTH = "base_health"
 TABLES = {"report_library": None, "monitored_links": None, "webpage_library": None,
           "companies": None, "mention_searches": None, "mention_hits": None, "base_health": None,
           # added 2 Nov 2026: it was missing, so records_total read 377,628 when Airtable showed 389,675
-          "attribute_values": None}
+          "attribute_values": None,
+          # added 14 Nov 2026: three tables made since were not counted (found when docs/fields.md was regenerated)
+          "company_contacts": None, "attribute_guidance": None, "company_requests": None}
 CHECKS = [("Report hub page", "missing_report_hub"), ("Sustainability page", "missing_sust_page"),
           ("Sustainability report (recent)", "missing_sust_report"),
           ("Annual report (recent)", "missing_annual_report"),
