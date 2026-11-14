@@ -87,5 +87,44 @@ class Patient(unittest.TestCase):
             C.patient(lambda: (_ for _ in ()).throw(RuntimeError("503")), waits=(1,), sleep=lambda s: None)
 
 
+
+class EveryDocument(unittest.TestCase):
+    """--rule all with a disk copy (14 Nov 2026): lanterN's own copy of every document."""
+
+    def test_the_file_goes_to_the_disk_and_to_the_storage(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            net = Net(); st = C.Storage("https://p", "k", net)
+            what, note = C.copy_one(st, net, "PT_00001", "L1", {"url": "u", "size": 14}, disk=d)
+            self.assertEqual(what, "stored"); self.assertIn("archive/PT_00001/L1.pdf (14 bytes)", note)
+            self.assertEqual(open(os.path.join(d, "PT_00001", "L1.pdf"), "rb").read(), net.pdf)
+            self.assertFalse(os.path.exists(os.path.join(d, "PT_00001", "L1.pdf.part")))       # whole or not at all
+
+    def test_a_file_the_storage_refuses_is_still_kept_on_the_disk(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            net = Net(limit=5); st = C.Storage("https://p", "k", net)
+            self.assertEqual(C.copy_one(st, net, "PT_1", "L", {"url": "u", "size": 14}, disk=d), ("too large", None))
+            self.assertTrue(os.path.exists(os.path.join(d, "PT_1", "L.pdf")))
+
+    def test_only_the_disk_copy_when_the_storage_already_has_it(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            net = Net(); st = C.Storage("https://p", "k", net)
+            self.assertEqual(C.copy_one(st, net, "PT_1", "L", {"url": "u", "size": 14}, disk=d, store=False), ("on disk", None))
+            self.assertEqual(net.objects, {})                                                   # nothing uploaded again
+
+    def test_what_a_row_still_needs(self):
+        row = {"wba_id": "PT_1", "library_id": "L", "stored_file": ""}
+        self.assertEqual(C.needs(row, ""), (True, False))
+        self.assertEqual(C.needs(dict(row, stored_file="archive/PT_1/L.pdf (9 bytes)"), "/d", exists=lambda p: False), (False, True))
+        self.assertEqual(C.needs(dict(row, stored_file="archive/PT_1/L.pdf (9 bytes)"), "/d", exists=lambda p: p == "/d/PT_1/L.pdf"), (False, False))
+
+    def test_airtable_gets_ten_rows_a_call_and_one_file_cannot_end_the_run(self):
+        src = open(C.__file__, encoding="utf-8").read()
+        self.assertIn("for k in range(0, len(updates), 10):", src)
+        self.assertIn('return rid, f, f"failed: {type(e).__name__}", None', src)
+        self.assertIn("where gone is null and not discard", src)                                # discarded rows are not copied
+
 if __name__ == "__main__":
     unittest.main()

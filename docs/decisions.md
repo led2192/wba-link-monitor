@@ -784,6 +784,10 @@ What (owner's decision): the extension's second button asks for a scan of the pa
 Why: asking for a scan was the last everyday action that needed Airtable open, and the person is already on the page when the need arises. Reusing `scan_now` and the inbox keeps one scanning path with its guards; only the way of asking is new.
 Rejected: scanning inside the browser and sending the links found (the extension already sends the documents themselves, downloaded by the browser, which is stronger where a site refuses the robot); a separate scanner for extension requests (two paths to keep equal).
 
-## lanterN keeps the documents as they were published (14 Nov 2026, proposed; the place is the owner's to choose)
+## lanterN keeps the documents as they were published (14 Nov 2026)
 What: the files are kept byte for byte. Why: the measure of 14 Nov (`file_space.py`) shows that the only large saving, reducing the images, changes the file (its hash no longer matches, the text was damaged in 18 of 487 rewrites) for about 270 GB of 712; the lossless saving is about 115 GB, and repeated files 4.6 GB. The copy is the proof of where a value was read, so it is not worth altering for that. Lossless compression may be applied by the store itself, where it costs nothing to read back.
 Rejected: rewriting the PDFs with reduced images; keeping no copy and relying on the companies' sites (documents are withdrawn).
+
+## Where lanterN's files live: the project's storage, and a working copy on the server (14 Nov 2026, owner's decision)
+What: every document's PDF goes to the storage of the database project (bucket `archive`) and to the server's disk. Why: no third provider to hold an account, a bill and keys for; the copying code and 37,846 copies were already there; the disk is paid for and gives a second copy that does not depend on the storage, and files to read again without downloading. Cost: 0.0213 USD a GB a month beyond the 100 GB included, about 13 USD a month for 712 GB (price read on 14 Nov 2026).
+Rejected: a separate object store (about 5 to 8 EUR a month: cheaper by a few euros, one more provider); the server's disk alone (one copy, on a machine rented by the month).
