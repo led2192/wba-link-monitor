@@ -346,6 +346,19 @@ def side_jobs(run=subprocess.run):
     return done
 
 
+def page_jobs(run=subprocess.run):
+    """The scans asked from the browser extension (page_scans.py), at every check: a tick on scan_now for a page
+    already watched, the inbox for a new one, and the result written back for the person who asked. Its own
+    process; a failure is reported and the watch goes on."""
+    if not os.environ.get("SUPABASE_DB_URL"):
+        return None
+    try:
+        return getattr(run([sys.executable, "page_scans.py", "--commit"], timeout=900), "returncode", 0)
+    except Exception as e:
+        print(f">>> page_scans failed ({type(e).__name__}); the watch goes on.", flush=True)
+        return -1
+
+
 def main():
     """One pass by default. --watch MINUTES keeps checking every --every seconds for that long.
     GitHub starts scheduled runs late (hours, in October 2026), so a 10-minute schedule fired a
@@ -368,6 +381,7 @@ def main():
         checks += 1
         if checks % SIDE_EVERY == 1:
             side_jobs()
+        page_jobs()
         try:
             if run_once():
                 scans += 1

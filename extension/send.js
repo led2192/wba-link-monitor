@@ -362,7 +362,7 @@ async function start() {
   $("company").onchange = markHeld;
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };
-  $("go").onclick = sendAll; $("watch").onclick = watchPage; $("newco").onclick = e => { e.preventDefault(); newCompany(); };
+  $("go").onclick = sendAll; $("watch").onclick = scanPage; showScan(false); $("newco").onclick = e => { e.preventDefault(); newCompany(); };
   $("deeper").hidden = isPdfUrl(TAB.url) || !/^https?:/.test(TAB.url); $("deeper").onclick = e => { e.preventDefault(); lookDeeper(); };
 }
 function showSignIn() {
@@ -397,13 +397,34 @@ async function sendAll() {
     : "They appear in the library within the half hour, and in the search after the night's load.");
   count();
 }
-async function watchPage() {
+// "Scan this page" (0.5.0): lanterN reads this page now. A page it already watches is scanned again; one it does
+// not watch is added for the company and then read. The request waits in the database for the watch (a few
+// minutes); the line under the buttons says what became of it, here and the next time the window opens on the page.
+const pageUrl = () => TAB.url.split("#")[0];
+const ago = t => { const m = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000)); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+function scanLine(j) {
+  if (!j) return "";
+  if (j.status === "done") return `Scanned ${ago(j.done_at || j.at)}. ${j.result || ""}`;
+  if (j.status === "failed") return `The scan asked ${ago(j.at)} gave no result. Ask again, or send the documents from this window.`;
+  if (j.status === "added") return `Asked ${ago(j.at)}: a new page for lanterN, on its way in. It is read within the half hour.`;
+  return `Asked ${ago(j.at)}: waiting for the scan (a few minutes).`;
+}
+let scanTimer = null;
+async function showScan(follow) {
+  if (!/^https?:/.test(TAB.url) || isPdfUrl(TAB.url)) return;
+  let j = null; try { j = await rpc("page_scan_last", { url: pageUrl() }); } catch (e) { return; }
+  $("scanmsg").textContent = scanLine(j);
+  clearTimeout(scanTimer);
+  if (follow && j && (j.status === "new" || j.status === "queued" || j.status === "added")) scanTimer = setTimeout(() => showScan(true), 20000);
+}
+async function scanPage() {
   const company = chosenCompany(); if (!company) { $("msg").textContent = "Choose the company from the list first."; $("company").focus(); return; }
-  if (/^REQ_/.test(company.id)) { $("msg").textContent = "The page can be added a quarter of an hour after the company is approved (close this window and click the button again)."; return; }
+  if (/^REQ_/.test(company.id)) { $("msg").textContent = "The page can be scanned a quarter of an hour after the company is approved (close this window and click the button again)."; return; }
   if (!/^https?:/.test(TAB.url) || isPdfUrl(TAB.url)) { $("msg").textContent = "This is a document, not a page that lists documents."; return; }
-  try { const j = await rpc("add_sources", { company: company.id, urls: [TAB.url.split("#")[0]], client: CLIENT });
-    if (j.added || j.again) await rememberHost(company);
-    $("msg").textContent = j.added ? `Page added for ${company.name}: lanterN looks at it for new documents.` : j.again ? "You had already added this page." : j.known ? "lanterN already holds this address." : "Not a link lanterN can keep."; }
-  catch (e) { $("msg").textContent = `Not added: ${e.message}`; }
+  try { const j = await rpc("scan_page", { company: company.id, url: pageUrl(), client: CLIENT });
+    await rememberHost(company);
+    $("msg").textContent = j.asked ? `Asked: lanterN reads this page for ${company.name} now.` : "A scan of this page is already waiting.";
+    showScan(true); }
+  catch (e) { $("msg").textContent = `Not asked: ${e.message}`; }
 }
 start();

@@ -49,7 +49,7 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.4.3"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.4.3", read("extension", "config.js"))
+        self.assertIn('"version": "0.5.0"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.5.0", read("extension", "config.js"))
 
     def test_a_large_file_shows_how_far_it_is(self):
         js = read("extension", "send.js")
