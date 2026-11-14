@@ -2,7 +2,7 @@
 
 Since 14 Nov 2026 the project rents one server for the jobs GitHub's machines run today: a virtual server with 16 cores, 64 GB of memory and 1,024 GB of disk in Nuremberg, on a one-month contract. Why a server at all: the repository is to become private, and a private repository gets 2,000 free job minutes a month where the pipeline uses about 6,800 a day (measured over 7.3 days in November 2026).
 
-Nothing has moved yet. Jobs move one at a time, each one run next to its GitHub copy first; GitHub's machines stay the fallback until the server has had several good nights.
+The server was installed on 14 Nov 2026 and its six runners answer. No pipeline job has moved yet. Jobs move one at a time, each one run next to its GitHub copy first; GitHub's machines stay the fallback until the server has had several good nights.
 
 ## What is on the server
 - Ubuntu 24.04, automatic security updates, a firewall that lets only SSH in, fail2ban against password guessing.
@@ -24,6 +24,9 @@ Nothing has moved yet. Jobs move one at a time, each one run next to its GitHub 
 **Without typing on the server at all** (how it was done on 14 Nov 2026): in the provider's panel, Media, Images, choose Ubuntu 24.04 and paste `server/first_boot.sh` into "Custom Script", with the token in place of `PASTE_THE_TOKEN_HERE`. The installed system then runs `setup.sh` by itself on its first start; the token is deleted from the server when it has finished and the record is in `/root/lantern-setup.log`.
 
 Running the script again is safe: it updates the system and registers only the runners that are missing. `RUNNERS=8 bash setup.sh` asks for another number; `bash setup.sh --no-runners` does the system part only.
+
+## Checking it
+The workflow **Server check** (Actions, manual, and every Monday) runs on the server and fails if the firewall, fail2ban or the automatic updates are off, or if the first-boot token is still on disk. It also shows the cores, memory and free disk, and installs the repository's packages the way a job does.
 
 ## Rules
 - A workflow that runs on a pull request never uses the server. Only `tests.yml` runs on pull requests, and it stays on GitHub's machines.

@@ -1,0 +1,41 @@
+# A look at lanterN's own job machine (docs/server.md), run on it: its size, its protections, whether the first-boot
+# token is gone, and whether a job can do there what jobs do on GitHub's machines (Python from setup-python, the
+# repository's packages). Reads only. Manual, and every Monday before the week's work.
+name: Server check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * 1"        # Mondays 05:23 UTC
+
+jobs:
+  check:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        run: |
+          echo "runner: $RUNNER_NAME   system: $(. /etc/os-release; echo "$PRETTY_NAME")   kernel: $(uname -r)"
+          echo "cores: $(nproc)   memory: $(free -g | awk '/^Mem/{print $2}') GB   disk free: $(df -h / | awk 'NR==2{print $4}') of $(df -h / | awk 'NR==2{print $2}')"
+          echo "up since: $(uptime -s)   load: $(cut -d' ' -f1-3 /proc/loadavg)"
+          echo "runner services running: $(systemctl list-units 'actions.runner.*' --state=running --no-legend | wc -l)"
+      - name: Protections
+        run: |
+          bad=0
+          sudo ufw status | grep -q "Status: active" && echo "firewall: active" || { echo "firewall: NOT active"; bad=1; }
+          echo "ports open to the world: $(sudo ufw status | awk '/ALLOW/{print $1}' | sort -u | tr '\n' ' ')"
+          systemctl is-active --quiet fail2ban && echo "fail2ban: running" || { echo "fail2ban: NOT running"; bad=1; }
+          grep -q 'Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades && echo "automatic security updates: on" || { echo "automatic security updates: OFF"; bad=1; }
+          sudo test -e /root/.lantern-token && { echo "first-boot token: STILL ON DISK"; bad=1; } || echo "first-boot token: gone"
+          echo "security updates waiting: $(apt list --upgradable 2>/dev/null | grep -c -i security || true)"
+          echo "reboot needed: $([ -e /var/run/reboot-required ] && echo yes || echo no)"
+          exit $bad
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: A job's tools
+        run: |
+          python --version
+          pip install -q -r requirements.txt
+          python -c "import psycopg, requests; print('packages: ok')"
