@@ -3,9 +3,10 @@ name: Key figures (revenue, employees)
 # Weekly after the regulator filings run, and on demand: each company's latest revenue and number
 # of employees with the exact source (official filing data, or the page of the latest report).
 # See key_figures.py. Companies with key_figures_checked ticked are never overwritten.
+# No schedule since 14 Nov 2026 (owner's decision): the nightly value reader (propose_values.py) now proposes revenue and
+# employees for every company and year, with the page, and they are reviewed in lanterN; this job's one figure a
+# company, written to the companies table in Airtable, is read by nothing. Manual runs remain possible.
 on:
-  schedule:
-    - cron: "20 9 * * 1"        # Mondays 09:20 UTC, after Regulator filings (06:20)
   workflow_dispatch:
     inputs:
       mode:

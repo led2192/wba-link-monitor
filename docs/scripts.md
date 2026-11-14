@@ -106,7 +106,7 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | `fix_wrong_attachments.py` | Fix wrong attachments, after Build cover text; dry run on a PR | Rows whose attachment is a web page the site served instead of the PDF (cover_status not_pdf, attachment type text/html, a .pdf address): the wrong attachment is removed, file_status set to blocked so the office-network runner fetches the file, cover_status cleared. Real non-PDF files (spreadsheets, Word) are left alone | file, file_status, cover_status, retry_note |
 | `resolve_doc_conflicts.py` | Resolve documentation conflicts, after every push to main | Open pull requests whose only conflicts with main are in docs/*.md or the re-run list get main merged in, both sides kept; code conflicts are left alone and noted on the pull request. Never merges into main. Uses the secret PR_UPDATE_TOKEN when set | the pull request branches |
 | `mention_search.py` | Mention search, after Full text; on demand | Saved "which companies mention X" searches | `mention_searches`, `mention_hits` |
-| `key_figures.py` | Key figures, Monday 09:20 | Revenue and employees from SEC and ESEF data, else a candidate from the latest report | revenue, employees and their sources on `companies` |
+| `key_figures.py` | Key figures, Monday 09:20 (no schedule since 14 Nov 2026: manual only) | Revenue and employees from SEC and ESEF data, else a candidate from the latest report | revenue, employees and their sources on `companies` |
 
 ## On demand and weekly
 
