@@ -1,0 +1,39 @@
+# lanterN's own copy of WBA's validated answers (gold_store.py): take it, or compare it with Airtable. Manual.
+# Prints counts only; the answers go to the private search database.
+name: Gold copy
+
+on:
+  workflow_dispatch:
+    inputs:
+      what:
+        description: "take (copy the bases) or verify (compare the copy with Airtable)"
+        type: choice
+        options: [take, verify]
+        default: take
+      commit:
+        description: "take: write the copy (false = counts only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: gold-copy
+  cancel-in-progress: false
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Gold copy
+        run: python gold_store.py --${{ inputs.what }} ${{ inputs.commit && '--commit' || '' }}
+        env:
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
