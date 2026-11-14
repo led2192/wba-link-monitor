@@ -27,8 +27,6 @@ on:
         description: "Write research_link and the notes (false = dry run)"
         type: boolean
         default: false
-  pull_request:
-    paths: [web_search.py, .github/workflows/web_search.yml]
 
 concurrency:
   group: web-search-${{ github.ref }}

@@ -14,8 +14,6 @@ on:
       attributes:
         description: "GMC codes, comma-separated (blank = all in gold_attributes.json)"
         default: ""
-  pull_request:
-    paths: [label_mining.py, gold_attributes.json, attributes.json, .github/workflows/label_mining.yml]
 
 jobs:
   evaluate:

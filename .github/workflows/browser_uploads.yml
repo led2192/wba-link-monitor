@@ -10,8 +10,6 @@ on:
       mode:
         description: "dry_run or commit"
         default: "commit"
-  pull_request:
-    paths: [browser_uploads.py, .github/workflows/browser_uploads.yml]
 
 concurrency:
   group: browser-uploads

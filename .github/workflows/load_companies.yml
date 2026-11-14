@@ -11,8 +11,6 @@ on:
       mode:
         description: "dry_run or commit"
         default: "commit"
-  pull_request:
-    paths: [load_companies.py, .github/workflows/load_companies.yml]
 
 concurrency:
   group: load-companies

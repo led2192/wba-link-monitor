@@ -13,8 +13,6 @@ on:
       attributes:
         description: "GMC codes, comma-separated (blank = all in gold_attributes.json)"
         default: ""
-  pull_request:
-    paths: [rank_eval.py, .github/workflows/rank_eval.yml]
 
 jobs:
   evaluate:

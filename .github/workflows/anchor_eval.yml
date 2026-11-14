@@ -9,8 +9,6 @@ on:
       companies:
         description: "companies to sample (0 = all)"
         default: "0"
-  pull_request:
-    paths: [anchor_eval.py, .github/workflows/anchor_eval.yml]
 
 jobs:
   evaluate:

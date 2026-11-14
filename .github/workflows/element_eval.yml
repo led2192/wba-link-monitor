@@ -10,8 +10,6 @@ on:
       sample:
         description: "element rows checked against the library and the evidence database"
         default: "1500"
-  pull_request:
-    paths: [element_eval.py, .github/workflows/element_eval.yml]
 
 jobs:
   evaluate:

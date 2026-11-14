@@ -20,8 +20,6 @@ on:
         description: "Re-tag every document (after a lexicon change the queue does this by itself)"
         type: boolean
         default: false
-  pull_request:
-    paths: [evidence_chunks.py, evidence_terms.json, .github/workflows/evidence_chunks.yml]
 
 concurrency:
   group: evidence-chunks

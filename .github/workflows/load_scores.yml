@@ -11,8 +11,6 @@ on:
       mode:
         description: "dry_run or commit"
         default: "commit"
-  pull_request:
-    paths: [load_scores.py, .github/workflows/load_scores.yml]
 
 concurrency:
   group: load-scores

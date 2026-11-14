@@ -10,8 +10,6 @@ on:
       mode:
         description: "dry_run or commit"
         default: "commit"
-  pull_request:
-    paths: [source_submissions.py, .github/workflows/source_submissions.yml]
 
 concurrency:
   group: source-submissions

@@ -14,8 +14,6 @@ on:
       bases:
         description: "Source Library bases, preferred first"
         default: "2025,2024"
-  pull_request:
-    paths: [sl_labels.py, .github/workflows/sl_labels.yml]
 
 jobs:
   labels:

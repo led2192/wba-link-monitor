@@ -24,8 +24,6 @@ on:
       max:
         description: "Companies this run (0 = all selected)"
         default: "0"
-  pull_request:
-    paths: [wayback_backfill.py, .github/workflows/wayback_backfill.yml]
 
 concurrency:
   # one dry run per pull request, the newest push wins; manual runs never cancel each other

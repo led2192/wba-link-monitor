@@ -9,8 +9,6 @@ on:
       sample:
         description: "pages to try, one per site"
         default: "300"
-  pull_request:
-    paths: [robot_identity.py, .github/workflows/robot_identity.yml]
 
 jobs:
   probe:

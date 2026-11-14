@@ -5,8 +5,6 @@ name: Coverage rules comparison
 # sections in whole annual reports). A pull request touching company_coverage.py posts the result.
 on:
   workflow_dispatch:
-  pull_request:
-    paths: [company_coverage.py, .github/workflows/coverage_compare.yml]
 
 jobs:
   compare:

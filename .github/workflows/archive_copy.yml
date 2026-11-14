@@ -22,8 +22,6 @@ on:
       minutes:
         description: "stop starting new batches after this many minutes"
         default: "300"
-  pull_request:
-    paths: [archive_copy.py, .github/workflows/archive_copy.yml]
 
 concurrency:
   group: archive-copy

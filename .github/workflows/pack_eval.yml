@@ -29,8 +29,6 @@ on:
         description: "narrative: write the pack's learned words (pack_terms.json, also printed to the log) for narrative_eval --evidence pack3"
         type: boolean
         default: false
-  pull_request:
-    paths: [pack_eval.py, .github/workflows/pack_eval.yml]
 
 jobs:
   evaluate:

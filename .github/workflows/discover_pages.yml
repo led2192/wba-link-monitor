@@ -15,8 +15,6 @@ on:
       wba:
         description: "Only these companies (comma-separated wba_ids). Blank = the usual queue."
         default: ""
-  pull_request:
-    paths: [discover_pages.py, .github/workflows/discover_pages.yml]
 
 concurrency:
   group: discover-pages

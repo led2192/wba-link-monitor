@@ -40,8 +40,6 @@ on:
       options:
         description: "more narrative_eval options, e.g. --auto 10 (also the 10 yes/no and list attributes with most answers) or --heldout 15 (only 15 held-out attributes, heldout.py) or --abstain on (the yes/no reader may say not found)"
         default: ""
-  pull_request:
-    paths: [narrative_eval.py, evidence_pack.py, heldout.py, .github/workflows/narrative_eval.yml]
 
 jobs:
   evaluate:

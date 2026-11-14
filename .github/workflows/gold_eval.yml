@@ -13,8 +13,6 @@ on:
       attributes:
         description: "GMC codes, comma-separated (blank = all in gold_attributes.json)"
         default: ""
-  pull_request:
-    paths: [gold_eval.py, gold_attributes.json, .github/workflows/gold_eval.yml]
 
 jobs:
   evaluate:

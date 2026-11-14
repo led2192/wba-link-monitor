@@ -27,8 +27,6 @@ on:
       budget:
         description: "minutes"
         default: "100"
-  pull_request:
-    paths: [one_hop.py, anchor_capture_eval.py, .github/workflows/one_hop.yml]
 
 concurrency:
   group: one-hop-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
