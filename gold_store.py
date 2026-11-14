@@ -261,17 +261,26 @@ def fetch_table(token, base, table):
                 formula = None
 
 
-def take(token, commit, out=print):
+def take(token, commit, out=print, again=False):
+    """Copies each table of each base. A table the copy already holds is not read again (a first run of 14 Nov 2026
+    was still reading after 80 minutes of its 120: a run that is cut goes on where it stopped) unless again=True."""
     counts = {}
     conn = _connect() if commit else None
     try:
+        held = set()
         if commit:
             cur = conn.cursor()
             for stmt in TABLE_SQL.split(";"):
                 cur.execute(stmt)
             conn.commit()
+            cur.execute("select base, tbl, count(*) from public.gold_records group by 1, 2")
+            held = {(b, t): n for b, t, n in cur.fetchall()}
         for name, base in gold_bases().items():
             for table in TABLES:
+                if not again and (base, table) in held:
+                    counts[(base, table)] = held[(base, table)]
+                    out(f"  base {base} {table}: {held[(base, table)]:,} records already in the copy")
+                    continue
                 recs, note = fetch_table(token, base, table)
                 if recs is None:
                     out(f"  base {base} {table}: not read ({note})"); counts[(base, table)] = None
@@ -324,6 +333,7 @@ def verify(token, out=print):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="lanterN's copy of WBA's validated answers")
     ap.add_argument("--take", action="store_true"); ap.add_argument("--verify", action="store_true"); ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--again", action="store_true", help="take: read again the tables the copy already holds")
     a = ap.parse_args(argv)
     token = os.environ.get("GOLD_TOKEN", "").strip()
     if not token or not os.environ.get("SUPABASE_DB_URL", "").strip():
@@ -335,7 +345,7 @@ def main(argv=None):
     try:
         counts, bad = {}, 0
         if a.take:
-            counts = take(token, a.commit)
+            counts = take(token, a.commit, again=a.again)
             total = sum(v or 0 for v in counts.values())
             print(f">>> {total:,} records in {sum(1 for v in counts.values() if v is not None)} tables" + ("" if a.commit else " (dry run: nothing written)"), flush=True)
         if a.verify:
