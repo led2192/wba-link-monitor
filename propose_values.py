@@ -443,6 +443,8 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                     if code == REVENUE and (wba, code, str(y)) in has_filing:
                         c["model reader: revenue left to the filing"] += 1; continue
                     c["model reader: asked"] += 1
+                    if c["model reader: asked"] % 25 == 1:
+                        tick(f"model reader: {c['model reader: asked']:,} asked, about {cost(usage):.2f} USD")
                     try:
                         # the validated answers of the company's other years: the company's memory (company_memory.py)
                         known = {yy: g["value"] for (w, cc, yy), g in gold.items() if w == wba and cc == code and yy != y and g.get("value")}
@@ -696,6 +698,12 @@ def default_codes(spec, named=""):
                         [k for k, v in spec.items() if v.get("type") == "number" and v.get("status") != "measuring"]) if x in spec]
 
 
+def tick(what):
+    """One line with the minutes since the start. The run printed nothing between its first line and its last: seven
+    long runs in four days (11 to 14 Nov 2026) were cancelled at the 345 minute limit and none said where the time went."""
+    print(f"  [{(time.time() - T0) / 60:5.0f} min] {what}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -768,7 +776,10 @@ def main():
         ciks = [(r["fields"]["wba_id"], str(r["fields"]["sec_cik"])) for r in comps
                 if r["fields"].get("wba_id") and str(r["fields"].get("sec_cik") or "").strip() not in ("", "none")]
         ciks = ciks[:a.limit] if a.limit else ciks
-        for wba, cik in ciks:
+        tick(f"SEC: {len(ciks):,} companies to ask")
+        for n_done, (wba, cik) in enumerate(ciks):
+            if n_done and n_done % 100 == 0:
+                tick(f"SEC: {n_done:,} of {len(ciks):,} companies")
             time.sleep(0.15)                                    # the SEC asks for at most ten requests a second
             cf = companyfacts(cik, sess) or {}
             facts = sec_annual(cf)
@@ -786,7 +797,10 @@ def main():
                 if r["fields"].get("wba_id") and (r["fields"].get("lei") or "").strip()
                 and (r["fields"].get("isin") or "")[:2].upper() in ESEF_ISIN]
         leis = leis[:a.limit] if a.limit else leis
-        for wba, lei in leis:
+        tick(f"ESEF: {len(leis):,} companies to ask")
+        for n_done, (wba, lei) in enumerate(leis):
+            if n_done and n_done % 50 == 0:
+                tick(f"ESEF: {n_done:,} of {len(leis):,} companies, {c['ESEF filings read']:,} filings read")
             facts, src = [], {}
             listed = filings(lei, sess, set(years))
             c["ESEF filings listed"] += len(listed)
@@ -812,8 +826,10 @@ def main():
                     proposals.append(row(wba, REVENUE, attr_name, y, f, "ESEF XBRL", src.get((f[3], f[7]), ""), gold, rec.get(wba), now))
 
     if "model" in methods:
+        tick("model reader: starting")
         proposals += model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c)
         semantic_counters(c, run)
+    tick(f"reading done: {len(proposals):,} proposals; writing next")
 
     for p in proposals:
         c[f"{p['method']}: proposals"] += 1
