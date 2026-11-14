@@ -744,3 +744,9 @@ Why: the person has the report open and knows what it is; interpreting it afterw
 Open: `doc_year` is the weakest input of the `year` formula, so a year read from the full text still wins over the sender's. To make the sender's year win, the formula needs a field of its own for it; left for the step that moves the year out of Airtable.
 Rejected: free text for the type (not the library's list); making either compulsory (most documents are sent many at a time from a page of links).
 
+## The sender's year is the year the period ends, and the database applies it (14 Nov 2026)
+What: the year typed in the extension is "the year the company prints on the report", not the year of the data (the owner's words). It is taken as the year the report's period ends, the Source Library's convention, and WBA's reporting-year rule is applied to it with the company's fiscal month: a report printed 2024 by a company whose year ends in May is reporting year 2023. With no month known, the year printed stands.
+Where: in the search database, at the nightly load, before the rows are compared with what the table holds (`sender_years`). `documents.year_by` says 'sender'. Airtable's `year` formula is not touched.
+Why not in Airtable: it would need a new field and a change to the `year` formula in a base we are leaving (phase 2 of the plan). This is the first fact about a document that the database decides and Airtable does not.
+Consequence to keep in mind: for these documents the search database and Airtable can show different years, on purpose. The daily comparison planned for phase 2 must count them apart.
+

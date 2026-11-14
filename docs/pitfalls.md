@@ -369,3 +369,6 @@ A question of eight words about one company ran into the 25 s timeout while "sco
 ## Work done after the time budget needs a budget too
 `propose_values.py` stops reading at 300 minutes "to leave time to write". After the reading it computed a signal with one database search for each proposal, with no limit, and only then wrote. When a night was cancelled its paid reads stayed in the journal, the next night took them back and had more proposals to compute the signal for, and was cancelled later in the same place: seven long runs in four days (11 to 14 Nov 2026) wrote nothing, and each printed one line. Three rules from it: every stage after a time budget has its own limit; a long job prints where it is with the minutes elapsed; someone looks every morning (a scheduled check since 14 Nov).
 
+## A new column can break a function that has a parameter of the same name
+A column `year_from` added to `documents` made `find_pages` fail with "column reference year_from is ambiguous": the function has a parameter of that name and reads `documents` without qualifying every column. The test on a real Postgres caught it before it shipped (14 Nov 2026); the column is `year_by`. Before naming a column, search the SQL functions for the name.
+
