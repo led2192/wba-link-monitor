@@ -159,7 +159,7 @@ def attachment_url(record_id):
     from monitor_core import airtable_request
     base, token = os.environ["AIRTABLE_BASE"], os.environ["AIRTABLE_TOKEN"]
     j = airtable_request("GET", f"https://api.airtable.com/v0/{base}/{quote('report_library')}/{record_id}",
-                         {"Authorization": f"Bearer {token}"}, params={"fields[]": ["file"]}).json()
+                         {"Authorization": f"Bearer {token}"}).json()      # one record: Airtable refuses fields[] here (422)
     files = j.get("fields", {}).get("file") or []
     return files[0].get("url") if files else None
 
