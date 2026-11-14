@@ -13,6 +13,7 @@ The pipeline that keeps WBA's Disclosure Library current: company pages watched 
 | [scripts.md](scripts.md) | Every script and workflow: what it does, when it runs, what it writes |
 | [quality.md](quality.md) | Pipeline QA: failure taxonomy, the QA base, golden set, daily and weekly review, the ship rule |
 | [pc_runner.md](pc_runner.md) | The robot on the owner's computer for sites that refuse cloud servers: how it works, how to set it up |
+| [server.md](server.md) | lanterN's own job machine: what is on it, how it is set up, the rules for moving jobs to it |
 | [runbook.md](runbook.md) | How to do common things, and what to do when something breaks |
 | [decisions.md](decisions.md) | Choices made, why, and what was rejected |
 | [pitfalls.md](pitfalls.md) | Lessons that were costly to learn |
