@@ -371,4 +371,4 @@ A question of eight words about one company ran into the 25 s timeout while "sco
 
 ## A new column can break a function that has a parameter of the same name
 A column `year_from` added to `documents` made `find_pages` fail with "column reference year_from is ambiguous": the function has a parameter of that name and reads `documents` without qualifying every column. The test on a real Postgres caught it before it shipped (14 Nov 2026); the column is `year_by`. Before naming a column, search the SQL functions for the name.
-
+- A new Airtable table is not counted towards the 500,000 record limit until it is added to `base_health.TABLES`. The only guard is the test that compares `docs/fields.md` with that list, and it sees nothing while the page is stale: three tables went uncounted until the page was regenerated on 14 Nov 2026. Regenerate the page (Field docs job) whenever a table is created.
