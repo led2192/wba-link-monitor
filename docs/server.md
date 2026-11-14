@@ -31,6 +31,9 @@ A workflow that can run on the server chooses its machine from the repository va
 | Name in `LANTERN_JOBS` | Workflow | Able to move since | Moved on |
 | --- | --- | --- | --- |
 | `scan_now` | Scan now (the watcher) | 14 Nov 2026 | 14 Nov 2026, 14:26 UTC |
+| `library_mirror` | Library mirror (nightly, 04:43 UTC) | 14 Nov 2026 | named in the variable on 14 Nov 2026; first night there 15 Nov |
+
+First result of Network compare (14 Nov 2026, 400 pages): the same answer on both machines for 94% of the pages; GitHub's machine got an answer from 331 and the server from 335; 9 pages answered GitHub only and 13 the server only. One run, so the difference of 4 may be chance; it shows the server's address is not treated worse.
 
 Before a job that reads company sites moves, run **Network compare** (Actions, manual): it reads the same sample of monitored pages from both machines and shows how many answer one and not the other.
 
