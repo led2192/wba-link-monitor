@@ -759,3 +759,10 @@ What it costs: the result of a measurement is no longer posted on the pull reque
 What (owner's decision): the Source Library bases are no longer a source of documents (their daily import has no schedule since today); the validated answers are complete as they are and no new ones will come; whatever lanterN needs from WBA from now on is taken from the public Data Explorer. The scripts that still read the validated-answer bases or the Source Library at run time are to read lanterN's own dated copy instead.
 Not done yet: the inventory of those scripts and the copy they need (23 scripts name one of the bases or their tokens; most are measurements, `propose_values.py` reads the validated answers every night).
 
+## The documents table moves as a mirror first, with the formulas rewritten in Python (14 Nov 2026)
+What: `public.library` holds one row a document with the fields that move as JSON (`fields`) and a few columns of their own: the company, discard, and the year and type both as lanterN works them out and as Airtable's formulas give them.
+Why JSON for the fields: 66 fields whose shapes are still Airtable's (selects, AI fields, dates as text). Fixing a column for each now would fix Airtable's shapes into the new table; the columns that searches need can be lifted out one by one as scripts start reading the table.
+Why the rules in Python and not as database functions: the same code runs in the nightly mirror today and will run when a script, not Airtable, writes the row; it has offline tests; and the comparison with Airtable's result is one loop over the rows already in memory.
+The rule of the plan: nothing reads `public.library` until its year and type agree with Airtable's for a stated number of days. The sender's year (`documents.year_by`) is the one place where they differ on purpose.
+Rejected: one typed column a field from the start; a trigger-based sync (Airtable has no change feed).
+
