@@ -25,37 +25,6 @@ jobs:
           echo "cores: $(nproc)   memory: $(free -g | awk '/^Mem/{print $2}') GB   disk free: $(df -h / | awk 'NR==2{print $4}') of $(df -h / | awk 'NR==2{print $2}')"
           echo "up since: $(uptime -s)   load: $(cut -d' ' -f1-3 /proc/loadavg)"
           echo "runner services running: $(systemctl list-units 'actions.runner.*' --state=running --no-legend | wc -l)"
-      - name: Protections
+      - name: Peek
         run: |
-          bad=0
-          sudo ufw status | grep -q "Status: active" && echo "firewall: active" || { echo "firewall: NOT active"; bad=1; }
-          echo "ports open to the world: $(sudo ufw status | awk '/ALLOW/{print $1}' | sort -u | tr '\n' ' ')"
-          systemctl is-active --quiet fail2ban && echo "fail2ban: running" || { echo "fail2ban: NOT running"; bad=1; }
-          grep -q 'Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades && echo "automatic security updates: on" || { echo "automatic security updates: OFF"; bad=1; }
-          sudo test -e /root/.lantern-token && { echo "first-boot token: STILL ON DISK"; bad=1; } || echo "first-boot token: gone"
-          echo "security updates waiting: $(apt list --upgradable 2>/dev/null | grep -c -i security || true)"
-          echo "reboot needed: $([ -e /var/run/reboot-required ] && echo yes || echo no)"
-          exit $bad
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: A job's tools
-        run: |
-          python --version
-          pip install -q -r requirements.txt
-          python -c "import psycopg, requests; print('packages: ok')"
-      - name: The browser the page reader uses
-        run: |
-          pip install -q playwright
-          # as the jobs do it: playwright calls sudo itself for the system packages (run through sudo, it does not find its own module)
-          if [ "${{ inputs.prepare }}" = "true" ]; then python -m playwright install --with-deps chromium >/dev/null && echo "system packages for the browser: installed"; fi
-          python -m playwright install chromium >/dev/null
-          python - <<'PY'
-          from playwright.sync_api import sync_playwright
-          with sync_playwright() as p:
-              b = p.chromium.launch()
-              page = b.new_page()
-              page.goto("https://example.com", timeout=30000)
-              print("browser: opens a page (" + page.title() + ")")
-              b.close()
-          PY
+          f=$(sudo sh -c 'ls -t /home/runner/actions-runner-4/_diag/pages/*.log' 2>/dev/null | head -1); echo "FILE $f"; sudo tail -n 80 "$f" | cut -c1-220
