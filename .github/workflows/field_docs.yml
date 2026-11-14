@@ -1,6 +1,6 @@
 # The field reference (docs/fields.md) regenerated from the live Airtable schema of the Disclosure Library and the
 # Pipeline QA base (field_docs.py). Read-only: it writes nothing to Airtable and nothing to the repository; the
-# page is kept as a file of the run ("fields") for a pull request to commit. Manual only.
+# page is printed in the log and kept as a file of the run ("fields") for a pull request to commit. Manual only.
 name: Field docs
 
 on:
@@ -19,6 +19,7 @@ jobs:
         run: |
           python field_docs.py > fields.md
           echo "$(wc -l < fields.md) lines; $(grep -c '^| `' fields.md) fields"
+          echo "=====PAGE====="; cat fields.md; echo "=====END====="
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
