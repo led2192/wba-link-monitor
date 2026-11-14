@@ -778,3 +778,8 @@ What: `gold_store.serves` is on unless `GOLD_COPY=off`. Why: the verify run of 1
 ## Jobs move to the server through a repository variable (14 Nov 2026)
 What: each workflow able to run on the server reads `LANTERN_JOBS` and picks its machine from it. Why: the way back must not need a pull request, tests and a merge while a job is failing; one variable shows in one place what runs where. The Scan now watcher is first because it uses the most minutes of any single job (about 20% of the total) and its work is visible within minutes.
 Rejected: changing `runs-on` in each file (the way back is a pull request); moving everything at once.
+
+## A scan is asked from the extension, and the request lives in lanterN's database (14 Nov 2026)
+What (owner's decision): the extension's second button asks for a scan of the page the person is on. The request is a row in `public.page_scans`; the watch turns it into the existing mechanisms (the `scan_now` box, or the inbox for a page not watched yet) and writes the outcome back.
+Why: asking for a scan was the last everyday action that needed Airtable open, and the person is already on the page when the need arises. Reusing `scan_now` and the inbox keeps one scanning path with its guards; only the way of asking is new.
+Rejected: scanning inside the browser and sending the links found (the extension already sends the documents themselves, downloaded by the browser, which is stronger where a site refuses the robot); a separate scanner for extension requests (two paths to keep equal).

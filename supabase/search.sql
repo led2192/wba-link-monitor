@@ -2825,6 +2825,88 @@ $$;
 revoke all on function public.add_sources(text, text[], int, text, text) from public, anon;
 grant execute on function public.add_sources(text, text[], int, text, text) to authenticated;
 
+-- "Scan this page" from the browser extension (14 Nov 2026, the owner: asking for a scan should not need Airtable).
+-- A signed-in person asks lanterN to read the page they are on, now. page_scans.py, run by the Scan now watch at
+-- every check, ticks scan_now on the page when it is already watched, or adds it for the company when it is not
+-- (through source_submissions and the inbox, as "Watch this page" did), and writes the result back here for the
+-- extension to show. One open request a page: asking again while one waits says so.
+create table if not exists public.page_scans (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  reviewer    text not null,
+  wba_id      text not null,
+  url         text not null,
+  status      text not null default 'new',   -- new, queued (scan_now ticked), added (a new page, on its way in), done, failed
+  result      text,
+  link_record text,                           -- the monitored_links record once known
+  before      text,                           -- scan_status of the page when the scan was asked: a different one means the scan ran
+  client      text,
+  done_at     timestamptz
+);
+alter table public.page_scans enable row level security;
+create index if not exists page_scans_open on public.page_scans (status) where status in ('new', 'queued', 'added');
+create index if not exists page_scans_url on public.page_scans (url, at desc);
+
+create or replace function public.scan_page(company text, url text, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+  u text := split_part(btrim(coalesce(url, '')), '#', 1);
+  open_one public.page_scans;
+  new_id bigint;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to ask for a scan' using errcode = '42501';
+  end if;
+  if co = '' or not (exists (select 1 from public.documents d where d.wba_id = co)
+                     or exists (select 1 from public.companies c where c.wba_id = co)) then
+    raise exception 'choose the company the page belongs to' using errcode = '22023';
+  end if;
+  if u !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(u) > 1000 or u ~* '\.pdf([?].*)?$' then
+    raise exception 'that is not a page lanterN can read' using errcode = '22023';
+  end if;
+  select * into open_one from public.page_scans p
+   where p.url = u and p.status in ('new', 'queued', 'added') and p.at > now() - interval '3 hours'
+   order by p.at desc limit 1;
+  if found then
+    return jsonb_build_object('waiting', true, 'status', open_one.status, 'at', open_one.at);
+  end if;
+  if (select count(*) from public.page_scans p where p.reviewer = who and p.at > now() - interval '1 day') >= 60 then
+    raise exception 'sixty scans a day at most' using errcode = '22023';
+  end if;
+  insert into public.page_scans (reviewer, wba_id, url, client) values (who, co, u, left(client, 60)) returning id into new_id;
+  return jsonb_build_object('asked', true, 'id', new_id);
+end;
+$$;
+revoke all on function public.scan_page(text, text, text) from public, anon;
+grant execute on function public.scan_page(text, text, text) to authenticated;
+
+-- What happened to the last scan asked for a page (anyone's): for the extension's status line.
+create or replace function public.page_scan_last(url text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  u text := split_part(btrim(coalesce(url, '')), '#', 1);
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address' using errcode = '42501';
+  end if;
+  return (select jsonb_build_object('status', p.status, 'result', p.result, 'at', p.at, 'done_at', p.done_at, 'mine', p.reviewer = who)
+            from public.page_scans p where p.url = u order by p.at desc limit 1);
+end;
+$$;
+revoke all on function public.page_scan_last(text) from public, anon;
+grant execute on function public.page_scan_last(text) to authenticated;
+
 -- "I'm feeling lucky" (10 Nov 2026): one value to review at a time, for a signed-in person. lucky_value picks,
 -- among the values the person has not reviewed, one of those with the fewest reviews, at random, and returns it
 -- with its source and the person's score. The score counts reviews, a review made in under four seconds as a
