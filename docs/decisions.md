@@ -774,3 +774,7 @@ Rejected: private first (all jobs at once); runners on the private repository `w
 
 ## The copy of the validated answers answers by default (14 Nov 2026)
 What: `gold_store.serves` is on unless `GOLD_COPY=off`. Why: the verify run of 14 Nov found no record that differs on any question Airtable and the copy could both answer. Not covered: the monthly bases' Sources tables (the token is refused) and two questions those bases cannot answer in Airtable either; a job with no `SUPABASE_DB_URL` keeps asking Airtable. The token for the bases stays until every reader has had a good night on the copy.
+
+## Jobs move to the server through a repository variable (14 Nov 2026)
+What: each workflow able to run on the server reads `LANTERN_JOBS` and picks its machine from it. Why: the way back must not need a pull request, tests and a merge while a job is failing; one variable shows in one place what runs where. The Scan now watcher is first because it uses the most minutes of any single job (about 20% of the total) and its work is visible within minutes.
+Rejected: changing `runs-on` in each file (the way back is a pull request); moving everything at once.

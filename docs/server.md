@@ -25,6 +25,15 @@ The server was installed on 14 Nov 2026 and its six runners answer. No pipeline 
 
 Running the script again is safe: it updates the system and registers only the runners that are missing. `RUNNERS=8 bash setup.sh` asks for another number; `bash setup.sh --no-runners` does the system part only.
 
+## Moving a job to the server, and back
+A workflow that can run on the server chooses its machine from the repository variable `LANTERN_JOBS` (GitHub: Settings, Secrets and variables, Actions, Variables): a list of job names separated by spaces. A job named there runs on the server; a job not named runs on GitHub's machines. Taking the name out is the way back; it needs no pull request and takes effect at the job's next start.
+
+| Name in `LANTERN_JOBS` | Workflow | Able to move since | Moved on |
+| --- | --- | --- | --- |
+| `scan_now` | Scan now (the watcher) | 14 Nov 2026 | |
+
+What differs on the server and has to be watched for each job moved: the pages are read from another network address (a company site may answer it differently from GitHub's), the Python packages of one job stay installed for the next, and files a job leaves outside its checkout stay on the disk.
+
 ## Checking it
 The workflow **Server check** (Actions, manual, and every Monday) runs on the server and fails if the firewall, fail2ban or the automatic updates are off, or if the first-boot token is still on disk. It also shows the cores, memory and free disk, and installs the repository's packages the way a job does.
 
