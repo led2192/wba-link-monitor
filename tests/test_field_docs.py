@@ -42,5 +42,17 @@ class FieldDocs(unittest.TestCase):
         self.assertIn("2026-10-23", self.text)
 
 
+
+class TokenFor(unittest.TestCase):
+    def test_quality_base_reads_with_its_own_token(self):
+        import field_docs
+        env = {"AIRTABLE_TOKEN": "a", "AIRTABLE_QA_TOKEN": "q"}
+        self.assertEqual(field_docs.token_for(field_docs.QA_BASE, env), "q")
+        self.assertEqual(field_docs.token_for(field_docs.DL_BASE, env), "a")
+
+    def test_one_token_when_the_quality_token_is_missing(self):
+        import field_docs
+        self.assertEqual(field_docs.token_for(field_docs.QA_BASE, {"AIRTABLE_TOKEN": "a"}), "a")
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-14 New manual job Field docs: runs `field_docs.py` against the live schema of both bases and keeps the page as a file of the run, so `docs/fields.md` (last generated on 24 October, 97 and 84 fields behind in places) can be regenerated without a schema token in a session. `field_docs.py` reads the Pipeline QA base with `AIRTABLE_QA_TOKEN` when it is set. (#531)
 - 2026-11-14 `library_mirror.py`, first full run: 271,933 documents read in 18 minutes; the type is the same as Airtable's on every one, the year on all but 17 (11 by the rule on the title, 6 where lanterN finds none). The run then failed writing (a NUL character in a title cannot be stored in the database's JSON); such characters are now removed. (#530)
 - 2026-11-14 Key figures (revenue, employees) has no schedule any more: the nightly value reader proposes both for every company and year, and nothing reads the one figure a company this job wrote to the `companies` table. Manual runs remain. (#529)
 - 2026-11-14 `gold_store.py --take` does not read again a table the copy already holds (`--again` does), and the Gold copy job may run 300 minutes: the first copy was still reading after 80 of its 120 minutes. `library_mirror.py`, first look at 20,000 documents: the type the same on all, the year the same on 19,999. (#528)

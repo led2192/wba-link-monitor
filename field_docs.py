@@ -13,7 +13,9 @@ Inputs, either:
                                 field with name, type, description and, for selects, options.choices or
                                 config.choices); a Claude session can save them with the Airtable tools.
   (no flag)                     reads the meta API with AIRTABLE_TOKEN (needs the schema.bases:read scope)
-                                for AIRTABLE_BASE and AIRTABLE_QA_BASE.
+                                for AIRTABLE_BASE and AIRTABLE_QA_BASE (the latter with AIRTABLE_QA_TOKEN
+                                when it is set). The Field docs workflow runs it this way and keeps the
+                                page as a file to download.
 Writes docs/fields.md only with --commit; otherwise prints it. Reads only; never writes to Airtable.
 """
 import argparse, datetime as dt, json, os, sys, urllib.request
@@ -121,9 +123,17 @@ def render(dl, qa, today):
     return "\n".join(out).rstrip() + "\n"
 
 
+def token_for(base, env=None):
+    """The quality base has its own token (AIRTABLE_QA_TOKEN); everything else reads with AIRTABLE_TOKEN."""
+    env = os.environ if env is None else env
+    if base == env.get("AIRTABLE_QA_BASE", QA_BASE) and env.get("AIRTABLE_QA_TOKEN"):
+        return env["AIRTABLE_QA_TOKEN"]
+    return env["AIRTABLE_TOKEN"]
+
+
 def fetch(base):
     req = urllib.request.Request(f"https://api.airtable.com/v0/meta/bases/{base}/tables",
-                                 headers={"Authorization": "Bearer " + os.environ["AIRTABLE_TOKEN"]})
+                                 headers={"Authorization": "Bearer " + token_for(base)})
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r)
 
