@@ -326,17 +326,6 @@ def run_commit(pages, limit):
     print(f">>> DONE. processed {done} rows. {counts}{tail}")
 
 
-def hash_one(rec):
-    """(record id, content_hash or None). Download only; None = transient failure, retried later."""
-    url = attachment_url(rec)
-    if not url:
-        return rec["id"], None
-    kind, data = download_pdf(url)
-    if kind == "ok":
-        return rec["id"], content_hash(data)
-    return rec["id"], NO_HASH if kind == "not_pdf" else None
-
-
 def run_size_backfill(limit, commit):
     """Fill file_size_mb from the attachment metadata Airtable already holds (no download). Walks
     the queue with offsets; rows Airtable has not sized yet are skipped and picked up later."""
@@ -369,27 +358,57 @@ def run_size_backfill(limit, commit):
     print(f">>> SIZE BACKFILL {'done' if commit else 'dry run (no writes)'}: {done} rows read, {wrote} written.")
 
 
-def run_hash_backfill(limit, commit):
-    """Fill content_hash on rows whose file was already read before the field existed. Walks the
-    queue page by page (offset), so rows that fail for a transient reason (left blank, retried on a
-    later run) can never block the rows behind them."""
+def hash_one(rec):
+    """(record id, content_hash or None, why). Download only; None = a failure, retried on a later run; why names it."""
+    url = attachment_url(rec)
+    if not url:
+        return rec["id"], None, "no attachment address"
+    kind, data = download_pdf(url)
+    if kind == "ok":
+        return rec["id"], content_hash(data), "ok"
+    return rec["id"], (NO_HASH if kind == "not_pdf" else None), kind
+
+
+def hash_queue(limit):
+    """The rows waiting for a content_hash, listed in one go before any file is fetched. Airtable keeps a listing
+    open for some minutes only: on 14 Nov 2026 five pages of files that failed slowly took 62 minutes, the listing
+    was gone (LIST_RECORDS_ITERATOR_NOT_AVAILABLE) and the run died. The attachment addresses of a listing stay good
+    for about two hours, which bounds the work of one run (HASH_MINUTES)."""
     formula = f"AND({{{FILE_F}}}, {{{HASH_F}}} = BLANK(), {{{STAT_F}}} != BLANK())"
-    done, counts, offset = 0, {"hashed": 0, "not_pdf": 0, "failed": 0}, None
-    while not limit or done < limit:
+    rows, offset = [], None
+    while not limit or len(rows) < limit:
         params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", FILE_F)]
         if offset:
             params.append(("offset", offset))
         j = airtable_request("GET", API, H, params=params).json()
-        rows, offset = j.get("records", []), j.get("offset")
-        if limit:
-            rows = rows[:limit - done]
-        if not rows:
+        rows += j.get("records", []); offset = j.get("offset")
+        if not offset:
             break
+    return rows[:limit] if limit else rows
+
+
+HASH_MINUTES = 75          # one run's files are fetched within this time of their listing
+
+
+def run_hash_backfill(limit, commit):
+    """Fill content_hash on rows whose file was already read before the field existed. The queue is listed first
+    (hash_queue), then worked through a hundred at a time; rows that fail are left blank and retried on a later run,
+    and the run says why they failed."""
+    queue = hash_queue(limit)
+    t0 = time.time()
+    done, counts, whys = 0, {"hashed": 0, "not_pdf": 0, "failed": 0}, {}
+    for at in range(0, len(queue), 100):
+        if time.time() - t0 > HASH_MINUTES * 60:
+            print(f">>> stopped at {HASH_MINUTES} minutes: {len(queue) - done} rows left for the next run.", flush=True)
+            break
+        rows = queue[at:at + 100]
         with ThreadPoolExecutor(max_workers=WORKERS) as ex:
             res = list(ex.map(hash_one, rows))
-        ups = [{"id": rid, "fields": {HASH_F: sha}} for rid, sha in res if sha]
-        for _, sha in res:
+        ups = [{"id": rid, "fields": {HASH_F: sha}} for rid, sha, _ in res if sha]
+        for _, sha, why in res:
             counts["failed" if not sha else "not_pdf" if sha == NO_HASH else "hashed"] += 1
+            if not sha:
+                whys[why] = whys.get(why, 0) + 1
         if commit:
             for i in range(0, len(ups), WRITE_BATCH):
                 try:
@@ -399,9 +418,10 @@ def run_hash_backfill(limit, commit):
                 time.sleep(WRITE_PAUSE)
         done += len(rows)
         print(f"  hashed {done} so far  {counts}", flush=True)
-        if not commit or not offset:
+        if not commit:
             break                       # dry run: one page is enough to show it works
-    print(f">>> HASH BACKFILL {'done' if commit else 'dry run (no writes)'}: {done} rows. {counts}")
+    print(f">>> HASH BACKFILL {'done' if commit else 'dry run (no writes)'}: {done} of {len(queue)} rows. {counts}"
+          + (f" Why the failures: {dict(sorted(whys.items(), key=lambda kv: -kv[1]))}." if whys else ""))
 
 
 def run_reclaim():
