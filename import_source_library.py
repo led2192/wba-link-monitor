@@ -83,8 +83,18 @@ REPORTS = {"SUST", "INT", "ANN"}
 SL_BASES = {c["base"] for c in SOURCE_LIBRARIES.values()}
 
 
-def get_all(token, base, table, fields, formula=None):
-    """GET only. This is the only function that ever addresses a Source Library base."""
+def get_all(token, base, table, fields, formula=None, copy=True):
+    """GET only. This is the only function that ever addresses a Source Library base or a base of validated answers.
+    Where lanterN holds its own copy of the table (gold_store.py, 14 Nov 2026) and GOLD_COPY is on, the copy answers
+    and Airtable is not asked; a question the copy cannot answer (a field it does not hold, a formula it does not
+    read) goes to Airtable."""
+    if copy:
+        try:
+            import gold_store
+            if gold_store.serves(base, table):
+                return gold_store.serve(base, table, fields, formula)
+        except ValueError:
+            pass
     from monitor_core import airtable_request
     H = {"Authorization": f"Bearer {token}"}
     params = [("pageSize", "100")] + [("fields[]", f) for f in fields]
