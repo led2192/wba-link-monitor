@@ -14,6 +14,8 @@
 # server: the jobs get their secrets from GitHub at run time, as they do on GitHub's own machines.
 #
 #   RUNNERS=8 bash setup.sh        another number of runners
+#   RUNNER_TOKEN=... bash setup.sh the token given by the caller, nothing asked (for a first boot with nobody
+#                                  at the keyboard: server/first_boot.sh)
 #   bash setup.sh --no-runners     steps 1 and 2 only
 set -euo pipefail
 
@@ -57,10 +59,12 @@ if [ "$WITH_RUNNERS" = "0" ]; then say "done (no runners asked for)"; exit 0; fi
 say "3/3 GitHub Actions runners: $RUNNERS, label \"$LABEL\""
 need=0
 for i in $(seq 1 "$RUNNERS"); do [ -f "/home/runner/actions-runner-$i/.runner" ] || need=1; done
-TOKEN=""
+TOKEN="${RUNNER_TOKEN:-}"
 if [ "$need" = "1" ]; then
-  printf 'Registration token (GitHub: Settings > Actions > Runners > New self-hosted runner, the value after --token): '
-  read -r TOKEN < /dev/tty
+  if [ -z "$TOKEN" ]; then
+    printf 'Registration token (GitHub: Settings > Actions > Runners > New self-hosted runner, the value after --token): '
+    read -r TOKEN < /dev/tty
+  fi
   [ -n "$TOKEN" ] || die "no token given"
   V="$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name | sed 's/^v//')"
   case "$V" in ''|null) die "could not read the runner version from GitHub";; esac
