@@ -34,7 +34,9 @@ concurrency:
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
+    # On lanterN's own machine when the repository variable LANTERN_JOBS names this job, on GitHub's otherwise
+    # (docs/server.md). Taking "scan_now" out of the variable is the way back, with no pull request.
+    runs-on: ${{ fromJSON(contains(vars.LANTERN_JOBS, 'scan_now') && '["self-hosted","lantern"]' || '"ubuntu-latest"') }}
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +50,8 @@ jobs:
       - name: Browser for the pages that need one (the watch runs without it if this fails)
         run: timeout 600 playwright install --with-deps chromium || timeout 300 playwright install chromium || echo "no browser this run"
         continue-on-error: true
+      - name: Where this runs
+        run: echo "machine $RUNNER_NAME ($RUNNER_ENVIRONMENT), $(nproc) cores"
       - name: Watch and scan
         run: python scan_now.py --watch "${{ inputs.watch_minutes || '330' }}" --every 180
         env:
