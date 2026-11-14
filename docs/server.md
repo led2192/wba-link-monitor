@@ -30,7 +30,9 @@ A workflow that can run on the server chooses its machine from the repository va
 
 | Name in `LANTERN_JOBS` | Workflow | Able to move since | Moved on |
 | --- | --- | --- | --- |
-| `scan_now` | Scan now (the watcher) | 14 Nov 2026 | |
+| `scan_now` | Scan now (the watcher) | 14 Nov 2026 | 14 Nov 2026, 14:26 UTC |
+
+Before a job that reads company sites moves, run **Network compare** (Actions, manual): it reads the same sample of monitored pages from both machines and shows how many answer one and not the other.
 
 What differs on the server and has to be watched for each job moved: the pages are read from another network address (a company site may answer it differently from GitHub's), the Python packages of one job stay installed for the next, and files a job leaves outside its checkout stay on the disk.
 
