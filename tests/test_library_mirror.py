@@ -52,6 +52,11 @@ class Rows(unittest.TestCase):
         self.assertEqual(c["year differs, our rule 7 rules (title / address)"], 1)
         self.assertIn("L3 ours 2020 Airtable 2021", differ["year"][0])
 
+    def test_a_nul_character_in_a_title_does_not_reach_the_database(self):
+        r = M.row_of({"id": "rec9", "fields": {"library_id": "L9", "auto_title": "Annual\x00 Report", "link_text": "a\\u0000b"}}, 2026)
+        self.assertNotIn("\\u0000", r[4]); self.assertNotIn("\x00", r[4])
+        self.assertEqual(json.loads(r[4])["auto_title"], "Annual Report")
+
     def test_the_fields_copied_are_the_approved_ones(self):
         for dropped in ("classify_input", "scope_input", "is_urd", "year_rules", "ai_year_test", "ai_year_input", "ai_year", "delete_now", "file", "cover_text"):
             self.assertNotIn(dropped, M.FIELDS)

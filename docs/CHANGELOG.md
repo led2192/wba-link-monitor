@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-14 `library_mirror.py`, first full run: 271,933 documents read in 18 minutes; the type is the same as Airtable's on every one, the year on all but 17 (11 by the rule on the title, 6 where lanterN finds none). The run then failed writing (a NUL character in a title cannot be stored in the database's JSON); such characters are now removed. (#530)
 - 2026-11-14 Key figures (revenue, employees) has no schedule any more: the nightly value reader proposes both for every company and year, and nothing reads the one figure a company this job wrote to the `companies` table. Manual runs remain. (#529)
 - 2026-11-14 `gold_store.py --take` does not read again a table the copy already holds (`--again` does), and the Gold copy job may run 300 minutes: the first copy was still reading after 80 of its 120 minutes. `library_mirror.py`, first look at 20,000 documents: the type the same on all, the year the same on 19,999. (#528)
 - 2026-11-14 The documents table in lanterN's own database, beside Airtable: `library_mirror.py` (workflow Library mirror, nightly at 04:43 UTC and manual) copies the 66 fields of `report_library` that move into `public.library`, works out the document's year and type with Airtable's own rules written in Python (`year_of`, `type_of`) and reports on how many documents they differ from Airtable's formulas. Nothing reads the table yet. Phase 2 of leaving Airtable. (#527)

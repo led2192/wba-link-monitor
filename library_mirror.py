@@ -129,7 +129,10 @@ def row_of(rec, this_year=None):
     y, rule = year_of(f, this_year)
     ya = f.get("year")
     keep = {k: f[k] for k in FIELDS if k in f and f[k] not in (None, "", [])}
-    return (lid, rec.get("id"), text(f.get("wba_id")).strip() or None, bool(f.get("discard")), json.dumps(keep, ensure_ascii=False),
+    # a NUL character (some PDF titles carry one) cannot be stored in the database's JSON: the first full run of
+    # 14 Nov 2026 read 271,933 documents and failed on writing them ("unsupported Unicode escape sequence")
+    as_json = json.dumps(keep, ensure_ascii=False).replace("\\u0000", "").replace("\x00", "")
+    return (lid, rec.get("id"), text(f.get("wba_id")).strip() or None, bool(f.get("discard")), as_json,
             y, int(ya) if isinstance(ya, (int, float)) and ya else None, rule, type_of(f) or None, text(f.get("effective_type")) or None)
 
 
