@@ -1,0 +1,33 @@
+# How much room lanterN's own copy of the documents needs and what could be saved (file_space.py): totals from the
+# nightly copy of the library, and a sample of attached PDFs downloaded to the server and measured as they are,
+# compressed whole, and with their images at 150 dpi. Read-only, numbers only. Manual. Runs on lanterN's machine.
+name: File space
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: "attached PDFs to download and measure"
+        default: "500"
+
+jobs:
+  measure:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q -r requirements.txt zstandard
+      - name: Ghostscript
+        run: command -v gs >/dev/null || { sudo apt-get update -q >/dev/null; sudo apt-get install -y -q ghostscript >/dev/null; }; gs --version
+      - name: Measure
+        run: python file_space.py --sample "${{ inputs.sample }}"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          QA_COMMIT: "true"
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
