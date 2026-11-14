@@ -188,6 +188,36 @@ class Propose(unittest.TestCase):
         self.assertIn("credit balance", P.REFUSED[0])
         P.REFUSED.clear()
 
+    def test_the_agreement_signal_has_its_own_time_limit(self):
+        # 14 Nov 2026: the signal ran after the reading had used its time, took longer than what was left, and seven
+        # long runs were cancelled before writing. Past the limit a proposal is written without the signal.
+        import types, collections, psycopg, extract_eval
+        class Cur:
+            def execute(self, *a): pass
+        class Conn:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def cursor(self): return Cur()
+        def fake(cur, wba, year, attr, spec, usage, known=None):
+            return [dict(value=5.0, printed=5.0, scale=1, library_id="L", page=1, unit="tCO2e", year=year, column=str(year), asked=year)]
+        seen = []
+        real = (psycopg.connect, extract_eval.read_values, P.library_docs, extract_eval.proposal_consensus, P.CONSENSUS_MIN)
+        psycopg.connect = lambda *a, **k: Conn(); extract_eval.read_values = fake; P.library_docs = lambda *a: {}
+        extract_eval.proposal_consensus = lambda cur, wba, year, attr, value: seen.append(wba) or (3, 2)
+        os.environ["ANTHROPIC_API_KEY"] = "k"; os.environ["SUPABASE_DB_URL"] = "postgres://x"
+        a = types.SimpleNamespace(attributes="GMC_00001.1", model_years="2024", companies="PT_1,PT_2", limit=0, max_usd=1.0, budget=300)
+        spec = {"GMC_00001.1": {"name": "Scope 1", "type": "number", "unit_family": "tco2e"}}
+        try:
+            P.CONSENSUS_MIN = -100000                                       # the limit is already past when the signal starts
+            c = collections.Counter()
+            rows = P.model_proposals(a, spec, [], {}, {}, {}, {}, "b", NOW, c)
+        finally:
+            psycopg.connect, extract_eval.read_values, P.library_docs, extract_eval.proposal_consensus, P.CONSENSUS_MIN = real
+        self.assertEqual(seen, [])                                          # no search was made
+        self.assertEqual(c["model reader: consensus skipped at the time limit"], 2)
+        self.assertEqual([r["wba_id"] for r in rows], ["PT_1", "PT_2"])     # both proposals are still written
+        self.assertNotIn("printed_on_pages", rows[0])
+
     def test_a_year_asked_is_read_and_its_own_figure_wins(self):
         # 31 Oct 2026: a 2025 read returns 2025, 2024 and 2023. 1 Nov 2026: comparison figures matched the validated
         # answer less often (66% against 76%), so 2024 is still read and its own figure replaces the comparison one

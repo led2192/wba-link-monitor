@@ -413,6 +413,7 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
             try:
                 journal = journal_load(cur, companies, codes, getattr(a, "journal_days", 7)); conn.commit()
                 c["model reader: reads waiting in the journal"] = len(journal)
+                tick(f"model reader: {len(journal):,} reads waiting in the journal (paid for by runs that did not finish)")
             except Exception as e:
                 journaling = False
                 c[f"model reader: no journal ({type(e).__name__}: {str(e)[:100]})"] = 1
@@ -509,7 +510,19 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
         # The report's own agreement with the reader (9 Nov 2026): on how many pages and in how many of the year's
         # documents the proposed figure is printed. Wave A: printed on 2+ pages right 76% to 88%, printed once 50%
         # to 77%. Written on the row for the reviewers' queue and, later, as the acceptance signal.
-        for wba, code, yy, e in got_rows:
+        # It is a search of the pages for each proposal, a second or more each, and it runs after the reading has used
+        # its time: with the reads of cancelled nights waiting in the journal there were thousands of proposals, the
+        # signal took longer than the 45 minutes left, the run was cancelled before it wrote anything, and the next
+        # night had more (seven long runs cancelled from 11 to 14 Nov 2026). It now has its own limit (CONSENSUS_MIN
+        # after the reading's budget); a proposal past it is written without the signal.
+        tick(f"model reader: reading over, {len(got_rows):,} proposals, {len(versions):,} figures; the agreement signal next")
+        consensus_until = T0 + (a.budget + CONSENSUS_MIN) * 60
+        for n_done, (wba, code, yy, e) in enumerate(got_rows):
+            if time.time() > consensus_until:
+                c["model reader: consensus skipped at the time limit"] = len(got_rows) - n_done
+                break
+            if n_done and n_done % 200 == 0:
+                tick(f"model reader: agreement signal for {n_done:,} of {len(got_rows):,} proposals")
             try:
                 e["printed_pages"], e["printed_docs"] = proposal_consensus(cur, wba, e.get("asked") or yy, spec[code], e["value"])
                 c["model reader: proposals printed on 2+ pages" if e["printed_pages"] >= 2 else "model reader: proposals printed once"] += 1
@@ -520,6 +533,7 @@ def model_proposals(a, spec, comps, rec, existing, gold, H, base, now, c):
                 except Exception:
                     pass
         c["model reader: figures found (all versions)"] = len(versions)
+        tick("model reader: writing the figures, the reads and the answers kept to the database")
         if getattr(a, "commit", False) and versions:
             try:
                 c["model reader: versions written"] = write_versions(conn, versions, "model reader", now)
@@ -696,6 +710,9 @@ def default_codes(spec, named=""):
     """The attributes to propose: the ones named, else every number attribute not marked "measuring"."""
     return [x for x in (named.split(",") if named else
                         [k for k, v in spec.items() if v.get("type") == "number" and v.get("status") != "measuring"]) if x in spec]
+
+
+CONSENSUS_MIN = 12        # minutes the agreement signal may take after the reading's budget; the job is cancelled 45 minutes after it
 
 
 def tick(what):
