@@ -21,6 +21,8 @@ Nothing has moved yet. Jobs move one at a time, each one run next to its GitHub 
    Paste the token when it asks. It ends with the list of runner services and the size of the machine.
 5. In GitHub, Settings, Actions, Runners: six runners named `lantern-1` to `lantern-6`, all "Idle".
 
+**Without typing on the server at all** (how it was done on 14 Nov 2026): in the provider's panel, Media, Images, choose Ubuntu 24.04 and paste `server/first_boot.sh` into "Custom Script", with the token in place of `PASTE_THE_TOKEN_HERE`. The installed system then runs `setup.sh` by itself on its first start; the token is deleted from the server when it has finished and the record is in `/root/lantern-setup.log`.
+
 Running the script again is safe: it updates the system and registers only the runners that are missing. `RUNNERS=8 bash setup.sh` asks for another number; `bash setup.sh --no-runners` does the system part only.
 
 ## Rules
