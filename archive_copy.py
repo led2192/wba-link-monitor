@@ -17,6 +17,14 @@ archived row without it. A file larger than the storage's limit, or one that doe
 as it is: the document is simply not archived. Rerun at will: rows with `stored_file` are skipped.
 
     python archive_copy.py [--rule B] [--limit 500] [--minutes 300] [--commit]
+    python archive_copy.py --rule all --disk /srv/lantern/files --workers 8 --commit
+
+--rule all (14 Nov 2026, the owner: lanterN keeps its own copy of every document, byte for byte, in the project's
+storage, and a working copy on its own machine) takes every document with a file from lanterN's nightly copy of
+the library (public.library), not only the candidates for archiving. --disk DIR also writes each file to
+DIR/<wba_id>/<library_id>.pdf on the machine it runs on; a row is done when it has `stored_file` and, with --disk,
+its file is on the disk. A file the storage refuses as too large is still kept on the disk. --workers copies
+several files at once.
 
 Dry run counts the candidates without a copy and their size; it downloads and uploads nothing.
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, SUPABASE_DB_URL (the text check), SUPABASE_URL, SUPABASE_SERVICE_KEY (the
@@ -80,9 +88,26 @@ class Storage:
         return None
 
 
-def copy_one(storage, session, wba, library_id, attachment):
-    """('stored', note) | ('no file' | 'too large' | 'size differs' | 'failed: ...', None). attachment: the row's
-    first `file` entry ({url, size})."""
+def disk_path(disk, wba, library_id):
+    return os.path.join(disk, object_path(wba, library_id))
+
+
+def write_disk(disk, wba, library_id, data):
+    """The file on this machine's disk, whole or not at all (written beside and renamed)."""
+    path = disk_path(disk, wba, library_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".part"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
+    return path
+
+
+def copy_one(storage, session, wba, library_id, attachment, disk=None, store=True):
+    """('stored', note) | ('on disk' | 'no file' | 'too large' | 'size differs' | 'failed: ...', None). attachment:
+    the row's first `file` entry ({url, size}). disk: a directory that also gets the file (written before the
+    upload, so a file the storage refuses is kept there). store=False: the storage already has it, only the disk
+    copy is missing."""
     if not attachment or not attachment.get("url"):
         return "no file", None
     if int(attachment.get("size") or 0) > MAX_BYTES:
@@ -91,6 +116,13 @@ def copy_one(storage, session, wba, library_id, attachment):
     if r.status_code != 200 or not r.content:
         return f"failed: download HTTP {r.status_code}", None
     data, path = r.content, object_path(wba, library_id)
+    if disk:
+        try:
+            write_disk(disk, wba, library_id, data)
+        except Exception as e:
+            return f"failed: disk {type(e).__name__}", None
+    if not store:
+        return "on disk", None
     try:
         if storage.upload(path, data) == "too large":
             return "too large", None
@@ -120,9 +152,30 @@ def patient(call, waits=WAITS, sleep=time.sleep):
     raise last
 
 
+def needs(fields, disk, exists=os.path.exists):
+    """(store, on_disk) still to do for a row: the storage copy when `stored_file` is empty, the disk copy when a
+    disk is given and the file is not there."""
+    store = not (fields.get("stored_file") or "").strip()
+    on_disk = bool(disk) and not exists(disk_path(disk, fields.get("wba_id"), fields.get("library_id")))
+    return store, on_disk
+
+
+def all_documents():
+    """Every document with a file, from lanterN's nightly copy of the library: [(record id, fields)]."""
+    import evidence_db
+    with evidence_db.connect() as conn:
+        cur = conn.cursor()
+        cur.execute("select record_id, wba_id, library_id, nullif(fields->>'file_size_mb', ''), coalesce(fields->>'stored_file', '') "
+                    "from public.library where gone is null and not discard and nullif(fields->>'file_size_mb', '') is not null "
+                    "and record_id is not null")
+        return [(rid, {"wba_id": w, "library_id": lid, "file_size_mb": mb, "stored_file": sf}) for rid, w, lid, mb, sf in cur.fetchall()]
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--rule", choices=["A", "B"], default="B")
+    ap.add_argument("--rule", choices=["A", "B", "all"], default="B")
+    ap.add_argument("--disk", default="", help="also keep each file under this directory of this machine")
+    ap.add_argument("--workers", type=int, default=1, help="files copied at the same time")
     ap.add_argument("--limit", type=int, default=500, help="documents this run (0 = all)")
     ap.add_argument("--minutes", type=float, default=300, help="stop starting new batches after this")
     ap.add_argument("--commit", action="store_true")
@@ -140,11 +193,15 @@ def main():
                 sys.exit(f"Set {v} (the storage the copies go to).")
     run = qa.Run("archive_copy.py")
     t0 = time.time()
-    cands, dropped = select_candidates(a.rule, datetime.now(timezone.utc).date())
-    todo = [(rid, f) for rid, f in cands if not (f.get("stored_file") or "").strip()]
+    if a.rule == "all":
+        cands = all_documents()
+    else:
+        cands, dropped = select_candidates(a.rule, datetime.now(timezone.utc).date())
+    todo = [(rid, f) for rid, f in cands if any(needs(f, a.disk))]
     todo.sort(key=lambda x: (x[1].get("wba_id") or "", x[1].get("library_id") or ""))
     c = collections.Counter({"candidates": len(cands), "already stored": len(cands) - len(todo), "to copy": len(todo)})
-    print(f"{len(cands):,} candidates of rule {a.rule}: {c['already stored']:,} already stored, {len(todo):,} to copy ({size_gb(todo):,.1f} GB)", flush=True)
+    print(f"{len(cands):,} candidates of rule {a.rule}: {c['already stored']:,} already stored, {len(todo):,} to copy ({size_gb(todo):,.1f} GB)"
+          + (f"; disk copy under {a.disk}" if a.disk else ""), flush=True)
     if a.limit:
         todo = todo[:a.limit]
     sent = 0
@@ -153,30 +210,49 @@ def main():
         storage = Storage(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"].strip(), session)
         print(f"  bucket {BUCKET}: {storage.ensure_bucket()}", flush=True)
         url = f"{API}/{BASE}/{quote('report_library')}"
-        for i in range(0, len(todo), BATCH):
+        step = BATCH if a.workers <= 1 else max(BATCH, min(50, a.workers * 5))
+        for i in range(0, len(todo), step):
             if time.time() - t0 > a.minutes * 60:
                 c["stopped at the time cap"] = 1
                 break
-            batch = todo[i:i + BATCH]
+            batch = todo[i:i + step]
             formula = "OR(" + ",".join(f"RECORD_ID()='{rid}'" for rid, _ in batch) + ")"
             fresh = patient(lambda: req("GET", url, params=[("filterByFormula", formula), ("fields[]", "file"), ("fields[]", "stored_file"), ("pageSize", "100")])).json().get("records", [])
             files = {r["id"]: r.get("fields", {}) for r in fresh}
             updates = []
-            for rid, f in batch:
+
+            def work(item):
+                rid, f = item
                 now = files.get(rid, {})
-                if (now.get("stored_file") or "").strip():
+                store, on_disk = needs(dict(f, stored_file=now.get("stored_file") or ""), a.disk)
+                if not store and not on_disk:
+                    return rid, f, "already stored", None
+                try:
+                    return (rid, f) + copy_one(storage, requests.Session() if a.workers > 1 else session, f.get("wba_id"), f.get("library_id"),
+                                               (now.get("file") or [None])[0], disk=a.disk or None, store=store)
+                except Exception as e:                      # one file must not end the run
+                    return rid, f, f"failed: {type(e).__name__}", None
+
+            if a.workers > 1:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=a.workers) as ex:
+                    results = list(ex.map(work, batch))
+            else:
+                results = [work(x) for x in batch]
+            for rid, f, what, note in results:
+                if what == "already stored":
                     c["already stored"] += 1; continue
-                what, note = copy_one(storage, session, f.get("wba_id"), f.get("library_id"), (now.get("file") or [None])[0])
                 c[what if not what.startswith("failed") else "failed"] += 1
                 if what.startswith("failed") and c["failed"] <= 5:
                     print(f"  {f.get('library_id')}: {what}", flush=True)
                 if note:
                     updates.append({"id": rid, "fields": {"stored_file": note}})
                     sent += int(note.rsplit("(", 1)[1].split()[0])
-            if updates:
-                patient(lambda: req("PATCH", url, json={"records": updates}))
-            if (i // BATCH) % 20 == 19:
-                print(f"  {c['stored']:,} stored, {sent / 1e9:.1f} GB, {(time.time() - t0) / 60:.0f} min", flush=True)
+            for k in range(0, len(updates), 10):               # Airtable takes ten rows a call
+                part = updates[k:k + 10]
+                patient(lambda: req("PATCH", url, json={"records": part}))
+            if (i // step) % 20 == 19:
+                print(f"  {c['stored']:,} stored, {c['on disk']:,} on disk only, {sent / 1e9:.1f} GB to the storage, {(time.time() - t0) / 60:.0f} min", flush=True)
     md = [f"### Archive copy, rule {a.rule}" + ("" if a.commit else " (dry run: nothing downloaded or uploaded)"), "",
           "| | Count |", "| --- | --: |"] + [f"| {k} | {v:,} |" for k, v in sorted(c.items())] + ["", f"Bytes stored this run: {sent / 1e9:.2f} GB."]
     out = "\n".join(md) + "\n"

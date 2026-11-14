@@ -45,4 +45,4 @@ The workflow **Server check** (Actions, manual, and every Monday) runs on the se
 ## Rules
 - A workflow that runs on a pull request never uses the server. Only `tests.yml` runs on pull requests, and it stays on GitHub's machines.
 - The runners are attached to this repository only.
-- The server is not a place to keep data: the documents live in Airtable and Supabase. Anything a job leaves on its disk may be deleted.
+- The server keeps one thing: the working copy of the documents' files under `/srv/lantern/files` (since 14 Nov 2026; the other copy is in the project's storage). Anything else a job leaves on its disk may be deleted.

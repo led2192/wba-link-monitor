@@ -12,10 +12,13 @@ on:
         options: [dry_run, commit]
         default: dry_run
       rule:
-        description: "A = 2021 or earlier, B = 2021 or earlier and not a key type"
+        description: "A = 2021 or earlier, B = 2021 or earlier and not a key type, all = every document with a file (runs on lanterN's machine and keeps a copy on its disk too)"
         type: choice
-        options: [B, A]
+        options: [B, A, all]
         default: B
+      workers:
+        description: "files copied at the same time"
+        default: "1"
       limit:
         description: "documents this run (0 = all that fit in the minutes)"
         default: "0"
@@ -29,19 +32,23 @@ concurrency:
 
 jobs:
   copy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 345
+    # "all" is lanterN's own copy of every document: on its machine, with the working copy on its disk, and with
+    # no six-hour limit (a run may last a day; it can be started again and goes on where it stopped)
+    runs-on: ${{ fromJSON(inputs.rule == 'all' && '["self-hosted","lantern"]' || '"ubuntu-latest"') }}
+    timeout-minutes: ${{ inputs.rule == 'all' && 1430 || 345 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install -q -r requirements.txt
       - name: Copy
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.mode }}" != "commit" ]; then python archive_copy.py --rule "${{ inputs.rule || 'B' }}"
-          else python archive_copy.py --commit --rule "${{ inputs.rule }}" --limit "${{ inputs.limit }}" --minutes "${{ inputs.minutes }}"; fi
+          DISK=""
+          if [ "${{ inputs.rule }}" = "all" ]; then DISK=/srv/lantern/files; sudo mkdir -p "$DISK"; sudo chown "$(id -un)":"$(id -gn)" /srv/lantern "$DISK"; echo "disk free: $(df -h "$DISK" | awk 'NR==2{print $4}')"; fi
+          if [ "${{ inputs.mode }}" != "commit" ]; then python archive_copy.py --rule "${{ inputs.rule || 'B' }}" --disk "$DISK"
+          else python archive_copy.py --commit --rule "${{ inputs.rule }}" --limit "${{ inputs.limit }}" --minutes "${{ inputs.minutes }}" --workers "${{ inputs.workers || '1' }}" --disk "$DISK"; fi
+          if [ -n "$DISK" ]; then echo "on the disk: $(find "$DISK" -name '*.pdf' | wc -l) files, $(du -sh "$DISK" | cut -f1); free $(df -h "$DISK" | awk 'NR==2{print $4}')"; fi
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
