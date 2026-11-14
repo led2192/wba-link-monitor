@@ -11,8 +11,6 @@ on:
       mode:
         description: "dry_run or commit"
         default: "commit"
-  pull_request:
-    paths: [add_companies.py, .github/workflows/add_companies.yml]
 
 concurrency:
   group: add-companies

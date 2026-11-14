@@ -24,8 +24,6 @@ on:
         description: "write the trained page choice (select_learned.json, kept with the result) for extract_eval --select learned"
         type: boolean
         default: false
-  pull_request:
-    paths: [select_eval.py, page_select.py, .github/workflows/select_eval.yml]
 
 jobs:
   evaluate:

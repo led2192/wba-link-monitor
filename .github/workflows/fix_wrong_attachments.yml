@@ -13,8 +13,6 @@ on:
       mode:
         description: "dry_run or commit"
         default: "dry_run"
-  pull_request:
-    paths: [fix_wrong_attachments.py, .github/workflows/fix_wrong_attachments.yml]
 
 concurrency:
   group: fix-wrong-attachments

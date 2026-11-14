@@ -56,8 +56,6 @@ on:
       fy_months:
         description: "model reader: only companies whose fiscal year ends in these months, e.g. 1-6 (blank = all); with fresh_days 0 for the re-read after the fiscal-year fix"
         default: ""
-  pull_request:
-    paths: [propose_values.py, extract_eval.py, model_reader.py, .github/workflows/propose_values.yml]
 
 jobs:
   plan:

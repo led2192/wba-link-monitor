@@ -13,8 +13,6 @@ on:
       wba:
         description: "wba ids, comma-separated (blank = by limit)"
         default: ""
-  pull_request:
-    paths: [dup_audit.py, .github/workflows/dup_audit.yml]
 
 jobs:
   audit:

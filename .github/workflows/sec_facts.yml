@@ -9,8 +9,6 @@ on:
       limit:
         description: "answers (0 = all revenue answers of companies with an SEC CIK)"
         default: "0"
-  pull_request:
-    paths: [sec_facts.py, .github/workflows/sec_facts.yml]
 
 jobs:
   score:

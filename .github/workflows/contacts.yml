@@ -17,8 +17,6 @@ on:
       wba:
         description: "Only these companies (comma-separated wba_ids). Blank = all."
         default: ""
-  pull_request:
-    paths: [contacts.py, .github/workflows/contacts.yml]
 
 concurrency:
   group: contacts

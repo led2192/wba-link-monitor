@@ -750,3 +750,12 @@ Where: in the search database, at the nightly load, before the rows are compared
 Why not in Airtable: it would need a new field and a change to the `year` formula in a base we are leaving (phase 2 of the plan). This is the first fact about a document that the database decides and Airtable does not.
 Consequence to keep in mind: for these documents the search database and Airtable can show different years, on purpose. The daily comparison planned for phase 2 must count them apart.
 
+## A pull request runs the tests only (14 Nov 2026)
+What: no workflow but Tests starts on a pull request. A measurement (Generic reader, Propose values in dry run, Narrative evaluation, the database load's dry run and the others) is started on purpose from the Actions page.
+Why: measured over 7.3 days, 42% of all machine time was measurements, 4,315 minutes of it started by pull requests, two of them paying the model each time; and the project is about to move to one rented machine, where a burst of such runs would hold the nightly work back.
+What it costs: the result of a measurement is no longer posted on the pull request by itself. The "no going back" rule is unchanged: a change to how a reader or ranker finds or reads pages is still measured beside the default before it becomes one; the measurement is now a step the author starts.
+
+## lanterN stops reading WBA's internal bases (14 Nov 2026)
+What (owner's decision): the Source Library bases are no longer a source of documents (their daily import has no schedule since today); the validated answers are complete as they are and no new ones will come; whatever lanterN needs from WBA from now on is taken from the public Data Explorer. The scripts that still read the validated-answer bases or the Source Library at run time are to read lanterN's own dated copy instead.
+Not done yet: the inventory of those scripts and the copy they need (23 scripts name one of the bases or their tokens; most are measurements, `propose_values.py` reads the validated answers every night).
+

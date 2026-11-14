@@ -16,8 +16,6 @@ on:
         description: "Re-read every key report, not only the queue"
         type: boolean
         default: false
-  pull_request:
-    paths: [pub_dates.py, .github/workflows/pub_dates.yml]
 
 concurrency:
   group: pub-dates

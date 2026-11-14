@@ -12,8 +12,6 @@ on:
       pages:
         description: "refused report pages to probe"
         default: "300"
-  pull_request:
-    paths: [blocked_probe.py, .github/workflows/blocked_probe.yml]
 
 jobs:
   probe:

@@ -13,8 +13,6 @@ on:
       attributes:
         description: "GMC codes, comma-separated (blank = all in gold_attributes.json)"
         default: ""
-  pull_request:
-    paths: [vocab_mining.py, .github/workflows/vocab_mining.yml]
 
 jobs:
   evaluate:

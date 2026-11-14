@@ -7,8 +7,6 @@ on:
   workflow_run:
     workflows: ["Company coverage"]
     types: [completed]
-  pull_request:
-    paths: [qa_sync.py, qa.py, .github/workflows/qa_sync.yml]   # a PR that touches the sync shows its dry-run counts
   workflow_dispatch:
     inputs:
       mode:

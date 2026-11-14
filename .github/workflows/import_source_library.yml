@@ -6,9 +6,10 @@ name: Import Source Library
 # source_library_plan.csv show what would be added. Daily at 05:17 the current cycle's base (2026) is
 # imported with --commit, so what the analysts add reaches the library the next morning.
 
+# No schedule since 14 Nov 2026 (owner's decision): the Source Library bases are no longer kept up and lanterN is
+# to stop depending on WBA's internal bases. What they held is already in the library. Manual runs remain possible
+# until the token is withdrawn.
 on:
-  schedule:
-    - cron: "17 5 * * *"
   workflow_dispatch:
     inputs:
       commit:

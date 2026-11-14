@@ -15,8 +15,6 @@ on:
       wba:
         description: "comma-separated wba_ids (blank = all)"
         default: ""
-  pull_request:
-    paths: [key_reports.py, .github/workflows/key_reports.yml]
 
 concurrency:
   group: key-reports

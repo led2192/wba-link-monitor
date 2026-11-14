@@ -19,8 +19,6 @@ on:
         type: choice
         options: [off, "on"]
         default: off
-  pull_request:
-    paths: [plausibility.py, .github/workflows/plausibility.yml]
 
 jobs:
   check:

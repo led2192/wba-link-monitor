@@ -30,8 +30,6 @@ on:
         description: "true = apply search.sql (the search functions) and stop: seconds, no schema, no documents, no pages"
         type: boolean
         default: false
-  pull_request:
-    paths: [load_supabase.py, supabase/schema.sql, .github/workflows/load_supabase.yml]
 
 # Installing the search functions alone takes seconds and has its own queue (12 Nov 2026): in the load's queue it
 # waited for hours behind a running load, and a fix to a function could not reach the page.

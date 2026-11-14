@@ -16,8 +16,6 @@ on:
       budget:
         description: "minutes"
         default: "100"
-  pull_request:
-    paths: [anchor_capture_eval.py, .github/workflows/anchor_capture.yml]
 
 jobs:
   evaluate:

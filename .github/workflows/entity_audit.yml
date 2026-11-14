@@ -13,8 +13,6 @@ on:
       wba:
         description: "wba ids, comma-separated (blank = by limit)"
         default: ""
-  pull_request:
-    paths: [entity_audit.py, .github/workflows/entity_audit.yml]
 
 jobs:
   audit:

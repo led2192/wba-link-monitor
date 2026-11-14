@@ -22,8 +22,6 @@ on:
         description: "Only these companies (comma-separated wba_ids). Blank = all."
         default: ""
 
-  pull_request:
-    paths: [regulator_filings.py, web_filing.py, .github/workflows/regulator_filings.yml]
 
 concurrency:
   group: regulator-filings
