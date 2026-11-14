@@ -85,7 +85,7 @@ SL_BASES = {c["base"] for c in SOURCE_LIBRARIES.values()}
 
 def get_all(token, base, table, fields, formula=None, copy=True):
     """GET only. This is the only function that ever addresses a Source Library base or a base of validated answers.
-    Where lanterN holds its own copy of the table (gold_store.py, 14 Nov 2026) and GOLD_COPY is on, the copy answers
+    Where lanterN holds its own copy of the table (gold_store.py, 14 Nov 2026) and GOLD_COPY is not off, the copy answers
     and Airtable is not asked; a question the copy cannot answer (a field it does not hold, a formula it does not
     read) goes to Airtable."""
     if copy:

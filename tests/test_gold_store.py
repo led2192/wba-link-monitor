@@ -47,12 +47,12 @@ class Serving(unittest.TestCase):
             if v is None: os.environ.pop(k, None)
             else: os.environ[k] = v
 
-    def test_the_copy_answers_only_when_switched_on(self):
-        os.environ.pop("GOLD_COPY", None)
-        self.assertFalse(G.serves("appGOLD", "Metadata"))                     # beside Airtable until verified
+    def test_the_copy_answers_unless_switched_off(self):
+        os.environ["GOLD_COPY"] = "off"
+        self.assertFalse(G.serves("appGOLD", "Metadata"))                     # the way back to Airtable
         self.assertTrue(G.serves("appGOLD", "Metadata", force=True))          # --verify reads it all the same
-        os.environ["GOLD_COPY"] = "on"
-        self.assertTrue(G.serves("appGOLD", "Metadata"))
+        os.environ.pop("GOLD_COPY", None)
+        self.assertTrue(G.serves("appGOLD", "Metadata"))                      # the default since 14 Nov 2026
         self.assertFalse(G.serves("appGOLD", "Sources"))                      # a table the copy does not hold
         self.assertFalse(G.serves("appOTHER", "Metadata"))
         self.assertFalse(G.serves("appGOLD", "report_library"))               # never one of ours
