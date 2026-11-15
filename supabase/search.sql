@@ -2445,6 +2445,10 @@ grant execute on function public.company_facts(text, text) to anon, authenticate
 -- of those companies' newest main report and the year before, and up to three of those pages take the places
 -- after the best five. The answer still reads older pages (the best five), so it can say what changed.
 insert into public.search_options (name, is_on, note) values ('ask_latest', false, 'Ask with no year: read pages of the company''s newest main report too') on conflict (name) do nothing;
+-- On since 15 Nov 2026, the owner's decision after the comparison (ask_pages_compare.py, run 43710164737, 12 cases, no
+-- model called): two cases read more pages of the newest two years (Nike scope 3 categories 1 -> 3, Coca-Cola water
+-- withdrawal 0 -> 3), none fewer, ten unchanged, seconds unchanged.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 15 Nov 2026, run 43710164737)' where name = 'ask_latest' and not is_on and note not like '%on since%';
 
 create or replace function public.ask_pages(
   key text, q text, qvec real[], company_filter text, year_from int, year_to int, type_filter text, asked text)
