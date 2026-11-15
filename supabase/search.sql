@@ -735,6 +735,15 @@ begin
 end;
 $$;
 
+-- How many pages one document may give to a list of pages found: three (the list a person reads shows documents,
+-- not fifty pages of one report). Ask can raise it for its own searches (option ask_doc_pages, in ask_pages) through
+-- the transaction's setting lantern.per_doc; anything but a digit from 1 to 9 there means three.
+create or replace function public.pages_a_document() returns int
+language sql stable
+as $$
+  select case when coalesce(current_setting('lantern.per_doc', true), '') ~ '^[1-9]$' then current_setting('lantern.per_doc', true)::int else 3 end
+$$;
+
 alter table public.search_log add column if not exists typed text;          -- what the person typed, before the box read filters out of it
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text);
 drop function if exists public.find_pages(text, text, text, int, int, text, int, text, text, text, text);
@@ -1117,7 +1126,7 @@ begin
       select r.library_id, r.page, r.year, r.doc_type, r.score, r.pairs, r.complete,
              row_number() over (order by (r.complete and r.joined) desc, r.complete desc, r.joined desc, r.score desc, r.year desc, r.library_id, r.page) as rk
       from ranked r
-      where r.in_doc <= 3
+      where r.in_doc <= public.pages_a_document()
       order by (r.complete and r.joined) desc, r.complete desc, r.joined desc, r.score desc, r.year desc, r.library_id, r.page
       limit need)
     select lid, t2.rk::int, t2.library_id, d.company, d.wba_id, t2.year, t2.doc_type, d.label, d.url, t2.page, t2.score,
@@ -2465,6 +2474,17 @@ declare
   later_from int;         -- the second search's first year: the newest report's year or the year before (no year asked), or the year after the years asked (ask_later)
   later boolean := false;
 begin
+  -- Option ask_doc_pages (16 Nov 2026). The search gives three pages a document, right for a list a person reads. An
+  -- answer about one company is often in one report, on its fourth or tenth best page: of 12 questions whose
+  -- confirmed page the search did not find, 8 had the page's document among the 24 and in 6 of those the document
+  -- already had its three (ask_eval.py --why, run 43772886780). With the option, the searches of an answer that names
+  -- a company take up to six pages a document. Set for these searches only and put back before returning.
+  if nullif(btrim(coalesce(company_filter, '')), '') is not null
+     and (coalesce(current_setting('lantern.ask_doc_pages', true), '') = 'on'
+          or (coalesce(current_setting('lantern.ask_doc_pages', true), '') <> 'off'
+              and exists (select 1 from public.search_options o where o.name = 'ask_doc_pages' and o.is_on))) then
+    perform set_config('lantern.per_doc', '6', true);
+  end if;
   if year_from is null and year_to is null and nullif(btrim(coalesce(company_filter, '')), '') is not null
      and (coalesce(current_setting('lantern.ask_latest', true), '') = 'on'
           or (coalesce(current_setting('lantern.ask_latest', true), '') <> 'off'
@@ -2507,6 +2527,7 @@ begin
                   when not later and u.year is not null and u.year >= coalesce(latest, newest.y) - 1 then 1
                   else 2 end, u.src, u.rank
     limit 8;
+  perform set_config('lantern.per_doc', '', true);
 end;
 $$;
 revoke all on function public.ask_pages(text, text, real[], text, int, int, text, text) from public, anon, authenticated;
@@ -3142,6 +3163,7 @@ grant execute on function public.admin_taxonomy(text) to authenticated;
 -- names): the reader is shown the names already in use and told to write a data point under one of them when it is
 -- the same thing. Off until it is compared on the answers' own check: it changes what the reader is told.
 insert into public.search_options (name, is_on, note) values ('ask_later', false, 'Ask with a year and a company: read pages of the company''s later reports too (a figure of a year is printed again, sometimes restated, by later reports)') on conflict (name) do nothing;
+insert into public.search_options (name, is_on, note) values ('ask_doc_pages', false, 'Ask about a company: the search may give up to six pages of one document instead of three') on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('ask_metric_names', false, 'Ask: the reader is given the metric names in use and writes facts under them') on conflict (name) do nothing;
 
 -- The names for one question, one a line: up to max_names metrics (those sharing a word with the question first, then
@@ -3976,7 +3998,7 @@ begin
                       and (types is null or d.doc_type = any(types)))
       select null::bigint, (row_number() over (order by x.dist))::int, x.library_id, x.company, x.wba_id, x.year, x.doc_type, x.label, x.url, x.page,
              (1 - x.dist)::real, left(regexp_replace(x.body, '\s+', ' ', 'g'), 420)
-      from kept x where x.in_doc <= 3 order by x.dist limit need;
+      from kept x where x.in_doc <= public.pages_a_document() order by x.dist limit need;
   else
     return query
       with docs as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url from public.documents d
@@ -3992,7 +4014,7 @@ begin
                     from pages p join docs d on d.library_id = p.library_id)
       select null::bigint, (row_number() over (order by x.dist))::int, x.library_id, x.company, x.wba_id, x.year, x.doc_type, x.label, x.url, x.page,
              (1 - x.dist)::real, left(regexp_replace(x.body, '\s+', ' ', 'g'), 420)
-      from kept x where x.in_doc <= 3 order by x.dist limit need;
+      from kept x where x.in_doc <= public.pages_a_document() order by x.dist limit need;
   end if;
 end;
 $$;
@@ -4041,7 +4063,7 @@ begin
          k as (select u.*, row_number() over (partition by u.library_id order by u.s desc) as in_doc from u)
     select (select max(w.log_id) from w), (row_number() over (order by k.s desc, k.library_id, k.page))::int, k.library_id, k.company, k.wba_id,
            k.year, k.doc_type, k.label, k.url, k.page, k.s::real, k.excerpt
-    from k where k.in_doc <= 3 order by k.s desc, k.library_id, k.page limit need;
+    from k where k.in_doc <= public.pages_a_document() order by k.s desc, k.library_id, k.page limit need;
 end;
 $$;
 revoke all on function public.find_blend(text, text, real[], text, int, int, text, int, text, text, text, text, text) from public;
