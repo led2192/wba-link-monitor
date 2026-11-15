@@ -653,6 +653,13 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.fact_restated('Gross Scope 1 emissions, restated'), public.fact_restated('Scope 1 (re-stated)'), public.fact_restated('Revised revenue'), "
                         "public.fact_restated('Scope 1 emissions'), public.fact_restated('Real estate assets'), public.fact_restated(null)")
             self.assertEqual(cur.fetchone(), (True, True, True, False, False, False))
+            # the owner's second screenshot: these are about a restatement, they are not the restated figure
+            cur.execute("select public.fact_restated('Restatement of 2023 Scope 1 emissions'), public.fact_restated('Reason for 2022 Scope 1 restatement'), "
+                        "public.fact_restated('Scope 1 emissions 2022 restatement change'), public.fact_restated('Scope 1 emissions 2022 as originally reported'), public.fact_restated('Scope 1 emissions 2022 as restated')")
+            self.assertEqual(cur.fetchone(), (False, False, False, False, True))
+            cur.execute("select public.fact_match('Restatement of 2023 Scope 1 emissions', 'Amadeus', 'yes_no'), public.fact_match('Scope 1 emissions', 'Amadeus', 'yes_no'), "
+                        "public.fact_match('Scope 1 emissions', 'Amadeus', 'number'), public.fact_match('Human rights policy', 'Amadeus', 'text'), public.fact_match('Scope 1 emissions 2022 as restated', 'Amadeus', 'number')")
+            self.assertEqual(cur.fetchone(), (None, None, "scope_1", "human_rights_policy", "scope_1"))      # a metric that is a number takes figures only
             cur.execute("insert into public.documents (library_id, wba_id, year, doc_type) values ('am-23', 'PT_AM', 2023, 'Annual Report') on conflict (library_id) do nothing")
             sources = [{"n": 1, "wba_id": "PT_AM", "company": "Amadeus", "library_id": "am-23", "page": 126}]
             facts = [{"what": "Gross Scope 1 emissions", "kind": "number", "value": "1427", "unit": "t CO2", "year": 2023, "source": 1},
@@ -665,6 +672,19 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.admin_company_facts('k', 'PT_AM')")
             rows = [(f["shown_year"], float(f["value"]), f["restated"]) for f in cur.fetchone()[0]["facts"] if f["metric"] == "scope_1"]
             self.assertEqual(rows, [(2023, 1427.0, False), (2022, 1493.0, True), (2022, 1600.0, False)])      # in its year the restated figure comes first
+            # a later report gives 2022 again with another figure and does not say so: the latest report's figure comes first
+            cur.execute("insert into public.documents (library_id, wba_id, year, doc_type) values ('am-24', 'PT_AM', 2024, 'Sustainability Report') on conflict (library_id) do nothing")
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value, unit, year, library_id, page, metric) values (962, 'PT_AM', 'Amadeus', 'Scope 1 emissions', 'number', 2148, 'tCO2eq', 2022, 'am-24', 114, 'scope_1')")
+            cur.execute("select public.admin_company_facts('k', 'PT_AM')")
+            rows = [(f["shown_year"], float(f["value"]), f["doc_year"]) for f in cur.fetchone()[0]["facts"] if f["metric"] == "scope_1" and f["shown_year"] == 2022]
+            self.assertEqual(rows, [(2022, 2148.0, 2024), (2022, 1493.0, 2023), (2022, 1600.0, 2023)])
+            # the two corrections the install makes: a yes under a metric that is a number, and a mark on a fact that is no figure
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, answer, year, metric, restated) values (963, 'PT_AM', 'Amadeus', 'Restatement of 2023 Scope 1 emissions', 'yes_no', 'no', 2023, 'scope_1', true), "
+                        "(964, 'PT_AM', 'Amadeus', 'Human rights policy', 'text', 'a policy', 2023, 'human_rights_policy', null)")
+            import load_supabase as L
+            cur.execute(L.guard_sql(open(os.path.join(pg_search.ROOT, "supabase", "search.sql"), encoding="utf-8").read()))
+            cur.execute("select ask_id, metric, restated from public.ask_facts where ask_id in (961, 963, 964) and (ask_id <> 961 or restated) order by ask_id")
+            self.assertEqual(cur.fetchall(), [(961, "scope_1", True), (963, None, None), (964, "human_rights_policy", None)])      # only the wrong ones are undone
             c.rollback()
 
     def test_the_owners_panel_links_facts_and_cost(self):

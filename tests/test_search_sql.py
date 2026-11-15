@@ -424,14 +424,17 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     seed = SQL[SQL.index("insert into public.fact_blocks"):SQL.index("create or replace function public.admin_taxonomy(")]
     assert seed.count("on conflict (key) do nothing;") == 3                     # written once: a later change of the owner stays
     assert "alter table public.ask_facts add column if not exists metric text;" in SQL
-    assert "public.fact_match(f ->> 'what', src ->> 'company')," in SQL and "nullif(public.fact_restated(f ->> 'what'), false))" in SQL      # a new fact gets its metric, and its mark when restated, as it is kept
-    assert SQL.count("where f.metric is null and public.fact_match(f.what, f.company) is not null;") == 2      # a classified fact is never touched
+    assert "public.fact_match(f ->> 'what', src ->> 'company', k)," in SQL and "nullif(k = 'number' and public.fact_restated(f ->> 'what'), false))" in SQL      # a new fact gets its metric, and its mark when restated, as it is kept
+    assert SQL.count("where f.metric is null and public.fact_match(f.what, f.company, f.kind) is not null;") == 2      # a classified fact is never touched
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v76 2026-11-15";' in PAGE
-    assert 'if (f.restated) span.appendChild(tag("restated"' in PAGE and "list.length > 1 && !list.some(f => f.restated)" in PAGE      # a restatement is marked, and is not "reports differ"
-    assert "update public.ask_facts f set restated = true where f.restated is null and public.fact_restated(f.what);" in SQL
+    assert 'const CLIENT = "lantern v77 2026-11-15";' in PAGE
+    assert 'if (i === 0 && (laterReport || f.restated)) td.appendChild(tag("restated"' in PAGE          # the latest report's figure prevails and is marked; v77
+    assert "if (several && !laterReport && !list.some(f => f.restated)) td.appendChild(tag(\"reports differ\"" in PAGE
+    assert "function factLine(points, large, unit, before)" in PAGE and '"stroke-dasharray": "5 4"' in PAGE      # as first reported, dashed
+    assert "update public.ask_facts f set restated = true where f.restated is null and f.kind = 'number' and public.fact_restated(f.what);" in SQL
+    assert "x.shown_year desc nulls last, x.doc_year desc nulls last, x.restated desc, x.at desc)" in SQL          # in a year, the latest report first
     assert '"All companies": adminAllCompanies' in PAGE and 'authed("admin_company_list", { key, search: st.search || null, max_rows: 200 })' in PAGE
     assert 'const worded = f.kind !== "number" && f.kind !== "yes_no";' in PAGE          # two wordings of a sentence are not "reports differ"
 

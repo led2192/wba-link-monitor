@@ -2020,8 +2020,8 @@ begin
               case when k <> 'number' then left(btrim(f ->> 'answer'), 300) end, src ->> 'library_id', (src ->> 'page')::int, src ->> 'url',
               public.wba_year(public.fiscal_label_year(f ->> 'period'),
                               (select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = src ->> 'wba_id')),
-              public.fact_match(f ->> 'what', src ->> 'company'),      -- its metric in the taxonomy, when a metric has that name (with or without the company's own name in it)
-              nullif(public.fact_restated(f ->> 'what'), false))
+              public.fact_match(f ->> 'what', src ->> 'company', k),      -- its metric in the taxonomy, when a metric has that name (with or without the company's own name in it) and takes this kind of fact
+              nullif(k = 'number' and public.fact_restated(f ->> 'what'), false))
       returning id into new_id;
     n := n + 1;
     kept := kept || ((select to_jsonb(a) - 'ask_id' - 'verdict_by' - 'verdict_at' from public.ask_facts a where a.id = new_id)
@@ -2918,7 +2918,7 @@ as $$
     where x <> '' and x !~ '^(19|20)[0-9]{2}$' and x !~ '^fy[0-9]{2,4}$'
       and x <> all(array['the', 'of', 'and', 'in', 'for', 'a', 'an', 'to', 'by', 'total', 'company', 'group', 'global', 'annual', 'gross', 'reported', 's',
                        'worldwide', 'globally', 'consolidated',
-                       'restated', 'restatement', 'revised', 'recalculated', 'as'])
+                       'restated', 'revised', 'recalculated', 'as'])      -- not "restatement": "Restatement of 2023 Scope 1 emissions: no" is a fact about a restatement, not the figure
   ) t
 $$;
 
@@ -2939,7 +2939,7 @@ revoke all on function public.fact_match(text) from public, anon, authenticated;
 -- Whether a fact's name says it is a restatement.
 create or replace function public.fact_restated(name text) returns boolean
 language sql immutable
-as $$ select coalesce(name, '') ~* '\m(re-?stated|re-?statement|revised|recalculated)\M' $$;
+as $$ select coalesce(name, '') ~* '\m(re-?stated|revised|recalculated)\M' and coalesce(name, '') !~* '\m(re-?statement|reason|change|difference|originally)\M' $$;
 
 -- The same, for a fact of a known company (15 Nov 2026, the owner's screenshot: "Nike total revenues", "NIKE, Inc.
 -- revenues" and "Nike chief executive officer" waited unclassified beside the metrics Revenue and Chief executive
@@ -2961,6 +2961,17 @@ as $$
      having count(*) < array_length(regexp_split_to_array(public.fact_key(name), ' '), 1)))      -- only when a word was taken off: the plain name was tried already
 $$;
 revoke all on function public.fact_match(text, text) from public, anon, authenticated;
+
+-- And for a fact of a known kind (15 Nov 2026): a metric that is a number takes figures only. "Restatement of 2023
+-- Scope 1 emissions", answered "no", had gone under Scope 1 emissions beside the tonnes.
+create or replace function public.fact_match(name text, company text, kind text) returns text
+language sql stable security definer
+set search_path = public, extensions
+as $$
+  select m.key from public.fact_metrics m
+  where m.key = public.fact_match($1, $2) and (m.kind <> 'number' or $3 = 'number')      -- $3, not "kind": inside this query the bare word is the metric's own column
+$$;
+revoke all on function public.fact_match(text, text, text) from public, anon, authenticated;
 
 insert into public.fact_blocks (key, label, position) values
   ('company', 'Company', 10), ('finance', 'Finance', 20), ('sustainability', 'Sustainability', 30), ('commitments', 'Commitments and policies', 40)
@@ -3087,8 +3098,13 @@ on conflict (key) do nothing;
 
 -- The facts kept before the taxonomy, and those a new alias now reaches: every fact with no metric is looked up again
 -- each time this file is installed. A fact that has a metric is never touched here.
-update public.ask_facts f set metric = public.fact_match(f.what, f.company) where f.metric is null and public.fact_match(f.what, f.company) is not null;
-update public.ask_facts f set restated = true where f.restated is null and public.fact_restated(f.what);
+update public.ask_facts f set metric = public.fact_match(f.what, f.company, f.kind) where f.metric is null and public.fact_match(f.what, f.company, f.kind) is not null;
+-- Two corrections of marks set on 15 Nov 2026 by the first version of these rules, which also took the noun
+-- "restatement" for the mark and let a yes or a sentence go under a metric that is a number. Only those are undone.
+update public.ask_facts f set restated = null where f.restated and (f.kind <> 'number' or not public.fact_restated(f.what));
+update public.ask_facts f set metric = null
+  where f.metric is not null and f.kind <> 'number' and exists (select 1 from public.fact_metrics m where m.key = f.metric and m.kind = 'number');
+update public.ask_facts f set restated = true where f.restated is null and f.kind = 'number' and public.fact_restated(f.what);
 
 -- The taxonomy for the owner's page: blocks, their groups, their metrics with how many facts and companies each has;
 -- the names of the facts with no metric, the most used first; and how much of all facts is classified.
@@ -3176,7 +3192,7 @@ set search_path = public, extensions
 as $$
 declare done int;
 begin
-  update public.ask_facts f set metric = public.fact_match(f.what, f.company) where f.metric is null and public.fact_match(f.what, f.company) is not null;
+  update public.ask_facts f set metric = public.fact_match(f.what, f.company, f.kind) where f.metric is null and public.fact_match(f.what, f.company, f.kind) is not null;
   get diagnostics done = row_count;
   return done;
 end;
@@ -3372,7 +3388,7 @@ begin
   return jsonb_build_object(
     'wba_id', ids[1],
     'company', (select min(f.company) from public.ask_facts f where f.wba_id = ids[1]),
-    'facts', (select coalesce(jsonb_agg(to_jsonb(x) order by x.block_position, x.group_position, x.label, x.shown_year desc nulls last, x.restated desc, x.doc_year desc nulls last, x.at desc), '[]'::jsonb) from (
+    'facts', (select coalesce(jsonb_agg(to_jsonb(x) order by x.block_position, x.group_position, x.label, x.shown_year desc nulls last, x.doc_year desc nulls last, x.restated desc, x.at desc), '[]'::jsonb) from (
       select f.id, f.at, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.period, f.wba_year, f.page, f.url, f.library_id, f.verdict, coalesce(f.restated, false) as restated,
              d.year as doc_year, d.doc_type,
              coalesce(f.year, f.wba_year, d.year) as shown_year,
