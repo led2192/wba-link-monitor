@@ -176,27 +176,55 @@ class SearchOnPostgres(unittest.TestCase):
         cur = self.conn.cursor(); cur.execute("select terms from public.search_log order by id desc limit 1")
         self.assertLessEqual(len((cur.fetchone()[0] or "").split()), 6)
 
-    def test_a_company_can_be_asked_for_once(self):
+    def test_a_company_a_person_adds_exists_at_once(self):
+        import add_companies as A
         cur = self.conn.cursor()
-        cur.execute("delete from public.company_requests")
-        cur.execute("select public.request_company('Acme Robotics', 'acme.example.com', null, 'for 2027')")
-        self.assertTrue(cur.fetchone()[0]["asked"])
-        cur.execute("select public.request_company('acme robotics')"); self.assertTrue(cur.fetchone()[0]["again"])
-        cur.execute("select public.request_company('Unilever')"); self.assertTrue(cur.fetchone()[0]["held"])      # already a company
-        cur.execute("select name, website, status from public.company_requests"); self.assertEqual(cur.fetchall(), [("Acme Robotics", "acme.example.com", "new")])
-        cur.execute("update public.companies set website = 'https://www.unilever.com/' where name = 'Unilever'")
-        cur.execute("select public.request_company('Unilever Global Plc', 'unilever.com/investors')"); j = cur.fetchone()[0]
-        self.assertTrue(j["held"]); self.assertEqual(j["name"], "Unilever")                              # the same website is the same company
+        cur.execute("delete from public.company_requests"); cur.execute("delete from public.company_overlaps"); cur.execute("delete from public.companies where wba_id like 'LN\\_%'")
+        cur.execute("alter table public.companies add column if not exists lei text")
+        # the name as compared and the id are the ones add_companies.py gives
+        for name in ("Nestlé S.A.", "Target Corporation", "The Coca-Cola Company", "Grupo Bimbo S.A.B. de C.V.", "PT Astra International Tbk", "Ørsted A/S"):
+            cur.execute("select public.name_key(%s)", (name,)); self.assertEqual(cur.fetchone()[0], A.norm_name(name), name)
+        cur.execute("select public.site_label('investors.example.co.uk'), public.site_label('example.com'), public.site_label('localhost')")
+        self.assertEqual(cur.fetchone(), ("example", "example", ""))
+        cur.execute("select public.request_company('Acme Robotics Ltd', 'acme.example.com', null, 'for 2027')"); j = cur.fetchone()[0]
+        self.assertTrue(j["created"]); self.assertEqual(j["id"], A.company_id("Acme Robotics Ltd", "")); self.assertEqual(j["doubts"], [])
+        cur.execute("select name, website from public.companies where wba_id = %s", (j["id"],)); self.assertEqual(cur.fetchone(), ("Acme Robotics Ltd", "acme.example.com"))
+        cur.execute("select public.upload_begin(%s, 'a.pdf', 5000, %s)", (j["id"], "ef" * 32)); self.assertEqual(cur.fetchone()[0]["path"], f"{j['id']}/{'ef' * 32}.pdf")      # its documents at once
+        # clear duplicates are not made: the same name without its legal ending, the same website, the same LEI
+        cur.execute("select public.request_company('ACME ROBOTICS')"); k = cur.fetchone()[0]; self.assertTrue(k["held"]); self.assertEqual(k["id"], j["id"])
+        cur.execute("select public.request_company('Unilever')"); self.assertTrue(cur.fetchone()[0]["held"])
+        cur.execute("update public.companies set website = 'https://www.unilever.com/', lei = '549300MKFYEKVRWML317' where name = 'Unilever'")
+        cur.execute("select public.request_company('Unilever Global Plc', 'unilever.com/investors')"); k = cur.fetchone()[0]
+        self.assertTrue(k["held"]); self.assertEqual(k["name"], "Unilever")
+        cur.execute("select public.request_company('Something Else', null, '549300MKFYEKVRWML317')"); self.assertEqual(cur.fetchone()[0]["name"], "Unilever")
         cur.execute("select public.site_host('HTTPS://www.Example.com:443/en/')"); self.assertEqual(cur.fetchone()[0], "example.com")
-        cur.execute("select public.request_company('acme robotics')"); rid = cur.fetchone()[0]["request"]
-        cur.execute("select public.upload_begin(%s, 'a.pdf', 5000, %s)", (f"REQ_{rid}", "ef" * 32)); self.assertEqual(cur.fetchone()[0]["path"], f"REQ_{rid}/{'ef' * 32}.pdf")
+        # a doubt does not stop the company: it is noted for the owner
+        cur.execute("select public.request_company('Unilever Nigeria', 'unilever.com.ng')"); d = cur.fetchone()[0]
+        self.assertTrue(d["created"]); self.assertTrue(any("Unilever" in x for x in d["doubts"])); self.assertTrue(any("website" in x for x in d["doubts"]))
+        cur.execute("select public.request_company('Zeta Mining')"); self.assertEqual(cur.fetchone()[0]["doubts"], ["no website given: its pages cannot be searched for"])
+        # a document of the new company that another company already holds is noted, by its address and by the file
+        cur.execute("insert into public.documents (library_id, wba_id, company, url, pages) values ('ovl-1', 'PT_00000', 'Other', 'https://example.com/shared.pdf', 3) on conflict do nothing")
+        cur.execute("select public.upload_known(%s, array['https://example.com/shared.pdf', 'https://example.com/new.pdf'])", (d["id"],)); self.assertEqual(cur.fetchone()[0], ["https://example.com/shared.pdf"])
+        cur.execute("delete from public.browser_uploads where sha256 = %s", ("cd" * 32,))
+        cur.execute("select public.upload_begin('PT_00000', 'b.pdf', 5000, %s)", ("cd" * 32,)); up = cur.fetchone()[0]["id"]; cur.execute("select public.upload_done(%s)", (up,))
+        cur.execute("select public.upload_begin(%s, 'b.pdf', 5000, %s)", (d["id"], "cd" * 32))
+        cur.execute("select public.admin_companies('k')"); rows = {c["name"]: c for c in cur.fetchone()[0]}
+        self.assertEqual(rows["Unilever Nigeria"]["overlaps"], [{"id": "PT_00000", "name": rows["Unilever Nigeria"]["overlaps"][0]["name"], "n": 2}])
+        self.assertEqual((rows["Acme Robotics Ltd"]["files"], rows["Acme Robotics Ltd"]["review"]), (0, None))      # registered, not stored yet
+        # the owner accepts one and rejects the other: the rejected one leaves the list and cannot be made again
+        cur.execute("select public.admin_company_set('k', %s, 'accepted')", (rows["Acme Robotics Ltd"]["request"],)); self.assertTrue(cur.fetchone()[0]["ok"])
+        cur.execute("select public.admin_company_set('k', %s, 'rejected', 'a unit of Unilever')", (rows["Unilever Nigeria"]["request"],)); self.assertTrue(cur.fetchone()[0]["ok"])
+        cur.execute("select count(*) from public.companies where wba_id = %s", (d["id"],)); self.assertEqual(cur.fetchone()[0], 0)
+        cur.execute("select status from public.browser_uploads where wba_id = %s", (d["id"],)); self.assertEqual(cur.fetchall(), [("orphan",)])
+        cur.execute("select public.request_company('Unilever Nigeria', 'unilever.com.ng')"); again = cur.fetchone()[0]
+        self.assertEqual((again["again"], again["review"], again["why"]), (True, "rejected", "a unit of Unilever"))
+        cur.execute("select count(*) from public.companies where wba_id = %s", (j["id"],)); self.assertEqual(cur.fetchone()[0], 1)
         with self.assertRaises(Exception):
-            cur.execute("select public.upload_begin('REQ_999999', 'a.pdf', 5000, %s)", ("ef" * 32,))     # a request that is not this person's
-        cur.execute("select public.upload_companies()"); mine = [c for c in cur.fetchone()[0] if c.get("asked")]
-        self.assertEqual([(c["id"], c["name"]) for c in mine], [(f"REQ_{rid}", "Acme Robotics")])        # the company asked for can be chosen again
+            cur.execute("select public.admin_company_set('k', 999999, 'accepted')")
         for bad in (("X",), ("Beta", "not a site"), ("Gamma", None, "123")):
             with self.assertRaises(Exception):
                 cur.execute("select public.request_company(%s, %s, %s)", (bad + (None, None))[:3])
+        cur.execute("delete from public.companies where wba_id like 'LN\\_%'"); cur.execute("delete from public.browser_uploads where wba_id like 'LN\\_%%' or sha256 = %s", ("cd" * 32,))
 
     def test_a_file_sent_from_the_browser_is_registered_once(self):
         cur = self.conn.cursor()

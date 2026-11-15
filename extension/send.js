@@ -288,25 +288,44 @@ function companyOfHost(host) {
 }
 let hostMemory = {};
 async function rememberHost(company) { const h = hostOf(TAB.url); if (!h || /^REQ_/.test(company.id) || hostMemory[h] === company.id) return; hostMemory[h] = company.id; await store.set("hosts", hostMemory); }
-let asked = null;          // a company this person has just asked for: { id: "REQ_<request>", name }
+let asked = null;          // a company asked for with an older database: { id: "REQ_<request>", name }
 const chosenCompany = () => { const v = fold($("company").value); return companies.find(c => fold(c.name) === v) || (asked && fold(asked.name) === v ? asked : null); };
-// A company that is not in the list. It is asked for (the same request "Missing a company?" makes in lanterN), a
-// person approves it, and the documents sent meanwhile wait for it. The database answers "already a company" when
-// the name or the website is one it holds, and that company is chosen instead: no second row for one company.
+// The company's name as the page's title gives it: the last part of "Annual report 2025 | Acme Group" (or the first,
+// when the last is a word like "Investors"). Only a proposal: the person reads and corrects it.
+function nameFromTitle(title) {
+  const parts = (title || "").split(/\s+[|·–—-]\s+|\s*[|·]\s*/).map(x => x.trim()).filter(x => x.length >= 2 && x.length <= 60);
+  if (!parts.length) return "";
+  const generic = /^(home|homepage|investors?|investor relations|reports?|annual reports?|sustainability|downloads?|publications?|news|about( us)?|welcome)\b/i;
+  const last = parts[parts.length - 1];
+  return (!generic.test(last) ? last : parts.find(x => !generic.test(x)) || "").slice(0, 120);
+}
+// A company that is not in the list (0.6.0): it is made at once, with its id, and its documents can be sent from this
+// moment; nobody has to approve it first. The database refuses a clear duplicate (the same name, website or LEI) and
+// answers the company it holds, which is chosen instead. A doubt (a name close to another company's) does not stop
+// the company: it is noted for the owner, who accepts or rejects the company later.
 function newCompany() {
-  $("cobox").hidden = false; $("coname").value = $("company").value.trim(); if (!$("cosite").value) $("cosite").value = "https://" + hostOf(TAB.url); $("coname").focus();
+  $("cobox").hidden = false; $("coname").value = $("company").value.trim() || nameFromTitle(TAB.title);
+  if (!$("cosite").value && /^https?:/.test(TAB.url)) $("cosite").value = "https://" + hostOf(TAB.url); $("coname").focus(); $("coname").select();
   $("cocancel").onclick = () => { $("cobox").hidden = true; };
   $("coask").onclick = async () => {
     const name = $("coname").value.trim(), isin = $("coisin").value.trim().toUpperCase();
     if (name.length < 2) { $("comsg").textContent = "Write the company's name."; return; }
     if (isin && !/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(isin)) { $("comsg").textContent = "An ISIN has 12 characters, like US0378331005."; return; }
     try {
+      $("coask").disabled = true;
       const j = await rpc("request_company", { name, website: $("cosite").value.trim(), lei: $("colei").value.trim(), note: isin ? `ISIN ${isin}` : null, client: CLIENT });
       if (j.held) { $("company").value = j.name; $("msg").textContent = `${j.name} is already a company of lanterN: chosen.`; }
-      else { asked = { id: `REQ_${j.request}`, name: j.name }; $("company").value = j.name;
-        $("msg").textContent = `${j.name} is asked for. You can send its documents now: they wait until the company is approved (table company_requests in Airtable, box approve).`; }
+      else if (j.again && j.review === "rejected") { $("comsg").textContent = `${j.name} was added before and not accepted${j.why ? `: ${j.why}` : ""}.`; return; }
+      else if (j.id) {
+        const made = { id: j.id, name: j.name, website: j.website || "" };
+        if (!companies.some(c => c.id === made.id)) { companies.push(made); const o = el("option"); o.value = made.name; $("companies").append(o); }
+        $("company").value = made.name; $("newco").textContent = "Not in the list? Add the company";
+        const doubts = (j.doubts || []).filter(d => !/^no website/.test(d));
+        $("msg").textContent = `${j.name} is a company of lanterN now. Send its documents.` + (doubts.length ? ` Noted for the owner: ${doubts[0]}.` : "");
+      }
+      else { asked = { id: `REQ_${j.request}`, name: j.name }; $("company").value = j.name; $("msg").textContent = `${j.name} is asked for. You can send its documents now.`; }
       $("cobox").hidden = true; await markHeld();
-    } catch (e) { $("comsg").textContent = `Not added: ${e.message}`; }
+    } catch (e) { $("comsg").textContent = `Not added: ${e.message}`; } finally { $("coask").disabled = false; }
   };
 }
 function render() {
@@ -356,6 +375,8 @@ async function start() {
   // its reports on one, its website on another)
   hostMemory = (await store.get("hosts")) || {};
   const guess = companyOfHost(hostOf(TAB.url)) || companies.find(c => c.id === hostMemory[hostOf(TAB.url)]); if (guess) $("company").value = guess.name;
+  // a company's own site that no company of lanterN has: say so, and offer to add the company (0.6.0)
+  else if (/^https?:/.test(TAB.url) && !isPdfUrl(TAB.url)) { $("newco").textContent = `No company of lanterN has ${siteOf(hostOf(TAB.url))}. Add the company`; $("newco").style.fontWeight = "600"; }
   docs = await listDocuments(); await confirmMaybes(docs); await markHeld();
   // PDFs from this computer (0.4.0): a file the site only hands over after a captcha is downloaded by the person and chosen here
   $("files").onchange = () => { for (const f of $("files").files) { if (!docs.some(d => d.file && d.file.name === f.name && d.file.size === f.size)) docs.push({ url: "", text: f.name.replace(/\.pdf$/i, ""), sure: true, file: f, held: false }); } $("files").value = ""; render(); };

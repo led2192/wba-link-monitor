@@ -56,6 +56,29 @@ class Decide(unittest.TestCase):
         self.assertEqual(A.clean({"a": "x", "b": None, "c": ""}), {"a": "x"})
 
 
+class MadeByPeople(unittest.TestCase):
+    """15 Nov 2026: a company a person adds in lanterN has its id at once; this script gives it its row."""
+    def existing(self):
+        return A.index_existing([{"fields": {"wba_id": "PT_00001", "company_name": "Acme Corp", "website": "https://acme.example", "lei": "529900T8BM49AURSDO55"}}])
+
+    def test_a_new_company_keeps_the_id_the_database_gave(self):
+        ex = self.existing()
+        self.assertEqual(A.settle("Beta Mining Ltd", "beta.example", "", A.company_id("Beta Mining Ltd", ""), ex)[:2], ("add", A.company_id("Beta Mining Ltd", "")))
+        self.assertEqual(A.settle("Gamma", "gamma.example", "", "LN_12345678", ex)[:2], ("add", "LN_12345678"))
+        self.assertIn("LN_12345678", ex[3]); self.assertEqual(ex[1]["gamma"], "LN_12345678")
+        self.assertEqual(A.settle("Gamma", "gamma.example", "", "LN_12345678", ex)[0], "done")              # a rerun makes no second row
+
+    def test_a_company_this_table_already_holds_is_withdrawn(self):
+        what, other, note = A.settle("Other name", "", "529900T8BM49AURSDO55", "LN_aaaaaaaa", self.existing())
+        self.assertEqual((what, other), ("merge", "PT_00001")); self.assertIn("the same LEI", note)
+
+    def test_a_rejected_company_is_discarded_not_deleted(self):
+        lib = [{"id": "recA", "fields": {"wba_id": "LN_aaaaaaaa"}}, {"id": "recB", "fields": {"wba_id": "LN_aaaaaaaa", "discard": True}}, {"id": "recC", "fields": {"wba_id": "PT_00001"}}]
+        pages = [{"id": "recP", "fields": {"wba_id": "LN_aaaaaaaa", "monitor": True}}, {"id": "recQ", "fields": {"wba_id": "LN_aaaaaaaa"}}]
+        self.assertEqual(A.rejection_patches("LN_aaaaaaaa", lib, pages),
+                         [("report_library", "recA", {"discard": True, "discard_reason": "Wrong company / misattributed"}), ("monitored_links", "recP", {"monitor": False})])
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -65,4 +88,3 @@ class Usable(unittest.TestCase):
         import os
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "add_companies.py"), encoding="utf-8").read()
         self.assertIn("insert into public.companies (wba_id, name, website) values (%s, %s, %s) on conflict (wba_id) do nothing", src)
-

@@ -1463,6 +1463,7 @@ grant execute on function public.doc_pages(text, text[]) to anon, authenticated;
 -- this day only WBA's list put one there. A signed-in person can ask for a company by name (website and LEI if
 -- known). It is a request, not a company: add_companies.py (hourly) copies it to a table a person reads, and only
 -- an approved request becomes a company whose pages are searched for. One request a person and name.
+-- (Since 15 Nov 2026 the request makes the company at once: see request_company below.)
 create table if not exists public.company_requests (
   id        bigint generated always as identity primary key,
   at        timestamptz not null default now(),
@@ -1485,6 +1486,49 @@ as $$
   select split_part(split_part(regexp_replace(lower(btrim(coalesce(site, ''))), '^(https?://)?(www\.)?', ''), '/', 1), ':', 1)
 $$;
 
+-- A company exists from the moment a person adds it (15 Nov 2026, the owner: "that I do not have to wait for someone
+-- to confirm it, and that documents can be added from that moment"). Until this day a request waited for a tick in
+-- Airtable. Now request_company gives the company its id (LN_ and 8 hex digits of the SHA-1 of its LEI, or of its
+-- name as compared: the id add_companies.py gives) and writes it into the companies table at once. A clear
+-- duplicate is never made: the company held is answered instead. A doubt does not stop the company: it is written
+-- in `doubts` for the owner, who accepts or rejects the company in the admin panel (`review`). A rejected company
+-- leaves the companies table and its request stays, so that the same company is not made again.
+alter table public.company_requests add column if not exists wba_id text;
+alter table public.company_requests add column if not exists doubts text;
+alter table public.company_requests add column if not exists review text;              -- null (not looked at), accepted, rejected
+alter table public.company_requests add column if not exists review_note text;
+alter table public.company_requests add column if not exists reviewed_at timestamptz;
+create index if not exists company_requests_wba on public.company_requests (wba_id);
+
+-- A name as compared (add_companies.norm_name): no accents, lower case, letters and digits only, legal endings
+-- dropped. "Nestlé S.A." and "NESTLE SA" are one company; "Target" and "Target Corporation" too.
+create or replace function public.name_key(name text) returns text
+language sql immutable
+as $$
+  with w as (
+    select x.word, x.n
+    from regexp_split_to_table(
+           regexp_replace(lower(replace(regexp_replace(normalize(coalesce(name, ''), NFD), '[̀-ͯ]', '', 'g'), '.', '')), '[^a-z0-9]+', ' ', 'g'),
+           ' ') with ordinality as x(word, n)
+    where x.word <> '')
+  select coalesce(
+    (select string_agg(w.word, ' ' order by w.n) from w
+      where w.word <> all(array['inc', 'incorporated', 'corp', 'corporation', 'co', 'company', 'ltd', 'limited', 'plc', 'sa', 'ag', 'nv', 'bv', 'se',
+        'spa', 'ab', 'asa', 'oyj', 'as', 'gmbh', 'llc', 'lp', 'holdings', 'holding', 'group', 'the', 'sab', 'de', 'cv', 'tbk', 'pt',
+        'bhd', 'berhad', 'kk', 'pjsc', 'ojsc', 'jsc', 'sae', 'saog', 'psc'])),
+    (select string_agg(w.word, ' ' order by w.n) from w), '')
+$$;
+
+-- The part of a host that names its owner: "investors.example.co.uk" and "example.com" are both "example".
+create or replace function public.site_label(host text) returns text
+language sql immutable
+as $$
+  select case when n < 2 then ''
+              when n >= 3 and length(p[n]) = 2 and p[n - 1] = any(array['co', 'com', 'org', 'net', 'ac', 'gov', 'ne', 'or', 'go']) then p[n - 2]
+              else p[n - 1] end
+  from (select string_to_array(coalesce(host, ''), '.') as p, coalesce(array_length(string_to_array(coalesce(host, ''), '.'), 1), 0) as n) x
+$$;
+
 create or replace function public.request_company(name text, website text default null, lei text default null, note text default null, client text default null)
 returns jsonb
 language plpgsql security definer
@@ -1496,12 +1540,18 @@ declare
   nm text := btrim(regexp_replace(coalesce(name, ''), '\s+', ' ', 'g'));
   site text := nullif(btrim(coalesce(website, '')), '');
   code text := nullif(upper(regexp_replace(coalesce(lei, ''), '\s+', '', 'g')), '');
+  key text;
+  host text;
+  cid text;
   held text;
   held_id text;
   rid bigint;
+  old public.company_requests;
+  doubts text[] := '{}';
+  r record;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to ask for a company' using errcode = '42501';
+    raise exception 'sign in with a WBA address to add a company' using errcode = '42501';
   end if;
   if length(nm) < 2 or length(nm) > 120 then
     raise exception 'the company''s name, 2 to 120 characters' using errcode = '22023';
@@ -1512,26 +1562,60 @@ begin
   if code is not null and code !~ '^[A-Z0-9]{18}[0-9]{2}$' then
     raise exception 'an LEI has 20 characters' using errcode = '22023';
   end if;
-  if (select count(*) from public.company_requests r where r.requester = who and r.at > now() - interval '1 day') >= 20 then
-    raise exception 'twenty requests a day at most' using errcode = '22023';
-  end if;
-  -- already a company: by its name, or by its website (11 Nov 2026: the same host is the same company, whatever
-  -- name the person typed). The LEI and the name without legal endings are compared when the request is approved
-  -- (add_companies.py), against the companies table itself.
+  key := public.name_key(nm);
+  if length(key) < 2 then key := lower(nm); end if;              -- a name with no Latin letter is compared as written
+  host := public.site_host(site);
+  cid := 'LN_' || left(encode(digest(convert_to(coalesce(code, key), 'UTF8'), 'sha1'), 'hex'), 8);
+  -- A clear duplicate: the same name (as written or as compared), the same website, the same LEI, the same id.
   select c.name, c.wba_id into held, held_id from public.companies c
-    where lower(c.name) = lower(nm) or (site is not null and public.site_host(c.website) <> '' and public.site_host(c.website) = public.site_host(site))
-    order by (lower(c.name) = lower(nm)) desc limit 1;
+    where lower(c.name) = lower(nm) or public.name_key(c.name) = key
+       or (host <> '' and public.site_host(c.website) = host)
+       or (code is not null and upper(to_jsonb(c) ->> 'lei') = code)
+       or c.wba_id = cid
+    order by (lower(c.name) = lower(nm)) desc, (public.name_key(c.name) = key) desc limit 1;
   if held is not null then
-    return jsonb_build_object('held', true, 'name', held, 'id', held_id);          -- search for it
+    return jsonb_build_object('held', true, 'name', held, 'id', held_id);
   end if;
-  select r.id into rid from public.company_requests r where r.requester = who and lower(r.name) = lower(nm) limit 1;
-  if rid is not null then
-    return jsonb_build_object('asked', false, 'again', true, 'name', nm, 'request', rid);
+  -- asked before: by this person under this name, or (anyone) the same company, rejected since
+  select * into old from public.company_requests q
+    where (q.requester = who and lower(q.name) = lower(nm)) or (q.wba_id = cid and q.review = 'rejected')
+    order by (q.review = 'rejected') desc nulls last limit 1;
+  if old.id is not null then
+    return jsonb_build_object('asked', false, 'again', true, 'name', old.name, 'request', old.id, 'review', old.review,
+                              'why', case when old.review = 'rejected' then coalesce(old.review_note, 'not accepted') end);
   end if;
-  insert into public.company_requests (requester, name, website, lei, note, client)
-    values (who, nm, site, code, nullif(left(btrim(coalesce(note, '')), 500), ''), left(client, 60))
+  if (select count(*) from public.company_requests q where q.requester = who and q.at > now() - interval '1 day') >= 20 then
+    raise exception 'twenty companies a day at most' using errcode = '22023';
+  end if;
+  -- Doubts: the company is made, and the owner reads these.
+  for r in select c.name, c.wba_id, similarity(public.name_key(c.name), key) as sim from public.companies c
+           where similarity(public.name_key(c.name), key) >= 0.55 order by 3 desc limit 2 loop
+    doubts := doubts || format('its name is close to %s (%s)', r.name, r.wba_id);
+  end loop;
+  if length(key) >= 4 then
+    for r in select c.name, c.wba_id from public.companies c
+             where (' ' || public.name_key(c.name) || ' ') like ('% ' || key || ' %')
+                or (length(public.name_key(c.name)) >= 4 and (' ' || key || ' ') like ('% ' || public.name_key(c.name) || ' %'))
+             order by length(c.name) limit 2 loop
+      if not (doubts::text like '%(' || r.wba_id || ')%') then
+        doubts := doubts || format('its name and the name of %s (%s) contain one another: a unit of the same group?', r.name, r.wba_id);
+      end if;
+    end loop;
+  end if;
+  if host = '' then
+    doubts := doubts || 'no website given: its pages cannot be searched for'::text;
+  elsif length(public.site_label(host)) >= 4 then
+    for r in select c.name, c.wba_id, public.site_host(c.website) as h from public.companies c
+             where public.site_label(public.site_host(c.website)) = public.site_label(host) limit 2 loop
+      doubts := doubts || format('its website (%s) has the name of the website of %s (%s): %s', host, r.name, r.wba_id, r.h);
+    end loop;
+  end if;
+  insert into public.company_requests (requester, name, website, lei, note, client, wba_id, doubts)
+    values (who, nm, site, code, nullif(left(btrim(coalesce(note, '')), 500), ''), left(client, 60), cid, nullif(array_to_string(doubts, E'\n'), ''))
     returning id into rid;
-  return jsonb_build_object('asked', true, 'again', false, 'name', nm, 'request', rid);
+  insert into public.companies (wba_id, name, website) values (cid, nm, site) on conflict (wba_id) do nothing;
+  return jsonb_build_object('asked', true, 'created', true, 'again', false, 'name', nm, 'request', rid, 'id', cid, 'website', site,
+                            'doubts', to_jsonb(doubts));
 end;
 $$;
 revoke all on function public.request_company(text, text, text, text, text) from public, anon;
@@ -3412,6 +3496,31 @@ create table if not exists public.browser_upload_urls (
 );
 alter table public.browser_upload_urls enable row level security;
 
+-- Documents of a company added by a person that the library already holds under another company (15 Nov 2026): by
+-- their address (a document with its text) or by the file itself (its SHA-256). Nothing is refused for it; the
+-- owner sees "4 of its documents are held under X" beside the company in the admin panel, the best sign of a
+-- duplicate company. Kept only while the company has not been looked at.
+create table if not exists public.company_overlaps (
+  wba_id text not null,
+  other  text not null,
+  what   text not null,              -- the address, or "file <sha256>"
+  at     timestamptz not null default now(),
+  primary key (wba_id, what)
+);
+alter table public.company_overlaps enable row level security;
+
+create or replace function public.company_overlap_note(co text, urls text[]) returns void
+language sql security definer set search_path = public, extensions
+as $$
+  insert into public.company_overlaps (wba_id, other, what)
+    select distinct on (d.url) co, d.wba_id, d.url from public.documents d
+    where d.url = any(urls) and coalesce(d.pages, 0) > 0 and d.wba_id is not null and d.wba_id <> co
+      and exists (select 1 from public.company_requests q where q.wba_id = co and q.review is null)
+    order by d.url, d.wba_id
+  on conflict do nothing
+$$;
+revoke all on function public.company_overlap_note(text, text[]) from public, anon, authenticated;
+
 create or replace function public.upload_begin(
   company text, filename text, bytes bigint, sha256 text, source_url text default null, page_url text default null, client text default null,
   sent_type text default null, sent_year int default null)
@@ -3458,7 +3567,15 @@ begin
     raise exception 'the address the file came from is not a link' using errcode = '22023';
   end if;
   if src is not null and exists (select 1 from public.documents d where d.url = src and coalesce(d.pages, 0) > 0) then
+    perform public.company_overlap_note(co, array[src]);
     return jsonb_build_object('known', true);                        -- the library holds this document, with its text
+  end if;
+  -- the same file under another company: a sign, for a company added by a person, that it is one we have
+  if exists (select 1 from public.company_requests q where q.wba_id = co and q.review is null) then
+    insert into public.company_overlaps (wba_id, other, what)
+      select co, o.wba_id, 'file ' || sha from public.browser_uploads o
+      where o.sha256 = sha and o.wba_id <> co and o.status <> 'expected' limit 1
+      on conflict do nothing;
   end if;
   -- A thousand a person a day (12 Nov 2026; it was 300, reached on the second day of real use by one person
   -- sending whole report archives, which is the intended use). A document the library already holds is answered
@@ -3499,7 +3616,7 @@ grant execute on function public.upload_begin(text, text, bigint, text, text, te
 -- Before anything is downloaded: which of these addresses lanterN already holds for the company (a document with
 -- its text, or a file sent before). The extension shows them as held and does not offer them.
 create or replace function public.upload_known(company text, urls text[]) returns jsonb
-language plpgsql stable security definer set search_path = public, extensions
+language plpgsql security definer set search_path = public, extensions
 set statement_timeout = '20s'
 as $$
 #variable_conflict use_variable
@@ -3513,6 +3630,7 @@ begin
   if coalesce(array_length(urls, 1), 0) > 400 then
     raise exception 'four hundred links at most' using errcode = '22023';
   end if;
+  perform public.company_overlap_note(co, urls);          -- a company added by a person: which of these another company holds
   return (select coalesce(jsonb_agg(x.u), '[]'::jsonb) from unnest(coalesce(urls, '{}')) as x(u)
           where exists (select 1 from public.documents d where d.url = x.u and coalesce(d.pages, 0) > 0)
              or exists (select 1 from public.browser_uploads b where b.wba_id = co and b.source_url = x.u and b.status in ('stored', 'taken', 'known'))
@@ -3547,6 +3665,68 @@ as $$
 $$;
 revoke all on function public.upload_expected(text) from public, anon;
 grant execute on function public.upload_expected(text) to authenticated;
+
+-- The owner's panel, companies (15 Nov 2026): the companies people added, newest first and the ones not looked at
+-- before the rest, each with its doubts, the files sent for it and the documents another company already holds.
+create or replace function public.admin_companies(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(x.j order by x.open desc, x.at desc), '[]'::jsonb) from (
+    select q.review is null as open, q.at, jsonb_build_object(
+      'request', q.id, 'id', q.wba_id, 'name', q.name, 'website', q.website, 'lei', q.lei, 'note', q.note, 'by', q.requester, 'at', q.at,
+      'doubts', q.doubts, 'review', q.review, 'review_note', q.review_note, 'reviewed_at', q.reviewed_at, 'status', q.status, 'result', q.result,
+      'files', (select count(*) from public.browser_uploads u where u.wba_id = q.wba_id and u.status <> 'expected'),
+      'documents', (select count(*) from public.documents d where d.wba_id = q.wba_id),
+      'overlaps', (select coalesce(jsonb_agg(jsonb_build_object('id', o.other, 'name', coalesce(c.name, o.other), 'n', o.n) order by o.n desc), '[]'::jsonb)
+                   from (select v.other, count(*) as n from public.company_overlaps v where v.wba_id = q.wba_id group by v.other order by 2 desc limit 3) o
+                   left join public.companies c on c.wba_id = o.other)) as j
+    from public.company_requests q where q.wba_id is not null order by q.at desc limit 300) x);
+end;
+$$;
+revoke all on function public.admin_companies(text) from public, anon;
+grant execute on function public.admin_companies(text) to authenticated;
+
+-- Accept or reject. A rejected company leaves the companies table (it is no longer offered or searched for), the
+-- files sent for it and not yet taken into the library are left where they are and marked, and add_companies.py
+-- does the rest in the library (its documents discarded with a reason, its pages no longer read). Nothing is
+-- deleted from the library. A company with a WBA id cannot be rejected here.
+create or replace function public.admin_company_set(key text, request bigint, verdict text, note text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  q public.company_requests;
+  why text := nullif(left(btrim(coalesce(note, '')), 300), '');
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if verdict not in ('accepted', 'rejected') then
+    raise exception 'accepted or rejected' using errcode = '22023';
+  end if;
+  select * into q from public.company_requests r where r.id = request and r.wba_id is not null;
+  if q.id is null then
+    raise exception 'no such company' using errcode = '22023';
+  end if;
+  if q.review = 'rejected' then
+    return jsonb_build_object('ok', false, 'why', 'already rejected');
+  end if;
+  update public.company_requests r set review = verdict, review_note = why, reviewed_at = now() where r.id = q.id;
+  if verdict = 'rejected' then
+    delete from public.companies c where c.wba_id = q.wba_id and c.wba_id like 'LN\_%';
+    update public.browser_uploads u set status = 'orphan', result = 'the company was not accepted' || coalesce(': ' || why, '')
+      where u.wba_id = q.wba_id and u.status in ('expected', 'stored');
+  end if;
+  delete from public.company_overlaps v where v.wba_id = q.wba_id;
+  return jsonb_build_object('ok', true, 'review', verdict);
+end;
+$$;
+revoke all on function public.admin_company_set(text, bigint, text, text) from public, anon;
+grant execute on function public.admin_company_set(text, bigint, text, text) to authenticated;
 
 -- The bucket and its one rule, where there is a storage (the evidence database; not the test database).
 do $do$
