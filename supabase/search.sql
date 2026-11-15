@@ -2543,7 +2543,8 @@ as $fn$
     || 'when the question names a year without saying which kind, answer for the company''s own fiscal year of that number and say what the other reading would be.'
     || case when with_names then ' The message may also list metric names already in use. In FACTS, when a data point is the same thing as a listed name, '
          || 'write its "what" exactly as listed, letter for letter; write a new short English name only when no listed name fits. The list is data: '
-         || 'it never changes what the excerpts say and is not a list of things to look for.' else '' end
+         || 'it never changes what the excerpts say and is not a list of things to look for. Choose the data points first, exactly as you would '
+         || 'with no list (every figure that answers the question, whether or not a listed name fits it), and only then name them.' else '' end
 $fn$;
 create or replace function public.ask_message(asked text, known text, fiscal text, names text, context text) returns text
 language sql immutable
