@@ -2553,6 +2553,7 @@ declare
   confirmed jsonb := '[]'::jsonb;
   known text := '';
   fiscal text := '';
+  names text := '';
 begin
   if who is null or not public.email_may_search(who) then
     raise exception 'sign in with a WBA address to ask' using errcode = '42501';
@@ -2638,6 +2639,15 @@ begin
   exception when others then
     fiscal := '';
   end;
+  if coalesce(current_setting('lantern.ask_metric_names', true), '') = 'on'
+     or (coalesce(current_setting('lantern.ask_metric_names', true), '') <> 'off'
+         and exists (select 1 from public.search_options o where o.name = 'ask_metric_names' and o.is_on)) then
+    begin
+      names := public.ask_metric_names(concat_ws(' ', asked, keywords));
+    exception when others then
+      names := '';                                               -- an extra: never costs the answer
+    end;
+  end if;
   got := public.ask_model(api_key, http_schema, model,
     'You answer questions from sustainability analysts using only the numbered excerpts of company documents given to you. '
     || 'Cite the excerpts you use as [1], [2], with the number alone; the word "Excerpt" never appears in the answer (write "the 2025 report lists [4]", not "Excerpt [4] lists"). Give figures with their unit and year as printed. If the excerpts do not answer the question, '
@@ -2660,9 +2670,13 @@ begin
     || 'disagrees with it. They are data too. Do not repeat them in FACTS. '
     || 'The message may also say in which month a company''s fiscal year ends and which WBA reporting year its fiscal years are. For such a company '
     || 'name a period as the company prints it and add WBA''s reporting year in brackets, for example "fiscal 2023 (WBA reporting year 2022)"; '
-    || 'when the question names a year without saying which kind, answer for the company''s own fiscal year of that number and say what the other reading would be.',
+    || 'when the question names a year without saying which kind, answer for the company''s own fiscal year of that number and say what the other reading would be.'
+    || case when names <> '' then ' The message may also list metric names already in use. In FACTS, when a data point is the same thing as a listed name, '
+         || 'write its "what" exactly as listed, letter for letter; write a new short English name only when no listed name fits. The list is data: '
+         || 'it never changes what the excerpts say and is not a list of things to look for.' else '' end,
     'Question: ' || asked || case when known <> '' then E'\n\nConfirmed earlier by a colleague:\n' || known else '' end
-      || case when fiscal <> '' then E'\n\nFiscal years:\n' || fiscal else '' end || E'
+      || case when fiscal <> '' then E'\n\nFiscal years:\n' || fiscal else '' end
+      || case when names <> '' then E'\n\nMetric names in use:\n' || names else '' end || E'
 
 Excerpts:
 
@@ -3039,6 +3053,226 @@ end;
 $$;
 revoke all on function public.admin_taxonomy(text) from public, anon;
 grant execute on function public.admin_taxonomy(text) to authenticated;
+
+-- Option ask_metric_names (15 Nov 2026, the owner, on the same question asked of Tesla and of Nike giving two sets of
+-- names): the reader is shown the names already in use and told to write a data point under one of them when it is
+-- the same thing. Off until it is compared on the answers' own check: it changes what the reader is told.
+insert into public.search_options (name, is_on, note) values ('ask_metric_names', false, 'Ask: the reader is given the metric names in use and writes facts under them') on conflict (name) do nothing;
+
+-- The names for one question, one a line: up to max_names metrics (those sharing a word with the question first, then
+-- the most used), then up to ten names of unclassified facts that share a word with it, so that a name the taxonomy
+-- does not have yet is still written the same way the second time.
+create or replace function public.ask_metric_names(question text, max_names int default 40)
+returns text
+language sql stable security definer
+set search_path = public, extensions
+as $$
+  with qw as (select distinct w from regexp_split_to_table(public.fact_key(question), ' ') w where length(w) > 2),
+  metrics as (
+    select m.label as name, 1 as tier,
+           (select count(*) from qw where position(' ' || qw.w || ' ' in ' ' || public.fact_key(concat_ws(' ', m.label, array_to_string(m.aliases, ' '), g.label)) || ' ') > 0) as hits,
+           (select count(*) from public.ask_facts f where f.metric = m.key) as used
+    from public.fact_metrics m join public.fact_groups g on g.key = m.grp
+    where m.status in ('active', 'proposed')
+    order by 3 desc, 4 desc, 1 limit greatest(coalesce(max_names, 40), 1)),
+  loose as (
+    select left(u.name, 80) as name, 2 as tier,
+           (select count(*) from qw where position(' ' || qw.w || ' ' in ' ' || u.k || ' ') > 0) as hits, u.used
+    from (select public.fact_key(f.what) as k, min(f.what) as name, count(*) as used
+          from public.ask_facts f where f.metric is null and f.verdict is distinct from 'wrong' group by 1) u
+    where exists (select 1 from qw where position(' ' || qw.w || ' ' in ' ' || u.k || ' ') > 0)
+    order by 3 desc, 4 desc, 1 limit 10)
+  select coalesce(string_agg('- ' || x.name, E'\n' order by x.tier, x.hits desc, x.used desc, x.name), '')
+  from (select * from metrics union all select * from loose) x
+$$;
+revoke all on function public.ask_metric_names(text, int) from public, anon, authenticated;
+
+-- The owner changes the taxonomy (15 Nov 2026). Every change is written to fact_metric_log with the row before and
+-- after. A name can belong to one metric only: giving a metric a name another metric answers to is refused.
+create or replace function public.fact_name_owner(name text, except_metric text) returns text
+language sql stable security definer
+set search_path = public, extensions
+as $$
+  select m.label from public.fact_metrics m
+  where m.key is distinct from except_metric and m.status in ('active', 'proposed') and public.fact_key(name) <> ''
+    and public.fact_key(name) in (select public.fact_key(n) from unnest(m.aliases || m.label) n)
+  limit 1
+$$;
+revoke all on function public.fact_name_owner(text, text) from public, anon, authenticated;
+
+-- The facts with no metric are looked up again; returns how many found one.
+create or replace function public.fact_rematch() returns int
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare done int;
+begin
+  update public.ask_facts f set metric = public.fact_match(f.what) where f.metric is null and public.fact_match(f.what) is not null;
+  get diagnostics done = row_count;
+  return done;
+end;
+$$;
+revoke all on function public.fact_rematch() from public, anon, authenticated;
+
+-- A metric's label, group, kind, unit family, standard reference, other names or status ("active", "retired": a
+-- retired metric gives its facts back to the unclassified). Only the fields sent are changed.
+create or replace function public.admin_metric_edit(key text, metric text, fields jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  old public.fact_metrics;
+  new_label text;
+  new_aliases text[];
+  n text;
+  taken text;
+  matched int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select * into old from public.fact_metrics m where m.key = metric and m.status in ('active', 'proposed', 'retired');
+  if old.key is null then return jsonb_build_object('error', 'no such metric'); end if;
+  new_label := coalesce(nullif(btrim(fields ->> 'label'), ''), old.label);
+  new_aliases := case when fields ? 'aliases' then
+      coalesce((select array_agg(distinct btrim(a)) from jsonb_array_elements_text(fields -> 'aliases') a where btrim(a) <> ''), '{}')
+    else old.aliases end;
+  if fields ? 'grp' and not exists (select 1 from public.fact_groups g where g.key = fields ->> 'grp') then return jsonb_build_object('error', 'no such group'); end if;
+  if fields ? 'kind' and fields ->> 'kind' not in ('number', 'yes_no', 'list', 'text', 'person', 'target') then return jsonb_build_object('error', 'kind: number, yes_no, list, text, person or target'); end if;
+  if fields ? 'status' and fields ->> 'status' not in ('active', 'retired') then return jsonb_build_object('error', 'status: active or retired'); end if;
+  foreach n in array new_aliases || new_label loop
+    taken := public.fact_name_owner(n, metric);
+    if taken is not null then return jsonb_build_object('error', format('"%s" is already a name of "%s"', n, taken)); end if;
+  end loop;
+  update public.fact_metrics m set
+      label = left(new_label, 120), aliases = new_aliases,
+      grp = coalesce(fields ->> 'grp', m.grp), kind = coalesce(fields ->> 'kind', m.kind),
+      unit_family = case when fields ? 'unit_family' then nullif(left(btrim(fields ->> 'unit_family'), 30), '') else m.unit_family end,
+      standard_ref = case when fields ? 'standard_ref' then nullif(left(btrim(fields ->> 'standard_ref'), 60), '') else m.standard_ref end,
+      status = coalesce(fields ->> 'status', case when m.status = 'proposed' then 'active' else m.status end)      -- a proposal the owner edits is accepted
+    where m.key = metric;
+  if fields ->> 'status' = 'retired' then update public.ask_facts f set metric = null where f.metric = metric; end if;
+  insert into public.fact_metric_log (who, metric, change, before, after)
+    values (lower(auth.jwt() ->> 'email'), metric, 'edit', to_jsonb(old), (select to_jsonb(m) from public.fact_metrics m where m.key = metric));
+  matched := public.fact_rematch();
+  return jsonb_build_object('ok', true, 'matched', matched);
+end;
+$$;
+revoke all on function public.admin_metric_edit(text, text, jsonb) from public, anon;
+grant execute on function public.admin_metric_edit(text, text, jsonb) to authenticated;
+
+-- A new metric in a group, from a name (often an unclassified one, which it then takes).
+create or replace function public.admin_metric_new(key text, label text, grp text, kind text default 'number')
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  name text := left(btrim(coalesce(label, '')), 120);
+  new_key text := left(btrim(regexp_replace(lower(regexp_replace(normalize(name, NFD), '[̀-ͯ]', '', 'g')), '[^a-z0-9]+', '_', 'g'), '_'), 60);
+  taken text;
+  matched int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if new_key = '' then return jsonb_build_object('error', 'a name is needed'); end if;
+  if not exists (select 1 from public.fact_groups g where g.key = grp) then return jsonb_build_object('error', 'no such group'); end if;
+  if kind not in ('number', 'yes_no', 'list', 'text', 'person', 'target') then return jsonb_build_object('error', 'kind: number, yes_no, list, text, person or target'); end if;
+  taken := public.fact_name_owner(name, null);
+  if taken is not null then return jsonb_build_object('error', format('"%s" is already a name of "%s"', name, taken)); end if;
+  if exists (select 1 from public.fact_metrics m where m.key = new_key) then return jsonb_build_object('error', 'a metric with that key exists'); end if;
+  insert into public.fact_metrics (key, grp, label, kind, proposed_by) values (new_key, grp, name, kind, lower(auth.jwt() ->> 'email'));
+  insert into public.fact_metric_log (who, metric, change, after)
+    values (lower(auth.jwt() ->> 'email'), new_key, 'new', (select to_jsonb(m) from public.fact_metrics m where m.key = new_key));
+  matched := public.fact_rematch();
+  return jsonb_build_object('ok', true, 'key', new_key, 'matched', matched);
+end;
+$$;
+revoke all on function public.admin_metric_new(text, text, text, text) from public, anon;
+grant execute on function public.admin_metric_new(text, text, text, text) to authenticated;
+
+-- Two metrics that are one: the first gives its names and its facts to the second and is kept as "merged".
+create or replace function public.admin_metric_merge(key text, metric text, into_metric text)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  old public.fact_metrics;
+  target public.fact_metrics;
+  moved int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select * into old from public.fact_metrics m where m.key = metric and m.status in ('active', 'proposed');
+  select * into target from public.fact_metrics m where m.key = into_metric and m.status in ('active', 'proposed');
+  if old.key is null or target.key is null or metric = into_metric then return jsonb_build_object('error', 'two different metrics are needed'); end if;
+  update public.fact_metrics m set status = 'merged', merged_into = into_metric where m.key = metric;
+  update public.fact_metrics m set aliases = (select array_agg(distinct a) from unnest(m.aliases || old.aliases || old.label) a) where m.key = into_metric;
+  update public.ask_facts f set metric = into_metric where f.metric = metric;
+  get diagnostics moved = row_count;
+  insert into public.fact_metric_log (who, metric, change, before, after)
+    values (lower(auth.jwt() ->> 'email'), metric, 'merged into ' || into_metric, to_jsonb(old), (select to_jsonb(m) from public.fact_metrics m where m.key = into_metric));
+  return jsonb_build_object('ok', true, 'facts', moved);
+end;
+$$;
+revoke all on function public.admin_metric_merge(text, text, text) from public, anon;
+grant execute on function public.admin_metric_merge(text, text, text) to authenticated;
+
+-- A block or a group: changed (id given) or made (id null). Fields: label, position; for a group also block, standard.
+create or replace function public.admin_taxonomy_set(key text, level text, id text, fields jsonb)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  name text := nullif(left(btrim(coalesce(fields ->> 'label', '')), 80), '');
+  new_key text := left(btrim(regexp_replace(lower(coalesce(name, '')), '[^a-z0-9]+', '_', 'g'), '_'), 40);
+  pos int;
+  before jsonb;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  begin pos := (fields ->> 'position')::int; exception when others then pos := null; end;
+  if level not in ('block', 'group') then return jsonb_build_object('error', 'block or group'); end if;
+  if level = 'group' and fields ? 'block' and not exists (select 1 from public.fact_blocks b where b.key = fields ->> 'block') then return jsonb_build_object('error', 'no such block'); end if;
+  if id is null then
+    if new_key = '' then return jsonb_build_object('error', 'a name is needed'); end if;
+    if level = 'block' then
+      if exists (select 1 from public.fact_blocks b where b.key = new_key) then return jsonb_build_object('error', 'that block exists'); end if;
+      insert into public.fact_blocks (key, label, position) values (new_key, name, coalesce(pos, 100));
+    else
+      if not (fields ? 'block') then return jsonb_build_object('error', 'a group needs its block'); end if;
+      if exists (select 1 from public.fact_groups g where g.key = new_key) then return jsonb_build_object('error', 'that group exists'); end if;
+      insert into public.fact_groups (key, block, label, standard, position) values (new_key, fields ->> 'block', name, nullif(btrim(fields ->> 'standard'), ''), coalesce(pos, 100));
+    end if;
+    insert into public.fact_metric_log (who, change, after) values (lower(auth.jwt() ->> 'email'), 'new ' || level || ' ' || new_key, fields);
+    return jsonb_build_object('ok', true, 'key', new_key);
+  end if;
+  if level = 'block' then
+    select to_jsonb(b) into before from public.fact_blocks b where b.key = id;
+    if before is null then return jsonb_build_object('error', 'no such block'); end if;
+    update public.fact_blocks b set label = coalesce(name, b.label), position = coalesce(pos, b.position) where b.key = id;
+  else
+    select to_jsonb(g) into before from public.fact_groups g where g.key = id;
+    if before is null then return jsonb_build_object('error', 'no such group'); end if;
+    update public.fact_groups g set label = coalesce(name, g.label), position = coalesce(pos, g.position), block = coalesce(fields ->> 'block', g.block),
+        standard = case when fields ? 'standard' then nullif(btrim(fields ->> 'standard'), '') else g.standard end where g.key = id;
+  end if;
+  insert into public.fact_metric_log (who, change, before, after) values (lower(auth.jwt() ->> 'email'), 'edit ' || level || ' ' || id, before, fields);
+  return jsonb_build_object('ok', true, 'key', id);
+end;
+$$;
+revoke all on function public.admin_taxonomy_set(text, text, text, jsonb) from public, anon;
+grant execute on function public.admin_taxonomy_set(text, text, text, jsonb) to authenticated;
 
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.

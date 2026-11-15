@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v71 2026-11-15";
+  const CLIENT = "lantern v72 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1804,14 +1804,41 @@
       block.append(head, adminTable(cols, list.map(line))); body.appendChild(block);
     }
   }
-  // Fact taxonomy (v71). The order given to the facts of answers: blocks, their groups, their metrics, with how many
-  // facts and companies each metric holds, and below them the names no metric has yet, the most used first.
-  async function adminTaxonomy(body) {
+  // Fact taxonomy (v71; editable since v72). The order given to the facts of answers: blocks, their groups, their
+  // metrics, with how many facts and companies each metric holds, and below them the names no metric has yet, the most
+  // used first. v72: a metric is edited, merged or retired here, an unclassified name is given to a metric or made
+  // into one, and blocks and groups are added or renamed. Nothing asks through a browser dialog: a second click confirms.
+  const taxInput = (value, width, placeholder) => { const i = document.createElement("input"); i.value = value == null ? "" : value; if (placeholder) i.placeholder = placeholder; i.style.cssText = `font:inherit;font-size:13px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;width:${width}px;background:var(--bg);color:var(--fg);margin-right:6px`; return i; };
+  const taxSelect = (options, value) => { const sel = document.createElement("select"); sel.style.cssText = "font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);margin-right:6px;max-width:260px";
+    for (const o of options) { if (o.group) { const g = document.createElement("optgroup"); g.label = o.group; for (const x of o.options) { const op = document.createElement("option"); op.value = x[0]; op.textContent = x[1]; g.appendChild(op); } sel.appendChild(g); } else { const op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; sel.appendChild(op); } }
+    if (value != null) sel.value = value; return sel; };
+  const TAX_KINDS = [["number", "number"], ["yes_no", "yes / no"], ["list", "list"], ["text", "text"], ["person", "person"], ["target", "target"]];
+  async function adminTaxonomy(body, said) {
     const t = await authed("admin_taxonomy", { key }); if (!t) { body.textContent = "Not available."; return; }
     body.innerHTML = "";
+    const again = msg => adminTaxonomy(body, msg);
+    const call = async (fn, args) => { const r = await authed(fn, Object.assign({ key }, args)); if (!r) { again("Not saved."); return; } if (r.error) { note.textContent = r.error; note.style.color = "var(--bad, #b00)"; return; }
+      again("Saved." + (r.matched ? ` ${r.matched} waiting fact${r.matched === 1 ? "" : "s"} found a metric.` : "") + (r.facts ? ` ${r.facts} fact${r.facts === 1 ? "" : "s"} moved.` : "")); };
     const share = t.facts ? Math.round(100 * t.classified / t.facts) : 0;
     const intro = el("p", null, `${Number(t.facts).toLocaleString("en-GB")} facts kept from answers; ${Number(t.classified).toLocaleString("en-GB")} have a metric (${share}%). A fact gets its metric when its name is the metric's name or one of its other names. The rest wait below as unclassified.`);
     intro.style.color = "var(--muted, #667)"; body.appendChild(intro);
+    const note = el("p", null, said || ""); note.style.cssText = "min-height:18px;margin:0 0 8px;font-size:13px"; body.appendChild(note);
+    const groupOptions = t.blocks.map(b => ({ group: b.label, options: b.groups.map(g => [g.key, g.label]) }));
+    const metricOptions = t.blocks.flatMap(b => b.groups.filter(g => g.metrics.length).map(g => ({ group: `${b.label} · ${g.label}`, options: g.metrics.map(m => [m.key, m.label]) })));
+    const blockOptions = t.blocks.map(b => [b.key, b.label]);
+    const metricEditor = (m, g) => {
+      const box = el("div"); box.style.cssText = "border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 14px;background:var(--bg)";
+      const row = (label, node) => { const r = el("div"); r.style.cssText = "display:flex;align-items:center;gap:8px;margin:4px 0"; const l = el("span", null, label); l.style.cssText = "width:110px;flex:none;color:var(--muted, #667);font-size:13px"; r.append(l, node); box.appendChild(r); };
+      const label = taxInput(m.label, 320), grp = taxSelect(groupOptions, g.key), kind = taxSelect(TAX_KINDS, m.kind), unit = taxInput(m.unit_family, 120, "co2e, money, percent…"), std = taxInput(m.standard_ref, 160, "ESRS E1-6");
+      const names = document.createElement("textarea"); names.value = (m.aliases || []).join("\n"); names.rows = Math.min(8, Math.max(3, (m.aliases || []).length)); names.style.cssText = "font:inherit;font-size:13px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;width:420px;background:var(--bg);color:var(--fg)";
+      row("Name", label); row("Group", grp); row("Kind", kind); row("Unit family", unit); row("Standard", std); row("Other names", names);
+      const into = taxSelect([["", "another metric…"]].concat(metricOptions.map(o => ({ group: o.group, options: o.options.filter(x => x[0] !== m.key) }))), "");
+      const retire = adminBtn("Retire", () => { if (retire.dataset.sure) call("admin_metric_edit", { metric: m.key, fields: { status: "retired" } }); else { retire.dataset.sure = "1"; retire.textContent = "Click again: its facts go back to unclassified"; } });
+      const actions = el("div"); actions.style.cssText = "display:flex;align-items:center;gap:4px;margin-top:8px;flex-wrap:wrap";
+      actions.append(adminBtn("Save", () => call("admin_metric_edit", { metric: m.key, fields: { label: label.value, grp: grp.value, kind: kind.value, unit_family: unit.value, standard_ref: std.value, aliases: names.value.split("\n").map(x => x.trim()).filter(Boolean) } })),
+        adminBtn("Cancel", () => box.remove()), el("span", null, " · "), into, adminBtn("Merge into it", () => { if (into.value) call("admin_metric_merge", { metric: m.key, into_metric: into.value }); }), el("span", null, " · "), retire);
+      box.appendChild(actions); return box;
+    };
     for (const b of t.blocks) {
       const metrics = b.groups.reduce((a, g) => a + g.metrics.length, 0), facts = b.groups.reduce((a, g) => a + g.metrics.reduce((x, m) => x + Number(m.facts), 0), 0);
       const block = el("details"); block.open = facts > 0; block.style.cssText = "border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin-bottom:10px;background:var(--box)";
@@ -1819,15 +1846,34 @@
       const counts = el("span", null, ` · ${metrics} metric${metrics === 1 ? "" : "s"} · ${facts} fact${facts === 1 ? "" : "s"}`); counts.style.fontWeight = "400"; head.appendChild(counts);
       block.appendChild(head);
       for (const g of b.groups) {
-        const h = el("h4", null, g.label + (g.standard ? ` (${g.standard})` : "")); h.style.cssText = "margin:12px 0 4px;font-size:14px"; block.appendChild(h);
-        block.appendChild(adminTable(["Metric", "Kind", "Unit", "Standard", "Facts", "Companies", "Other names"],
-          g.metrics.map(m => [m.label + (m.status === "proposed" ? " (proposed)" : ""), m.kind.replace("_", " "), m.unit_family || "", m.standard_ref || "", m.facts, m.companies, (m.aliases || []).join(" · ")])));
+        const h = el("h4", null, g.label + (g.standard ? ` (${g.standard})` : "")); h.style.cssText = "margin:12px 0 4px;font-size:14px;display:flex;align-items:center;gap:10px";
+        const slot = el("div");
+        const rename = adminBtn("Edit group", () => { slot.innerHTML = ""; const l = taxInput(g.label, 220), bl = taxSelect(blockOptions, b.key), st = taxInput(g.standard, 110, "standard");
+          slot.append(l, bl, st, adminBtn("Save", () => call("admin_taxonomy_set", { level: "group", id: g.key, fields: { label: l.value, block: bl.value, standard: st.value } })), adminBtn("Cancel", () => { slot.innerHTML = ""; })); });
+        rename.style.fontWeight = "400"; h.appendChild(rename); block.append(h, slot);
+        const holder = el("div");
+        block.appendChild(adminTable(["Metric", "Kind", "Unit", "Standard", "Facts", "Companies", "Other names", ""],
+          g.metrics.map(m => [m.label + (m.status === "proposed" ? " (proposed)" : ""), m.kind.replace("_", " "), m.unit_family || "", m.standard_ref || "", m.facts, m.companies, (m.aliases || []).join(" · "),
+            adminBtn("Edit", () => { holder.innerHTML = ""; holder.appendChild(metricEditor(m, g)); holder.scrollIntoView({ block: "nearest" }); })])));
+        block.appendChild(holder);
       }
       body.appendChild(block);
     }
+    const add = el("div"); add.style.cssText = "display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:6px 0 18px";
+    const gName = taxInput("", 200, "new group"), gBlock = taxSelect(blockOptions), bName = taxInput("", 200, "new block");
+    add.append(gName, gBlock, adminBtn("Add group", () => call("admin_taxonomy_set", { level: "group", id: null, fields: { label: gName.value, block: gBlock.value } })), el("span", null, " · "),
+      bName, adminBtn("Add block", () => call("admin_taxonomy_set", { level: "block", id: null, fields: { label: bName.value } })));
+    body.appendChild(add);
     body.append(el("h3", null, `Unclassified names (${t.unclassified.length}${t.unclassified.length === 300 ? ", the 300 most used" : ""})`));
-    if (!t.unclassified.length) body.append(el("p", null, "None: every fact has a metric."));
-    else body.appendChild(adminTable(["Name as the answer wrote it", "Kind", "Facts", "Companies"], t.unclassified.map(u => [u.name, (u.kind || "").replace("_", " "), u.facts, u.companies])));
+    if (!t.unclassified.length) { body.append(el("p", null, "None: every fact has a metric.")); return; }
+    const how = el("p", null, "Give a name to a metric that exists (it becomes one of its other names) or make a new metric of it in a group. Either way every fact with that name follows.");
+    how.style.color = "var(--muted, #667)"; body.appendChild(how);
+    const byKey = new Map(t.blocks.flatMap(b => b.groups.flatMap(g => g.metrics.map(m => [m.key, m]))));
+    body.appendChild(adminTable(["Name as the answer wrote it", "Kind", "Facts", "Companies", "Is the metric", "Or a new metric in"], t.unclassified.map(u => {
+      const is = taxSelect([["", "choose…"]].concat(metricOptions), ""), isBox = el("span"), inn = taxSelect([["", "choose a group…"]].concat(groupOptions), ""), innBox = el("span");
+      isBox.append(is, adminBtn("Set", () => { const m = byKey.get(is.value); if (m) call("admin_metric_edit", { metric: m.key, fields: { aliases: (m.aliases || []).concat([u.name]) } }); }));
+      innBox.append(inn, adminBtn("Create", () => { if (inn.value) call("admin_metric_new", { label: u.name, grp: inn.value, kind: u.kind === "yes_no" || u.kind === "text" ? u.kind : "number" }); }));
+      return [u.name, (u.kind || "").replace("_", " "), u.facts, u.companies, isBox, innBox]; })));
   }
   async function adminCost(body) {
     const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available."; return; }
