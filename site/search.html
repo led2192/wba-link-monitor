@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v69 2026-11-15";
+  const CLIENT = "lantern v70 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1675,7 +1675,7 @@
   async function adminCompanies(body) {
     const rows = await authed("admin_companies", { key }); if (!rows) { body.textContent = "Not available: open lanterN with the owner's link and sign in."; return; }
     body.innerHTML = "";
-    body.appendChild(el("p", "what", "A company exists from the moment a person adds it, and its documents can be sent at once. Clear duplicates (the same name, website or LEI) are refused when it is added; what is left for you is here. Accept, or reject: a rejected company leaves lanterN, its documents are discarded with a reason and its pages are no longer read. Nothing is deleted from the library."));
+    body.appendChild(el("p", "what", "A company exists from the moment a person adds it, and its documents can be sent at once. Clear duplicates (the same name, website or LEI) are refused when it is added; what is left for you is here. Accept it, correct its name and codes, merge it into the company it duplicates (its documents go there), or reject it: a rejected company leaves lanterN, its documents are discarded with a reason and its pages are no longer read. Nothing is deleted from the library, and a rejection can be undone."));
     if (!rows.length) { body.appendChild(el("p", null, "No company has been added by a person yet.")); return; }
     const open = rows.filter(c => !c.review), done = rows.filter(c => c.review);
     const line = c => {
@@ -1687,15 +1687,38 @@
       for (const o of c.overlaps || []) { const x = el("div", null, `• ${o.n} of its documents ${o.n === 1 ? "is" : "are"} already held under ${o.name} (${o.id})`); x.style.fontWeight = "600"; doubts.appendChild(x); }
       if (!doubts.childNodes.length) doubts.textContent = "none";
       const act = el("div");
-      if (c.review) act.textContent = `${c.review}${c.reviewed_at ? `, ${adminWhen(c.reviewed_at)}` : ""}${c.review_note ? `: ${c.review_note}` : ""}`;
+      if (c.review) act.appendChild(el("div", null, `${c.review}${c.reviewed_at ? `, ${adminWhen(c.reviewed_at)}` : ""}${c.review_note ? `: ${c.review_note}` : ""}`));
+      const say = el("span", "what", "");
+      const again = () => setTimeout(() => { adminCompanies(body); adminWaiting($("admin").querySelector("[data-view]").parentElement); }, 700);
+      const set = async (verdict, note, into) => { const r = await authed("admin_company_set", { key, request: c.request, verdict, note: note || null, into_company: into || null });
+        say.textContent = r && r.ok ? ` ${verdict}` : ` not saved${r && r.why ? `: ${r.why}` : ""}`; if (r && r.ok) again(); };
+      const field = (ph, w) => { const i = el("input"); i.placeholder = ph; i.style.cssText = `font:inherit;font-size:13px;width:${w || 230}px;margin:4px 4px 0 0;display:block`; return i; };
+      const form = el("div");               // one small form at a time under the buttons
       if (c.review !== "rejected") {
-        const say = el("span", "what", ""); const set = async (verdict, note) => { const r = await authed("admin_company_set", { key, request: c.request, verdict, note: note || null }); say.textContent = r && r.ok ? ` ${verdict}` : " not saved"; if (r && r.ok) setTimeout(() => { adminCompanies(body); const nav = $("admin").querySelector("[data-view]").parentElement; adminWaiting(nav); }, 700); };
         if (!c.review) act.appendChild(adminBtn("Accept", () => set("accepted")));
-        const rej = adminBtn("Reject", () => {
-          if (act.querySelector("input")) return; const why = el("input"); why.placeholder = "Why (a duplicate of…, not a company…)"; why.maxLength = 300; why.style.cssText = "font:inherit;font-size:13px;width:230px;margin:4px 4px 0 0;display:block";
-          const sure = adminBtn("Reject this company", () => set("rejected", why.value)); sure.style.borderColor = "var(--fg)"; act.append(why, sure); why.focus(); });
-        act.append(rej, say);
-      }
+        act.appendChild(adminBtn("Edit", () => {
+          form.innerHTML = ""; const inputs = {};
+          for (const [k, label, list] of [["name", "Name"], ["website", "Website"], ["lei", "LEI (20 characters)"], ["isin", "ISIN (12 characters)"], ["industry", "Industry", industries], ["country", "Country, three letters (ESP)"], ["region", "Region", regions]]) {
+            const i = field(label, 300); i.value = c[k] || ""; i.title = label; inputs[k] = i;
+            if (list) { const dl = el("datalist"); dl.id = `adm-${k}-${c.request}`; for (const v of list) { const o = el("option"); o.value = v; dl.appendChild(o); } i.setAttribute("list", dl.id); form.appendChild(dl); }
+            const lab = el("label", "what", label); lab.style.cssText = "display:block;margin-top:6px"; form.append(lab, i);
+          }
+          form.appendChild(adminBtn("Save", async () => {
+            const changed = {}; for (const k of Object.keys(inputs)) if (inputs[k].value.trim() !== (c[k] || "")) changed[k] = inputs[k].value.trim();
+            if (!Object.keys(changed).length) { say.textContent = " nothing changed"; return; }
+            const r = await authed("admin_company_edit", { key, company: c.id, fields: changed });
+            say.textContent = r && r.ok ? " saved" : ` not saved${r && r.why ? `: ${r.why}` : ""}`; if (r && r.ok) again(); }));
+          form.lastChild.style.marginTop = "8px"; inputs.name.focus(); }));
+        act.appendChild(adminBtn("Merge into…", () => {
+          form.innerHTML = ""; const into = field("The company it duplicates", 300); into.setAttribute("list", "companies");
+          const sure = adminBtn("Merge: its documents go to that company", () => { const t = companies.find(x => foldText(x.name) === foldText(into.value) && x.id !== c.id);
+            if (!t) { say.textContent = " choose a company of the list"; return; } set("merged", null, t.id); }); sure.style.cssText += ";border-color:var(--fg);margin-top:6px";
+          form.append(into, sure); into.focus(); }));
+        act.appendChild(adminBtn("Reject", () => {
+          form.innerHTML = ""; const why = field("Why (not a company, a test…)");
+          const sure = adminBtn("Reject this company", () => set("rejected", why.value)); sure.style.cssText += ";border-color:var(--fg);margin-top:6px"; form.append(why, sure); why.focus(); }));
+      } else if (!c.merged_into) act.appendChild(adminBtn("Undo the rejection", () => set("reopened")));
+      act.append(say, form);
       return [name, c.by, adminWhen(c.at), doubts, `${c.files} sent, ${c.documents} in the search`, act];
     };
     const cols = ["Company", "Added by", "When", "Doubts", "Documents", ""];

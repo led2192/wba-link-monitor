@@ -11,8 +11,8 @@ class Rows(unittest.TestCase):
                 {"fields": {"wba_id": " PT_00002 ", "company_name": "", "wba_industry": "", "lei": " 529900t8bm49aursdo55 "}},
                 {"fields": {"wba_id": "LN_deadbeef", "company_name": "Not one", "intake_note": "rejected in lanterN (2026-11-15): a duplicate"}}]
         rows = L.company_rows(recs)
-        self.assertEqual(rows[0], ("PT_00001", "Acme", "Oil & Gas", "USA", "North America", "https://acme.example", "LN_0a0a0a0a", None))
-        self.assertEqual(rows[1], ("PT_00002", None, None, None, None, None, None, "529900T8BM49AURSDO55"))      # a rejected company is not copied back
+        self.assertEqual(rows[0], ("PT_00001", "Acme", "Oil & Gas", "USA", "North America", "https://acme.example", "LN_0a0a0a0a", None, None))
+        self.assertEqual(rows[1], ("PT_00002", None, None, None, None, None, None, "529900T8BM49AURSDO55", None))      # a rejected company is not copied back
         self.assertEqual(len(rows), 2)
 
     def test_upsert_creates_the_table_and_writes_every_row(self):

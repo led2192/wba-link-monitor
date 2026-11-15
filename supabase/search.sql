@@ -3668,6 +3668,20 @@ grant execute on function public.upload_expected(text) to authenticated;
 
 -- The owner's panel, companies (15 Nov 2026): the companies people added, newest first and the ones not looked at
 -- before the rest, each with its doubts, the files sent for it and the documents another company already holds.
+alter table public.company_requests add column if not exists merged_into text;
+do $do$
+begin                 -- the two codes of a company (load_companies.py adds lei too; the table is made by that script)
+  if to_regclass('public.companies') is not null then
+    if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'companies' and column_name = 'lei') then
+      execute 'alter table public.companies add column lei text';
+    end if;
+    if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'companies' and column_name = 'isin') then
+      execute 'alter table public.companies add column isin text';
+    end if;
+  end if;
+end
+$do$;
+
 create or replace function public.admin_companies(key text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
 as $$
@@ -3677,56 +3691,170 @@ begin
   end if;
   return (select coalesce(jsonb_agg(x.j order by x.open desc, x.at desc), '[]'::jsonb) from (
     select q.review is null as open, q.at, jsonb_build_object(
-      'request', q.id, 'id', q.wba_id, 'name', q.name, 'website', q.website, 'lei', q.lei, 'note', q.note, 'by', q.requester, 'at', q.at,
+      'request', q.id, 'id', q.wba_id, 'name', coalesce(c.name, q.name), 'website', coalesce(c.website, q.website), 'lei', coalesce(to_jsonb(c) ->> 'lei', q.lei),
+      'isin', to_jsonb(c) ->> 'isin', 'industry', c.industry, 'country', c.country, 'region', c.region,
+      'note', q.note, 'by', q.requester, 'at', q.at,
       'doubts', q.doubts, 'review', q.review, 'review_note', q.review_note, 'reviewed_at', q.reviewed_at, 'status', q.status, 'result', q.result,
+      'merged_into', q.merged_into,
       'files', (select count(*) from public.browser_uploads u where u.wba_id = q.wba_id and u.status <> 'expected'),
       'documents', (select count(*) from public.documents d where d.wba_id = q.wba_id),
-      'overlaps', (select coalesce(jsonb_agg(jsonb_build_object('id', o.other, 'name', coalesce(c.name, o.other), 'n', o.n) order by o.n desc), '[]'::jsonb)
+      'overlaps', (select coalesce(jsonb_agg(jsonb_build_object('id', o.other, 'name', coalesce(k.name, o.other), 'n', o.n) order by o.n desc), '[]'::jsonb)
                    from (select v.other, count(*) as n from public.company_overlaps v where v.wba_id = q.wba_id group by v.other order by 2 desc limit 3) o
-                   left join public.companies c on c.wba_id = o.other)) as j
-    from public.company_requests q where q.wba_id is not null order by q.at desc limit 300) x);
+                   left join public.companies k on k.wba_id = o.other)) as j
+    from public.company_requests q left join public.companies c on c.wba_id = q.wba_id
+    where q.wba_id is not null order by q.at desc limit 300) x);
 end;
 $$;
 revoke all on function public.admin_companies(text) from public, anon;
 grant execute on function public.admin_companies(text) to authenticated;
 
--- Accept or reject. A rejected company leaves the companies table (it is no longer offered or searched for), the
--- files sent for it and not yet taken into the library are left where they are and marked, and add_companies.py
--- does the rest in the library (its documents discarded with a reason, its pages no longer read). Nothing is
--- deleted from the library. A company with a WBA id cannot be rejected here.
-create or replace function public.admin_company_set(key text, request bigint, verdict text, note text default null) returns jsonb
+-- Accept, reject, merge or reopen (15 Nov 2026). Only companies people added (LN_) are touched; a company with a
+-- WBA id cannot be rejected here. Nothing is deleted from the library.
+--   rejected: the company leaves the companies table (no longer offered or searched for), the files sent for it and
+--     not yet taken are marked, and add_companies.py does the library's side (documents discarded with a reason,
+--     pages no longer read).
+--   merged (into = the company it duplicates): as rejected, and every file sent for it goes to that company as if
+--     it had been sent for it (browser_uploads.py makes the rows there; a file that company already has is known).
+--   reopened: a rejection is undone (not a merge: its files have moved). The company is back, its files wait
+--     again, and add_companies.py brings back the documents and pages the rejection had set aside.
+drop function if exists public.admin_company_set(text, bigint, text, text);
+create or replace function public.admin_company_set(key text, request bigint, verdict text, note text default null, into_company text default null) returns jsonb
 language plpgsql security definer set search_path = public, extensions
 as $$
 #variable_conflict use_variable
 declare
   q public.company_requests;
   why text := nullif(left(btrim(coalesce(note, '')), 300), '');
+  target text := nullif(btrim(coalesce(into_company, '')), '');
+  target_name text;
 begin
   if not public.admin_ok(key) then
     raise exception 'not allowed' using errcode = '42501';
   end if;
-  if verdict not in ('accepted', 'rejected') then
-    raise exception 'accepted or rejected' using errcode = '22023';
+  if verdict not in ('accepted', 'rejected', 'merged', 'reopened') then
+    raise exception 'accepted, rejected, merged or reopened' using errcode = '22023';
   end if;
   select * into q from public.company_requests r where r.id = request and r.wba_id is not null;
   if q.id is null then
     raise exception 'no such company' using errcode = '22023';
   end if;
+  if verdict = 'reopened' then
+    if q.review is distinct from 'rejected' or q.merged_into is not null then
+      return jsonb_build_object('ok', false, 'why', case when q.merged_into is not null then 'a merge cannot be undone: its files are with the other company' else 'not rejected' end);
+    end if;
+    insert into public.companies (wba_id, name, website) values (q.wba_id, q.name, q.website) on conflict (wba_id) do nothing;
+    update public.browser_uploads u set status = 'stored', result = null
+      where u.wba_id = q.wba_id and u.status = 'orphan' and u.result like 'the company was not accepted%';
+    update public.company_requests r set review = null, review_note = null, reviewed_at = now(),
+                                          status = case when r.status = 'rejected' then 'restore' else r.status end where r.id = q.id;
+    return jsonb_build_object('ok', true, 'review', null);
+  end if;
   if q.review = 'rejected' then
     return jsonb_build_object('ok', false, 'why', 'already rejected');
   end if;
-  update public.company_requests r set review = verdict, review_note = why, reviewed_at = now() where r.id = q.id;
-  if verdict = 'rejected' then
+  if verdict = 'merged' then
+    select c.name into target_name from public.companies c where c.wba_id = target and c.wba_id <> q.wba_id;
+    if target_name is null then
+      raise exception 'choose the company it is merged into' using errcode = '22023';
+    end if;
+    -- its files: the ones the other company already has are known; the rest are sent again, for the other company
+    update public.browser_uploads u set status = 'known', result = 'sent for a company merged into ' || target || ', which has this file'
+      where u.wba_id = q.wba_id and u.status <> 'expected'
+        and exists (select 1 from public.browser_uploads o where o.wba_id = target and o.sha256 = u.sha256);
+    update public.browser_uploads u set wba_id = target, status = 'stored', result = null, library_id = null
+      where u.wba_id = q.wba_id and u.status in ('stored', 'taken', 'known', 'same', 'orphan')
+        and not exists (select 1 from public.browser_uploads o where o.wba_id = target and o.sha256 = u.sha256);
+    update public.company_requests r set review = 'rejected', merged_into = target, reviewed_at = now(),
+                                          review_note = left('merged into ' || target_name || ' (' || target || ')' || coalesce(': ' || why, ''), 300) where r.id = q.id;
+  else
+    update public.company_requests r set review = verdict, review_note = why, reviewed_at = now() where r.id = q.id;
+  end if;
+  if verdict in ('rejected', 'merged') then
     delete from public.companies c where c.wba_id = q.wba_id and c.wba_id like 'LN\_%';
     update public.browser_uploads u set status = 'orphan', result = 'the company was not accepted' || coalesce(': ' || why, '')
       where u.wba_id = q.wba_id and u.status in ('expected', 'stored');
   end if;
   delete from public.company_overlaps v where v.wba_id = q.wba_id;
-  return jsonb_build_object('ok', true, 'review', verdict);
+  return jsonb_build_object('ok', true, 'review', case when verdict = 'merged' then 'rejected' else verdict end, 'into', target_name);
 end;
 $$;
-revoke all on function public.admin_company_set(text, bigint, text, text) from public, anon;
-grant execute on function public.admin_company_set(text, bigint, text, text) to authenticated;
+revoke all on function public.admin_company_set(text, bigint, text, text, text) from public, anon;
+grant execute on function public.admin_company_set(text, bigint, text, text, text) to authenticated;
+
+-- The owner corrects a company people added (15 Nov 2026: "a panel to touch some fields of the companies, like the
+-- name, some code like the LEI"): its name, website, LEI, ISIN, industry, country and region. The change is in the
+-- search at once and is kept in company_edits, from where add_companies.py writes it to the library's companies
+-- table (which the nightly copy reads back). A name, website or LEI another company has is refused. Companies of
+-- WBA's list are not edited here: their profile comes from WBA's master list every night.
+create table if not exists public.company_edits (
+  id      bigint generated always as identity primary key,
+  at      timestamptz not null default now(),
+  by      text not null,
+  wba_id  text not null,
+  fields  jsonb not null,
+  applied timestamptz
+);
+alter table public.company_edits enable row level security;
+
+create or replace function public.admin_company_edit(key text, company text, fields jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+  f jsonb := '{}';
+  k text; v text;
+  other text;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if co not like 'LN\_%' or not exists (select 1 from public.companies c where c.wba_id = co) then
+    raise exception 'only a company added in lanterN can be edited here' using errcode = '22023';
+  end if;
+  for k, v in select e.key, nullif(btrim(regexp_replace(e.value, '\s+', ' ', 'g')), '') from jsonb_each_text(coalesce(fields, '{}')) e loop
+    if k not in ('name', 'website', 'lei', 'isin', 'industry', 'country', 'region') then
+      raise exception 'not a field that can be edited: %', k using errcode = '22023';
+    end if;
+    if k in ('lei', 'isin', 'country') then v := upper(replace(v, ' ', '')); end if;
+    if k = 'name' and (v is null or length(v) < 2 or length(v) > 120) then raise exception 'the company''s name, 2 to 120 characters' using errcode = '22023'; end if;
+    if k = 'website' and v is not null and (length(v) > 300 or v !~* '^(https?://)?[a-z0-9.-]+\.[a-z]{2,}(/.*)?$') then raise exception 'the website does not look like a web address' using errcode = '22023'; end if;
+    if k = 'lei' and v is not null and v !~ '^[A-Z0-9]{18}[0-9]{2}$' then raise exception 'an LEI has 20 characters' using errcode = '22023'; end if;
+    if k = 'isin' and v is not null and v !~ '^[A-Z]{2}[A-Z0-9]{9}[0-9]$' then raise exception 'an ISIN has 12 characters' using errcode = '22023'; end if;
+    if k = 'country' and v is not null and v !~ '^[A-Z]{3}$' then raise exception 'the country as its three letters (ESP, USA, JPN)' using errcode = '22023'; end if;
+    if k in ('industry', 'region') and length(v) > 80 then raise exception 'too long' using errcode = '22023'; end if;
+    f := f || jsonb_build_object(k, v);
+  end loop;
+  if f = '{}' then
+    return jsonb_build_object('ok', false, 'why', 'nothing to change');
+  end if;
+  select c.name || ' (' || c.wba_id || ')' into other from public.companies c
+    where c.wba_id <> co and ((f ? 'name' and public.name_key(c.name) = public.name_key(f ->> 'name'))
+       or (f ->> 'website' is not null and public.site_host(c.website) = public.site_host(f ->> 'website'))
+       or (f ->> 'lei' is not null and upper(to_jsonb(c) ->> 'lei') = f ->> 'lei')) limit 1;
+  if other is not null then
+    return jsonb_build_object('ok', false, 'why', 'another company has that name, website or LEI: ' || other);
+  end if;
+  update public.companies c set
+      name = case when f ? 'name' then f ->> 'name' else c.name end,
+      website = case when f ? 'website' then f ->> 'website' else c.website end,
+      lei = case when f ? 'lei' then f ->> 'lei' else c.lei end,
+      isin = case when f ? 'isin' then f ->> 'isin' else c.isin end,
+      industry = case when f ? 'industry' then f ->> 'industry' else c.industry end,
+      country = case when f ? 'country' then f ->> 'country' else c.country end,
+      region = case when f ? 'region' then f ->> 'region' else c.region end
+    where c.wba_id = co;
+  update public.company_requests r set name = coalesce(f ->> 'name', r.name),
+      website = case when f ? 'website' then f ->> 'website' else r.website end,
+      lei = case when f ? 'lei' then f ->> 'lei' else r.lei end
+    where r.wba_id = co;
+  insert into public.company_edits (by, wba_id, fields) values (coalesce(who, 'owner'), co, f);
+  return jsonb_build_object('ok', true, 'fields', f);
+end;
+$$;
+revoke all on function public.admin_company_edit(text, text, jsonb) from public, anon;
+grant execute on function public.admin_company_edit(text, text, jsonb) to authenticated;
 
 -- The bucket and its one rule, where there is a storage (the evidence database; not the test database).
 do $do$

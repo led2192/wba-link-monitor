@@ -72,6 +72,17 @@ class MadeByPeople(unittest.TestCase):
         what, other, note = A.settle("Other name", "", "529900T8BM49AURSDO55", "LN_aaaaaaaa", self.existing())
         self.assertEqual((what, other), ("merge", "PT_00001")); self.assertIn("the same LEI", note)
 
+    def test_a_rejection_undone_brings_back_only_what_it_set_aside(self):
+        lib = [{"id": "recA", "fields": {"wba_id": "LN_aaaaaaaa", "discard": True, "discard_reason": "Wrong company / misattributed"}},
+               {"id": "recB", "fields": {"wba_id": "LN_aaaaaaaa", "discard": True, "discard_reason": {"name": "Not a disclosure"}}}]
+        pages = [{"id": "recP", "fields": {"wba_id": "LN_aaaaaaaa"}}]
+        self.assertEqual(A.restore_patches("LN_aaaaaaaa", lib, pages),
+                         [("report_library", "recA", {"discard": False, "discard_reason": None}), ("monitored_links", "recP", {"monitor": True})])
+
+    def test_the_owners_correction_and_the_isin_of_the_note(self):
+        self.assertEqual(A.edit_fields({"name": "Amadeus IT Group", "industry": "Software", "lei": "", "other": 1}), {"company_name": "Amadeus IT Group", "wba_industry": "Software", "lei": None})
+        self.assertEqual((A.isin_of("ISIN ES0109067019"), A.isin_of("for 2027")), ("ES0109067019", ""))
+
     def test_a_rejected_company_is_discarded_not_deleted(self):
         lib = [{"id": "recA", "fields": {"wba_id": "LN_aaaaaaaa"}}, {"id": "recB", "fields": {"wba_id": "LN_aaaaaaaa", "discard": True}}, {"id": "recC", "fields": {"wba_id": "PT_00001"}}]
         pages = [{"id": "recP", "fields": {"wba_id": "LN_aaaaaaaa", "monitor": True}}, {"id": "recQ", "fields": {"wba_id": "LN_aaaaaaaa"}}]
