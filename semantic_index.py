@@ -189,12 +189,38 @@ def write_document(cur, lid, chunks, vectors, model, pairs=None, stage=False):
 # The vectors in the table stay whole; find_meaning searches the index with the same cast (search.sql).
 INDEX_SQL = ("create index if not exists chunks_embedding on public.chunks using hnsw "
              "((embedding::extensions.halfvec(384)) extensions.halfvec_cosine_ops) with (m = 16, ef_construction = 64)")
-# A second, small index on the same embeddings (15 Nov 2026): each embedding reduced to its 384 signs, one bit each,
-# searched by how many bits differ. About a sixteenth of the half-precision vectors, so it stays in memory on a small
-# database machine when the passages are four times as many. It finds candidates only; the search then orders them by
-# the whole embeddings. Beside chunks_embedding, not in its place, until meaning_bits_compare.py says how much it loses.
-BITS_INDEX_SQL = ("create index if not exists chunks_bits on public.chunks using hnsw "
-                  "((extensions.binary_quantize(embedding)::bit(384)) extensions.bit_hamming_ops) with (m = 16, ef_construction = 64)")
+# A second, small index on the same embeddings (15 Nov 2026): each embedding reduced to 384 bits and searched by how
+# many bits differ. It finds candidates only; the search then orders them by the whole embeddings. Beside
+# chunks_embedding, not in its place, until meaning_bits_compare.py says how much it loses.
+# The bits are the signs of the embedding MINUS THE MEAN EMBEDDING. This model's embeddings all point much the same
+# way (the mean of 165,652 of them has length 0.89 of 1), so their plain signs are nearly the same for every passage:
+# the first index, on plain signs (chunks_bits), found 12% of the full index's first ten pages. On a sample, centred
+# signs kept 90% of the first ten with 800 candidates and plain signs 27% (run 43750083409).
+# public.chunk_bits(v) holds the mean as a constant: made once from a sample and never replaced, because the index is
+# only right for the mean it was built with.
+BITS_INDEX_SQL = ("create index if not exists chunks_signs on public.chunks using hnsw "
+                  "((public.chunk_bits(embedding)) extensions.bit_hamming_ops) with (m = 16, ef_construction = 64)")
+BITS_FUNCTION_SQL = ("create function public.chunk_bits(v extensions.vector) returns bit(384) language sql immutable parallel safe "
+                     "as $fn$ select extensions.binary_quantize(v operator(extensions.-) '{mean}'::extensions.vector(384))::bit(384) $fn$")
+
+
+def ensure_bits_function(cur, say=print):
+    """public.chunk_bits, made once: the mean embedding of a 2% sample of the passages written into it as a constant.
+    Left alone when it exists (an index built on it would be wrong for another mean). Returns True when it made it."""
+    cur.execute("select to_regprocedure('public.chunk_bits(extensions.vector)') is not null")
+    if cur.fetchone()[0]:
+        return False
+    cur.execute("select avg(embedding)::text, count(*) from public.chunks tablesample system (2) where embedding is not null")
+    mean, n = cur.fetchone()
+    if not mean or not re.fullmatch(r"\[[-0-9.eE,+ ]+\]", mean):
+        raise RuntimeError("the mean embedding could not be read")
+    cur.execute(BITS_FUNCTION_SQL.format(mean=mean))
+    cur.execute("revoke all on function public.chunk_bits(extensions.vector) from public, anon, authenticated")
+    cur.connection.commit()
+    say(f">>> public.chunk_bits made from the mean of {n:,} passages", flush=True)
+    return True
+
+
 PAIRS_INDEX_SQL = "create index if not exists page_pairs_pairs on public.page_pairs using gin (pairs)"
 FILL_INDEXES = ("chunks_embedding", "page_pairs_pairs")      # dropped for the fill, built once at the end
 
@@ -274,18 +300,22 @@ def build_vector_index(cur, memory="512MB", workers=2, say=print):
 
 
 def build_bits_index(cur, memory="512MB", workers=2, say=print):
-    """The index on the bits (BITS_INDEX_SQL), beside the others. Small enough to build on the everyday machine."""
+    """The index on the centred signs (BITS_INDEX_SQL), beside the others. Small enough to build on the everyday machine."""
     memory, workers = build_settings(memory, workers)
     cur.execute("set statement_timeout = 0")
     cur.execute(f"set maintenance_work_mem = '{memory}'")
     cur.execute(f"set max_parallel_maintenance_workers = {workers}")
     cur.execute("select count(*) from public.chunks")
     say(f">>> building the index on the bits of {cur.fetchone()[0]:,} chunks with maintenance_work_mem {memory} and {workers} parallel workers", flush=True)
+    ensure_bits_function(cur, say)
+    # the first index, on plain signs, is of no use (see BITS_INDEX_SQL) and nothing reads it: it goes, by name
+    cur.execute("drop index if exists public.chunks_bits")
+    cur.connection.commit()
     t = time.time()
     cur.execute(BITS_INDEX_SQL)
     cur.connection.commit()
-    cur.execute("select pg_size_pretty(pg_relation_size('public.chunks_bits'))")
-    say(f">>> chunks_bits: {cur.fetchone()[0]}", flush=True)
+    cur.execute("select pg_size_pretty(pg_relation_size('public.chunks_signs'))")
+    say(f">>> chunks_signs: {cur.fetchone()[0]}", flush=True)
     return time.time() - t
 
 
@@ -302,7 +332,7 @@ def main():
     ap.add_argument("--try-query", default="", help="check the search by meaning: embed these words and print the ids of the nearest pages")
     ap.add_argument("--try-company", default="", help="with --try-query: a company (wba id or name); empty searches every company through the index")
     ap.add_argument("--remaining", action="store_true", help="print how many documents are done and left, and stop")
-    ap.add_argument("--build-bits", action="store_true", help="build the small index on the embeddings' bits, beside the others, and stop")
+    ap.add_argument("--build-bits", action="store_true", help="build the small index on the embeddings' centred signs (chunks_signs), beside the others, and stop")
     ap.add_argument("--build-memory", default="512MB", help="maintenance_work_mem for --build-index: about half the database machine's RAM")
     ap.add_argument("--build-workers", type=int, default=2, help="parallel workers for --build-index: the machine's processors minus one")
     ap.add_argument("--drop-indexes", action="store_true", help="drop the indexes on the embeddings and the word pairs before filling (a first fill only: the search by meaning stops until --build-index)")
