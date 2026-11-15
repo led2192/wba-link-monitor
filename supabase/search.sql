@@ -2014,13 +2014,14 @@ begin
     end if;
     continue when k = 'number' and num is null;
     continue when k <> 'number' and coalesce(btrim(f ->> 'answer'), '') = '';
-    insert into public.ask_facts (ask_id, wba_id, company, year, period, what, kind, value, unit, answer, library_id, page, url, wba_year, metric)
+    insert into public.ask_facts (ask_id, wba_id, company, year, period, what, kind, value, unit, answer, library_id, page, url, wba_year, metric, restated)
       values (the_ask, src ->> 'wba_id', src ->> 'company', yr, nullif(left(btrim(f ->> 'period'), 20), ''), left(btrim(f ->> 'what'), 120), k,
               case when k = 'number' then num end, nullif(left(btrim(f ->> 'unit'), 40), ''),
               case when k <> 'number' then left(btrim(f ->> 'answer'), 300) end, src ->> 'library_id', (src ->> 'page')::int, src ->> 'url',
               public.wba_year(public.fiscal_label_year(f ->> 'period'),
                               (select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = src ->> 'wba_id')),
-              public.fact_match(f ->> 'what', src ->> 'company'))      -- its metric in the taxonomy, when a metric has that name (with or without the company's own name in it)
+              public.fact_match(f ->> 'what', src ->> 'company'),      -- its metric in the taxonomy, when a metric has that name (with or without the company's own name in it)
+              nullif(public.fact_restated(f ->> 'what'), false))
       returning id into new_id;
     n := n + 1;
     kept := kept || ((select to_jsonb(a) - 'ask_id' - 'verdict_by' - 'verdict_at' from public.ask_facts a where a.id = new_id)
@@ -2875,6 +2876,10 @@ alter table public.fact_groups enable row level security;
 alter table public.fact_metrics enable row level security;
 alter table public.fact_metric_log enable row level security;
 alter table public.ask_facts add column if not exists metric text;       -- a key of fact_metrics; null: unclassified
+-- A figure given again, changed, by a later report (15 Nov 2026, the owner, on "Gross Scope 1 emissions · 2023" beside
+-- "Gross Scope 1 emissions, restated · 2022": the same thing, one of them a restatement). The word stays out of the
+-- name's key, so both are one metric, and the fact carries the mark.
+alter table public.ask_facts add column if not exists restated boolean;
 create index if not exists ask_facts_metric on public.ask_facts (metric, wba_id);
 
 -- A name reduced to what it says: no accents, no years ("2024", "FY24"), no filler words, no plural "s", the words
@@ -2892,7 +2897,8 @@ as $$
            ' ') x
     where x <> '' and x !~ '^(19|20)[0-9]{2}$' and x !~ '^fy[0-9]{2,4}$'
       and x <> all(array['the', 'of', 'and', 'in', 'for', 'a', 'an', 'to', 'by', 'total', 'company', 'group', 'global', 'annual', 'gross', 'reported', 's',
-                       'worldwide', 'globally', 'consolidated'])
+                       'worldwide', 'globally', 'consolidated',
+                       'restated', 'restatement', 'revised', 'recalculated', 'as'])
   ) t
 $$;
 
@@ -2909,6 +2915,11 @@ as $$
   limit 1
 $$;
 revoke all on function public.fact_match(text) from public, anon, authenticated;
+
+-- Whether a fact's name says it is a restatement.
+create or replace function public.fact_restated(name text) returns boolean
+language sql immutable
+as $$ select coalesce(name, '') ~* '\m(re-?stated|re-?statement|revised|recalculated)\M' $$;
 
 -- The same, for a fact of a known company (15 Nov 2026, the owner's screenshot: "Nike total revenues", "NIKE, Inc.
 -- revenues" and "Nike chief executive officer" waited unclassified beside the metrics Revenue and Chief executive
@@ -3057,6 +3068,7 @@ on conflict (key) do nothing;
 -- The facts kept before the taxonomy, and those a new alias now reaches: every fact with no metric is looked up again
 -- each time this file is installed. A fact that has a metric is never touched here.
 update public.ask_facts f set metric = public.fact_match(f.what, f.company) where f.metric is null and public.fact_match(f.what, f.company) is not null;
+update public.ask_facts f set restated = true where f.restated is null and public.fact_restated(f.what);
 
 -- The taxonomy for the owner's page: blocks, their groups, their metrics with how many facts and companies each has;
 -- the names of the facts with no metric, the most used first; and how much of all facts is classified.
@@ -3339,8 +3351,8 @@ begin
   return jsonb_build_object(
     'wba_id', ids[1],
     'company', (select min(f.company) from public.ask_facts f where f.wba_id = ids[1]),
-    'facts', (select coalesce(jsonb_agg(to_jsonb(x) order by x.block_position, x.group_position, x.label, x.shown_year desc nulls last, x.doc_year desc nulls last, x.at desc), '[]'::jsonb) from (
-      select f.id, f.at, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.period, f.wba_year, f.page, f.url, f.library_id, f.verdict,
+    'facts', (select coalesce(jsonb_agg(to_jsonb(x) order by x.block_position, x.group_position, x.label, x.shown_year desc nulls last, x.restated desc, x.doc_year desc nulls last, x.at desc), '[]'::jsonb) from (
+      select f.id, f.at, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.period, f.wba_year, f.page, f.url, f.library_id, f.verdict, coalesce(f.restated, false) as restated,
              d.year as doc_year, d.doc_type,
              coalesce(f.year, f.wba_year, d.year) as shown_year,
              case when f.year is not null then 'stated' when f.wba_year is not null then 'period' when d.year is not null then 'report' end as year_from,

@@ -645,6 +645,28 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(cur.fetchone()[0], "revenue")
             c.rollback()
 
+    def test_a_restated_figure_is_the_same_metric_with_a_mark(self):
+        """15 Nov 2026, the owner: "Gross Scope 1 emissions · 2023" and "Gross Scope 1 emissions, restated · 2022" are the same thing."""
+        import json, psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.fact_restated('Gross Scope 1 emissions, restated'), public.fact_restated('Scope 1 (re-stated)'), public.fact_restated('Revised revenue'), "
+                        "public.fact_restated('Scope 1 emissions'), public.fact_restated('Real estate assets'), public.fact_restated(null)")
+            self.assertEqual(cur.fetchone(), (True, True, True, False, False, False))
+            cur.execute("insert into public.documents (library_id, wba_id, year, doc_type) values ('am-23', 'PT_AM', 2023, 'Annual Report') on conflict (library_id) do nothing")
+            sources = [{"n": 1, "wba_id": "PT_AM", "company": "Amadeus", "library_id": "am-23", "page": 126}]
+            facts = [{"what": "Gross Scope 1 emissions", "kind": "number", "value": "1427", "unit": "t CO2", "year": 2023, "source": 1},
+                     {"what": "Scope 1 emissions offset", "kind": "number", "value": "764", "unit": "t CO2", "year": 2023, "source": 1},
+                     {"what": "Gross Scope 1 emissions, restated", "kind": "number", "value": "1493", "unit": "t CO2", "year": 2022, "source": 1},
+                     {"what": "Scope 1 emissions", "kind": "number", "value": "1600", "unit": "t CO2", "year": 2022, "source": 1}]
+            cur.execute("select public.ask_keep_facts(961, %s::jsonb, %s::jsonb)", (json.dumps(facts), json.dumps(sources)))
+            kept = cur.fetchone()[0]
+            self.assertEqual([(k["metric"], k["restated"]) for k in kept], [("scope_1", None), (None, None), ("scope_1", True), ("scope_1", None)])   # the offset is another thing
+            cur.execute("select public.admin_company_facts('k', 'PT_AM')")
+            rows = [(f["shown_year"], float(f["value"]), f["restated"]) for f in cur.fetchone()[0]["facts"] if f["metric"] == "scope_1"]
+            self.assertEqual(rows, [(2023, 1427.0, False), (2022, 1493.0, True), (2022, 1600.0, False)])      # in its year the restated figure comes first
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:
