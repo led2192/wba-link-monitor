@@ -616,6 +616,35 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(cur.fetchone()[0], "no such answer")
             c.rollback()
 
+    def test_a_fact_named_with_its_companys_name_still_finds_its_metric(self):
+        """15 Nov 2026, the owner's screenshot: "Nike total revenues" and "NIKE, Inc. revenues" waited unclassified beside Revenue."""
+        import json, psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cases = [("Nike total revenues", "Nike", "revenue"), ("NIKE, Inc. revenues", "Nike", "revenue"), ("Nike, Inc. total revenues", "NIKE, Inc.", "revenue"),
+                     ("Nike chief executive officer", "Nike", "ceo"), ("Nike employees worldwide", "Nike", "employees"),
+                     ("Scope 1 emissions", "Nike", "scope_1"),                       # the plain name, as before
+                     ("Nike", "Nike", None), ("Nike, Inc.", "Nike", None),           # nothing but the company's name
+                     ("Nike favourite colour", "Nike", None),
+                     ("Water Corporation water withdrawal", "Water Corporation", None),      # a company named with the metric's own word: it waits unclassified, never a wrong metric
+                     ("Revenue Solutions revenue", "Revenue Solutions", None),
+                     ("Water withdrawal", "Water Corporation", "water_withdrawal"),          # the plain name is tried first, whatever the company is called
+                     ("Nike total revenues", None, None), ("Nike total revenues", "", None), ("Adidas revenues", "Nike", None)]
+            for name, company, want in cases:
+                cur.execute("select public.fact_match(%s, %s)", (name, company))
+                self.assertEqual(cur.fetchone()[0], want, (name, company))
+            sources = [{"n": 1, "wba_id": "PT_NK", "company": "Nike", "library_id": "nk-1", "page": 4}]
+            facts = [{"what": "Nike total revenues", "kind": "number", "value": "51220000000", "unit": "USD", "source": 1},
+                     {"what": "Nike mascot", "kind": "text", "answer": "none", "source": 1}]
+            cur.execute("select public.ask_keep_facts(951, %s::jsonb, %s::jsonb)", (json.dumps(facts), json.dumps(sources)))
+            self.assertEqual([k["metric"] for k in cur.fetchone()[0]], ["revenue", None])
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value) values (952, 'PT_NK', 'Nike', 'NIKE, Inc. revenues', 'number', 5)")
+            cur.execute("select public.fact_rematch()")
+            self.assertGreaterEqual(cur.fetchone()[0], 1)
+            cur.execute("select metric from public.ask_facts where ask_id = 952")
+            self.assertEqual(cur.fetchone()[0], "revenue")
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:

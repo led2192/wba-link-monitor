@@ -424,8 +424,9 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     seed = SQL[SQL.index("insert into public.fact_blocks"):SQL.index("create or replace function public.admin_taxonomy(")]
     assert seed.count("on conflict (key) do nothing;") == 3                     # written once: a later change of the owner stays
     assert "alter table public.ask_facts add column if not exists metric text;" in SQL
-    assert "public.fact_match(f ->> 'what'))" in SQL                            # a new fact gets its metric as it is kept
-    assert "where f.metric is null and public.fact_match(f.what) is not null;" in SQL      # a classified fact is never touched
+    assert "public.fact_match(f ->> 'what', src ->> 'company'))" in SQL          # a new fact gets its metric as it is kept
+    assert SQL.count("where f.metric is null and public.fact_match(f.what, f.company) is not null;") == 2      # a classified fact is never touched
+    assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
     assert 'const CLIENT = "lantern v75 2026-11-15";' in PAGE
