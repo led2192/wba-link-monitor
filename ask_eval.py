@@ -76,10 +76,13 @@ def evaluate(cur, cases, out=print, option=None, places=None, missed=None):
     """Counts over the cases: found (words and meaning), found_words (words alone), first_three, no_vector, in_search
     (a confirmed page is among the 24 pages of the search, whether or not it is one of the eight read), and exact /
     exact_found for the cases asked again exactly as they were. option = (name, 'on' or 'off') sets lantern.name for
-    the session before every case. places, when given, receives {ask id: (place among the eight, in the search)};
-    missed receives what --why needs of each case whose confirmed page is not among the 24."""
-    c = dict(cases=0, found=0, found_words=0, first_three=0, no_vector=0, failed=0, exact=0, exact_found=0, in_search=0)
-    for ask_id, keywords, search, question, wba, right_pages in cases:
+    the session before every case. places, when given, receives {case number: (place among the eight, in the search,
+    the eight pages)} (the case's number in the list, since one question about two companies is two cases);
+    missed receives what --why needs of each case whose confirmed page is not among the 24. found_doc counts the cases
+    where a confirmed page's document is among the eight with any page (a figure often stands on several pages of a
+    report, so this is the kinder reading); with_years those whose search named years."""
+    c = dict(cases=0, found=0, found_words=0, first_three=0, no_vector=0, failed=0, exact=0, exact_found=0, in_search=0, found_doc=0, with_years=0)
+    for number, (ask_id, keywords, search, question, wba, right_pages) in enumerate(cases):
         right = set(right_pages or [])
         tries, company, y0, y1, kind, exact = replay(keywords, search, question, wba)
         try:
@@ -103,8 +106,10 @@ def evaluate(cur, cases, out=print, option=None, places=None, missed=None):
         c["in_search"] += 1 if place(wide, right) else 0
         c["exact"] += 1 if exact else 0
         c["exact_found"] += 1 if exact and at else 0
+        c["found_doc"] += 1 if {doc_of(k) for k in both} & {doc_of(k) for k in right} else 0
+        c["with_years"] += 1 if y0 is not None or y1 is not None else 0
         if places is not None:
-            places[ask_id] = (at, bool(place(wide, right)))
+            places[number] = (at, bool(place(wide, right)), tuple(both))
         if missed is not None and not place(wide, right):
             missed.append((ask_id, tries, vec, company, y0, y1, kind, right, wide))
     return c
@@ -124,6 +129,13 @@ CAUSES = ("the document is among the 24 pages, with other pages of it",
 
 def doc_of(key):
     return key.rsplit("|", 1)[0]
+
+
+def apart(right, wide):
+    """The fewest pages between a confirmed page and a page of the same document among the pages found; None when
+    the document is not among them."""
+    gaps = [abs(int(k.rsplit("|", 1)[1]) - int(w.rsplit("|", 1)[1])) for k in right for w in wide if doc_of(k) == doc_of(w)]
+    return min(gaps) if gaps else None
 
 
 def cause(cur, case):
@@ -173,7 +185,13 @@ def why(cur, missed, out=print):
             out(f"  one case not looked at ({type(e).__name__})")
             got = CAUSES[-1]
         n[got] = n.get(got, 0) + 1
-    return [f"Confirmed page not among the 24 pages of the search: {len(missed)} questions."] + [f"  {n[k]}: {k}" for k in CAUSES if k in n]
+    lines = [f"Confirmed page not among the 24 pages of the search: {len(missed)} questions."] + [f"  {n[k]}: {k}" for k in CAUSES if k in n]
+    gaps = [g for g in (apart(m[7], m[8]) for m in missed) if g is not None]
+    if gaps:
+        lines.append(f"  Where the document is there with other pages, the nearest page found is the next or the one before in "
+                     f"{sum(1 for g in gaps if g == 1)}, two or three pages away in {sum(1 for g in gaps if 2 <= g <= 3)}, "
+                     f"four to ten in {sum(1 for g in gaps if 4 <= g <= 10)}, further in {sum(1 for g in gaps if g > 10)}.")
+    return lines
 
 
 def compare(off, on):
@@ -182,8 +200,10 @@ def compare(off, on):
     g8 = sum(1 for k in both if on[k][0] and not off[k][0]); l8 = sum(1 for k in both if off[k][0] and not on[k][0])
     gs = sum(1 for k in both if on[k][1] and not off[k][1]); ls = sum(1 for k in both if off[k][1] and not on[k][1])
     moved = sum(1 for k in both if on[k][0] and off[k][0] and on[k][0] != off[k][0])
-    return (f"With the option on, of {len(both)} questions run both ways: among the eight, {g8} gained and {l8} lost their confirmed page "
-            f"({moved} kept it at another place); among the 24 of the search, {gs} gained and {ls} lost.")
+    changed = sum(1 for k in both if len(on[k]) > 2 and len(off[k]) > 2 and on[k][2] != off[k][2])
+    return (f"With the option on, of {len(both)} questions run both ways: the eight pages changed in {changed}; among the eight, {g8} gained and {l8} lost their confirmed page "
+            f"({moved} kept it at another place); among the 24 of the search, {gs} gained and {ls} lost."
+            + (" The option changed no page of any question: it did not act on this set (or was not set)." if changed == 0 else ""))
 
 
 def pages_for(cur, tries, vec, company, y0, y1, kind, ask_id, search=False):
@@ -207,6 +227,7 @@ def summary(c):
     pct = lambda k: f"{c[k]} of {c['cases']} ({100 * c[k] / n:.0f}%)"
     return (f"{c['cases']} questions with a confirmed page. A confirmed page is among the eight pages an answer reads: {pct('found')}; "
             f"among the first three: {pct('first_three')}; with the words alone: {pct('found_words')}; among the 24 pages of the search: {pct('in_search')}. "
+            f"The confirmed page's document is among the eight with any of its pages: {pct('found_doc')}. Searches that named years: {c.get('with_years', 0)}. "
             f"Asked again exactly as they were (the search was kept): {c['exact']}, found {c['exact_found']}; the others are searched as typed, within the fact's company. "
             f"Questions with no vector: {c['no_vector']}; not run: {c['failed']}.")
 

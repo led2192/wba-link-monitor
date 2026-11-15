@@ -95,12 +95,18 @@ class SearchTimingLevels(unittest.TestCase):
         places = {}
         A.evaluate(cur, cases, out=lambda s: None, option=("ask_later", "on"), places=places)
         self.assertEqual(cur.settings, [("lantern.ask_later", "on")] * 2)             # a rollback would have undone one set once
-        self.assertEqual(places, {1: (1, True), 2: (0, False)})
+        self.assertEqual(places, {0: (1, True, ('L1|5',)), 1: (0, False, ('x|1',))})
         line = A.compare({1: (1, True), 2: (0, False), 3: (2, True)}, {1: (0, True), 2: (4, True), 3: (5, True)})
         self.assertIn("of 3 questions", line)
         self.assertIn("1 gained and 1 lost", line)
         self.assertIn("(1 kept it at another place)", line)
         self.assertIn("1 gained and 0 lost.", line)
+        self.assertNotIn("did not act", A.compare({1: (1, True, ("a|1",))}, {1: (1, True, ("b|1",))}))
+        self.assertIn("did not act", A.compare({1: (1, True, ("a|1",))}, {1: (1, True, ("a|1",))}))
+        # one question about two companies is two cases: both are kept
+        two = {}
+        A.evaluate(cur, [(5, "kw", None, "q one?", "W1", ["L1|5"]), (5, "kw", None, "q one?", "W2", ["L1|5"])], out=lambda s: None, places=two)
+        self.assertEqual(len(two), 2)
 
     def test_why_counts_causes_and_names_nothing(self):
         def case(i, right, wide, y0=None, y1=None, kind=None, company="W1"):
@@ -121,7 +127,10 @@ class SearchTimingLevels(unittest.TestCase):
                          [A.CAUSES[0], A.CAUSES[2], A.CAUSES[3], A.CAUSES[4], A.CAUSES[5], A.CAUSES[6], A.CAUSES[7], A.CAUSES[8], A.CAUSES[1]])
         lines = A.why(cur, missed, out=lambda s: None)
         self.assertIn("9 questions", lines[0])
-        self.assertEqual(len(lines), 10)
+        self.assertEqual(len(lines), 11)
+        self.assertIn("the next or the one before in 1,", lines[-1])
+        self.assertEqual(A.apart({"L1|5", "L1|40"}, ["L1|43", "x|5"]), 3)
+        self.assertIsNone(A.apart({"L1|5"}, ["x|5"]))
         for secret in ("L1", "L4", "kw4", "W1", "Policy"):
             self.assertNotIn(secret, " ".join(lines))
 
