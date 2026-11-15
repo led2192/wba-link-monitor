@@ -318,6 +318,21 @@ def run_once():
 SIDE_EVERY = 2          # of the watch's checks: with --every 180, about every 6 minutes (it was 5 until 15 Nov 2026: a file sent from a browser waited up to 15 minutes before anything looked at it)
 
 
+def refresh_code(run=subprocess.run):
+    """The watch runs for five and a half hours from the code it was started with, and its side jobs are scripts
+    started from that folder: on 15 Nov 2026 a change to add_companies.py and browser_uploads.py was merged at
+    10:53 UTC and the watch went on running the old ones, which set a new company's 55 files aside as having no
+    company. Before the side jobs, the folder is brought to main (the scripts started after this are the new
+    ones; this process keeps the code it has). Best effort: a failure leaves the folder as it is."""
+    try:
+        if getattr(run(["git", "fetch", "--quiet", "--depth", "1", "origin", "main"], timeout=120), "returncode", 1) != 0:
+            return False
+        return getattr(run(["git", "reset", "--quiet", "--hard", "FETCH_HEAD"], timeout=120), "returncode", 1) == 0      # as inbox.save_state does
+    except Exception as e:
+        print(f">>> the code could not be refreshed ({type(e).__name__}); the watch goes on with what it has.", flush=True)
+        return False
+
+
 def side_jobs(run=subprocess.run):
     """What must not wait for GitHub's schedule, done from the watch: the companies asked for (add_companies.py,
     then discover_pages.py for the new ones) and the files sent from a browser (browser_uploads.py). On 11 Nov
@@ -382,6 +397,8 @@ def main():
     checks = scans = errors = 0
     while time.time() < end:
         checks += 1
+        if checks % SIDE_EVERY == 1 and os.environ.get("GITHUB_ACTIONS"):
+            refresh_code()               # never on a person's machine: it would throw their changes away
         if checks % SIDE_EVERY == 1:
             side_jobs()
         page_jobs()
