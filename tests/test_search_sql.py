@@ -339,7 +339,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts"}
+    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -428,7 +428,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "where f.metric is null and public.fact_match(f.what) is not null;" in SQL      # a classified fact is never touched
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v74 2026-11-15";' in PAGE
+    assert 'const CLIENT = "lantern v75 2026-11-15";' in PAGE
+    assert '"All companies": adminAllCompanies' in PAGE and 'authed("admin_company_list", { key, search: st.search || null, max_rows: 200 })' in PAGE
     assert 'const worded = f.kind !== "number" && f.kind !== "yes_no";' in PAGE          # two wordings of a sentence are not "reports differ"
 
 

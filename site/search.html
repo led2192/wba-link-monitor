@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v74 2026-11-15";
+  const CLIENT = "lantern v75 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1652,7 +1652,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -1874,6 +1874,21 @@
       isBox.append(is, adminBtn("Set", () => { const m = byKey.get(is.value); if (m) call("admin_metric_edit", { metric: m.key, fields: { aliases: (m.aliases || []).concat([u.name]) } }); }));
       innBox.append(inn, adminBtn("Create", () => { if (inn.value) call("admin_metric_new", { label: u.name, grp: inn.value, kind: u.kind === "yes_no" || u.kind === "text" ? u.kind : "number" }); }));
       return [u.name, (u.kind || "").replace("_", " "), u.facts, u.companies, isBox, innBox]; })));
+  }
+  // All companies (v75): every company lanterN holds, by word, with its documents; the ones a person added first.
+  const allCompaniesView = { search: "" };
+  async function adminAllCompanies(body) {
+    const st = allCompaniesView; body.innerHTML = "";
+    const got = await authed("admin_company_list", { key, search: st.search || null, max_rows: 200 }); if (!got) { body.textContent = "Not available."; return; }
+    const bar = el("div"); bar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px";
+    const box = document.createElement("input"); box.placeholder = "a name, a country, an industry, an id"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:320px;background:var(--box);color:var(--fg)";
+    const go = () => { st.search = box.value.trim(); adminAllCompanies(body); }; box.onkeydown = ev => { if (ev.key === "Enter") go(); };
+    bar.append(box, adminBtn("Search", go), el("span", null, `${Number(got.all).toLocaleString("en-GB")} companies in all, ${got.added} added by people. Showing ${got.rows.length}${got.rows.length >= 200 ? " (the first 200: search to narrow)" : ""}; people's first, then by documents.`));
+    body.appendChild(bar);
+    body.appendChild(adminTable(["Company", "Id", "Industry", "Country", "Documents", "Website", "LEI", "ISIN"], got.rows.map(c => {
+      const name = el("span", null, c.name || "?"); if (c.added) { const t = el("span", null, "added by a person"); t.style.cssText = "font-size:11px;padding:0 6px;border:1px solid var(--line);border-radius:999px;margin-left:6px;white-space:nowrap"; name.appendChild(t); }
+      let site = ""; if (c.website) { site = el("a", null, c.website.replace(/^https?:\/\//, "").replace(/\/$/, "")); site.href = /^https?:/.test(c.website) ? c.website : `https://${c.website}`; site.target = "_blank"; site.rel = "noopener"; }
+      return [name, c.id, c.industry || "", c.country || "", Number(c.documents).toLocaleString("en-GB"), site, c.lei || "", c.isin || ""]; })));
   }
   // Company facts (v73). One company's facts laid out by the taxonomy: a row a metric, a column a year, the newest
   // on the left, every value linked to the page it was read on. What changed from one year to the next is marked (a

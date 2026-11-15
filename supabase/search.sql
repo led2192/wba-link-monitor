@@ -3322,6 +3322,36 @@ $$;
 revoke all on function public.admin_company_facts(text, text) from public, anon;
 grant execute on function public.admin_company_facts(text, text) to authenticated;
 
+-- Every company lanterN holds, for the owner (15 Nov 2026, the owner: "I should see the ones we already have, and the
+-- ones people want to add"): the companies table, by word (name, id, industry, country), with the documents each has
+-- and whether a person added it (an id that starts with LN_). The most documents first; at most 500 rows.
+create or replace function public.admin_company_list(key text, search text default null, max_rows int default 200)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'all', (select count(*) from public.companies),
+    'added', (select count(*) from public.companies c where c.wba_id like 'LN\_%'),
+    'rows', (select coalesce(jsonb_agg(to_jsonb(x) order by x.added desc, x.documents desc, x.name), '[]'::jsonb) from (
+      select c.wba_id as id, c.name, c.industry, c.country, c.region, c.website, to_jsonb(c) ->> 'lei' as lei, to_jsonb(c) ->> 'isin' as isin,
+             c.wba_id like 'LN\_%' as added, coalesce(n.documents, 0) as documents
+      from public.companies c
+        left join (select d.wba_id, count(*) as documents from public.documents d group by d.wba_id) n on n.wba_id = c.wba_id
+      where not exists (select 1 from regexp_split_to_table(lower(btrim(coalesce(search, ''))), '\s+') w
+                        where w <> '' and position(w in lower(concat_ws(' ', c.name, c.wba_id, c.industry, c.country, c.region, c.website))) = 0)
+      order by (c.wba_id like 'LN\_%') desc, coalesce(n.documents, 0) desc, c.name
+      limit least(greatest(coalesce(max_rows, 200), 1), 500)) x));
+end;
+$$;
+revoke all on function public.admin_company_list(text, text, int) from public, anon;
+grant execute on function public.admin_company_list(text, text, int) to authenticated;
+
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
 create or replace function public.admin_link_new(key text, name text)
