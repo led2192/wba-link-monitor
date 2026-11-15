@@ -30,6 +30,11 @@ class ServerSetup(unittest.TestCase):
     def test_running_it_again_registers_nothing_twice(self):
         self.assertIn('if [ -f "$D/.runner" ]; then echo "runner $i: already registered"; continue; fi', self.text)
 
+    def test_the_tools_the_jobs_call_are_installed(self):
+        line = [l for l in self.text.splitlines() if l.startswith("apt-get -y -q install")][0]
+        for tool in ("gh", "git", "jq", "curl", "zip", "unzip"):
+            self.assertIn(f" {tool}", line + " ")
+
     def test_only_this_repository(self):
         urls = set(re.findall(r'REPO_URL="([^"]+)"', self.text))
         self.assertEqual(urls, {"https://github.com/led2192/wba-link-monitor"})
