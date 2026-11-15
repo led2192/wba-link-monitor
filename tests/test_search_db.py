@@ -765,6 +765,39 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([p for p, _ in no_company], [1, 2, 3, 4, 5, 6, 7, 8])                      # no company named: nothing to be the newest of
         self.assertEqual(a_year, [(100 + g, 2023) for g in range(1, 9)])                            # a year asked for: one search, its eight pages (the stub marks a search with a year)
 
+    def test_an_answer_about_a_year_reads_the_later_reports_too(self):
+        """Option ask_later (15 Nov 2026): a figure of 2023 is printed again, sometimes restated, by the reports of 2024 and 2025."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
+                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null,
+                             region_filter text default null, typed text default null)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$
+                             select null::bigint, g, case when year_to is null then 'LATER' else 'ASKED' end, 'C', 'W', case when year_to is null then year_from else year_to end, 't', 'l', null::text,
+                                    case when year_to is null then 200 + g else g end, 0::real, client
+                             from generate_series(1, least(max_rows, 24)) g $f$""")
+            cur.execute("create or replace function public.find_company_ids(company_filter text) returns text[] language sql as $f$ select array['W_LATER'] $f$")
+            cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, pages) values ('l-23', 'W_LATER', 'C', 'Annual Report', 2023, 200), ('l-25', 'W_LATER', 'C', 'Annual Report', 2025, 200), "
+                        "('l-short', 'W_LATER', 'C', 'Annual Report', 2027, 2), ('l-other', 'W_LATER', 'C', 'Statutory Documents', 2027, 50)")
+            ask = "select page, year, excerpt from public.ask_pages('k', 'q', null, %s, %s, %s, null, 'q?')"
+            cur.execute(ask, ("C", 2023, 2023)); default = cur.fetchall()
+            cur.execute("select set_config('lantern.ask_later', 'on', true)")
+            cur.execute(ask, ("C", 2023, 2023)); on = cur.fetchall()
+            cur.execute(ask, ("C", 2021, 2023)); span = cur.fetchall()
+            cur.execute(ask, ("C", 2025, 2025)); newest = cur.fetchall()
+            cur.execute(ask, (None, 2023, 2023)); no_company = cur.fetchall()
+            cur.execute("select set_config('lantern.ask_later', 'off', true)")
+            cur.execute(ask, ("C", 2023, 2023)); off = cur.fetchall()
+            c.rollback()
+        eight = [(g, 2023, "ask") for g in range(1, 9)]
+        self.assertEqual(default, eight); self.assertEqual(off, eight)                               # the option is off until it is compared
+        self.assertEqual(on, [(g, 2023, "ask") for g in range(1, 6)] + [(200 + g, 2024, "ask later") for g in range(1, 4)])      # the best five of the year asked, then three pages of later reports
+        self.assertEqual([p for p, _, _ in span], [1, 2, 3, 4, 5, 201, 202, 203])                   # a span of years: later than its last year
+        self.assertEqual(newest, [(g, 2025, "ask") for g in range(1, 9)])                            # no main report after 2025 (two pages, or statutory, do not count)
+        self.assertEqual(no_company, eight)                                                         # no company named: whose later reports?
+
     def test_a_fiscal_period_gets_wbas_year_and_is_one_period_however_written(self):
         import json, psycopg
         with psycopg.connect(URL) as c:

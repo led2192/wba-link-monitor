@@ -2462,6 +2462,8 @@ as $$
 declare
   ids text[];
   latest int;
+  later_from int;         -- the second search's first year: the newest report's year or the year before (no year asked), or the year after the years asked (ask_later)
+  later boolean := false;
 begin
   if year_from is null and year_to is null and nullif(btrim(coalesce(company_filter, '')), '') is not null
      and (coalesce(current_setting('lantern.ask_latest', true), '') = 'on'
@@ -2473,19 +2475,37 @@ begin
         where d.wba_id = any(ids) and coalesce(d.pages, 0) > 2
           and d.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', '10K Form', 'Registration Document');
     end if;
+    later_from := latest - 1;
+  elsif year_to is not null and nullif(btrim(coalesce(company_filter, '')), '') is not null
+     and (coalesce(current_setting('lantern.ask_later', true), '') = 'on'
+          or (coalesce(current_setting('lantern.ask_later', true), '') <> 'off'
+              and exists (select 1 from public.search_options o where o.name = 'ask_later' and o.is_on))) then
+    -- Option ask_later (15 Nov 2026, the owner, on "how many times have Amadeus's scope 1 emissions of 2023 been
+    -- restated?" answered from the 2023 documents alone): the year in a question is the year of the figure, and a
+    -- figure of 2023 is also printed, sometimes changed, by the reports of 2024 and 2025. When the company has main
+    -- reports of later years, their pages are asked for too.
+    ids := public.find_company_ids(company_filter);
+    if coalesce(array_length(ids, 1), 0) between 1 and 5 and exists (
+         select 1 from public.documents d where d.wba_id = any(ids) and coalesce(d.pages, 0) > 2 and d.year > year_to
+           and d.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', '10K Form', 'Registration Document')) then
+      later_from := year_to + 1; later := true;
+    end if;
   end if;
   return query
     with c as materialized (select * from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask', null, null, null, asked)),
          newest as (select max(c.year) as y from c),
-         r as materialized (select * from public.find_blend(key, q, qvec, company_filter, latest - 1, null, type_filter, 8, 'ask latest', null, null, null, asked)
-                            where latest is not null),
+         r as materialized (select * from public.find_blend(key, q, qvec, company_filter, later_from, null, type_filter, 8, case when later then 'ask later' else 'ask latest' end, null, null, null, asked)
+                            where later_from is not null),
          u as (select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt, c.rank, 0 as src from c
                union all
                select r.library_id, r.company, r.wba_id, r.year, r.doc_type, r.label, r.url, r.page, r.excerpt, r.rank, 1 from r
                where not exists (select 1 from c where c.library_id = r.library_id and c.page = r.page))
     select u.library_id, u.company, u.wba_id, u.year, u.doc_type, u.label, u.url, u.page, u.excerpt
     from u, newest
-    order by case when u.src = 0 and u.rank <= 5 then 0 when u.year is not null and u.year >= coalesce(latest, newest.y) - 1 then 1 else 2 end, u.src, u.rank
+    order by case when u.src = 0 and u.rank <= 5 then 0
+                  when later and u.src = 1 then 1                                                    -- after the best five of the years asked, the later reports' pages (three at most: eight in all)
+                  when not later and u.year is not null and u.year >= coalesce(latest, newest.y) - 1 then 1
+                  else 2 end, u.src, u.rank
     limit 8;
 end;
 $$;
@@ -3105,6 +3125,7 @@ grant execute on function public.admin_taxonomy(text) to authenticated;
 -- Option ask_metric_names (15 Nov 2026, the owner, on the same question asked of Tesla and of Nike giving two sets of
 -- names): the reader is shown the names already in use and told to write a data point under one of them when it is
 -- the same thing. Off until it is compared on the answers' own check: it changes what the reader is told.
+insert into public.search_options (name, is_on, note) values ('ask_later', false, 'Ask with a year and a company: read pages of the company''s later reports too (a figure of a year is printed again, sometimes restated, by later reports)') on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('ask_metric_names', false, 'Ask: the reader is given the metric names in use and writes facts under them') on conflict (name) do nothing;
 
 -- The names for one question, one a line: up to max_names metrics (those sharing a word with the question first, then
