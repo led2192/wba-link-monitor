@@ -68,7 +68,8 @@ def documents(cur):
 
 
 MAIN_TYPES = ("Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report",
-              "Impact Report", "Climate Report", "Environmental Reports", "Social Reports", "10K Form", "Registration Document")      # as semantic_index.MAIN_TYPES
+              "Impact Report", "Climate Report", "Environmental Reports", "Social Reports", "10K Form", "Registration Document",
+              "CDP Report", "GRI")      # as semantic_index.MAIN_TYPES
 
 
 def main_reports(cur):
