@@ -515,6 +515,33 @@ class SearchOnPostgres(unittest.TestCase):
             c.rollback()
         self.assertEqual([p for p, _ in got], [1, 2, 3, 4, 5, 9, 14, 20])       # the best five, then 2026 and 2025 before older pages ranked above them
 
+    def test_an_answer_with_no_year_reads_the_newest_main_report_too(self):
+        """Option ask_latest: the search's first pages are all of an old report; the company's newest main report is asked for on its own."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
+                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null,
+                             region_filter text default null, typed text default null)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$
+                             select null::bigint, g, case when year_from is null then 'OLD' else 'NEW' end, 'C', 'W', coalesce(year_from + 1, 2022), 't', 'l', null::text,
+                                    case when year_from is null then g else 100 + g end, 0::real, 'e'
+                             from generate_series(1, least(max_rows, 24)) g $f$""")
+            cur.execute("create or replace function public.find_company_ids(company_filter text) returns text[] language sql as $f$ select array['W_LATEST'] $f$")
+            cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, pages) values ('w-new', 'W_LATEST', 'C', 'Sustainability Report', 2025, 120), ('w-short', 'W_LATEST', 'C', 'Annual Report', 2027, 2), ('w-other', 'W_LATEST', 'C', 'Statutory Documents', 2027, 50)")
+            ask = "select page, year from public.ask_pages('k', 'q', null, %s, %s, null, null, 'q?')"
+            cur.execute(ask, ("C", None)); off = cur.fetchall()
+            cur.execute("select set_config('lantern.ask_latest', 'on', true)")
+            cur.execute(ask, ("C", None)); on = cur.fetchall()
+            cur.execute(ask, (None, None)); no_company = cur.fetchall()
+            cur.execute(ask, ("C", 2022)); a_year = cur.fetchall()
+            c.rollback()
+        self.assertEqual([p for p, _ in off], [1, 2, 3, 4, 5, 6, 7, 8])                             # as before: the option is off
+        self.assertEqual(on, [(1, 2022), (2, 2022), (3, 2022), (4, 2022), (5, 2022), (101, 2025), (102, 2025), (103, 2025)])      # 2025: a two-page annual report and a statutory document do not set the year
+        self.assertEqual([p for p, _ in no_company], [1, 2, 3, 4, 5, 6, 7, 8])                      # no company named: nothing to be the newest of
+        self.assertEqual(a_year, [(100 + g, 2023) for g in range(1, 9)])                            # a year asked for: one search, its eight pages (the stub marks a search with a year)
+
     def test_a_fiscal_period_gets_wbas_year_and_is_one_period_however_written(self):
         import json, psycopg
         with psycopg.connect(URL) as c:
