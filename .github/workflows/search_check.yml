@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = the sample searches; timing = where a lanterN search spends its time (search_timing.py); compare = an option beside the default (search_compare.py)"
+        description: "check = the sample searches; timing = where a lanterN search spends its time (search_timing.py); compare = an option beside the default (search_compare.py); ask_pages = the pages an answer reads, an option beside the default, no model called (ask_pages_compare.py)"
         type: choice
-        options: [check, timing, compare]
+        options: [check, timing, compare, ask_pages]
         default: check
       option:
         description: "compare: the option to try (a row of search_options)"
@@ -36,7 +36,7 @@ jobs:
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           QA_COMMIT: "true"
         run: |
-          if [ "${{ inputs.mode }}" = "timing" ]; then python search_timing.py; elif [ "${{ inputs.mode }}" = "compare" ]; then python search_compare.py --option "${{ inputs.option || 'pairs' }}"; else python search_check.py; fi
+          if [ "${{ inputs.mode }}" = "timing" ]; then python search_timing.py; elif [ "${{ inputs.mode }}" = "compare" ]; then python search_compare.py --option "${{ inputs.option || 'pairs' }}"; elif [ "${{ inputs.mode }}" = "ask_pages" ]; then python ask_pages_compare.py --option "${{ inputs.option || 'ask_latest' }}"; else python search_check.py; fi
       - name: Post the result on the pull request
         if: github.event_name == 'pull_request' && always()
         run: |

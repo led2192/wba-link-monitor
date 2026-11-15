@@ -2437,6 +2437,15 @@ grant execute on function public.company_facts(text, text) to anon, authenticate
 -- documents (the owner). Now: the best five of the search's first twenty-four, then up to three more from the two
 -- newest years found among those twenty-four, then the next best. A question about one year (a year filter) is
 -- not touched by this: every candidate is then of that year.
+-- Option ask_latest (15 Nov 2026, the owner, on "What scope 3 categories does Nike report on?": six of the eight
+-- pages read were of the 2022 Impact Report while the library held the 2025 Sustainability Report). The rule above
+-- only looks among the search's first twenty-four, and the newest report had no page there: an older report that
+-- uses the question's very words outranks it. A question with no year is a question about now. With the option, when
+-- the question is about one to five companies and names no year, the search is asked a second time for the years
+-- of those companies' newest main report and the year before, and up to three of those pages take the places
+-- after the best five. The answer still reads older pages (the best five), so it can say what changed.
+insert into public.search_options (name, is_on, note) values ('ask_latest', false, 'Ask with no year: read pages of the company''s newest main report too') on conflict (name) do nothing;
+
 create or replace function public.ask_pages(
   key text, q text, qvec real[], company_filter text, year_from int, year_to int, type_filter text, asked text)
 returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text)
@@ -2444,13 +2453,33 @@ language plpgsql security definer           -- plpgsql, not sql: find_blend is d
 set search_path = public, extensions
 as $$
 #variable_conflict use_column
+declare
+  ids text[];
+  latest int;
 begin
+  if year_from is null and year_to is null and nullif(btrim(coalesce(company_filter, '')), '') is not null
+     and (coalesce(current_setting('lantern.ask_latest', true), '') = 'on'
+          or (coalesce(current_setting('lantern.ask_latest', true), '') <> 'off'
+              and exists (select 1 from public.search_options o where o.name = 'ask_latest' and o.is_on))) then
+    ids := public.find_company_ids(company_filter);
+    if coalesce(array_length(ids, 1), 0) between 1 and 5 then
+      select max(d.year) into latest from public.documents d
+        where d.wba_id = any(ids) and coalesce(d.pages, 0) > 2
+          and d.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', '10K Form', 'Registration Document');
+    end if;
+  end if;
   return query
     with c as materialized (select * from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask', null, null, null, asked)),
-         newest as (select max(c.year) as y from c)
-    select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt
-    from c, newest
-    order by case when c.rank <= 5 then 0 when c.year is not null and c.year >= newest.y - 1 then 1 else 2 end, c.rank
+         newest as (select max(c.year) as y from c),
+         r as materialized (select * from public.find_blend(key, q, qvec, company_filter, latest - 1, null, type_filter, 8, 'ask latest', null, null, null, asked)
+                            where latest is not null),
+         u as (select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt, c.rank, 0 as src from c
+               union all
+               select r.library_id, r.company, r.wba_id, r.year, r.doc_type, r.label, r.url, r.page, r.excerpt, r.rank, 1 from r
+               where not exists (select 1 from c where c.library_id = r.library_id and c.page = r.page))
+    select u.library_id, u.company, u.wba_id, u.year, u.doc_type, u.label, u.url, u.page, u.excerpt
+    from u, newest
+    order by case when u.src = 0 and u.rank <= 5 then 0 when u.year is not null and u.year >= coalesce(latest, newest.y) - 1 then 1 else 2 end, u.src, u.rank
     limit 8;
 end;
 $$;
