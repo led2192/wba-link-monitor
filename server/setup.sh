@@ -37,7 +37,9 @@ say "1/3 system: updates, automatic security updates, firewall, fail2ban"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get -y -q -o Dpkg::Options::=--force-confold upgrade
-apt-get -y -q install curl tar git jq ufw fail2ban unattended-upgrades ca-certificates build-essential
+# gh, zip and unzip: the jobs call them, and GitHub's own machines have them (the first watch on this machine
+# could not start the next one for want of gh, 14 Nov 2026)
+apt-get -y -q install curl tar git jq ufw fail2ban unattended-upgrades ca-certificates build-essential gh zip unzip
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CONF'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
