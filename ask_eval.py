@@ -140,6 +140,12 @@ def apart(right, wide):
     return min(gaps) if gaps else None
 
 
+def at_the_cap(right, wide, cap=3):
+    """True when a confirmed page's document has as many pages among the pages found as the search allows a document."""
+    docs = {doc_of(k) for k in right}
+    return any(sum(1 for w in wide if doc_of(w) == d) >= cap for d in docs)
+
+
 def cause(cur, case):
     """Why no confirmed page of this case is among the 24 pages of its search: the first of CAUSES that holds for any
     of its confirmed pages, in that order (the mildest first)."""
@@ -193,6 +199,8 @@ def why(cur, missed, out=print):
         lines.append(f"  Where the document is there with other pages, the nearest page found is the next or the one before in "
                      f"{sum(1 for g in gaps if g == 1)}, two or three pages away in {sum(1 for g in gaps if 2 <= g <= 3)}, "
                      f"four to ten in {sum(1 for g in gaps if 4 <= g <= 10)}, further in {sum(1 for g in gaps if g > 10)}.")
+        full = sum(1 for m in missed if at_the_cap(m[7], m[8]))
+        lines.append(f"  The search gives at most three pages a document: the confirmed page's document already has its three among the 24 in {full} of these {len(gaps)}.")
     return lines
 
 

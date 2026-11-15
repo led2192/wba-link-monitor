@@ -131,8 +131,11 @@ class SearchTimingLevels(unittest.TestCase):
                          [A.CAUSES[0], A.CAUSES[2], A.CAUSES[3], A.CAUSES[4], A.CAUSES[5], A.CAUSES[6], A.CAUSES[7], A.CAUSES[8], A.CAUSES[1]])
         lines = A.why(cur, missed, out=lambda s: None)
         self.assertIn("9 questions", lines[0])
-        self.assertEqual(len(lines), 11)
-        self.assertIn("the next or the one before in 1,", lines[-1])
+        self.assertEqual(len(lines), 12)
+        self.assertIn("the next or the one before in 1,", lines[-2])
+        self.assertIn("in 0 of these 1.", lines[-1])
+        self.assertTrue(A.at_the_cap({"L1|5"}, ["L1|1", "x|1", "L1|2", "L1|3"]))
+        self.assertFalse(A.at_the_cap({"L1|5"}, ["L1|1", "x|1", "L1|2"]))
         self.assertEqual(A.apart({"L1|5", "L1|40"}, ["L1|43", "x|5"]), 3)
         self.assertIsNone(A.apart({"L1|5"}, ["x|5"]))
         for secret in ("L1", "L4", "kw4", "W1", "Policy"):
