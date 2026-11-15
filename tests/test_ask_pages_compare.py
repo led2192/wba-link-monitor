@@ -14,6 +14,14 @@ class Compare(unittest.TestCase):
         rows = [("a", 1, 2022), ("b", 2, 2025), ("c", 3, 2026), ("d", 4, None)]
         self.assertEqual((A.recent(rows, 2026), A.recent(rows, None)), (2, 0))
 
+    def test_with_ask_later_a_case_is_asked_about_the_year_two_before_the_newest_report(self):
+        self.assertEqual((A.year_asked("ask_later", 2026), A.year_asked("ask_later", None), A.year_asked("ask_latest", 2026)), (2024, None, None))
+        rows = [("a", 1, 2024), ("b", 2, 2025), ("c", 3, 2026), ("d", 4, None), ("e", 5, 2023)]
+        self.assertEqual(A.counted("ask_later", rows, 2026), 2)             # 2025 and 2026: later than 2024
+        self.assertEqual(A.counted("ask_latest", rows, 2026), A.recent(rows, 2026))
+        src = open(A.__file__, encoding="utf-8").read()
+        self.assertIn("(words, company, asked, asked, words)", src)
+
     def test_it_never_calls_the_model_and_prints_no_page_text(self):
         src = open(A.__file__, encoding="utf-8").read()
         self.assertNotIn("public.ask(", src); self.assertNotIn("excerpt", src)
