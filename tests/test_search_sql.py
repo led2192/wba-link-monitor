@@ -93,7 +93,7 @@ def test_scores_for_one_company_with_places_counted():
 
 
 def test_ask_is_signed_limited_and_keeps_the_key_out_of_the_page():
-    ask = SQL[SQL.index("create or replace function public.ask("):SQL.index("-- A company's benchmark results")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("-- A company's benchmark results")]
     assert "public.email_may_search(who)" in ask and "per_day constant int := 50;" in ask
     assert "from vault.decrypted_secrets d where d.name = 'anthropic_api_key'" in ask          # the key lives in the vault, nowhere else
     assert "sk-ant" not in SQL
@@ -224,7 +224,7 @@ def test_short_company_names_and_long_questions():
 
 
 def test_ask_searches_a_long_question_with_the_models_words():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]      # with what the reader is told (ask_instructions, ask_message)
     assert "if coalesce(array_length((public.find_terms(search_q)).words, 1), 0) > 4 then" in ask
     assert "case when attempt = 1 then keywords else search_q end" in ask                    # its words first, the question itself if they find nothing
     assert "revoke all on function public.ask_model(text, text, text, text, text, int) from public, anon, authenticated;" in SQL
@@ -245,7 +245,7 @@ def test_a_company_a_person_adds_exists_at_once():
 
 
 def test_ask_has_a_ceiling_for_everyone_together():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]      # with what the reader is told (ask_instructions, ask_message)
     assert "per_day_all constant int := 1000;" in ask and ">= per_day_all then" in ask and "'everyone', true" in ask
     wf = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "propose_values.yml"), encoding="utf-8").read()
     assert "--max-usd ${{ vars.READER_MAX_USD || '5' }}" in wf                       # the owner changes the night's ceiling without a code change
@@ -280,7 +280,7 @@ def test_the_schema_is_guarded_like_the_functions():
 
 
 def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]      # with what the reader is told (ask_instructions, ask_message)
     assert "from public.ask_pages(key, case when attempt = 1 then keywords else search_q end, qvec," in ask       # the one search's pages, the newest reports among them
     assert "from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask'" in SQL      # words and meaning, as the list under it
     assert "'library_id', r.library_id" in ask and "begin with Yes, No, " in ask
@@ -290,7 +290,7 @@ def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
 
 
 def test_what_an_answer_finds_is_kept_unconfirmed_and_shown_beside_it():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]      # with what the reader is told (ask_instructions, ask_message)
     assert "write FACTS: followed by a JSON array" in ask and "Only what an excerpt states, never from memory; never an item saying" in ask
     assert "facts := public.ask_keep_facts(ask_id, parts -> 'facts', sources);" in ask and "'facts', facts," in ask and "'facts_stated', parts -> 'stated'" in ask
     assert "revoke all on function public.ask_keep_facts(bigint, jsonb, jsonb) from public, anon, authenticated;" in SQL
@@ -317,7 +317,7 @@ def test_a_mark_on_a_fact_shows():
 
 
 def test_confirmed_facts_come_back_with_the_next_answer():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]      # with what the reader is told (ask_instructions, ask_message)
     assert "confirmed := public.ask_confirmed_facts(null, sources, who);" in ask and "'confirmed', confirmed);" in ask
     assert "Confirmed earlier by a colleague:" in ask and "Do not repeat them in FACTS." in ask          # the answer reads them too
     assert "revoke all on function public.ask_confirmed_facts(bigint, jsonb, text) from public, anon, authenticated;" in SQL
@@ -379,7 +379,7 @@ def test_a_page_without_a_link_can_still_be_read():
 
 
 def test_eight_pages_are_not_a_total():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]      # with what the reader is told (ask_instructions, ask_message)
     assert "do not give a count: say first that a total cannot be read from eight pages" in ask
 
 
@@ -394,7 +394,7 @@ def test_nothing_of_the_search_before_stays_when_a_search_runs_or_fails():
 
 
 def test_fiscal_years_are_said_in_both_ways():
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]      # with what the reader is told (ask_instructions, ask_message)
     assert "fiscal := public.ask_fiscal_lines(sources);" in ask and 'for example "fiscal 2023 (WBA reporting year 2022)"' in ask
     assert "coalesce((select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = p.wba_id)," in SQL
     assert "coalesce(a.period, '')" not in SQL                                    # one period however written
@@ -447,11 +447,11 @@ def test_a_companys_facts_by_year_are_for_the_owner_and_leave_out_the_wrong_ones
 
 def test_the_reader_is_given_the_names_in_use_only_when_the_option_is_on():
     assert "values ('ask_metric_names', false," in SQL and "set is_on = true" not in SQL[SQL.index("values ('ask_metric_names', false,"):SQL.index("create or replace function public.ask_metric_names(")]
-    ask = SQL[SQL.index("create or replace function public.ask(\n"):]
-    ask = ask[:ask.index("$$;")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[])")]
     assert "names := public.ask_metric_names(concat_ws(' ', asked, keywords));" in ask
-    assert "|| case when names <> '' then ' The message may also list metric names already in use." in ask      # the instructions are unchanged while it is off
+    assert "|| case when with_names then ' The message may also list metric names already in use." in ask      # the instructions are unchanged while it is off
     assert "|| case when names <> '' then E'\\n\\nMetric names in use:\\n' || names else '' end" in ask
+    assert "public.ask_model(api_key, http_schema, model, public.ask_instructions(names <> ''), public.ask_message(asked, known, fiscal, names, context), 3500);" in ask
     assert "revoke all on function public.ask_metric_names(text, int) from public, anon, authenticated;" in SQL
 
 
@@ -461,3 +461,12 @@ def test_the_owner_edits_the_taxonomy_without_a_browser_dialog():
         assert f'"{fn}"' in tax, fn
     assert "confirm(" not in tax and "prompt(" not in tax and "alert(" not in tax
     assert 'retire.dataset.sure' in tax                                          # a second click, not a dialog
+
+
+def test_the_names_comparison_keeps_nothing_and_is_for_the_database_alone():
+    trial = SQL[SQL.index("create or replace function public.ask_names_trial("):]
+    trial = trial[:trial.index("$$;")]
+    assert "insert into" not in trial and "update public" not in trial               # nothing kept: no answer logged, no fact stored
+    assert "array['off', 'again', 'on']" in trial and "public.ask_instructions(arm = 'on')" in trial
+    assert "revoke all on function public.ask_names_trial(bigint) from public, anon, authenticated;" in SQL
+    assert "revoke all on function public.ask_reply_numbers(text, jsonb, text) from public, anon, authenticated;" in SQL
