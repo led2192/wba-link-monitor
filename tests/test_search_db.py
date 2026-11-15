@@ -580,6 +580,21 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(sheet["facts"][0]["doc_type"], "Sustainability Report"); self.assertEqual(sheet["facts"][3]["label"], "Colour of the logo")
             c.rollback()
 
+    def test_the_owner_sees_every_company_with_its_documents_peoples_first(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.companies (wba_id, name, industry, country) values ('LN_zz000001', 'Zebra Added Co', 'Retail', 'Spain'), ('PT_ZZ9', 'Zebra Listed Co', 'Retail', 'Chile') on conflict (wba_id) do nothing")
+            cur.execute("insert into public.documents (library_id, wba_id, year) values ('zz-1', 'PT_ZZ9', 2024), ('zz-2', 'PT_ZZ9', 2023) on conflict (library_id) do nothing")
+            cur.execute("select public.admin_company_list('k', 'zebra retail')")
+            got = cur.fetchone()[0]
+            self.assertEqual([(r["id"], r["documents"], r["added"]) for r in got["rows"]], [("LN_zz000001", 0, True), ("PT_ZZ9", 2, False)])      # a person's first, then the most documents
+            self.assertGreaterEqual(got["all"], 2); self.assertGreaterEqual(got["added"], 1)
+            cur.execute("select jsonb_array_length(public.admin_company_list('k', 'zebra chile') -> 'rows'), jsonb_array_length(public.admin_company_list('k', 'zebra mars') -> 'rows'), "
+                        "jsonb_array_length(public.admin_company_list('k', null, 1) -> 'rows')")
+            self.assertEqual(cur.fetchone(), (1, 0, 1))
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:
