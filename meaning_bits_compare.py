@@ -3,12 +3,13 @@
 meaning_bits_compare.py: does a search by meaning through the small index on the bits find the pages the full index finds?
 
 The index of meanings (chunks_embedding, half-precision vectors) is 4 GB for 4 million passages and would be about
-17 GB for every year: more than the memory of the everyday database machine. chunks_bits holds one bit a number and
-is about a sixteenth of that. This script takes the query vectors people's searches left (public.query_vectors), and
+17 GB for every year: more than the memory of the everyday database machine. chunks_signs holds one bit a number
+(the sign of the embedding minus the mean embedding, public.chunk_bits) and is about a third of the full index's size
+(the graph weighs more than the bits). This script takes the query vectors people's searches left (public.query_vectors), and
 for each asks both ways for the nearest pages with no company named:
 
   full   as find_meaning does today: the 400 nearest passages through chunks_embedding, their pages in order
-  bits   the 800 passages nearest by bits through chunks_bits, ordered again by the whole embeddings, the best 400
+  bits   the 800 passages nearest by bits through chunks_signs, ordered again by the whole embeddings, the best 400
 
 and reports how many of the full index's first 10 and first 50 pages the bits find, how often the first page is the
 same, and the time of each. Calls no model. Reads only. The log is public: counts, shares and milliseconds only.
@@ -33,7 +34,7 @@ BITS_SQL = """
 with cand as materialized (
   select c.library_id, c.page, c.embedding
   from public.chunks c
-  order by (extensions.binary_quantize(c.embedding)::bit(384)) operator(extensions.<~>) extensions.binary_quantize(%s::real[]::extensions.vector(384))::bit(384) limit %s),
+  order by (public.chunk_bits(c.embedding)) operator(extensions.<~>) public.chunk_bits(%s::real[]::extensions.vector(384)) limit %s),
 near as (select library_id, page, embedding operator(extensions.<=>) %s::real[]::extensions.vector(384) as dist from cand order by dist limit 400)
 select library_id, page from (select distinct on (library_id, page) library_id, page, dist from near order by library_id, page, dist) p
 order by dist limit 50"""
@@ -83,10 +84,10 @@ def main():
     rows = []
     with psycopg.connect(os.environ["SUPABASE_DB_URL"]) as conn:
         cur = conn.cursor()
-        cur.execute("select to_regclass('public.chunks_embedding') is not null, to_regclass('public.chunks_bits') is not null")
+        cur.execute("select to_regclass('public.chunks_embedding') is not null, to_regclass('public.chunks_signs') is not null")
         full_there, bits_there = cur.fetchone()
         if not (full_there and bits_there):
-            print(f"Not compared: chunks_embedding {'is' if full_there else 'is NOT'} there, chunks_bits {'is' if bits_there else 'is NOT'} there.", flush=True)
+            print(f"Not compared: chunks_embedding {'is' if full_there else 'is NOT'} there, chunks_signs {'is' if bits_there else 'is NOT'} there.", flush=True)
             run.finish("ok", rows_in=0, rows_out=0, notes="an index is missing")
             return 0
         cur.execute("select vec from public.query_vectors where array_length(vec, 1) = 384 order by at desc limit %s", (a.limit,))

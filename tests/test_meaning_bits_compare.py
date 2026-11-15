@@ -25,27 +25,41 @@ class Shares(unittest.TestCase):
 
     def test_both_ways_use_their_index_expression(self):
         self.assertIn("(c.embedding::extensions.halfvec(384)) operator(extensions.<=>)", M.FULL_SQL)
-        self.assertIn("(extensions.binary_quantize(c.embedding)::bit(384)) operator(extensions.<~>)", M.BITS_SQL)
+        self.assertIn("(public.chunk_bits(c.embedding)) operator(extensions.<~>) public.chunk_bits(%s::real[]::extensions.vector(384))", M.BITS_SQL)
         self.assertIn("embedding operator(extensions.<=>) %s::real[]::extensions.vector(384) as dist from cand", M.BITS_SQL)      # ordered again by the whole embeddings
 
 
 class Index(unittest.TestCase):
-    def test_the_bits_index_stands_beside_the_full_one_and_is_never_dropped_for_a_fill(self):
-        self.assertIn("create index if not exists chunks_bits on public.chunks using hnsw", S.BITS_INDEX_SQL)
-        self.assertIn("(extensions.binary_quantize(embedding)::bit(384)) extensions.bit_hamming_ops", S.BITS_INDEX_SQL)
-        self.assertNotIn("chunks_bits", S.FILL_INDEXES)
+    def test_the_signs_index_stands_beside_the_full_one_and_is_never_dropped_for_a_fill(self):
+        self.assertIn("create index if not exists chunks_signs on public.chunks using hnsw", S.BITS_INDEX_SQL)
+        self.assertIn("((public.chunk_bits(embedding)) extensions.bit_hamming_ops)", S.BITS_INDEX_SQL)
+        self.assertNotIn("chunks_signs", S.FILL_INDEXES)
+        self.assertIn("operator(extensions.-) '{mean}'::extensions.vector(384)", S.BITS_FUNCTION_SQL)      # the signs of the embedding minus the mean
 
-    def test_building_it_sets_the_memory_and_says_its_size(self):
-        class Cur:
-            def __init__(self): self.sql = []; self.connection = self
-            def execute(self, q, *a): self.sql.append(q)
-            def fetchone(self): return (4000000,) if "count(*)" in self.sql[-1] else ("510 MB",)
-            def commit(self): self.sql.append("commit")
-        cur, said = Cur(), []
+    class Cur:
+        def __init__(self, function_there): self.sql = []; self.connection = self; self.there = function_there
+        def execute(self, q, *a): self.sql.append(q)
+        def fetchone(self):
+            q = self.sql[-1]
+            return (self.there,) if "to_regprocedure" in q else ("[0.1,-0.25,3e-05]", 82000) if "avg(embedding)" in q else (4000000,) if "count(*)" in q else ("1300 MB",)
+        def commit(self): self.sql.append("commit")
+
+    def test_the_mean_is_written_once_and_never_replaced(self):
+        cur, said = self.Cur(False), []
+        self.assertTrue(S.ensure_bits_function(cur, say=lambda *a, **k: said.append(a[0])))
+        made = [q for q in cur.sql if q.startswith("create function public.chunk_bits")]
+        self.assertEqual(len(made), 1); self.assertIn("'[0.1,-0.25,3e-05]'::extensions.vector(384)", made[0])
+        self.assertNotIn("or replace", made[0])
+        cur = self.Cur(True)
+        self.assertFalse(S.ensure_bits_function(cur))
+        self.assertFalse(any("create function" in q for q in cur.sql))                  # an index built on it would be wrong for another mean
+
+    def test_building_it_drops_only_the_first_useless_index(self):
+        cur, said = self.Cur(True), []
         S.build_bits_index(cur, "1GB", 2, say=lambda *a, **k: said.append(a[0]))
         self.assertIn("set maintenance_work_mem = '1GB'", cur.sql); self.assertIn(S.BITS_INDEX_SQL, cur.sql)
-        self.assertFalse(any("drop index" in q for q in cur.sql))
-        self.assertTrue(any("510 MB" in x for x in said))
+        self.assertEqual([q for q in cur.sql if "drop index" in q], ["drop index if exists public.chunks_bits"])
+        self.assertTrue(any("1300 MB" in x for x in said))
 
 
 if __name__ == "__main__":
