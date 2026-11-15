@@ -37,10 +37,11 @@ MODEL = "intfloat/multilingual-e5-small"     # 384 dimensions, 100+ languages, 1
 DIMS = 384
 # The reports in scope. 15 Nov 2026 (the owner): everything that is, or reads like, an annual or a sustainability
 # report: the impact, climate, environmental and social reports, and the annual report as two countries file it (the
-# 10-K form, the registration document). Not in scope: questionnaires and indexes (CDP, GRI, SASB), policies, statutory
-# and interim documents, presentations.
+# 10-K form, the registration document), and the CDP responses and GRI reports for the sustainability data they hold
+# (the owner, the same day). Not in scope: policies, statutory and interim documents, presentations, SASB indexes.
 MAIN_TYPES = ("Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report",
-              "Impact Report", "Climate Report", "Environmental Reports", "Social Reports", "10K Form", "Registration Document")
+              "Impact Report", "Climate Report", "Environmental Reports", "Social Reports", "10K Form", "Registration Document",
+              "CDP Report", "GRI")
 YEAR_MIN = 2024
 MAX_SEQ = 256                                # tokens read per passage (120 words are about 180 tokens)
 INSERT_BATCH = 500
