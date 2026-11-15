@@ -84,6 +84,27 @@ class SearchOnPostgres(unittest.TestCase):
                                ("real", "Annual Report", None), ("three", "Sustainability Report", None),
                                ("zero", "Annual Report", None)])           # no pages counted: its length is not known
 
+    def test_what_a_companys_traits_say_about_a_missing_report(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.company_notes (wba_id, traits) values ('PT_N1', '{no_reports,local_language}'), ('PT_N2', '{sust_in_annual,no_annual}'), "
+                        "('PT_N3', '{in_parent}'), ('PT_N4', '{refuses_robot}'), ('PT_N5', '{no_sustainability}')")
+            got = []
+            for w in ("PT_N1", "PT_N2", "PT_N3", "PT_N4", "PT_N5", "PT_NOBODY"):
+                cur.execute("select public.company_implied(%s, 'annual'), public.company_implied(%s, 'sustainability')", (w, w))
+                got.append(cur.fetchone())
+            cur.execute("select public.company_traits() @> array['no_reports', 'in_parent', 'refuses_robot']")
+            listed = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual(got, [("not_published", "not_published"),      # publishes almost nothing: neither report is a gap
+                               ("not_published", "inside_annual"),      # each kind by its own trait
+                               ("parent", "parent"),
+                               (None, None),                            # a trait that describes, and explains no gap
+                               (None, "not_published"),
+                               (None, None)])
+        self.assertTrue(listed)
+
     def test_company_first_finds_the_same_pages(self):
         """Option company_first: four words or more within a company read the company's pages; the list is the same."""
         cur = self.conn.cursor()

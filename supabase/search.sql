@@ -2110,6 +2110,77 @@ $$;
 revoke all on function public.gap_note_set(text, text, text, int, text) from public, anon;
 grant execute on function public.gap_note_set(text, text, text, int, text) to authenticated;
 
+-- How a company reports, said once for the whole company (15 Nov 2026, the owner: "this company publishes almost
+-- nothing" should be said once, not cell by cell, and the pipeline should be able to read it). A closed list of
+-- traits, several at a time, and a short free note. The traits that explain a gap stand in for a gap note on every
+-- year (company_implied); the others describe the company for whoever, or whatever job, looks for its documents.
+create table if not exists public.company_notes (
+  wba_id text primary key,
+  traits text[] not null default '{}',
+  note   text,
+  by     text,
+  at     timestamptz not null default now()
+);
+alter table public.company_notes enable row level security;
+
+create or replace function public.company_traits()
+returns text[] language sql immutable as $$
+  select array['no_reports', 'no_annual', 'no_sustainability', 'sust_in_annual', 'in_parent',
+               'local_language', 'web_pages', 'filings_only', 'irregular', 'refuses_robot']
+$$;
+
+-- What the company's traits say about a missing report of one kind, as a gap-note reason, or null.
+create or replace function public.company_implied(company text, kind text)
+returns text language sql stable security definer set search_path = public, extensions as $$
+  select case
+           when kind = 'sustainability' and 'sust_in_annual' = any(n.traits) then 'inside_annual'
+           when 'in_parent' = any(n.traits) then 'parent'
+           when 'no_reports' = any(n.traits) then 'not_published'
+           when kind = 'annual' and 'no_annual' = any(n.traits) then 'not_published'
+           when kind = 'sustainability' and 'no_sustainability' = any(n.traits) then 'not_published'
+         end
+  from public.company_notes n where n.wba_id = company
+$$;
+revoke all on function public.company_implied(text, text) from public, anon;
+
+create or replace function public.company_note_set(key text, wba_id text, traits text[], note text)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  t text[] := coalesce((select array_agg(distinct x order by x) from unnest(coalesce(traits, '{}')) x), '{}');
+  words text := nullif(btrim(regexp_replace(coalesce(note, ''), '\s+', ' ', 'g')), '');
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address' using errcode = '42501';
+  end if;
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if not t <@ public.company_traits() then
+    raise exception 'not one of the answers' using errcode = '22023';
+  end if;
+  if length(coalesce(words, '')) > 400 then
+    raise exception 'the note is 400 characters at most' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.companies c where c.wba_id = wba_id) then
+    raise exception 'no such company' using errcode = '22023';
+  end if;
+  if cardinality(t) = 0 and words is null then
+    delete from public.company_notes n where n.wba_id = wba_id;
+    return jsonb_build_object('ok', true, 'cleared', true);
+  end if;
+  insert into public.company_notes (wba_id, traits, note, by) values (wba_id, t, words, who)
+    on conflict on constraint company_notes_pkey do update set traits = excluded.traits, note = excluded.note, by = excluded.by, at = now();
+  return jsonb_build_object('ok', true, 'annual', public.company_implied(wba_id, 'annual'), 'sustainability', public.company_implied(wba_id, 'sustainability'));
+end;
+$$;
+revoke all on function public.company_note_set(text, text, text[], text) from public, anon;
+grant execute on function public.company_note_set(text, text, text[], text) to authenticated;
+
 -- A company with a gap among its main reports of the last three years, drawn at random. A cell is not a gap when a
 -- person said so (gap_notes; the year's own note before the every-year one), nor when the annual report of that year
 -- reads as carrying the sustainability statements ("sustainability_inside": at least three of its pages print
@@ -2157,13 +2228,16 @@ begin
            from public.documents d join drawn on drawn.wba_id = d.wba_id where d.year between y1 and y2 group by 1, 2),
          grid as (
            select drawn.wba_id, ys.year, coalesce(h.annual, '{}') as annual, coalesce(h.sustainability, '{}') as sustainability, coalesce(h.documents, 0) as documents,
-                  (select g.reason from public.gap_notes g where g.wba_id = drawn.wba_id and g.kind = 'annual' and g.year in (ys.year, 0) order by g.year desc limit 1) as annual_note,
-                  (select g.reason from public.gap_notes g where g.wba_id = drawn.wba_id and g.kind = 'sustainability' and g.year in (ys.year, 0) order by g.year desc limit 1) as sustainability_note
+                  coalesce((select g.reason from public.gap_notes g where g.wba_id = drawn.wba_id and g.kind = 'annual' and g.year in (ys.year, 0) order by g.year desc limit 1),
+                           public.company_implied(drawn.wba_id, 'annual')) as annual_note,          -- a cell's own note first, then what the company's traits say
+                  coalesce((select g.reason from public.gap_notes g where g.wba_id = drawn.wba_id and g.kind = 'sustainability' and g.year in (ys.year, 0) order by g.year desc limit 1),
+                           public.company_implied(drawn.wba_id, 'sustainability')) as sustainability_note
            from drawn cross join ys left join held h on h.wba_id = drawn.wba_id and h.year = ys.year),
          gaps as (select g.wba_id, count(*) filter (where (cardinality(g.annual) = 0 and coalesce(g.annual_note, 'gap') = 'gap')
                                                        or (cardinality(g.sustainability) = 0 and coalesce(g.sustainability_note, 'gap') = 'gap')) as n from grid g group by 1)
     select jsonb_build_object('wba_id', drawn.wba_id, 'company', drawn.name, 'industry', drawn.industry, 'country', drawn.country, 'website', drawn.website,
-                              'documents', (select count(*) from public.documents d where d.wba_id = drawn.wba_id)),
+                              'documents', (select count(*) from public.documents d where d.wba_id = drawn.wba_id),
+                              'profile', (select jsonb_build_object('traits', to_jsonb(n.traits), 'note', n.note) from public.company_notes n where n.wba_id = drawn.wba_id)),
            (select jsonb_agg(jsonb_build_object('year', g.year, 'annual', to_jsonb(g.annual), 'sustainability', to_jsonb(g.sustainability), 'documents', g.documents,
                                                 'annual_note', g.annual_note, 'sustainability_note', g.sustainability_note) order by g.year desc)
             from grid g where g.wba_id = drawn.wba_id)

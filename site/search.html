@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v67 2026-11-13";
+  const CLIENT = "lantern v68 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1548,6 +1548,10 @@
   const gapSeen = [];
   const GAP_REASONS = { inside_annual: "It is inside the annual report", not_published: "The company does not publish it", parent: "Its parent company publishes it",
                         not_yet: "Not published yet", held_as_other: "lanterN holds it under another type or year", gap: "It is a gap" };
+  const COMPANY_TRAITS = { no_reports: "Publishes almost nothing", no_annual: "Publishes no annual or financial report", no_sustainability: "Publishes no sustainability report",
+                           sust_in_annual: "Its sustainability reporting is inside the annual report", in_parent: "Reports through its parent company",
+                           local_language: "Reports only in its own language", web_pages: "Reports on web pages, not in documents", filings_only: "Only files with a regulator",
+                           irregular: "Publishes late or not every year", refuses_robot: "Its website refuses the robot" };
   async function gapCard() {
     const box = $("results"); $("values").hidden = true; setStatus(""); document.body.classList.add("playing");
     box.innerHTML = ""; const c = el("div", "lucky"); box.appendChild(c);
@@ -1598,6 +1602,20 @@
     c.appendChild(t);
     const all = el("p", "what", `${g.documents} document${g.documents === 1 ? "" : "s"} of this company in the library in all. `);
     const see = el("a", null, "See them"); see.href = "#"; see.onclick = e => { e.preventDefault(); luckyClose(); $("q").value = g.company; go(); }; all.appendChild(see); c.appendChild(all);
+    // How this company reports (v68, the owner): said once for the company, a closed list (several at once) and a short
+    // note. The traits that explain a gap replace "Missing" on every year; all of it is kept for the pipeline to read.
+    { const prof = g.profile || {}, have = new Set(prof.traits || []);
+      const box2 = el("details"); box2.style.cssText = "margin:10px 0 4px"; if (have.size || prof.note) box2.open = true;
+      const sum = el("summary", null, "How this company reports"); sum.style.cssText = "cursor:pointer;font-weight:600;font-size:14px"; box2.appendChild(sum);
+      const list = el("div"); list.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 14px;margin:8px 0;font-size:13.5px";
+      const boxes = {};
+      for (const [v, label] of Object.entries(COMPANY_TRAITS)) { const l = el("label"), cb = el("input"); cb.type = "checkbox"; cb.checked = have.has(v); boxes[v] = cb; l.append(cb, document.createTextNode(" " + label)); list.appendChild(l); }
+      const ta = el("textarea"); ta.maxLength = 400; ta.rows = 2; ta.placeholder = "A short note on how this company reports (optional, 400 characters)"; ta.value = prof.note || ""; ta.style.cssText = "width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:6px 8px;border:1px solid var(--line);border-radius:8px";
+      const row = el("div"); row.style.cssText = "display:flex;gap:10px;align-items:center;margin-top:6px"; const ok = el("button", null, "Save"), msg = el("span", "what"); ok.type = "button";
+      ok.onclick = async () => { ok.disabled = true; msg.textContent = "";
+        const r = await authed("company_note_set", { key, wba_id: g.wba_id, traits: Object.keys(boxes).filter(k => boxes[k].checked), note: ta.value });
+        ok.disabled = false; msg.textContent = r && r.ok ? (r.cleared ? "Cleared." : "Saved. The table follows it the next time this company comes up.") : "Not saved. Sign in with your WBA address (Review a value asks for it) and try again."; };
+      row.append(ok, msg); box2.append(list, ta, row); c.appendChild(box2); }
     const hold = el("div", "values"); hold.style.marginTop = "8px"; c.appendChild(hold);
     const nav = el("div", "nav");
     const add = el("button", "save", "Add a link"); add.type = "button"; add.title = "A link to the missing report, or to the page that lists the company's reports"; add.onclick = () => addSourceForm(hold, g.wba_id);
