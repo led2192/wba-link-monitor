@@ -59,6 +59,44 @@ class Indexes(unittest.TestCase):
             self.assertNotIn("--drop-indexes", open(os.path.join(ROOT, ".github", "workflows", wf), encoding="utf-8").read(), wf)
 
 
+class Stage(unittest.TestCase):
+    """The fill of the older years writes beside the tables the search reads."""
+    class Cur:
+        def __init__(self, there=True): self.sql = []; self.there = there; self.connection = self
+        def execute(self, q, a=None): self.sql.append(q)
+        def executemany(self, q, rows): self.sql.append(q)
+        def fetchone(self): return (self.there,)
+        def fetchall(self): return []
+
+    def test_a_staged_document_goes_to_the_stage_tables_alone_and_without_pairs(self):
+        import semantic_index as S
+        cur = self.Cur()
+        S.write_document(cur, "L1", [(1, 0, "a passage")], [[0.0] * 384], "m", None, stage=True)
+        text = " ".join(cur.sql)
+        self.assertIn("insert into public.chunks_stage (", text); self.assertIn("insert into public.chunk_docs_stage (", text)
+        self.assertNotIn("insert into public.chunks (", text); self.assertNotIn("public.chunk_docs (", text); self.assertNotIn("page_pairs", text)
+        cur = self.Cur()
+        S.write_document(cur, "L1", [(1, 0, "a passage")], [[0.0] * 384], "m", None)
+        self.assertIn("insert into public.chunks (", " ".join(cur.sql)); self.assertNotIn("_stage", " ".join(cur.sql))
+
+    def test_a_staged_document_is_not_asked_for_again(self):
+        import semantic_index as S
+        cur = self.Cur(there=True)
+        S.documents_to_index(cur, (1990, 2023), (0, 1), 10)
+        self.assertIn("not exists (select 1 from public.chunk_docs_stage c where c.library_id = d.library_id)", cur.sql[-1])
+        cur = self.Cur(there=False)
+        S.documents_to_index(cur, (1990, 2023), (0, 1), 10)
+        self.assertNotIn("chunk_docs_stage", cur.sql[-1])
+
+    def test_the_stage_has_the_chunks_columns_and_none_of_its_indexes(self):
+        sql = open(os.path.join(ROOT, "supabase", "search.sql"), encoding="utf-8").read()
+        self.assertIn("create table if not exists public.chunks_stage (like public.chunks including defaults);", sql)
+        self.assertNotIn("including indexes", sql); self.assertNotIn("including all", sql)
+        src = open(os.path.join(ROOT, "semantic_index.py"), encoding="utf-8").read()
+        self.assertIn('prs if (has_pairs and not a.no_pairs and not a.stage) else None, stage=a.stage)', src)
+        self.assertIn('[ "${{ inputs.stage }}" = "true" ] && ARGS="$ARGS --stage"', open(os.path.join(ROOT, ".github", "workflows", "semantic_index.yml"), encoding="utf-8").read())
+
+
 class Store(unittest.TestCase):
     def test_the_files_of_one_run(self):
         listing = {n: {"size": 1} for n in (

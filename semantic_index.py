@@ -76,11 +76,13 @@ def documents_to_index(cur, years, partition, limit, ids=None):
     k, n = partition
     cur.execute("select to_regclass('public.chunk_docs') is not null")
     has_done = cur.fetchone()[0]                               # a dry run before the tables exist still lists the documents
+    staged = stage_there(cur)                                  # a document waiting in the stage is done too
     cur.execute(f"""
         select d.library_id, d.year, d.doc_type, coalesce(d.pages, 0)
         from public.documents d
         where d.doc_type = any(%s) and d.text_status = 'ok' and d.year >= %s and (%s::int is null or d.year <= %s)
           {"and not exists (select 1 from public.chunk_docs c where c.library_id = d.library_id)" if has_done else ""}
+          {"and not exists (select 1 from public.chunk_docs_stage c where c.library_id = d.library_id)" if staged else ""}
           and (abs(hashtext(d.library_id)) %% %s) = %s
           and (%s::text[] is null or d.library_id = any(%s))
         order by d.year desc, d.library_id
@@ -150,7 +152,17 @@ class Embedder:
 WRITE_S = {"pairs": 0.0, "chunks": 0.0}      # seconds spent writing each table, for the run's last line
 
 
-def write_document(cur, lid, chunks, vectors, model, pairs=None):
+# The fill of the older years (15 Nov 2026) writes beside the tables the search reads: public.chunks_stage and
+# public.chunk_docs_stage, with no index on the embeddings. Written into public.chunks with its two indexes in place, 131
+# documents took 42 minutes of a run for their passages alone (run 43731309344), which is weeks for 33,000 documents;
+# without the indexes the search by meaning would stop for the day of the fill. Staged, the search goes on untouched
+# and the passages are moved in and indexed once, at the end. A staged document counts as done for the next run.
+def stage_there(cur):
+    cur.execute("select to_regclass('public.chunks_stage') is not null and to_regclass('public.chunk_docs_stage') is not null")
+    return bool(cur.fetchone()[0])
+
+
+def write_document(cur, lid, chunks, vectors, model, pairs=None, stage=False):
     """The document's chunks with their embeddings, its pages' word pairs (pairs: [(page, tsvector literal)], when the
     page_pairs table exists), then its done-marker. One transaction per document (the caller commits)."""
     t = time.time()
@@ -161,11 +173,11 @@ def write_document(cur, lid, chunks, vectors, model, pairs=None):
     WRITE_S["pairs"] += time.time() - t; t = time.time()
     rows = [(lid, page, n, body, vector_literal(v), model) for (page, n, body), v in zip(chunks, vectors)]
     for i in range(0, len(rows), INSERT_BATCH):
-        cur.executemany("insert into public.chunks (library_id, page, n, body, embedding, model) values (%s, %s, %s, %s, %s::extensions.vector, %s) "
+        cur.executemany(f"insert into public.{'chunks_stage' if stage else 'chunks'} (library_id, page, n, body, embedding, model) values (%s, %s, %s, %s, %s::extensions.vector, %s) "
                         "on conflict (library_id, page, n) do update set body = excluded.body, embedding = excluded.embedding, model = excluded.model",
                         rows[i:i + INSERT_BATCH])
     WRITE_S["chunks"] += time.time() - t
-    cur.execute("insert into public.chunk_docs (library_id, chunks, model) values (%s, %s, %s) on conflict (library_id) do update set chunks = excluded.chunks, model = excluded.model, written = now()",
+    cur.execute(f"insert into public.{'chunk_docs_stage' if stage else 'chunk_docs'} (library_id, chunks, model) values (%s, %s, %s) on conflict (library_id) do update set chunks = excluded.chunks, model = excluded.model, written = now()",
                 (lid, len(rows), model))
 
 
@@ -221,7 +233,11 @@ def remaining_line(cur, years):
     done = cur.fetchone()[0]
     cur.execute("select pg_database_size(current_database()) / 1e9")
     gb = float(cur.fetchone()[0])
-    return f"Semantic fill: {done:,} documents done, {left:,} left to index; database {gb:.1f} GB."
+    waiting = 0
+    if stage_there(cur):
+        cur.execute("select count(*) from public.chunk_docs_stage")
+        waiting = cur.fetchone()[0]
+    return f"Semantic fill: {done:,} documents done" + (f", {waiting:,} staged" if waiting else "") + f", {left:,} left to index; database {gb:.1f} GB."
 
 
 def build_settings(memory, workers):
@@ -290,6 +306,7 @@ def main():
     ap.add_argument("--build-memory", default="512MB", help="maintenance_work_mem for --build-index: about half the database machine's RAM")
     ap.add_argument("--build-workers", type=int, default=2, help="parallel workers for --build-index: the machine's processors minus one")
     ap.add_argument("--drop-indexes", action="store_true", help="drop the indexes on the embeddings and the word pairs before filling (a first fill only: the search by meaning stops until --build-index)")
+    ap.add_argument("--stage", action="store_true", help="write to chunks_stage and chunk_docs_stage (no index, the search untouched); no word pairs")
     ap.add_argument("--ids", default="", help="the fast lane: only these library ids (comma-separated), if they are in scope")
     ap.add_argument("--no-pairs", action="store_true", help="write the chunks only; the word pairs of these documents are left for a later pass")
     a = ap.parse_args()
@@ -352,6 +369,10 @@ def main():
         if a.commit and a.drop_indexes:
             drop_vector_index(cur)
             cur.execute("set statement_timeout = '120s'")
+        if a.stage and a.commit and not stage_there(cur):
+            sys.exit("--stage: public.chunks_stage is not there (it is created with the search functions, supabase/search.sql).")
+        if a.stage and a.drop_indexes:
+            sys.exit("--stage writes beside the indexed tables: there is no index to drop.")
         docs = documents_to_index(cur, years, partition, a.limit if a.limit else 1_000_000, [x.strip() for x in a.ids.split(",") if x.strip()] or None)
         print(f">>> {len(docs):,} documents to index (years {a.years}, slice {partition[0]}/{partition[1]}), model {a.model}", flush=True)
         for lid, year, dtype, pages_n in docs:
@@ -364,7 +385,7 @@ def main():
                 chunks = chunk_pages(pages)
                 if not chunks:
                     if a.commit:
-                        cur.execute("insert into public.chunk_docs (library_id, chunks, model) values (%s, 0, %s) on conflict (library_id) do nothing", (lid, a.model))
+                        cur.execute(f"insert into public.{'chunk_docs_stage' if a.stage else 'chunk_docs'} (library_id, chunks, model) values (%s, 0, %s) on conflict (library_id) do nothing", (lid, a.model))
                         conn.commit()
                     continue
                 t1 = time.time()
@@ -372,7 +393,7 @@ def main():
                 embed_s += time.time() - t1
                 prs = pair_rows(pages)
                 if a.commit:
-                    write_document(cur, lid, chunks, vectors, a.model, prs if (has_pairs and not a.no_pairs) else None)
+                    write_document(cur, lid, chunks, vectors, a.model, prs if (has_pairs and not a.no_pairs and not a.stage) else None, stage=a.stage)
                     conn.commit()
             except Exception as e:
                 # The database dropped the connection (11 Nov 2026: two runs died an hour in, each with hours of work

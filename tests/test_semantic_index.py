@@ -75,7 +75,7 @@ class Reconnect(unittest.TestCase):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "semantic_index.py"), encoding="utf-8").read()
         self.assertIn('if not gone or lost >= 5:', src)
         self.assertIn('WRITE_S["pairs"] += time.time() - t', src); self.assertIn("Minutes writing:", src)   # where the time goes is printed, not guessed (12 Nov 2026)
-        self.assertIn('prs if (has_pairs and not a.no_pairs) else None', src)
+        self.assertIn('prs if (has_pairs and not a.no_pairs and not a.stage) else None', src)
         self.assertIn('FILL_INDEXES = ("chunks_embedding", "page_pairs_pairs")', src)           # the fill writes with no index on the embeddings nor on the pairs
         self.assertIn('cur.execute(f"drop index if exists public.{name}")', src)
         self.assertNotIn("create index if not exists page_pairs_pairs", schema_text())
@@ -94,8 +94,8 @@ class Remaining(unittest.TestCase):
             def __init__(self): self.q = ""
             def execute(self, q, *a): self.q = q
             def fetchall(self): return [("PT_1-a", 2025, "Annual Report", 10)] * 3
-            def fetchone(self): return (True,) if "to_regclass" in self.q else (12345,) if "chunk_docs" in self.q else (91.26,)
-        self.assertEqual(SI.remaining_line(Cur(), (2024, None)), "Semantic fill: 12,345 documents done, 3 left to index; database 91.3 GB.")
+            def fetchone(self): return (True,) if "to_regclass" in self.q else (678,) if "chunk_docs_stage" in self.q else (12345,) if "chunk_docs" in self.q else (91.26,)
+        self.assertEqual(SI.remaining_line(Cur(), (2024, None)), "Semantic fill: 12,345 documents done, 678 staged, 3 left to index; database 91.3 GB.")
 
 
 class BuildSettings(unittest.TestCase):
