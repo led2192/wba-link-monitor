@@ -3274,6 +3274,54 @@ $$;
 revoke all on function public.admin_taxonomy_set(text, text, text, jsonb) from public, anon;
 grant execute on function public.admin_taxonomy_set(text, text, text, jsonb) to authenticated;
 
+-- A company's facts laid out by the taxonomy (15 Nov 2026, the owner: see quickly that the emissions were verified
+-- in 2020 and not in 2021, or that a target changed between two reports). For the owner only until the
+-- classification is trusted. With no company: the companies that have facts. With one: every fact not marked wrong,
+-- with its metric, group and block, the year it is shown under (the year the fact states, else WBA's reporting year
+-- of its period, else the year of the report it was read in) and the report it comes from. The page groups them.
+create or replace function public.admin_company_facts(key text, company text default null)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  ids text[];
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if coalesce(btrim(company), '') = '' then
+    return jsonb_build_object('companies', (select coalesce(jsonb_agg(to_jsonb(x) order by x.facts desc, x.company), '[]'::jsonb) from (
+      select f.wba_id, min(f.company) as company, count(*) as facts, count(f.metric) as classified
+      from public.ask_facts f where f.verdict is distinct from 'wrong' and f.wba_id is not null group by f.wba_id) x));
+  end if;
+  ids := case when exists (select 1 from public.ask_facts f where f.wba_id = btrim(company)) then array[btrim(company)] else public.find_company_ids(company) end;
+  if ids is null or coalesce(array_length(ids, 1), 0) <> 1 then
+    return jsonb_build_object('error', 'name one company');
+  end if;
+  return jsonb_build_object(
+    'wba_id', ids[1],
+    'company', (select min(f.company) from public.ask_facts f where f.wba_id = ids[1]),
+    'facts', (select coalesce(jsonb_agg(to_jsonb(x) order by x.block_position, x.group_position, x.label, x.shown_year desc nulls last, x.doc_year desc nulls last, x.at desc), '[]'::jsonb) from (
+      select f.id, f.at, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.period, f.wba_year, f.page, f.url, f.library_id, f.verdict,
+             d.year as doc_year, d.doc_type,
+             coalesce(f.year, f.wba_year, d.year) as shown_year,
+             case when f.year is not null then 'stated' when f.wba_year is not null then 'period' when d.year is not null then 'report' end as year_from,
+             f.metric, coalesce(m.label, f.what) as label, m.kind as metric_kind, m.unit_family, m.standard_ref,
+             g.key as grp, g.label as group_label, coalesce(g.position, 10000) as group_position,
+             b.key as block, b.label as block_label, coalesce(b.position, 10000) as block_position
+      from public.ask_facts f
+        left join public.documents d on d.library_id = f.library_id
+        left join public.fact_metrics m on m.key = f.metric
+        left join public.fact_groups g on g.key = m.grp
+        left join public.fact_blocks b on b.key = g.block
+      where f.wba_id = ids[1] and f.verdict is distinct from 'wrong') x));
+end;
+$$;
+revoke all on function public.admin_company_facts(text, text) from public, anon;
+grant execute on function public.admin_company_facts(text, text) to authenticated;
+
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
 create or replace function public.admin_link_new(key text, name text)
