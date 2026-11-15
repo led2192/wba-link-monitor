@@ -152,6 +152,36 @@ def rejection_patches(cid, library_rows, page_rows):
     return out
 
 
+def restore_patches(cid, library_rows, page_rows):
+    """A rejection undone: the documents the rejection discarded (its reason, no other) come back and the company's
+    pages are read again."""
+    out = [("report_library", r["id"], {"discard": False, "discard_reason": None})
+           for r in library_rows if (r.get("fields", {}).get("wba_id") or "") == cid and r["fields"].get("discard")
+           and _name(r["fields"].get("discard_reason")) == REJECT_REASON]
+    out += [("monitored_links", r["id"], {"monitor": True})
+            for r in page_rows if (r.get("fields", {}).get("wba_id") or "") == cid and not r["fields"].get("monitor")]
+    return out
+
+
+def _name(v):
+    return v.get("name") if isinstance(v, dict) else v
+
+
+EDIT_FIELDS = {"name": "company_name", "website": "website", "lei": "lei", "isin": "isin", "industry": "wba_industry",
+               "country": "hq_country", "region": "hq_region"}
+
+
+def edit_fields(fields):
+    """The owner's correction of a company (admin panel) as the library's fields. An emptied value empties the field."""
+    return {EDIT_FIELDS[k]: (v if v not in ("", None) else None) for k, v in (fields or {}).items() if k in EDIT_FIELDS}
+
+
+def isin_of(note):
+    """The ISIN the extension puts in a request's note ("ISIN ES0109067019"), or ''."""
+    m = re.search(r"\bISIN ([A-Z]{2}[A-Z0-9]{9}[0-9])\b", note or "")
+    return m.group(1) if m else ""
+
+
 def clean(fields):
     """The fields with a value (Airtable is not sent empty ones on a new row)."""
     return {k: v for k, v in fields.items() if v not in (None, "")}
@@ -176,7 +206,7 @@ def main():
         os.environ["QA_COMMIT"] = "true"
     run = qa.Run("add_companies.py")
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    c = {"hand rows": 0, "added": 0, "not added": 0, "requests copied": 0, "requests approved": 0, "made by people": 0, "withdrawn": 0, "rejected": 0}
+    c = {"hand rows": 0, "added": 0, "not added": 0, "requests copied": 0, "requests approved": 0, "made by people": 0, "withdrawn": 0, "rejected": 0, "restored": 0, "edited": 0}
     new_ids = []
 
     records = list(sweep("companies", ["wba_id", "company_name", "website", "lei", "intake_note"]))
@@ -209,10 +239,10 @@ def main():
                 at_once = cur.fetchone()[0] > 0
                 made = []
                 if at_once:
-                    cur.execute("select id, name, website, lei, wba_id from public.company_requests where status = 'new' and wba_id is not null "
+                    cur.execute("select id, name, website, lei, wba_id, note from public.company_requests where status = 'new' and wba_id is not null "
                                 "and review is distinct from 'rejected' order by id limit %s", (a.limit,))
                     made = cur.fetchall()
-                for rid, name, website, lei, cid in made:
+                for rid, name, website, lei, cid, req_note in made:
                     what, got, note = settle(name, website, lei, cid, existing)
                     c["made by people"] += 1
                     print(f"  company {cid} (request {rid}): {what}{' into ' + got if what == 'merge' else ''}", flush=True)
@@ -225,7 +255,7 @@ def main():
                     if what == "add":
                         airtable_request("POST", f"{API}/{BASE}/{quote('companies')}", headers, payload={"fields": clean({
                             "wba_id": cid, "company_name": (name or "").strip(), "website": website,
-                            "lei": norm_lei(lei), "intake_note": f"{note}, added by a person in lanterN ({today})"})})
+                            "lei": norm_lei(lei), "isin": isin_of(req_note), "intake_note": f"{note}, added by a person in lanterN ({today})"})})
                     if what in ("add", "done"):
                         cur.execute("update public.company_requests set status = 'added', result = %s where id = %s", (note, rid))
                     else:
@@ -260,6 +290,46 @@ def main():
                                          payload={"fields": {"intake_note": f"rejected in lanterN ({today})" + (f": {why}" if why else "")}})
                     cur.execute("update public.company_requests set status = 'rejected' where id = %s", (rid,))
                     conn.commit()
+                # a rejection the owner undid: the documents and pages it set aside come back
+                restored = []
+                if at_once:
+                    cur.execute("select id, wba_id from public.company_requests where status = 'restore' and wba_id like 'LN\\_%%' order by id limit %s", (a.limit,))
+                    restored = cur.fetchall()
+                for rid, cid in restored:
+                    safe = cid.replace("'", "")
+                    patches = restore_patches(cid, list(sweep("report_library", ["wba_id", "discard", "discard_reason"], "{wba_id}='%s'" % safe)),
+                                              list(sweep("monitored_links", ["wba_id", "monitor"], "{wba_id}='%s'" % safe)))
+                    row = next((r for r in records if (r["fields"].get("wba_id") or "").strip() == cid), None)
+                    c["restored"] += 1
+                    print(f"  company {cid} (request {rid}) restored: {len(patches)} rows brought back", flush=True)
+                    if not a.commit:
+                        continue
+                    for table, rec_id, fields in patches:
+                        airtable_request("PATCH", f"{API}/{BASE}/{quote(table)}/{rec_id}", headers, payload={"fields": fields})
+                    if row:
+                        airtable_request("PATCH", f"{API}/{BASE}/{quote('companies')}/{row['id']}", headers,
+                                         payload={"fields": {"intake_note": f"added as {cid}, restored after a rejection ({today})"}})
+                    cur.execute("update public.company_requests set status = 'added' where id = %s", (rid,))
+                    conn.commit()
+                # the owner's corrections of a company (admin panel): into the library's companies table
+                cur.execute("select to_regclass('public.company_edits') is not null")
+                edits = []
+                if cur.fetchone()[0]:
+                    cur.execute("select id, wba_id, fields from public.company_edits where applied is null order by id limit %s", (a.limit,))
+                    edits = cur.fetchall()
+                if edits:
+                    by_id = {(r["fields"].get("wba_id") or "").strip(): r["id"] for r in sweep("companies", ["wba_id"])}      # read again: rows made above are in it
+                for eid, cid, fields in edits:
+                    rec_id, patch = by_id.get(cid), edit_fields(fields)
+                    print(f"  edit {eid} of {cid}: {', '.join(sorted(patch)) or 'nothing'}{'' if rec_id else ' (no row yet: next run)'}", flush=True)
+                    if not rec_id:
+                        continue
+                    c["edited"] += 1
+                    if a.commit:
+                        if patch:
+                            airtable_request("PATCH", f"{API}/{BASE}/{quote('companies')}/{rec_id}", headers, payload={"fields": patch})
+                        cur.execute("update public.company_edits set applied = now() where id = %s", (eid,))
+                        conn.commit()
                 cur.execute("select id, name, website, lei, note, at::date from public.company_requests where status = 'new' "
                             + ("and wba_id is null " if at_once else "") + "order by id limit %s", (a.limit,))
                 for rid, name, website, lei, note, at in cur.fetchall():
@@ -305,7 +375,7 @@ def main():
 
     if a.ids_file:
         open(a.ids_file, "w").write(",".join(new_ids))
-    print(f"{c['made by people']} companies made by people ({c['withdrawn']} withdrawn as duplicates), {c['rejected']} rejected by the owner; "
+    print(f"{c['made by people']} companies made by people ({c['withdrawn']} withdrawn as duplicates), {c['rejected']} rejected by the owner, {c['restored']} restored, {c['edited']} corrected; "
           f"{c['hand rows']} rows added by hand, {c['requests copied']} requests copied, {c['requests approved']} approved: "
           f"{c['added']} companies added, {c['not added']} not added" + ("" if a.commit else " (dry run: nothing written)"), flush=True)
     run.finish("ok", rows_in=c["hand rows"] + c["requests copied"] + c["requests approved"], rows_out=c["added"] if a.commit else 0,

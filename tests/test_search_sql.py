@@ -239,6 +239,7 @@ def test_a_company_a_person_adds_exists_at_once():
     assert "q.review = 'rejected'" in req                                                                # a rejected company is not made again
     assert "if not public.admin_ok(key) then" in SQL[SQL.index("create or replace function public.admin_company_set("):]
     assert 'authed("admin_companies", { key })' in PAGE and 'authed("admin_company_set"' in PAGE
+    assert 'authed("admin_company_edit", { key, company: c.id, fields: changed })' in PAGE and '"Undo the rejection"' in PAGE and '"Merge into…"' in PAGE      # v70
     assert 'd = el("div"); d.id = "admin";' in PAGE and "← Back to the search" in PAGE                    # v69: a page, not a pop-up
     assert 'rpc/request_company' in PAGE and "Missing a company? Add it" in PAGE
 
@@ -338,7 +339,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set"}
+    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]

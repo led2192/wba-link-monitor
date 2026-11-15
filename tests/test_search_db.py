@@ -219,12 +219,35 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.request_company('Unilever Nigeria', 'unilever.com.ng')"); again = cur.fetchone()[0]
         self.assertEqual((again["again"], again["review"], again["why"]), (True, "rejected", "a unit of Unilever"))
         cur.execute("select count(*) from public.companies where wba_id = %s", (j["id"],)); self.assertEqual(cur.fetchone()[0], 1)
+        # the rejection is undone: the company is back and its file waits again; then it is merged into another company
+        cur.execute("select public.admin_company_set('k', %s, 'reopened')", (rows["Unilever Nigeria"]["request"],)); self.assertTrue(cur.fetchone()[0]["ok"])
+        cur.execute("select count(*) from public.companies where wba_id = %s", (d["id"],)); self.assertEqual(cur.fetchone()[0], 1)
+        cur.execute("update public.browser_uploads set status = 'taken', library_id = 'x' where wba_id = %s", (d["id"],))
+        cur.execute("select public.upload_begin(%s, 'c.pdf', 6000, %s)", (d["id"], "ab" * 31 + "cd")); cur.execute("update public.browser_uploads set status = 'taken' where sha256 = %s", ("ab" * 31 + "cd",))
+        cur.execute("select public.admin_company_set('k', %s, 'merged', null, 'PT_00000')", (rows["Unilever Nigeria"]["request"],)); m = cur.fetchone()[0]; self.assertTrue(m["ok"])
+        cur.execute("select wba_id, status, library_id from public.browser_uploads where sha256 in (%s, %s) and wba_id in ('PT_00000', %s) order by bytes, wba_id", ("cd" * 32, "ab" * 31 + "cd", d["id"]))
+        got = cur.fetchall()
+        self.assertIn(("PT_00000", "stored", None), got)                                     # the file only it had is sent again, for the other company
+        self.assertIn((d["id"], "known", "x"), got)                                           # the file both had stays, known
+        cur.execute("select review, merged_into from public.company_requests where id = %s", (rows["Unilever Nigeria"]["request"],)); self.assertEqual(cur.fetchone(), ("rejected", "PT_00000"))
+        cur.execute("select public.admin_company_set('k', %s, 'reopened')", (rows["Unilever Nigeria"]["request"],)); self.assertFalse(cur.fetchone()[0]["ok"])      # a merge is not undone
+        # the owner corrects a company people added; another company's name or LEI is refused; a company of WBA's list is not edited here
+        cur.execute("alter table public.companies add column if not exists isin text")
+        cur.execute("select public.admin_company_edit('k', %s, %s)", (j["id"], '{"name": "Acme Robotics Group", "lei": "529900t8bm49aursdo55", "isin": "ES0109067019", "industry": "Capital Goods", "country": "esp"}'))
+        self.assertTrue(cur.fetchone()[0]["ok"])
+        cur.execute("select name, lei, isin, industry, country from public.companies where wba_id = %s", (j["id"],))
+        self.assertEqual(cur.fetchone(), ("Acme Robotics Group", "529900T8BM49AURSDO55", "ES0109067019", "Capital Goods", "ESP"))
+        cur.execute("select fields ->> 'country', applied from public.company_edits where wba_id = %s", (j["id"],)); self.assertEqual(cur.fetchall(), [("ESP", None)])
+        cur.execute("select public.admin_company_edit('k', %s, %s)", (j["id"], '{"name": "Unilever PLC"}')); self.assertIn("Unilever", cur.fetchone()[0]["why"])
+        for co, bad in ((j["id"], '{"lei": "123"}'), (j["id"], '{"wba_id": "X"}'), ("PT_00000", '{"name": "Other"}')):
+            with self.assertRaises(Exception):
+                cur.execute("select public.admin_company_edit('k', %s, %s)", (co, bad))
         with self.assertRaises(Exception):
             cur.execute("select public.admin_company_set('k', 999999, 'accepted')")
         for bad in (("X",), ("Beta", "not a site"), ("Gamma", None, "123")):
             with self.assertRaises(Exception):
                 cur.execute("select public.request_company(%s, %s, %s)", (bad + (None, None))[:3])
-        cur.execute("delete from public.companies where wba_id like 'LN\\_%'"); cur.execute("delete from public.browser_uploads where wba_id like 'LN\\_%%' or sha256 = %s", ("cd" * 32,))
+        cur.execute("delete from public.companies where wba_id like 'LN\\_%'"); cur.execute("delete from public.browser_uploads where wba_id like 'LN\\_%%' or sha256 in (%s, %s)", ("cd" * 32, "ab" * 31 + "cd")); cur.execute("delete from public.company_edits")
 
     def test_a_file_sent_from_the_browser_is_registered_once(self):
         cur = self.conn.cursor()

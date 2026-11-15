@@ -16,7 +16,7 @@ AIRTABLE_QA_TOKEN for the run record (QA_COMMIT=true writes it).
 """
 import argparse, collections, os, sys, time
 
-FIELDS = ["wba_id", "company_name", "wba_industry", "hq_country", "hq_region", "website", "lantern_id", "lei", "intake_note"]
+FIELDS = ["wba_id", "company_name", "wba_industry", "hq_country", "hq_region", "website", "lantern_id", "lei", "intake_note", "isin"]
 
 
 def fiscal_rows(records):
@@ -63,7 +63,7 @@ def company_rows(records):
         out.append((wba, (f.get("company_name") or "").strip() or None, (f.get("wba_industry") or "").strip() or None,
                     (f.get("hq_country") or "").strip() or None, (f.get("hq_region") or "").strip() or None,
                     (f.get("website") or "").strip() or None, (f.get("lantern_id") or "").strip() or None,
-                    (f.get("lei") or "").strip().upper() or None))
+                    (f.get("lei") or "").strip().upper() or None, (f.get("isin") or "").strip().upper() or None))
     return out
 
 
@@ -121,6 +121,10 @@ def upsert(conn, rows):
                                       and column_name = 'lei') then
                          execute 'alter table public.companies add column lei text';      -- 15 Nov 2026: request_company compares it
                        end if;
+                       if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'companies'
+                                      and column_name = 'isin') then
+                         execute 'alter table public.companies add column isin text';
+                       end if;
                        if to_regclass('public.companies_lantern_id') is null then
                          execute 'create index companies_lantern_id on public.companies (lantern_id)';
                        end if;
@@ -129,10 +133,10 @@ def upsert(conn, rows):
         c.execute("create index if not exists companies_industry on public.companies (industry)")
         c.execute("create index if not exists companies_country on public.companies (country)")
         c.execute("create index if not exists companies_region on public.companies (region)")
-        c.executemany("""insert into public.companies (wba_id, name, industry, country, region, website, lantern_id, lei)
-                         values (%s, %s, %s, %s, %s, %s, %s, %s)
+        c.executemany("""insert into public.companies (wba_id, name, industry, country, region, website, lantern_id, lei, isin)
+                         values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                          on conflict (wba_id) do update set name = excluded.name, industry = excluded.industry,
-                           country = excluded.country, region = excluded.region, website = excluded.website, lei = excluded.lei,
+                           country = excluded.country, region = excluded.region, website = excluded.website, lei = excluded.lei, isin = excluded.isin,
                            lantern_id = coalesce(excluded.lantern_id, public.companies.lantern_id), updated = now()""", rows)
     conn.commit()
 
