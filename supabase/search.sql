@@ -3438,6 +3438,24 @@ end;
 $$;
 revoke all on function public.ask_names_trial(bigint) from public, anon, authenticated;
 
+-- The stage of the semantic fill (15 Nov 2026, semantic_index.py --stage): passages of the older years wait here, with
+-- no index on their embeddings, while the search reads public.chunks as before. They are moved into public.chunks and
+-- indexed once, when the fill is done. No function reads these tables.
+create table if not exists public.chunks_stage (like public.chunks including defaults);      -- the same columns; none of its indexes
+do $stage$ begin
+  if not exists (select 1 from pg_constraint where conrelid = 'public.chunks_stage'::regclass and contype = 'p') then
+    alter table public.chunks_stage add primary key (library_id, page, n);
+  end if;
+end $stage$;
+create table if not exists public.chunk_docs_stage (
+  library_id  text primary key,
+  chunks      int  not null,
+  model       text,
+  written     timestamptz not null default now()
+);
+alter table public.chunks_stage enable row level security;
+alter table public.chunk_docs_stage enable row level security;
+
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
 create or replace function public.admin_link_new(key text, name text)

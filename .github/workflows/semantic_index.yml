@@ -41,6 +41,9 @@ on:
       pairs:
         description: "false to write the chunks only (the word pairs in a later pass)"
         default: "true"
+      stage:
+        description: "true to write beside the indexed tables (chunks_stage): the fill of the older years, the search untouched"
+        default: "false"
       partition:
         description: "k/N: this run takes slice k of N of the documents (empty = everything)"
         default: ""
@@ -73,6 +76,7 @@ jobs:
           [ -n "${{ inputs.partition }}" ] && ARGS="$ARGS --partition ${{ inputs.partition }}"
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
           [ "${{ inputs.pairs }}" = "false" ] && ARGS="$ARGS --no-pairs"
+          [ "${{ inputs.stage }}" = "true" ] && ARGS="$ARGS --stage"
           [ "${{ inputs.build_index }}" = "true" ] && ARGS="--build-index --commit --build-memory ${{ inputs.build_memory || '512MB' }} --build-workers ${{ inputs.build_workers || '2' }}"
           [ "${{ inputs.build_bits }}" = "true" ] && ARGS="--build-bits --commit --build-memory ${{ inputs.build_memory || '512MB' }} --build-workers ${{ inputs.build_workers || '2' }}"
           [ "${{ inputs.remaining }}" = "true" ] && ARGS="--remaining --years ${{ inputs.years }}"
