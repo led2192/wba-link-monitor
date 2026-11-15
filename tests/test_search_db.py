@@ -489,6 +489,73 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(t["facts"] - t["classified"], sum(u["facts"] for u in t["unclassified"]))
             c.rollback()
 
+    def test_the_owner_changes_the_taxonomy_and_every_change_is_logged(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value) values (911, 'PT_A', 'A Co', 'Plastic packaging used', 'number', 5), "
+                        "(912, 'PT_B', 'B Co', 'Plastic packaging used 2023', 'number', 7), (913, 'PT_A', 'A Co', 'Virgin plastic', 'number', 2), (914, 'PT_A', 'A Co', 'Scope 1 emissions', 'number', 9)")
+            cur.execute("select public.fact_rematch()")
+            # a new metric from an unclassified name takes every fact with that name
+            cur.execute("select public.admin_metric_new('k', 'Plastic packaging used', 'e5', 'number')")
+            made = cur.fetchone()[0]
+            self.assertEqual((made["ok"], made["key"], made["matched"]), (True, "plastic_packaging_used", 2))
+            cur.execute("select public.admin_metric_new('k', 'Used plastic packaging 2024', 'e5') ->> 'error', public.admin_metric_new('k', 'X', 'nowhere') ->> 'error', public.admin_metric_new('k', ' ', 'e5') ->> 'error'")
+            self.assertEqual(cur.fetchone(), ('"Used plastic packaging 2024" is already a name of "Plastic packaging used"', "no such group", "a name is needed"))
+            # an unclassified name becomes another name of a metric; a name another metric answers to is refused
+            cur.execute("select public.admin_metric_edit('k', 'plastic_packaging_used', %s::jsonb)", ('{"aliases": ["Virgin plastic"], "label": "Plastic packaging", "grp": "e5", "unit_family": "mass"}',))
+            self.assertEqual(cur.fetchone()[0], {"ok": True, "matched": 1})
+            cur.execute("select public.admin_metric_edit('k', 'plastic_packaging_used', %s::jsonb) ->> 'error', public.admin_metric_edit('k', 'plastic_packaging_used', %s::jsonb) ->> 'error', "
+                        "public.admin_metric_edit('k', 'nope', '{}'::jsonb) ->> 'error'", ('{"aliases": ["Scope 1"]}', '{"kind": "sentence"}'))
+            self.assertEqual(cur.fetchone(), ('"Scope 1" is already a name of "Scope 1 emissions"', "kind: number, yes_no, list, text, person or target", "no such metric"))
+            cur.execute("select label, unit_family, aliases, status from public.fact_metrics where key = 'plastic_packaging_used'")
+            self.assertEqual(cur.fetchone(), ("Plastic packaging", "mass", ["Virgin plastic"], "active"))
+            # the old label is no longer a name: the facts keep their metric all the same
+            cur.execute("select count(*) from public.ask_facts where metric = 'plastic_packaging_used'")
+            self.assertEqual(cur.fetchone()[0], 3)
+            # merge: names and facts go to the other metric, which then answers to the merged one's names
+            cur.execute("select public.admin_metric_merge('k', 'plastic_packaging_used', 'waste_generated'), public.admin_metric_merge('k', 'waste_generated', 'waste_generated') ->> 'error'")
+            merged, same = cur.fetchone()
+            self.assertEqual((merged, same), ({"ok": True, "facts": 3}, "two different metrics are needed"))
+            cur.execute("select public.fact_match('Virgin plastic'), public.fact_match('Plastic packaging'), (select status || ' ' || merged_into from public.fact_metrics where key = 'plastic_packaging_used')")
+            self.assertEqual(cur.fetchone(), ("waste_generated", "waste_generated", "merged waste_generated"))
+            # retire: the facts go back to unclassified and stay there
+            cur.execute("select public.admin_metric_edit('k', 'scope_1', '{\"status\": \"retired\"}'::jsonb)")
+            cur.execute("select metric from public.ask_facts where ask_id = 914")
+            self.assertIsNone(cur.fetchone()[0])
+            cur.execute("select public.admin_metric_edit('k', 'scope_1', '{\"status\": \"active\"}'::jsonb) -> 'matched'")
+            self.assertGreaterEqual(cur.fetchone()[0], 1)
+            # blocks and groups
+            cur.execute("select public.admin_taxonomy_set('k', 'block', null, '{\"label\": \"Products & services\"}'::jsonb), "
+                        "public.admin_taxonomy_set('k', 'group', null, '{\"label\": \"Animal welfare\", \"block\": \"products_services\"}'::jsonb)")
+            blk, grp = cur.fetchone()
+            self.assertEqual((blk["key"], grp["key"]), ("products_services", "animal_welfare"))
+            cur.execute("select public.admin_taxonomy_set('k', 'group', 'animal_welfare', '{\"label\": \"Animals\", \"block\": \"sustainability\"}'::jsonb), "
+                        "public.admin_taxonomy_set('k', 'group', null, '{\"label\": \"Orphan\"}'::jsonb) ->> 'error', public.admin_taxonomy_set('k', 'group', 'e1', '{\"block\": \"mars\"}'::jsonb) ->> 'error'")
+            self.assertEqual(cur.fetchone()[1:], ("a group needs its block", "no such block"))
+            cur.execute("select label, block from public.fact_groups where key = 'animal_welfare'")
+            self.assertEqual(cur.fetchone(), ("Animals", "sustainability"))
+            cur.execute("select count(*), count(*) filter (where before is not null) from public.fact_metric_log")
+            changes, with_before = cur.fetchone()
+            self.assertGreaterEqual(changes, 8); self.assertGreaterEqual(with_before, 5)
+            c.rollback()
+
+    def test_the_names_given_to_the_reader_put_the_questions_own_first(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value, verdict) values (921, 'PT_A', 'A Co', 'Cobalt sourced from recycled batteries', 'number', 5, null), "
+                        "(922, 'PT_A', 'A Co', 'Cobalt mined by children', 'number', 1, 'wrong'), (923, 'PT_A', 'A Co', 'Pandas adopted', 'number', 1, null)")
+            cur.execute("select public.ask_metric_names('How much water did the company withdraw, and its cobalt?', 5)")
+            lines = cur.fetchone()[0].split("\n")
+            self.assertEqual(len(lines), 6)                                             # five metrics and the one loose name that shares a word
+            self.assertTrue(set(lines[:3]) == {"- Water withdrawal", "- Water consumption", "- Water discharge"} or "- Water target" in lines[:4], lines)
+            self.assertEqual(lines[-1], "- Cobalt sourced from recycled batteries")      # not the one a person marked wrong, not the pandas
+            cur.execute("select public.ask_metric_names('', 3), public.ask_metric_names(null, 3)")
+            empty, none = cur.fetchone()
+            self.assertEqual(len(empty.split("\n")), 3); self.assertEqual(len(none.split("\n")), 3)      # no word to go by: the most used metrics
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:

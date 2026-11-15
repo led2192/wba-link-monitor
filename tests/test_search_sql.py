@@ -339,7 +339,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy"}
+    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -428,4 +428,22 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "where f.metric is null and public.fact_match(f.what) is not null;" in SQL      # a classified fact is never touched
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v71 2026-11-15";' in PAGE
+    assert 'const CLIENT = "lantern v72 2026-11-15";' in PAGE
+
+
+def test_the_reader_is_given_the_names_in_use_only_when_the_option_is_on():
+    assert "values ('ask_metric_names', false," in SQL and "set is_on = true" not in SQL[SQL.index("values ('ask_metric_names', false,"):SQL.index("create or replace function public.ask_metric_names(")]
+    ask = SQL[SQL.index("create or replace function public.ask(\n"):]
+    ask = ask[:ask.index("$$;")]
+    assert "names := public.ask_metric_names(concat_ws(' ', asked, keywords));" in ask
+    assert "|| case when names <> '' then ' The message may also list metric names already in use." in ask      # the instructions are unchanged while it is off
+    assert "|| case when names <> '' then E'\\n\\nMetric names in use:\\n' || names else '' end" in ask
+    assert "revoke all on function public.ask_metric_names(text, int) from public, anon, authenticated;" in SQL
+
+
+def test_the_owner_edits_the_taxonomy_without_a_browser_dialog():
+    tax = PAGE[PAGE.index("async function adminTaxonomy(body, said)"):PAGE.index("async function adminCost(body)")]
+    for fn in ("admin_metric_edit", "admin_metric_merge", "admin_metric_new", "admin_taxonomy_set"):
+        assert f'"{fn}"' in tax, fn
+    assert "confirm(" not in tax and "prompt(" not in tax and "alert(" not in tax
+    assert 'retire.dataset.sure' in tax                                          # a second click, not a dialog
