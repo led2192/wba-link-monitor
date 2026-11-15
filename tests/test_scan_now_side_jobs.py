@@ -39,6 +39,18 @@ class SideJobs(unittest.TestCase):
         self.assertEqual(calls[-1], ["discover_pages.py", "--commit", "--max", "200", "--wba", "LN_0a1b2c3d"])
         self.assertFalse(os.path.exists("new_company_ids.txt"))
 
+    def test_the_watch_runs_the_code_of_main_not_the_code_it_started_with(self):
+        calls = []
+        def run(cmd, timeout=None):
+            calls.append(cmd); return R()
+        self.assertTrue(S.refresh_code(run=run))
+        self.assertEqual(calls, [["git", "fetch", "--quiet", "--depth", "1", "origin", "main"], ["git", "reset", "--quiet", "--hard", "FETCH_HEAD"]])
+        def broken(cmd, timeout=None):
+            raise OSError("no git")
+        self.assertFalse(S.refresh_code(run=broken))                      # the watch goes on
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scan_now.py"), encoding="utf-8").read()
+        self.assertIn('if checks % SIDE_EVERY == 1 and os.environ.get("GITHUB_ACTIONS"):\n            refresh_code()', src)
+
     def test_the_watch_calls_them(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scan_now.py"), encoding="utf-8").read()
         self.assertIn("if checks % SIDE_EVERY == 1:\n            side_jobs()", src)

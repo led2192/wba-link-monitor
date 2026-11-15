@@ -232,7 +232,7 @@ def main():
         # minutes later (add_companies.py, the step before this one): its files wait for the row, they are not orphans
         cur.execute("select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'company_requests' and column_name = 'wba_id'")
         if cur.fetchone()[0]:
-            cur.execute("select wba_id from public.company_requests where status = 'new' and wba_id is not null and review is distinct from 'rejected'")
+            cur.execute("select wba_id from public.company_requests where status in ('new', 'waiting') and wba_id is not null and review is distinct from 'rejected'")
             fresh = {r[0] for r in cur.fetchall()}
             waiting += [u for u in uploads if u["wba_id"] in fresh]
             uploads = [u for u in uploads if u["wba_id"] not in fresh]

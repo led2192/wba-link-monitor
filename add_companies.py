@@ -239,7 +239,8 @@ def main():
                 at_once = cur.fetchone()[0] > 0
                 made = []
                 if at_once:
-                    cur.execute("select id, name, website, lei, wba_id, note from public.company_requests where status = 'new' and wba_id is not null "
+                    # 'waiting' too: a watch still running the code of before 15 Nov 2026 copied such a request to the old Airtable table and left it waiting
+                    cur.execute("select id, name, website, lei, wba_id, note from public.company_requests where status in ('new', 'waiting') and wba_id is not null "
                                 "and review is distinct from 'rejected' order by id limit %s", (a.limit,))
                     made = cur.fetchall()
                 for rid, name, website, lei, cid, req_note in made:
@@ -258,6 +259,9 @@ def main():
                             "lei": norm_lei(lei), "isin": isin_of(req_note), "intake_note": f"{note}, added by a person in lanterN ({today})"})})
                     if what in ("add", "done"):
                         cur.execute("update public.company_requests set status = 'added', result = %s where id = %s", (note, rid))
+                        # files sent before the row existed and set aside as having no company: they wait again
+                        cur.execute("update public.browser_uploads set status = 'stored', result = null where wba_id = %s and status = 'orphan' "
+                                    "and result = 'the company is not in the companies table'", (cid,))
                     else:
                         # the same company under another id: the files sent go to it (unless it has the same file),
                         # the company made leaves the list, the request says why
