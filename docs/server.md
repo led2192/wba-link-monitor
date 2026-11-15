@@ -31,13 +31,16 @@ A workflow that can run on the server chooses its machine from the repository va
 | Name in `LANTERN_JOBS` | Workflow | Able to move since | Moved on |
 | --- | --- | --- | --- |
 | `scan_now` | Scan now (the watcher) | 14 Nov 2026 | 14 Nov 2026, 14:26 UTC |
-| `library_mirror` | Library mirror (nightly, 04:43 UTC) | 14 Nov 2026 | named in the variable by the owner on the evening of 14 Nov 2026; first night there 15 Nov |
+| `library_mirror` | Library mirror (nightly, 04:43 UTC) | 14 Nov 2026 | 15 Nov 2026, 06:27 UTC (38 minutes there, 27 on GitHub's machine the day before) |
 
 First result of Network compare (14 Nov 2026, 400 pages): the same answer on both machines for 94% of the pages; GitHub's machine got an answer from 331 and the server from 335; 9 pages answered GitHub only and 13 the server only. One run, so the difference of 4 may be chance; it shows the server's address is not treated worse.
 
 Before a job that reads company sites moves, run **Network compare** (Actions, manual): it reads the same sample of monitored pages from both machines and shows how many answer one and not the other.
 
 What differs on the server and has to be watched for each job moved: the pages are read from another network address (a company site may answer it differently from GitHub's), the Python packages of one job stay installed for the next, and files a job leaves outside its checkout stay on the disk.
+
+## The clock
+The server starts the scheduled jobs at their time (`clock.py`, workflow **Clock**, always running like the Scan now watch). What starts when is the table `server/clock.json`: the workflow file, its times of day in UTC, and the inputs. To move a scheduled workflow to the clock: remove its `schedule:`, add the input `as_scheduled` and make it do what the scheduled run did, add its line to the table. A test fails if a workflow in the table still has a schedule of its own.
 
 ## Checking it
 The workflow **Server check** (Actions, manual, and every Monday) runs on the server and fails if the firewall, fail2ban or the automatic updates are off, or if the first-boot token is still on disk. It also shows the cores, memory and free disk, and installs the repository's packages the way a job does.

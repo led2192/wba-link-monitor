@@ -6,6 +6,10 @@ name: Library mirror
 on:
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "run as the nightly mirror: it writes (the clock ticks this)"
+        type: boolean
+        default: false
       commit:
         description: "write public.library (false = read and compare only)"
         type: boolean
@@ -13,8 +17,6 @@ on:
       limit:
         description: "documents at most (0 = all)"
         default: "0"
-  schedule:
-    - cron: "43 4 * * *"        # 04:43 UTC
 
 concurrency:
   group: library-mirror
@@ -34,7 +36,7 @@ jobs:
       - name: Where this runs
         run: echo "machine $RUNNER_NAME ($RUNNER_ENVIRONMENT), $(nproc) cores"
       - name: Mirror
-        run: python library_mirror.py --limit "${{ inputs.limit || '0' }}" ${{ (github.event_name == 'schedule' || inputs.commit) && '--commit' || '' }}
+        run: python library_mirror.py --limit "${{ inputs.limit || '0' }}" ${{ (inputs.as_scheduled || inputs.commit) && '--commit' || '' }}
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}

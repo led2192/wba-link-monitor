@@ -1,0 +1,50 @@
+# lanterN's own clock (clock.py): starts the scheduled jobs at their time from the server, because GitHub's scheduler
+# starts them hours late or not at all (15 Nov 2026). One watch of five and a half hours after another, like the
+# Scan now watch; the table of what starts when is server/clock.json. The cron below only restarts the chain if it
+# ever breaks: with a clock already running, the new run waits its turn and takes over when the watch ends.
+name: Clock
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "length of this watch in minutes"
+        default: "330"
+  schedule:
+    - cron: "11 */3 * * *"
+
+concurrency:
+  group: clock
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write        # it starts other workflows
+
+jobs:
+  clock:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main       # a watch started hours ago by the cron still reads today's table
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q -r requirements.txt
+      - name: Keep the time
+        run: |
+          sudo mkdir -p /srv/lantern && sudo chown "$(id -un)":"$(id -gn)" /srv/lantern
+          python clock.py --list
+          python clock.py --minutes "${{ inputs.minutes || '330' }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QA_COMMIT: "true"
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+      - name: Start the next watch
+        if: ${{ !cancelled() }}
+        run: gh workflow run clock.yml --repo "${{ github.repository }}" --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}

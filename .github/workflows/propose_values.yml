@@ -7,17 +7,18 @@ name: Propose values
 # request touching it runs a dry run: 30 companies per filing method, and the model reader on three
 # companies with no filing (at most 0.30 USD). Nightly since 9 Nov 2026 (05:07 UTC): the filings for every
 # company and the model reader, incremental, on the pilot attributes with a 1.5 USD cap.
+# The nightly pass is started by lanterN's own clock on the server at 03:30 UTC (clock.py, server/clock.json) since
+# 15 Nov 2026, with as_scheduled ticked: SEC and ESEF for every company, then the model reader on the pilot
+# attributes for 2024 and 2025, what was not read in 30 days, up to READER_MAX_USD. Before that it started after the
+# night's scheduled load or at a 05:07 cron, and GitHub fired both hours late or not at all (15 Nov: neither by
+# 07:00). Idempotent: a second pass in a day re-reads nothing within --fresh-days.
 on:
-  workflow_run:                # the nightly pass runs after the night's Evidence database load (01:41 UTC cron, about
-    workflows: ["Evidence database load"]   # 02:20 in practice): GitHub fired the 05:07 cron hours late or not at all
-    types: [completed]         # (10 Nov 2026); the load's evening run (19:41 UTC) is skipped by the hour check below
-  schedule:
-    - cron: "7 5 * * *"        # 05:07 UTC fallback (owner's decision, 9 Nov 2026): SEC and ESEF for every company, then the
-                               # model reader on the pilot attributes for 2024 and 2025, what was not read in 30 days,
-                               # up to 1.5 USD; a refused call (no credit) stops the reading and writes what was read.
-                               # Idempotent: a second pass in a day re-reads nothing within --fresh-days
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "run as the nightly pass (the clock ticks this); every other box is ignored"
+        type: boolean
+        default: false
       commit:
         description: "write to attribute_values (unticked = dry run)"
         type: boolean
@@ -105,16 +106,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             ARGS="--limit 30 --methods sec,esef,model --companies PT_02083,PT_00646,PT_02801 --model-years 2024 --max-usd 0.3 --escalate none"
-          elif [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_run" ]; then
-            if [ "${{ github.event_name }}" = "workflow_run" ]; then
-              H=$(date -u -d "${{ github.event.workflow_run.run_started_at }}" +%H)
-              # (11 Nov 2026: a functions-only install of the search functions, dispatched by hand at 06:33 UTC, is also a
-              # load that "completed" before noon, and it started a second paid pass beside the night's. Only the
-              # scheduled load starts one.)
-              if [ "${{ github.event.workflow_run.conclusion }}" != "success" ] || [ "$H" -ge 12 ] || [ "${{ github.event.workflow_run.event }}" != "schedule" ]; then
-                echo "the load that finished was not the night's scheduled one (event ${{ github.event.workflow_run.event }}, started ${{ github.event.workflow_run.run_started_at }}, ${{ github.event.workflow_run.conclusion }}): nothing to do"; exit 0
-              fi
-            fi
+          elif [ "${{ inputs.as_scheduled }}" = "true" ]; then
             ARGS="--years 2018- --methods sec,esef,model --model-years 2025,2024 --attributes GMC_00048.1,GMC_00001.1,GMC_00002.1,GMC_00003.1,GMC_02526.1 --max-usd ${{ vars.READER_MAX_USD || '5' }} --fresh-days 30 --commit"
           else
             ARGS="--years ${{ inputs.years }} --methods ${{ inputs.methods }} --limit ${{ inputs.limit }} --model-years ${{ inputs.model_years }} --max-usd ${{ inputs.max_usd }} --fresh-days ${{ inputs.fresh_days || '30' }}"
