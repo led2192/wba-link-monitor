@@ -2,6 +2,9 @@
 
 Lessons that cost time to learn. Read before changing the area they name.
 
+## Facts and their names
+- **A word left out of a name's key changes what the name means.** On 15 Nov 2026 "restated" and "restatement" were both left out of `fact_key` so that a restated figure would find its metric. "Restatement of 2023 Scope 1 emissions" (a yes or no) then had the same key as "Scope 1 emissions" and was filed under the tonnes, on the live page, within the hour. Before a word joins the list of words left out, look for names where it is the subject rather than a qualifier; and a metric that is a number takes figures only.
+
 ## Embeddings
 - **The plain signs of these embeddings say almost nothing.** multilingual-e5-small puts every passage in a narrow cone: the mean of 165,652 embeddings has length 0.89 of 1. An index on the signs of the numbers (binary quantisation, tried on 15 Nov 2026 to fit the index in memory) found 12% of the full index's first ten pages. Subtract the mean first: the same test kept 90% (800 candidates, ordered again by the whole embeddings). Any compression of these vectors by sign, or any test of one, must centre them; measure on a sample before building an index that takes an hour.
 

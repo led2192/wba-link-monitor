@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v76 2026-11-15";
+  const CLIENT = "lantern v77 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1913,13 +1913,17 @@
     return null;
   }
   // points [{year, value}] as a line: small beside the row, large when asked for
-  function factLine(points, large, unit) {
+  function factLine(points, large, unit, before) {
     const w = large ? 520 : 84, h = large ? 170 : 22, padX = large ? 46 : 3, padY = large ? 22 : 3;
-    const xs = points.map(p => p.year), ys = points.map(p => p.value), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys, 0), y1 = Math.max(...ys);
+    const xs = points.map(p => p.year), ys = points.concat(before || []).map(p => p.value), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys, 0), y1 = Math.max(...ys);
     const X = x => padX + (x1 === x0 ? 0.5 : (x - x0) / (x1 - x0)) * (w - 2 * padX), Y = y => h - padY - (y1 === y0 ? 0.5 : (y - y0) / (y1 - y0)) * (h - 2 * padY);
     const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"); svg.setAttribute("width", w); svg.setAttribute("height", h); svg.setAttribute("viewBox", `0 0 ${w} ${h}`); svg.style.verticalAlign = "middle";
     const add = (tag, attrs, text) => { const n = document.createElementNS(ns, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; svg.appendChild(n); return n; };
     if (large) { add("line", { x1: padX, y1: h - padY, x2: w - padX, y2: h - padY, stroke: "var(--line)" }); add("text", { x: padX - 6, y: Y(y1) + 4, "text-anchor": "end", "font-size": 11, fill: "currentColor" }, fmt(y1)); add("text", { x: padX - 6, y: Y(y0) + 4, "text-anchor": "end", "font-size": 11, fill: "currentColor" }, fmt(y0)); if (unit) add("text", { x: padX, y: 12, "font-size": 11, fill: "currentColor" }, unit); }
+    if (before) {                                                        // as first reported: dashed, grey, under the latest figures
+      add("polyline", { points: before.map(p => `${X(p.year).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" "), fill: "none", stroke: "#8892A6", "stroke-width": 1.5, "stroke-dasharray": "5 4" });
+      for (const p of before) { const c = add("circle", { cx: X(p.year).toFixed(1), cy: Y(p.value).toFixed(1), r: 3, fill: "#8892A6" }); const t = document.createElementNS(ns, "title"); t.textContent = `${p.year}, as first reported: ${fmt(p.value)}${unit ? " " + unit : ""}`; c.appendChild(t); }
+    }
     add("polyline", { points: points.map(p => `${X(p.year).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" "), fill: "none", stroke: "#2378FF", "stroke-width": large ? 2 : 1.5 });
     for (const p of points) { const c = add("circle", { cx: X(p.year).toFixed(1), cy: Y(p.value).toFixed(1), r: large ? 3.5 : 2, fill: "#2378FF" }); const t = document.createElementNS(ns, "title"); t.textContent = `${p.year}: ${fmt(p.value)}${unit ? " " + unit : ""}`; c.appendChild(t);
       if (large) add("text", { x: X(p.year).toFixed(1), y: h - 6, "text-anchor": "middle", "font-size": 11, fill: "currentColor" }, p.year); }
@@ -1961,7 +1965,6 @@
     const valueNode = f => { const span = el("span"); const v = el("a", null, factShown(f) || "?"); v.href = "#"; v.title = [f.period, [f.doc_year, f.doc_type].filter(Boolean).join(" "), f.page ? `page ${f.page}` : "", f.year_from === "report" ? "year: the report's, the fact states none" : "", f.verdict === "right" ? "confirmed by a person" : ""].filter(Boolean).join(" · ");
       v.style.cssText = "color:inherit;text-decoration:none;border-bottom:1px dotted var(--line)"; v.onclick = e => { e.preventDefault(); if (f.library_id && f.page) openReader(f.library_id, f.page, factNeedle(f)); else if (/^https?:\/\//i.test(f.url || "")) window.open(pageUrl(f), "_blank", "noopener"); };
       span.appendChild(v); if (f.verdict === "right") span.appendChild(document.createTextNode(" ✓"));
-      if (f.restated) span.appendChild(tag("restated", `given again, changed, by the ${f.doc_year || "later"} report`));      // v76: a restatement is the same metric, marked
       return span; };
     for (const b of blocks.values()) {
       const block = el("details"); block.open = true; block.style.cssText = "border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin-bottom:10px;background:var(--box)";
@@ -1970,20 +1973,32 @@
       for (const g of b.groups.values()) {
         const rows = [], big = el("div");
         for (const m of g.metrics.values()) {
+          // v77 (the owner): the figure of the latest report prevails in its year; the figure a year was first given with is kept beside it
           const first = y => (m.cells.get(String(y)) || [])[0], flags = new Map(); let changed = false;
+          const earliest = y => { const nums = (m.cells.get(String(y)) || []).filter(f => f.kind === "number" && f.doc_year != null); return nums.length > 1 ? nums.reduce((a, f) => f.doc_year < a.doc_year ? f : a) : null; };
           const asc = years.slice().reverse().filter(y => first(y));
           for (let i = 1; i < asc.length; i++) { const c = factChange(first(asc[i - 1]), first(asc[i]), m.kind); if (c) { flags.set(String(asc[i]), c); changed = true; } }
           for (const list of m.cells.values()) if (list.length > 1) changed = true;
           if (st.changed && !changed) continue;
-          const points = asc.map(y => first(y)).filter(f => f.kind === "number").map(f => ({ year: f.shown_year, value: Number(f.value), unit: factUnit(f.unit), shown: f.unit }));
+          const point = f => ({ year: f.shown_year, value: Number(f.value), unit: factUnit(f.unit), shown: f.unit });
+          const points = asc.map(y => first(y)).filter(f => f.kind === "number").map(point);
           const lineable = points.length >= 3 && points.every(p => p.unit === points[0].unit);
+          // the same years as each was first reported: drawn beside the latest figures when a later report changed any of them
+          const before = asc.map(y => { const f = first(y), e = earliest(y); return f && f.kind === "number" ? point(e && e !== f && factUnit(e.unit) === factUnit(f.unit) ? e : f) : null; }).filter(Boolean);
+          const restatedAny = lineable && before.length === points.length && before.some((p, i) => p.value !== points[i].value);
           const name = el("span", null, m.label || "?"); if (!m.key) name.style.fontStyle = "italic";
           const cells = cols.map(c => { const list = m.cells.get(c) || [], td = el("span");
-            list.forEach((f, i) => { if (i) td.appendChild(el("br")); td.appendChild(valueNode(f)); });
-            if (list.length > 1 && !list.some(f => f.restated)) td.appendChild(tag("reports differ", "two reports state this year differently: the newer report first"));      // a restatement says why they differ
-            const fl = flags.get(c); if (fl) td.appendChild(tag(fl.text, fl.title)); return td; });
+            const several = list.length > 1, laterReport = several && list[0].doc_year != null && list.slice(1).some(f => f.doc_year != null && f.doc_year < list[0].doc_year);
+            list.forEach((f, i) => { if (i) td.appendChild(el("br")); td.appendChild(valueNode(f));
+              if (several && f.doc_year) { const by = el("span", null, ` ${f.doc_year} report`); by.style.cssText = "font-size:11px;color:var(--muted, #667)"; td.appendChild(by); }
+              if (i === 0 && (laterReport || f.restated)) td.appendChild(tag("restated", laterReport ? `the ${f.doc_year} report gives this figure for the year; an earlier report gave another` : "the report says it gives this figure again, changed"));
+              else if (i > 0 && f.restated) td.appendChild(tag("restated", "the report says it gives this figure again, changed"));
+              if (i === 0) { const fl = flags.get(c); if (fl) td.appendChild(tag(fl.text, fl.title)); } });      // the change on the year before belongs to the figure that prevails
+            if (several && !laterReport && !list.some(f => f.restated)) td.appendChild(tag("reports differ", "two reports of the same year state this year differently"));
+            return td; });
           let chart = "";
-          if (lineable) { chart = el("a"); chart.href = "#"; chart.title = "Enlarge"; chart.appendChild(factLine(points, false)); chart.onclick = e => { e.preventDefault(); const open = big.dataset.metric === m.label; big.innerHTML = ""; big.dataset.metric = open ? "" : m.label; if (!open) { const cap = el("div", null, m.label); cap.style.cssText = "font-weight:600;margin:4px 0"; big.append(cap, factLine(points, true, points[0].shown || "")); } }; }
+          if (lineable) { chart = el("a"); chart.href = "#"; chart.title = "Enlarge"; chart.appendChild(factLine(points, false)); chart.onclick = e => { e.preventDefault(); const open = big.dataset.metric === m.label; big.innerHTML = ""; big.dataset.metric = open ? "" : m.label; if (!open) { const cap = el("div", null, m.label); cap.style.cssText = "font-weight:600;margin:4px 0"; big.append(cap, factLine(points, true, points[0].shown || "", restatedAny ? before : null));
+            if (restatedAny) { const key2 = el("div", null, "Solid line: each year as the latest report gives it. Dashed line: as it was first reported."); key2.style.cssText = "font-size:12px;color:var(--muted, #667);margin:2px 0 8px"; big.appendChild(key2); } } }; }
           rows.push([name].concat(cells, [chart]));
         }
         if (!rows.length) continue; shownRows += rows.length;
