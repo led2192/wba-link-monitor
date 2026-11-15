@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v72 2026-11-15";
+  const CLIENT = "lantern v73 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1652,7 +1652,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Fact taxonomy": adminTaxonomy, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -1874,6 +1874,119 @@
       isBox.append(is, adminBtn("Set", () => { const m = byKey.get(is.value); if (m) call("admin_metric_edit", { metric: m.key, fields: { aliases: (m.aliases || []).concat([u.name]) } }); }));
       innBox.append(inn, adminBtn("Create", () => { if (inn.value) call("admin_metric_new", { label: u.name, grp: inn.value, kind: u.kind === "yes_no" || u.kind === "text" ? u.kind : "number" }); }));
       return [u.name, (u.kind || "").replace("_", " "), u.facts, u.companies, isBox, innBox]; })));
+  }
+  // Company facts (v73). One company's facts laid out by the taxonomy: a row a metric, a column a year, the newest
+  // on the left, every value linked to the page it was read on. What changed from one year to the next is marked (a
+  // yes that became a no, a figure that moved more than 10%, a target that is not the same), two reports that state
+  // one year differently are both shown, a metric with three years or more gets a small line, and the climate group
+  // shows the share of scope 1, 2 and 3. Facts marked wrong are not sent. For the owner only, for now.
+  const companyFactsView = { company: "", changed: false };
+  const factUnit = u => { const x = String(u || "").toLowerCase().replace(/\s+/g, " ").trim(); return /^(metric )?(tons?|tonnes?|t|mt) ?(of )?co2(e|eq|-e|-eq)?\.?$/.test(x) ? "tco2e" : x; };
+  const factShown = f => f.kind === "number" ? [fmt(Number(f.value)), f.unit].filter(Boolean).join(" ") : (f.answer || "");
+  const factSame = (a, b) => a.kind === "number" && b.kind === "number" ? factUnit(a.unit) === factUnit(b.unit) && Math.abs(Number(a.value) - Number(b.value)) <= Math.abs(Number(b.value)) * 0.01 : String(a.answer || "").trim().toLowerCase() === String(b.answer || "").trim().toLowerCase();
+  // what the newer year's value did against the older one's: null when they cannot be compared or did not change enough
+  function factChange(older, newer, metricKind) {
+    if (older.kind === "number" && newer.kind === "number") {
+      if (factUnit(older.unit) !== factUnit(newer.unit)) return null;
+      const a = Number(older.value), b = Number(newer.value); if (a === b) return null;
+      if (metricKind === "target") return { text: "target changed", title: `was ${factShown(older)}` };
+      if (!a) return null; const pct = (b - a) / Math.abs(a);
+      return Math.abs(pct) > 0.10 ? { text: `${pct > 0 ? "▲ +" : "▼ −"}${Math.abs(Math.round(pct * 100))}%`, title: `was ${factShown(older)}` } : null;
+    }
+    if (older.kind === "yes_no" && newer.kind === "yes_no") return factSame(older, newer) ? null : { text: `was ${String(older.answer || "").toLowerCase()}`, title: "the answer changed from the year before" };
+    if (metricKind === "target" || metricKind === "person") return factSame(older, newer) ? null : { text: "changed", title: `was ${factShown(older)}` };
+    return null;
+  }
+  // points [{year, value}] as a line: small beside the row, large when asked for
+  function factLine(points, large, unit) {
+    const w = large ? 520 : 84, h = large ? 170 : 22, padX = large ? 46 : 3, padY = large ? 22 : 3;
+    const xs = points.map(p => p.year), ys = points.map(p => p.value), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys, 0), y1 = Math.max(...ys);
+    const X = x => padX + (x1 === x0 ? 0.5 : (x - x0) / (x1 - x0)) * (w - 2 * padX), Y = y => h - padY - (y1 === y0 ? 0.5 : (y - y0) / (y1 - y0)) * (h - 2 * padY);
+    const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg"); svg.setAttribute("width", w); svg.setAttribute("height", h); svg.setAttribute("viewBox", `0 0 ${w} ${h}`); svg.style.verticalAlign = "middle";
+    const add = (tag, attrs, text) => { const n = document.createElementNS(ns, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; svg.appendChild(n); return n; };
+    if (large) { add("line", { x1: padX, y1: h - padY, x2: w - padX, y2: h - padY, stroke: "var(--line)" }); add("text", { x: padX - 6, y: Y(y1) + 4, "text-anchor": "end", "font-size": 11, fill: "currentColor" }, fmt(y1)); add("text", { x: padX - 6, y: Y(y0) + 4, "text-anchor": "end", "font-size": 11, fill: "currentColor" }, fmt(y0)); if (unit) add("text", { x: padX, y: 12, "font-size": 11, fill: "currentColor" }, unit); }
+    add("polyline", { points: points.map(p => `${X(p.year).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" "), fill: "none", stroke: "#2378FF", "stroke-width": large ? 2 : 1.5 });
+    for (const p of points) { const c = add("circle", { cx: X(p.year).toFixed(1), cy: Y(p.value).toFixed(1), r: large ? 3.5 : 2, fill: "#2378FF" }); const t = document.createElementNS(ns, "title"); t.textContent = `${p.year}: ${fmt(p.value)}${unit ? " " + unit : ""}`; c.appendChild(t);
+      if (large) add("text", { x: X(p.year).toFixed(1), y: h - 6, "text-anchor": "middle", "font-size": 11, fill: "currentColor" }, p.year); }
+    return svg;
+  }
+  async function adminCompanyFacts(body) {
+    const st = companyFactsView; body.innerHTML = "";
+    const bar = el("div"); bar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px";
+    const box = document.createElement("input"); box.placeholder = "a company"; box.value = st.company && !st.id ? st.company : ""; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--box);color:var(--fg)";
+    const show = () => { st.company = box.value.trim(); st.id = false; adminCompanyFacts(body); };
+    box.onkeydown = ev => { if (ev.key === "Enter") show(); };
+    bar.append(box, adminBtn("Show", show)); body.appendChild(bar);
+    if (!st.company) {
+      const got = await authed("admin_company_facts", { key, company: null }); if (!got) { body.append(el("p", null, "Not available.")); return; }
+      const note = el("p", null, "Companies with facts kept from answers. Facts marked wrong are left out everywhere here."); note.style.color = "var(--muted, #667)"; body.appendChild(note);
+      body.appendChild(adminTable(["Company", "Facts", "With a metric", ""], got.companies.map(c => [c.company, c.facts, c.classified, adminBtn("Open", () => { st.company = c.wba_id; st.id = true; adminCompanyFacts(body); })])));
+      return;
+    }
+    const sheet = await authed("admin_company_facts", { key, company: st.company });
+    if (!sheet || sheet.error) { body.append(el("p", null, sheet && sheet.error ? `Not shown: ${sheet.error}.` : "Not available.")); bar.appendChild(adminBtn("All companies", () => { st.company = ""; adminCompanyFacts(body); })); return; }
+    const only = adminBtn(st.changed ? "Showing only what changed" : "Only what changed", () => { st.changed = !st.changed; adminCompanyFacts(body); }); if (st.changed) only.style.fontWeight = "700";
+    bar.append(adminBtn("All companies", () => { st.company = ""; adminCompanyFacts(body); }), only);
+    const title = el("h3", null, `${sheet.company || sheet.wba_id} · ${sheet.facts.length} fact${sheet.facts.length === 1 ? "" : "s"}`); title.style.margin = "0 0 10px"; body.appendChild(title);
+    if (!sheet.facts.length) { body.append(el("p", null, "No fact kept for this company yet.")); return; }
+    const years = [...new Set(sheet.facts.map(f => f.shown_year).filter(y => y != null))].sort((a, b) => b - a), noYear = sheet.facts.some(f => f.shown_year == null);
+    const cols = years.map(String).concat(noYear ? ["no year"] : []);
+    // block > group > metric, in the order the database sent them (the taxonomy's own order; unclassified last)
+    const blocks = new Map();
+    for (const f of sheet.facts) {
+      const bk = f.block || "~", gk = f.grp || "~", mk = f.metric || "~" + String(f.what || "").trim().toLowerCase();
+      if (!blocks.has(bk)) blocks.set(bk, { label: f.block_label || "Unclassified", groups: new Map() });
+      const groups = blocks.get(bk).groups; if (!groups.has(gk)) groups.set(gk, { key: f.grp, label: f.group_label || "", metrics: new Map() });
+      const metrics = groups.get(gk).metrics; if (!metrics.has(mk)) metrics.set(mk, { key: f.metric, label: f.label, kind: f.metric_kind, cells: new Map() });
+      const cells = metrics.get(mk).cells, ck = f.shown_year == null ? "no year" : String(f.shown_year); if (!cells.has(ck)) cells.set(ck, []);
+      if (!cells.get(ck).some(x => factSame(x, f))) cells.get(ck).push(f);              // the same value read twice is shown once; the newest report came first
+    }
+    const tag = (text, title) => { const t = el("span", null, text); t.title = title || ""; t.style.cssText = "display:inline-block;font-size:11px;padding:0 6px;border:1px solid var(--line);border-radius:999px;margin-left:5px;white-space:nowrap"; return t; };
+    const valueNode = f => { const span = el("span"); const v = el("a", null, factShown(f) || "?"); v.href = "#"; v.title = [f.period, [f.doc_year, f.doc_type].filter(Boolean).join(" "), f.page ? `page ${f.page}` : "", f.year_from === "report" ? "year: the report's, the fact states none" : "", f.verdict === "right" ? "confirmed by a person" : ""].filter(Boolean).join(" · ");
+      v.style.cssText = "color:inherit;text-decoration:none;border-bottom:1px dotted var(--line)"; v.onclick = e => { e.preventDefault(); if (f.library_id && f.page) openReader(f.library_id, f.page, factNeedle(f)); else if (/^https?:\/\//i.test(f.url || "")) window.open(pageUrl(f), "_blank", "noopener"); };
+      span.appendChild(v); if (f.verdict === "right") span.appendChild(document.createTextNode(" ✓")); return span; };
+    for (const b of blocks.values()) {
+      const block = el("details"); block.open = true; block.style.cssText = "border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin-bottom:10px;background:var(--box)";
+      const head = el("summary"); head.style.cssText = "cursor:pointer;font-weight:600;padding:2px 0"; head.textContent = b.label; block.appendChild(head);
+      let shownRows = 0;
+      for (const g of b.groups.values()) {
+        const rows = [], big = el("div");
+        for (const m of g.metrics.values()) {
+          const first = y => (m.cells.get(String(y)) || [])[0], flags = new Map(); let changed = false;
+          const asc = years.slice().reverse().filter(y => first(y));
+          for (let i = 1; i < asc.length; i++) { const c = factChange(first(asc[i - 1]), first(asc[i]), m.kind); if (c) { flags.set(String(asc[i]), c); changed = true; } }
+          for (const list of m.cells.values()) if (list.length > 1) changed = true;
+          if (st.changed && !changed) continue;
+          const points = asc.map(y => first(y)).filter(f => f.kind === "number").map(f => ({ year: f.shown_year, value: Number(f.value), unit: factUnit(f.unit), shown: f.unit }));
+          const lineable = points.length >= 3 && points.every(p => p.unit === points[0].unit);
+          const name = el("span", null, m.label || "?"); if (!m.key) name.style.fontStyle = "italic";
+          const cells = cols.map(c => { const list = m.cells.get(c) || [], td = el("span");
+            list.forEach((f, i) => { if (i) td.appendChild(el("br")); td.appendChild(valueNode(f)); });
+            if (list.length > 1) td.appendChild(tag("reports differ", "two reports state this year differently: the newer report first"));
+            const fl = flags.get(c); if (fl) td.appendChild(tag(fl.text, fl.title)); return td; });
+          let chart = "";
+          if (lineable) { chart = el("a"); chart.href = "#"; chart.title = "Enlarge"; chart.appendChild(factLine(points, false)); chart.onclick = e => { e.preventDefault(); const open = big.dataset.metric === m.label; big.innerHTML = ""; big.dataset.metric = open ? "" : m.label; if (!open) { const cap = el("div", null, m.label); cap.style.cssText = "font-weight:600;margin:4px 0"; big.append(cap, factLine(points, true, points[0].shown || "")); } }; }
+          rows.push([name].concat(cells, [chart]));
+        }
+        if (!rows.length) continue; shownRows += rows.length;
+        if (g.label) { const h = el("h4", null, g.label); h.style.cssText = "margin:12px 0 4px;font-size:14px"; block.appendChild(h); }
+        if (g.key === "e1" && !st.changed) {                                     // the share of scope 1, 2 and 3, a bar a year, when the three are there in one unit
+          const pick = (y, keys) => { for (const k of keys) { const m = g.metrics.get(k), f = m && (m.cells.get(String(y)) || [])[0]; if (f && f.kind === "number") return f; } return null; };
+          const bars = years.map(y => ({ y, parts: [pick(y, ["scope_1"]), pick(y, ["scope_2_market", "scope_2_location", "scope_2"]), pick(y, ["scope_3"])] })).filter(r => r.parts.every(Boolean) && r.parts.every(f => factUnit(f.unit) === factUnit(r.parts[0].unit)) && r.parts.reduce((a, f) => a + Number(f.value), 0) > 0);
+          if (bars.length) {
+            const wrap = el("div"); wrap.style.cssText = "margin:6px 0 10px"; const cap = el("div", null, "Share of scope 1, 2 and 3"); cap.style.cssText = "font-size:12px;color:var(--muted, #667);margin-bottom:4px"; wrap.appendChild(cap);
+            for (const r of bars) { const total = r.parts.reduce((a, f) => a + Number(f.value), 0), line = el("div"); line.style.cssText = "display:flex;align-items:center;gap:8px;margin:2px 0;font-size:12px";
+              const yr = el("span", null, String(r.y)); yr.style.cssText = "width:40px;flex:none"; const bar2 = el("div"); bar2.style.cssText = "display:flex;height:14px;width:360px;max-width:60%;border-radius:4px;overflow:hidden;border:1px solid var(--line)";
+              r.parts.forEach((f, i) => { const seg = el("div"); seg.style.cssText = `width:${(100 * Number(f.value) / total).toFixed(2)}%;background:${["#2378FF", "#0FC8BE", "#FAC300"][i]}`; seg.title = `Scope ${i + 1}: ${factShown(f)}`; bar2.appendChild(seg); });
+              line.append(yr, bar2, el("span", null, r.parts.map((f, i) => `S${i + 1} ${Math.round(100 * Number(f.value) / total)}%`).join(" · "))); wrap.appendChild(line); }
+            block.appendChild(wrap);
+          }
+        }
+        block.append(adminTable(["Metric"].concat(cols, [""]), rows), big);
+      }
+      if (shownRows) body.appendChild(block);
+    }
+    if (st.changed && !body.querySelector("details")) body.append(el("p", null, "Nothing changed from one year to the next among these facts, and no two reports differ."));
   }
   async function adminCost(body) {
     const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available."; return; }

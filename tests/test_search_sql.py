@@ -339,7 +339,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set"}
+    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -428,7 +428,19 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "where f.metric is null and public.fact_match(f.what) is not null;" in SQL      # a classified fact is never touched
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v72 2026-11-15";' in PAGE
+    assert 'const CLIENT = "lantern v73 2026-11-15";' in PAGE
+
+
+def test_a_companys_facts_by_year_are_for_the_owner_and_leave_out_the_wrong_ones():
+    fn = SQL[SQL.index("create or replace function public.admin_company_facts("):]
+    fn = fn[:fn.index("$$;")]
+    assert fn.count("f.verdict is distinct from 'wrong'") == 2                     # in the list of companies and in the sheet
+    assert "coalesce(f.year, f.wba_year, d.year) as shown_year" in fn
+    sheet = PAGE[PAGE.index("async function adminCompanyFacts(body)"):PAGE.index("async function adminCost(body)")]
+    assert '"Company facts": adminCompanyFacts' in PAGE and 'authed("admin_company_facts", { key, company: st.company })' in sheet
+    assert "Math.abs(pct) > 0.10" in PAGE and 'metricKind === "target"' in PAGE     # a figure that moved more than 10%; a target that is not the same
+    assert "points.length >= 3 && points.every(p => p.unit === points[0].unit)" in sheet      # a line only for three years in one unit
+    assert '["scope_2_market", "scope_2_location", "scope_2"]' in sheet and '"reports differ"' in sheet
 
 
 def test_the_reader_is_given_the_names_in_use_only_when_the_option_is_on():

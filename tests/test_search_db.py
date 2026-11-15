@@ -556,6 +556,30 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(len(empty.split("\n")), 3); self.assertEqual(len(none.split("\n")), 3)      # no word to go by: the most used metrics
             c.rollback()
 
+    def test_a_companys_facts_come_with_their_metric_group_block_and_year(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.documents (library_id, wba_id, year, doc_type) values ('sheet-23', 'PT_SHEET', 2023, 'Sustainability Report') on conflict (library_id) do nothing")
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value, unit, answer, year, library_id, page, verdict) values "
+                        "(931, 'PT_SHEET', 'Sheet Co', 'Scope 1 emissions', 'number', 100, 'tCO2e', null, 2022, 'sheet-23', 5, null), "
+                        "(932, 'PT_SHEET', 'Sheet Co', 'Scope 1 emissions', 'number', 80, 'tCO2e', null, 2023, 'sheet-23', 5, 'right'), "
+                        "(933, 'PT_SHEET', 'Sheet Co', 'Scope 1 emissions', 'number', 999, 'tCO2e', null, 2023, 'sheet-23', 6, 'wrong'), "
+                        "(934, 'PT_SHEET', 'Sheet Co', 'Emissions verified', 'yes_no', null, null, 'yes', null, 'sheet-23', 9, null), "
+                        "(935, 'PT_SHEET', 'Sheet Co', 'Colour of the logo', 'text', null, null, 'green', null, null, null, null)")
+            cur.execute("select public.fact_rematch()")
+            cur.execute("select public.admin_company_facts('k')")
+            row = [x for x in cur.fetchone()[0]["companies"] if x["wba_id"] == "PT_SHEET"][0]
+            self.assertEqual((row["company"], row["facts"], row["classified"]), ("Sheet Co", 4, 3))        # the wrong one is not counted
+            cur.execute("select public.admin_company_facts('k', 'PT_SHEET')")
+            sheet = cur.fetchone()[0]
+            self.assertEqual(sheet["company"], "Sheet Co")
+            got = [(f["metric"], f["block"], f["grp"], f["shown_year"], f["year_from"]) for f in sheet["facts"]]
+            self.assertEqual(got, [("scope_1", "sustainability", "e1", 2023, "stated"), ("scope_1", "sustainability", "e1", 2022, "stated"),
+                                   ("emissions_verified", "commitments", "assurance", 2023, "report"), (None, None, None, None, None)])   # the taxonomy's order, the unclassified last
+            self.assertEqual(sheet["facts"][0]["doc_type"], "Sustainability Report"); self.assertEqual(sheet["facts"][3]["label"], "Colour of the logo")
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:
