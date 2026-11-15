@@ -2020,7 +2020,7 @@ begin
               case when k <> 'number' then left(btrim(f ->> 'answer'), 300) end, src ->> 'library_id', (src ->> 'page')::int, src ->> 'url',
               public.wba_year(public.fiscal_label_year(f ->> 'period'),
                               (select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = src ->> 'wba_id')),
-              public.fact_match(f ->> 'what'))      -- its metric in the taxonomy, when a metric has that name
+              public.fact_match(f ->> 'what', src ->> 'company'))      -- its metric in the taxonomy, when a metric has that name (with or without the company's own name in it)
       returning id into new_id;
     n := n + 1;
     kept := kept || ((select to_jsonb(a) - 'ask_id' - 'verdict_by' - 'verdict_at' from public.ask_facts a where a.id = new_id)
@@ -2891,7 +2891,8 @@ as $$
              '[^a-z0-9]+', ' ', 'g'),
            ' ') x
     where x <> '' and x !~ '^(19|20)[0-9]{2}$' and x !~ '^fy[0-9]{2,4}$'
-      and x <> all(array['the', 'of', 'and', 'in', 'for', 'a', 'an', 'to', 'by', 'total', 'company', 'group', 'global', 'annual', 'gross', 'reported', 's'])
+      and x <> all(array['the', 'of', 'and', 'in', 'for', 'a', 'an', 'to', 'by', 'total', 'company', 'group', 'global', 'annual', 'gross', 'reported', 's',
+                       'worldwide', 'globally', 'consolidated'])
   ) t
 $$;
 
@@ -2908,6 +2909,27 @@ as $$
   limit 1
 $$;
 revoke all on function public.fact_match(text) from public, anon, authenticated;
+
+-- The same, for a fact of a known company (15 Nov 2026, the owner's screenshot: "Nike total revenues", "NIKE, Inc.
+-- revenues" and "Nike chief executive officer" waited unclassified beside the metrics Revenue and Chief executive
+-- officer). The name is tried as it is first; only when no metric has it, it is tried again without the words of the
+-- company's own name and without the endings of company names (Inc, Ltd, SA). A name that is nothing but the
+-- company's name finds nothing.
+create or replace function public.fact_match(name text, company text) returns text
+language sql stable security definer
+set search_path = public, extensions
+as $$
+  select coalesce(
+    public.fact_match(name),
+    (select public.fact_match(string_agg(w, ' '))
+     from regexp_split_to_table(public.fact_key(name), ' ') w
+     where w <> '' and coalesce(btrim(company), '') <> ''
+       and w <> all(regexp_split_to_array(public.fact_key(company), ' '))
+       and w <> all(array['inc', 'incorporated', 'corp', 'corporation', 'co', 'ltd', 'limited', 'plc', 'sa', 'ag', 'nv', 'bv', 'se', 'spa', 'ab', 'asa',
+                          'oyj', 'gmbh', 'llc', 'holding', 'sab', 'tbk', 'bhd', 'berhad', 'kk', 'pjsc', 'jsc'])
+     having count(*) < array_length(regexp_split_to_array(public.fact_key(name), ' '), 1)))      -- only when a word was taken off: the plain name was tried already
+$$;
+revoke all on function public.fact_match(text, text) from public, anon, authenticated;
 
 insert into public.fact_blocks (key, label, position) values
   ('company', 'Company', 10), ('finance', 'Finance', 20), ('sustainability', 'Sustainability', 30), ('commitments', 'Commitments and policies', 40)
@@ -3034,7 +3056,7 @@ on conflict (key) do nothing;
 
 -- The facts kept before the taxonomy, and those a new alias now reaches: every fact with no metric is looked up again
 -- each time this file is installed. A fact that has a metric is never touched here.
-update public.ask_facts f set metric = public.fact_match(f.what) where f.metric is null and public.fact_match(f.what) is not null;
+update public.ask_facts f set metric = public.fact_match(f.what, f.company) where f.metric is null and public.fact_match(f.what, f.company) is not null;
 
 -- The taxonomy for the owner's page: blocks, their groups, their metrics with how many facts and companies each has;
 -- the names of the facts with no metric, the most used first; and how much of all facts is classified.
@@ -3121,7 +3143,7 @@ set search_path = public, extensions
 as $$
 declare done int;
 begin
-  update public.ask_facts f set metric = public.fact_match(f.what) where f.metric is null and public.fact_match(f.what) is not null;
+  update public.ask_facts f set metric = public.fact_match(f.what, f.company) where f.metric is null and public.fact_match(f.what, f.company) is not null;
   get diagnostics done = row_count;
   return done;
 end;
