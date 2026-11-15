@@ -63,8 +63,9 @@ def parse_years(text):
     return int(text), int(text)
 
 
-def documents_to_index(cur, years, partition, limit):
-    """[(library_id, year, doc_type, pages)] in scope and not yet done, newest year first, in slice k of N."""
+def documents_to_index(cur, years, partition, limit, ids=None):
+    """[(library_id, year, doc_type, pages)] in scope and not yet done, newest year first, in slice k of N.
+    ids: only these documents (the fast lane); the scope is the same, so a document outside it is not indexed."""
     y0, y1 = years
     k, n = partition
     cur.execute("select to_regclass('public.chunk_docs') is not null")
@@ -75,8 +76,9 @@ def documents_to_index(cur, years, partition, limit):
         where d.doc_type = any(%s) and d.text_status = 'ok' and d.year >= %s and (%s::int is null or d.year <= %s)
           {"and not exists (select 1 from public.chunk_docs c where c.library_id = d.library_id)" if has_done else ""}
           and (abs(hashtext(d.library_id)) %% %s) = %s
+          and (%s::text[] is null or d.library_id = any(%s))
         order by d.year desc, d.library_id
-        limit %s""", (list(MAIN_TYPES), y0, y1, y1, n, k, limit))
+        limit %s""", (list(MAIN_TYPES), y0, y1, y1, n, k, ids, ids, limit))
     return cur.fetchall()
 
 
@@ -258,6 +260,7 @@ def main():
     ap.add_argument("--remaining", action="store_true", help="print how many documents are done and left, and stop")
     ap.add_argument("--build-memory", default="512MB", help="maintenance_work_mem for --build-index: about half the database machine's RAM")
     ap.add_argument("--build-workers", type=int, default=2, help="parallel workers for --build-index: the machine's processors minus one")
+    ap.add_argument("--ids", default="", help="the fast lane: only these library ids (comma-separated), if they are in scope")
     ap.add_argument("--no-pairs", action="store_true", help="write the chunks only; the word pairs of these documents are left for a later pass")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
@@ -309,7 +312,7 @@ def main():
         if a.commit:
             drop_vector_index(cur)
             cur.execute("set statement_timeout = '120s'")
-        docs = documents_to_index(cur, years, partition, a.limit if a.limit else 1_000_000)
+        docs = documents_to_index(cur, years, partition, a.limit if a.limit else 1_000_000, [x.strip() for x in a.ids.split(",") if x.strip()] or None)
         print(f">>> {len(docs):,} documents to index (years {a.years}, slice {partition[0]}/{partition[1]}), model {a.model}", flush=True)
         for lid, year, dtype, pages_n in docs:
             if time.time() - t0 > a.minutes * 60:

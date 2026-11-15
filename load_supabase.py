@@ -58,6 +58,52 @@ def plan(listing, loaded):
             [e for e in evidence_files(listing) if e[1] not in loaded])
 
 
+def fast_files(listing, loaded, run_id):
+    """The store files of one fast-lane run (build_fulltext.py --ids): (docs files, pages files not loaded yet,
+    fastmeta files). A part's name carries the run that wrote it (-r<run>a<attempt>-)."""
+    docs, pages = tc.complete_parts(listing)
+    tag = f"-r{run_id}a"
+    return ([n for n in docs if tag in n], [n for n in pages if tag in n and n not in loaded],
+            sorted(n for n in listing if n.startswith("fastmeta-") and n.endswith(f"-r{run_id}.jsonl.gz")))
+
+
+def add_fastmeta(meta, folder, names):
+    """The fast lane's metadata for the documents the snapshot does not hold yet (they were read after it was
+    made). Without it a load between a fast-lane run and the next snapshot would write those documents with no
+    company, type or year. The snapshot's own line always wins. Returns the documents added."""
+    n = 0
+    for name in sorted(names):
+        for m in tc.read_jsonl_gz(os.path.join(folder, name)):
+            if m.get("id") and m["id"] not in meta:
+                meta[m["id"]] = m; n += 1
+    return n
+
+
+def fast_load(conn, store, listing, run_id, commit, say=print):
+    """One fast-lane run into the database: its documents (with the metadata it published) and their pages. No
+    schema, no other document, no index work: seconds, not the ten minutes of a whole load. Returns counters."""
+    docs_names, pages_names, meta_names = fast_files(listing, loaded_names(conn), run_id)
+    c = collections.Counter({"docs files": len(docs_names), "pages files": len(pages_names)})
+    if not docs_names:
+        return c
+    work = tempfile.mkdtemp(prefix="sb-fast-")
+    tc.sync_down(store, docs_names + pages_names + meta_names, work)
+    index = tc.load_docs_index(work, docs_names)
+    meta = {}
+    add_fastmeta(meta, work, meta_names)
+    status = collections.Counter(d.get("status") for d in index.values())
+    say(f">>> fast lane run {run_id}: {len(index):,} documents ({', '.join(f'{k} {v:,}' for k, v in status.most_common())}), metadata for {len(meta):,}", flush=True)
+    if commit:
+        c["documents upserted"] = upsert_documents(conn, (document_row(d, meta.get(i, {})) for i, d in index.items() if i in meta), say=say)
+        c["documents without metadata"] = sum(1 for i in index if i not in meta)      # never written with an empty company
+        for name in pages_names:
+            part = tc.part_of(name)[1]
+            docs_n, rows_n = load_pages(conn, name, current_pages(tc.read_jsonl_gz(os.path.join(work, name)), index, part))
+            c["documents with pages"] += docs_n; c["pages"] += rows_n
+    shutil.rmtree(work, ignore_errors=True)
+    return c
+
+
 def newest_meta(listing):
     metas = sorted(n for n in listing if n.startswith("meta-"))
     return metas[-1] if metas else None
@@ -517,6 +563,7 @@ def main():
     ap.add_argument("--parts", type=int, default=0, help="at most this many pages files (0 = all pending)")
     ap.add_argument("--max-gb", type=float, default=6.0, help="stop loading pages at this database size")
     ap.add_argument("--functions-only", action="store_true", help="apply search.sql (the search functions) with --commit and stop: no schema, no documents, no pages (10 Nov 2026: a function change during the day without the two-hour documents refresh)")
+    ap.add_argument("--fast-run", default="", help="the fast lane: load only the documents and pages one run of build_fulltext.py --ids stored (its GitHub run id)")
     ap.add_argument("--index", action="store_true", help="fill the stored words of older pages and build the search index when it is missing and no pages file is left")
     a = ap.parse_args()
     if a.commit:
@@ -536,6 +583,16 @@ def main():
             refresh_derived(conn)
         print(f"search.sql {'applied' if a.commit else 'checked and rolled back'}", flush=True)
         run.finish("ok", rows_in=0, rows_out=0, counters={"functions_only": True, "committed": a.commit}, notes="search functions only")
+        return 0
+    if a.fast_run:
+        if not re.fullmatch(r"[A-Za-z0-9]+", a.fast_run):
+            sys.exit("--fast-run: a run id")
+        store = tc.open_store()
+        conn = connect(os.environ["SUPABASE_DB_URL"])
+        c = fast_load(conn, store, store.assets(), a.fast_run, a.commit)
+        conn.close()
+        print(f"fast lane load: {', '.join(f'{k} {v:,}' for k, v in c.items())}" + ("" if a.commit else " (dry run: nothing written)"), flush=True)
+        run.finish("ok", rows_in=c["docs files"], rows_out=c["pages"], counters=dict(c), notes="fast lane")
         return 0
     store = tc.open_store()
     listing = store.assets()
@@ -557,6 +614,10 @@ def main():
     if mname:
         tc.sync_down(store, [mname], work)
         meta = {m["id"]: m for m in tc.read_jsonl_gz(os.path.join(work, mname))}
+    fast_names = sorted(n for n in listing if n.startswith("fastmeta-"))
+    if fast_names:
+        tc.sync_down(store, fast_names, work)
+        print(f">>> fast lane metadata: {add_fastmeta(meta, work, fast_names):,} documents the snapshot does not hold yet ({len(fast_names):,} files)", flush=True)
     status = collections.Counter(d.get("status") for d in index.values())
     print(f">>> documents in the store: {len(index):,} ({', '.join(f'{k} {v:,}' for k, v in status.most_common())}); "
           f"metadata snapshot {mname or 'none'} ({len(meta):,})", flush=True)
