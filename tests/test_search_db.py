@@ -595,6 +595,27 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(cur.fetchone(), (1, 0, 1))
             c.rollback()
 
+    def test_a_readers_reply_is_reduced_to_numbers_for_the_names_comparison(self):
+        import json, psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            sources = [{"n": 1, "library_id": "x", "page": 3}, {"n": 2, "library_id": "x", "page": 4}]
+            raw = ('Scope 1 was 120 tCO2e [1] and revenue 5 bn [2]. Verified [1].\nFACTS: ' + json.dumps([
+                {"what": "Scope 1 emissions", "kind": "number", "value": "120", "source": 1},
+                {"what": "Revenue", "kind": "number", "value": "5,000,000,000", "source": "[2]"},
+                {"what": "Pandas adopted", "kind": "number", "value": "3", "source": 9},
+                {"what": "Emissions verified", "kind": "yes_no", "answer": "yes", "source": 1}]))
+            cur.execute("select public.ask_reply_numbers(%s, %s::jsonb, %s)", (raw, json.dumps(sources), "- Scope 1 emissions\n- Revenue\n- Net income"))
+            got = cur.fetchone()[0]
+            self.assertEqual((got["answered"], got["cites"], got["facts"], got["with_metric"], got["as_listed"]), (True, 3, 3, 3, 2))     # the fact with no page behind it is not counted
+            self.assertEqual(sorted(got["values"]), ["120", "5000000000"]); self.assertEqual(len(got["names"]), 3)
+            cur.execute("select public.ask_reply_numbers('no list here', '[]'::jsonb, '')")
+            got = cur.fetchone()[0]
+            self.assertEqual((got["answered"], got["facts"], got["values"]), (True, 0, []))
+            cur.execute("select public.ask_names_trial(-1) ->> 'skipped'")
+            self.assertEqual(cur.fetchone()[0], "no such answer")
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:
