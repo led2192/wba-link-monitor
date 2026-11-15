@@ -65,6 +65,25 @@ class SearchOnPostgres(unittest.TestCase):
                                ("s-nobody", 2022, None),           # nobody said anything: Airtable's year stays
                                ("s-unknown", 2024, "sender")])     # no fiscal month known: the year printed
 
+    def test_a_report_of_one_or_two_pages_is_not_shown_as_a_report(self):
+        import psycopg, load_supabase as L
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("alter table public.documents add column if not exists type_by text")
+            cur.execute("create temp table tmp_docs (like public.documents including defaults) on commit drop")
+            cur.execute("insert into tmp_docs (library_id, doc_type, pages) values ('bio', 'Annual Report', 1), ('note', 'Integrated Report', 2), "
+                        "('real', 'Annual Report', 240), ('three', 'Sustainability Report', 3), ('nocount', 'Annual Report', null), "
+                        "('zero', 'Annual Report', 0), ('policy', 'Policy Documents', 1)")
+            n = L.short_types(cur)
+            cur.execute("select library_id, doc_type, type_by from tmp_docs order by library_id")
+            got = cur.fetchall()
+            c.rollback()
+        self.assertEqual(n, 2)
+        self.assertEqual(got, [("bio", "UNKNOWN", "too short"), ("nocount", "Annual Report", None), ("note", "UNKNOWN", "too short"),
+                               ("policy", "Policy Documents", None),       # a one-page policy is a policy
+                               ("real", "Annual Report", None), ("three", "Sustainability Report", None),
+                               ("zero", "Annual Report", None)])           # no pages counted: its length is not known
+
     def test_company_first_finds_the_same_pages(self):
         """Option company_first: four words or more within a company read the company's pages; the list is the same."""
         cur = self.conn.cursor()

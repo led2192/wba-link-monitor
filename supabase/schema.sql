@@ -38,6 +38,11 @@ alter table public.documents add column if not exists found text;
 -- report, taken as the year its period ends, with WBA's reporting-year rule applied: 14 Nov 2026); null when it is
 -- Airtable's `year`. The first fact about a document decided in this database and not in Airtable.
 alter table public.documents add column if not exists year_by text;        -- not "year_from": the search functions have a parameter of that name
+-- type_by: 'too short' when the type shown here is not Airtable's: a document of one or two pages typed as a periodic
+-- report (an annual, integrated or sustainability report, a 10-K, a registration document) is shown as UNKNOWN
+-- (15 Nov 2026: 7,443 such documents of 865 companies, one-page executive biographies among them, came up under the
+-- "Annual report" filter). Null when the type is Airtable's.
+alter table public.documents add column if not exists type_by text;
 create index if not exists documents_wba_id on public.documents (wba_id);
 create index if not exists documents_year on public.documents (year);
 create index if not exists documents_doc_type on public.documents (doc_type);
