@@ -25,14 +25,14 @@ class Shares(unittest.TestCase):
 
     def test_both_ways_use_their_index_expression(self):
         self.assertIn("(c.embedding::extensions.halfvec(384)) operator(extensions.<=>)", M.FULL_SQL)
-        self.assertIn("(public.chunk_bits(c.embedding)) operator(extensions.<~>) public.chunk_bits(%s::real[]::extensions.vector(384))", M.BITS_SQL)
+        self.assertIn("(public.chunk_bits(c.embedding)::bit(384)) operator(extensions.<~>) public.chunk_bits(%s::real[]::extensions.vector(384))::bit(384)", M.BITS_SQL)
         self.assertIn("embedding operator(extensions.<=>) %s::real[]::extensions.vector(384) as dist from cand", M.BITS_SQL)      # ordered again by the whole embeddings
 
 
 class Index(unittest.TestCase):
     def test_the_signs_index_stands_beside_the_full_one_and_is_never_dropped_for_a_fill(self):
         self.assertIn("create index if not exists chunks_signs on public.chunks using hnsw", S.BITS_INDEX_SQL)
-        self.assertIn("((public.chunk_bits(embedding)) extensions.bit_hamming_ops)", S.BITS_INDEX_SQL)
+        self.assertIn("((public.chunk_bits(embedding)::bit(384)) extensions.bit_hamming_ops)", S.BITS_INDEX_SQL)      # 15 Nov 2026: without the cast, "column does not have dimensions"
         self.assertNotIn("chunks_signs", S.FILL_INDEXES)
         self.assertIn("operator(extensions.-) '{mean}'::extensions.vector(384)", S.BITS_FUNCTION_SQL)      # the signs of the embedding minus the mean
 

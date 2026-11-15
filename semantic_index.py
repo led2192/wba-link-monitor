@@ -199,7 +199,7 @@ INDEX_SQL = ("create index if not exists chunks_embedding on public.chunks using
 # public.chunk_bits(v) holds the mean as a constant: made once from a sample and never replaced, because the index is
 # only right for the mean it was built with.
 BITS_INDEX_SQL = ("create index if not exists chunks_signs on public.chunks using hnsw "
-                  "((public.chunk_bits(embedding)) extensions.bit_hamming_ops) with (m = 16, ef_construction = 64)")
+                  "((public.chunk_bits(embedding)::bit(384)) extensions.bit_hamming_ops) with (m = 16, ef_construction = 64)")      # the cast: a function's result carries no length, and the index needs one
 BITS_FUNCTION_SQL = ("create function public.chunk_bits(v extensions.vector) returns bit(384) language sql immutable parallel safe "
                      "as $fn$ select extensions.binary_quantize(v operator(extensions.-) '{mean}'::extensions.vector(384))::bit(384) $fn$")
 

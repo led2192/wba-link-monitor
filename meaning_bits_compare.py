@@ -34,7 +34,7 @@ BITS_SQL = """
 with cand as materialized (
   select c.library_id, c.page, c.embedding
   from public.chunks c
-  order by (public.chunk_bits(c.embedding)) operator(extensions.<~>) public.chunk_bits(%s::real[]::extensions.vector(384)) limit %s),
+  order by (public.chunk_bits(c.embedding)::bit(384)) operator(extensions.<~>) public.chunk_bits(%s::real[]::extensions.vector(384))::bit(384) limit %s),
 near as (select library_id, page, embedding operator(extensions.<=>) %s::real[]::extensions.vector(384) as dist from cand order by dist limit 400)
 select library_id, page from (select distinct on (library_id, page) library_id, page, dist from near order by library_id, page, dist) p
 order by dist limit 50"""
