@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v70 2026-11-15";
+  const CLIENT = "lantern v71 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1652,7 +1652,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Fact taxonomy": adminTaxonomy, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -1803,6 +1803,31 @@
       const counts = el("span", null, ` · ${list.length} fact${list.length === 1 ? "" : "s"}` + (right ? ` · ${right} right` : "") + (wrong ? ` · ${wrong} wrong` : "") + (open ? ` · ${open} not marked` : "")); counts.style.fontWeight = "400"; head.appendChild(counts);
       block.append(head, adminTable(cols, list.map(line))); body.appendChild(block);
     }
+  }
+  // Fact taxonomy (v71). The order given to the facts of answers: blocks, their groups, their metrics, with how many
+  // facts and companies each metric holds, and below them the names no metric has yet, the most used first.
+  async function adminTaxonomy(body) {
+    const t = await authed("admin_taxonomy", { key }); if (!t) { body.textContent = "Not available."; return; }
+    body.innerHTML = "";
+    const share = t.facts ? Math.round(100 * t.classified / t.facts) : 0;
+    const intro = el("p", null, `${Number(t.facts).toLocaleString("en-GB")} facts kept from answers; ${Number(t.classified).toLocaleString("en-GB")} have a metric (${share}%). A fact gets its metric when its name is the metric's name or one of its other names. The rest wait below as unclassified.`);
+    intro.style.color = "var(--muted, #667)"; body.appendChild(intro);
+    for (const b of t.blocks) {
+      const metrics = b.groups.reduce((a, g) => a + g.metrics.length, 0), facts = b.groups.reduce((a, g) => a + g.metrics.reduce((x, m) => x + Number(m.facts), 0), 0);
+      const block = el("details"); block.open = facts > 0; block.style.cssText = "border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin-bottom:10px;background:var(--box)";
+      const head = el("summary"); head.style.cssText = "cursor:pointer;font-weight:600;padding:2px 0"; head.textContent = b.label;
+      const counts = el("span", null, ` · ${metrics} metric${metrics === 1 ? "" : "s"} · ${facts} fact${facts === 1 ? "" : "s"}`); counts.style.fontWeight = "400"; head.appendChild(counts);
+      block.appendChild(head);
+      for (const g of b.groups) {
+        const h = el("h4", null, g.label + (g.standard ? ` (${g.standard})` : "")); h.style.cssText = "margin:12px 0 4px;font-size:14px"; block.appendChild(h);
+        block.appendChild(adminTable(["Metric", "Kind", "Unit", "Standard", "Facts", "Companies", "Other names"],
+          g.metrics.map(m => [m.label + (m.status === "proposed" ? " (proposed)" : ""), m.kind.replace("_", " "), m.unit_family || "", m.standard_ref || "", m.facts, m.companies, (m.aliases || []).join(" · ")])));
+      }
+      body.appendChild(block);
+    }
+    body.append(el("h3", null, `Unclassified names (${t.unclassified.length}${t.unclassified.length === 300 ? ", the 300 most used" : ""})`));
+    if (!t.unclassified.length) body.append(el("p", null, "None: every fact has a metric."));
+    else body.appendChild(adminTable(["Name as the answer wrote it", "Kind", "Facts", "Companies"], t.unclassified.map(u => [u.name, (u.kind || "").replace("_", " "), u.facts, u.companies])));
   }
   async function adminCost(body) {
     const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available."; return; }
