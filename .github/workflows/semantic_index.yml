@@ -10,6 +10,9 @@ on:
       build_index:
         description: "true to build the index on the embeddings and stop (once, when every document is in)"
         default: "false"
+      build_bits:
+        description: "true to build the small index on the embeddings' bits (chunks_bits), beside the others, and stop"
+        default: "false"
       build_memory:
         description: "for build_index: maintenance_work_mem, about half the database machine's RAM (512MB, 8GB)"
         default: "512MB"
@@ -71,6 +74,7 @@ jobs:
           [ "${{ inputs.commit }}" = "true" ] && ARGS="$ARGS --commit"
           [ "${{ inputs.pairs }}" = "false" ] && ARGS="$ARGS --no-pairs"
           [ "${{ inputs.build_index }}" = "true" ] && ARGS="--build-index --commit --build-memory ${{ inputs.build_memory || '512MB' }} --build-workers ${{ inputs.build_workers || '2' }}"
+          [ "${{ inputs.build_bits }}" = "true" ] && ARGS="--build-bits --commit --build-memory ${{ inputs.build_memory || '512MB' }} --build-workers ${{ inputs.build_workers || '2' }}"
           [ "${{ inputs.remaining }}" = "true" ] && ARGS="--remaining --years ${{ inputs.years }}"
           if [ -n "$TRY_QUERY" ]; then python semantic_index.py --try-query "$TRY_QUERY" --try-company "$TRY_COMPANY"; exit $?; fi
           echo "python semantic_index.py $ARGS"
