@@ -531,13 +531,17 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("create or replace function public.find_company_ids(company_filter text) returns text[] language sql as $f$ select array['W_LATEST'] $f$")
             cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, pages) values ('w-new', 'W_LATEST', 'C', 'Sustainability Report', 2025, 120), ('w-short', 'W_LATEST', 'C', 'Annual Report', 2027, 2), ('w-other', 'W_LATEST', 'C', 'Statutory Documents', 2027, 50)")
             ask = "select page, year from public.ask_pages('k', 'q', null, %s, %s, null, null, 'q?')"
+            cur.execute("select set_config('lantern.ask_latest', 'off', true)")          # the option is on since 15 Nov 2026: a session can still switch it off (the comparison does)
             cur.execute(ask, ("C", None)); off = cur.fetchall()
+            cur.execute("select set_config('lantern.ask_latest', '', true)")
+            cur.execute(ask, ("C", None)); default = cur.fetchall()
             cur.execute("select set_config('lantern.ask_latest', 'on', true)")
             cur.execute(ask, ("C", None)); on = cur.fetchall()
             cur.execute(ask, (None, None)); no_company = cur.fetchall()
             cur.execute(ask, ("C", 2022)); a_year = cur.fetchall()
             c.rollback()
         self.assertEqual([p for p, _ in off], [1, 2, 3, 4, 5, 6, 7, 8])                             # as before: the option is off
+        self.assertEqual([p for p, _ in default], [1, 2, 3, 4, 5, 101, 102, 103])                   # the default is the option
         self.assertEqual(on, [(1, 2022), (2, 2022), (3, 2022), (4, 2022), (5, 2022), (101, 2025), (102, 2025), (103, 2025)])      # 2025: a two-page annual report and a statutory document do not set the year
         self.assertEqual([p for p, _ in no_company], [1, 2, 3, 4, 5, 6, 7, 8])                      # no company named: nothing to be the newest of
         self.assertEqual(a_year, [(100 + g, 2023) for g in range(1, 9)])                            # a year asked for: one search, its eight pages (the stub marks a search with a year)
