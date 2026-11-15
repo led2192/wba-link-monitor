@@ -428,7 +428,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "where f.metric is null and public.fact_match(f.what) is not null;" in SQL      # a classified fact is never touched
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v73 2026-11-15";' in PAGE
+    assert 'const CLIENT = "lantern v74 2026-11-15";' in PAGE
+    assert 'const worded = f.kind !== "number" && f.kind !== "yes_no";' in PAGE          # two wordings of a sentence are not "reports differ"
 
 
 def test_a_companys_facts_by_year_are_for_the_owner_and_leave_out_the_wrong_ones():

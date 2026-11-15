@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v73 2026-11-15";
+  const CLIENT = "lantern v74 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1939,7 +1939,8 @@
       const groups = blocks.get(bk).groups; if (!groups.has(gk)) groups.set(gk, { key: f.grp, label: f.group_label || "", metrics: new Map() });
       const metrics = groups.get(gk).metrics; if (!metrics.has(mk)) metrics.set(mk, { key: f.metric, label: f.label, kind: f.metric_kind, cells: new Map() });
       const cells = metrics.get(mk).cells, ck = f.shown_year == null ? "no year" : String(f.shown_year); if (!cells.has(ck)) cells.set(ck, []);
-      if (!cells.get(ck).some(x => factSame(x, f))) cells.get(ck).push(f);              // the same value read twice is shown once; the newest report came first
+      const worded = f.kind !== "number" && f.kind !== "yes_no";                         // v74: two wordings of one sentence are not two values: the newest is shown, alone
+      if (!cells.get(ck).some(x => factSame(x, f) || (worded && x.kind === f.kind))) cells.get(ck).push(f);      // the same value read twice is shown once; the newest report came first
     }
     const tag = (text, title) => { const t = el("span", null, text); t.title = title || ""; t.style.cssText = "display:inline-block;font-size:11px;padding:0 6px;border:1px solid var(--line);border-radius:999px;margin-left:5px;white-space:nowrap"; return t; };
     const valueNode = f => { const span = el("span"); const v = el("a", null, factShown(f) || "?"); v.href = "#"; v.title = [f.period, [f.doc_year, f.doc_type].filter(Boolean).join(" "), f.page ? `page ${f.page}` : "", f.year_from === "report" ? "year: the report's, the fact states none" : "", f.verdict === "right" ? "confirmed by a person" : ""].filter(Boolean).join(" · ");
