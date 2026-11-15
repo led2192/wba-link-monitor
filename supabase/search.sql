@@ -3527,6 +3527,22 @@ create table if not exists public.chunk_docs_stage (
 alter table public.chunks_stage enable row level security;
 alter table public.chunk_docs_stage enable row level security;
 
+-- What open models tried on the job server answered for each fact (fact_classify_trial.py, 15 Nov 2026): a trial for
+-- the owner to judge, read by nothing else.
+create table if not exists public.fact_trials (
+  id       bigint generated always as identity primary key,
+  at       timestamptz not null default now(),
+  model    text not null,
+  fact_id  bigint not null,
+  metric   text,                               -- a key of fact_metrics; null: none, or no usable answer
+  role     text,                               -- value, restated, original, change, explanation, other; null: no usable answer
+  name     text,
+  seconds  real,
+  run      text
+);
+create index if not exists fact_trials_fact on public.fact_trials (fact_id);
+alter table public.fact_trials enable row level security;
+
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
 create or replace function public.admin_link_new(key text, name text)

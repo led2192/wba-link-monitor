@@ -1,0 +1,44 @@
+# A trial of open models on the job server for classifying the facts of answers (fact_classify_trial.py). Manual only.
+# No API and no money: the models run on the server's processors. Its Python environment is its own
+# (/srv/lantern/venv-llm), so nothing here can change the one the other jobs use. Prints counts and seconds only.
+name: Fact classify trial
+
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "models to try, comma-separated (qwen3-4b, qwen3-8b, smollm3-3b)"
+        default: "qwen3-4b,qwen3-8b,smollm3-3b"
+      limit:
+        description: "facts, the newest first"
+        default: "30"
+      threads:
+        description: "processors a model may use (the server has 16)"
+        default: "8"
+      commit:
+        description: "write each answer to public.fact_trials for the owner to judge"
+        type: boolean
+        default: false
+
+concurrency:
+  group: fact-classify-trial
+  cancel-in-progress: false
+
+jobs:
+  trial:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: The models' own environment
+        run: |
+          [ -x /srv/lantern/venv-llm/bin/python ] || python3 -m venv /srv/lantern/venv-llm
+          /srv/lantern/venv-llm/bin/pip install -q --upgrade pip
+          /srv/lantern/venv-llm/bin/pip install -q "psycopg[binary]" huggingface_hub
+          /srv/lantern/venv-llm/bin/pip install -q --only-binary=:all: llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+          /srv/lantern/venv-llm/bin/python -c "import llama_cpp; print('llama-cpp-python', llama_cpp.__version__)"
+      - name: Trial
+        run: /srv/lantern/venv-llm/bin/python fact_classify_trial.py --models "${{ inputs.models }}" --limit "${{ inputs.limit }}" --threads "${{ inputs.threads }}" ${{ inputs.commit && '--commit' || '' }}
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          HF_HOME: /srv/lantern/hf
