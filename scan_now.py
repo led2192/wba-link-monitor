@@ -315,7 +315,7 @@ def run_once():
     return True
 
 
-SIDE_EVERY = 5          # of the watch's checks: with --every 180, about every 15 minutes
+SIDE_EVERY = 2          # of the watch's checks: with --every 180, about every 6 minutes (it was 5 until 15 Nov 2026: a file sent from a browser waited up to 15 minutes before anything looked at it)
 
 
 def side_jobs(run=subprocess.run):
@@ -327,8 +327,11 @@ def side_jobs(run=subprocess.run):
         return []
     done = []
     ids_file = "new_company_ids.txt"
+    # fast_lane.py --dispatch (15 Nov 2026): when files sent from a browser are in the library and not yet in the
+    # search, it starts the Fast lane workflow (full text, load, meaning index for those documents only)
     for name, cmd in (("add_companies", [sys.executable, "add_companies.py", "--commit", "--ids-file", ids_file]),
-                      ("browser_uploads", [sys.executable, "browser_uploads.py", "--commit"])):
+                      ("browser_uploads", [sys.executable, "browser_uploads.py", "--commit"]),
+                      ("fast_lane", [sys.executable, "fast_lane.py", "--dispatch"])):
         try:
             r = run(cmd, timeout=900)
             done.append((name, getattr(r, "returncode", 0)))

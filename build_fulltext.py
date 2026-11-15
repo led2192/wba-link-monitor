@@ -402,6 +402,39 @@ def run_batch(tasks, workers):
 # ----------------------------------------------------------------------------------------------
 # Planning
 # ----------------------------------------------------------------------------------------------
+def rows_by_id(ids):
+    """The documents with these library ids, read one request per forty ids (the fast lane: a handful of documents
+    sent minutes ago must not wait for a sweep of the whole table). Discarded rows and rows with no file yet do
+    not come back."""
+    request, url, headers = _airtable()
+    out = []
+    ids = [i for i in dict.fromkeys(ids) if i and "'" not in i]
+    for k in range(0, len(ids), 40):
+        formula = "OR(" + ",".join("{%s}='%s'" % (F_ID, i) for i in ids[k:k + 40]) + ")"
+        params = [("pageSize", "100"), ("filterByFormula", formula)] + [("fields[]", f) for f in SWEEP_FIELDS + [F_DISCARD]]
+        for rec in request("GET", url, headers, params=params).json().get("records", []):
+            if rec.get("fields", {}).get(F_DISCARD):
+                continue
+            d = row_doc(rec)
+            if d:
+                out.append(d)
+        time.sleep(0.12)
+    return out
+
+
+META_KEEP = ("id", "rec", "wba", "co", "type", "year", "lang", "label", "url", "pages", "end", "found")
+
+
+def fastmeta_name(run_id):
+    return f"fastmeta-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-r{run_id}.jsonl.gz"
+
+
+def old_fastmeta(listing, now=None, days=7):
+    """The fastmeta files older than a week: their documents are in the nightly metadata snapshot long since."""
+    cut = time.strftime("%Y%m%dT%H%M%S", time.gmtime((now or time.time()) - days * 86400))
+    return sorted(n for n in listing if n.startswith("fastmeta-") and n[len("fastmeta-"):len("fastmeta-") + 15] < cut)
+
+
 def shard_of(lib_id, n):
     return int(hashlib.sha1(lib_id.encode("utf-8")).hexdigest()[:8], 16) % n
 
@@ -509,7 +542,7 @@ def publish_plan(store, work, docs, queue, listing):
     store.upload(os.path.join(work, queue_name))
     old_meta = sorted(n for n in listing if n.startswith("meta-") and n != meta_name)
     old_queue = sorted(n for n in listing if n.startswith("queue-") and n != queue_name)
-    for n in old_meta[:-1] + old_queue[:-3]:              # keep one previous snapshot, three queues
+    for n in old_meta[:-1] + old_queue[:-3] + old_fastmeta(listing):      # keep one previous snapshot, three queues; the fast lane's own metadata for a week
         store.delete(n)
     return meta_name, queue_name
 
@@ -635,6 +668,7 @@ def main():
     ap.add_argument("--budget-min", type=int, default=320, help="stop cleanly after this many minutes")
     ap.add_argument("--retry-failed", action="store_true", help="requeue parse_fail / timeout / crash")
     ap.add_argument("--sample", type=int, default=5, help="dry-run sample size")
+    ap.add_argument("--ids", default="", help="the fast lane: read only these library ids (comma-separated), now, and publish their metadata beside the text")
     args = ap.parse_args()
 
     try:
@@ -667,6 +701,23 @@ def main():
         else:
             _, queue, _, _ = plan(args, store, work)
         run_extract(args, store, work, queue, i - 1, n)
+        return
+
+    if args.ids:
+        # The fast lane (15 Nov 2026): a document a person sent is read within minutes. No sweep of the table, no
+        # plan, no new metadata snapshot (a snapshot of a few documents would hide every other one): the text goes
+        # to the store as a part of this run, and the documents' metadata as a fastmeta file that the loader reads
+        # until the nightly snapshot holds them.
+        docs = rows_by_id([x.strip() for x in args.ids.split(",")])
+        print(f">>> fast lane: {len(docs):,} of {len([x for x in args.ids.split(',') if x.strip()]):,} documents asked for have a file to read", flush=True)
+        if not args.commit or not docs:
+            print(">>> nothing written." if not docs else ">>> dry run, nothing written. Re-run with --commit.", flush=True)
+            return
+        run_extract(args, store, work, docs, 0, 1)
+        name = fastmeta_name(os.environ.get("GITHUB_RUN_ID") or f"local{os.getpid()}")
+        tc.write_jsonl_gz(os.path.join(work, name), ({k: d.get(k) for k in META_KEEP} for d in docs))
+        store.upload(os.path.join(work, name))
+        print(f">>> published {name} ({len(docs):,} documents)", flush=True)
         return
 
     docs, queue, shards, listing = plan(args, store, work)

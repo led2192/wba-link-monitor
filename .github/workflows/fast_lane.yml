@@ -1,0 +1,56 @@
+# The fast lane (fast_lane.py): the documents people sent with the browser extension, read, loaded and indexed
+# by meaning within minutes, on lanterN's server. Started by the Scan now watch when such documents wait
+# (fast_lane.py --dispatch, about every 6 minutes), or by hand. One run at a time; a run that finds nothing
+# ends in seconds. The nightly jobs still do the same work for everything else.
+name: Fast lane
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "commit = do the three steps; dry_run = only say what waits"
+        type: choice
+        default: commit
+        options: [commit, dry_run]
+
+concurrency:
+  group: fast-lane
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  lane:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Where this runs
+        run: echo "machine $RUNNER_NAME ($RUNNER_ENVIRONMENT), $(nproc) cores"
+      # One Python environment kept on the server's disk, shared by the six runners (one run at a time): the
+      # sentence model's libraries are installed once, not at every run. CPU build of torch: no graphics card here.
+      - name: Tools (installed once, then only checked)
+        run: |
+          V=/srv/lantern/venv
+          if [ ! -x "$V/bin/python" ] || ! "$V/bin/python" -c "import sentence_transformers" 2>/dev/null; then
+            sudo mkdir -p /srv/lantern && sudo chown "$(id -un)" /srv/lantern
+            python3 -m venv "$V" 2>/dev/null || { sudo apt-get update -q >/dev/null; sudo apt-get install -y -q python3-venv >/dev/null; python3 -m venv "$V"; }
+            "$V/bin/pip" install -q --upgrade pip
+            "$V/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
+          fi
+          "$V/bin/pip" install -q -r requirements.txt sentence-transformers
+          "$V/bin/python" --version
+      - name: Fast lane
+        run: |
+          if [ "${{ inputs.mode }}" = "dry_run" ]; then /srv/lantern/venv/bin/python fast_lane.py; else /srv/lantern/venv/bin/python fast_lane.py --commit; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_LIBRARY_TABLE: report_library
+          TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
+          TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          HF_HOME: /srv/lantern/hf

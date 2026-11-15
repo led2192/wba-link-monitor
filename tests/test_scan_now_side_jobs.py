@@ -24,8 +24,8 @@ class SideJobs(unittest.TestCase):
             return R()
         with mock.patch.dict(os.environ, {"SUPABASE_DB_URL": "postgresql://x"}):
             done = S.side_jobs(run=run)
-        self.assertEqual(calls, ["add_companies.py", "browser_uploads.py"])
-        self.assertEqual(done, [("add_companies", -1), ("browser_uploads", 0)])
+        self.assertEqual(calls, ["add_companies.py", "browser_uploads.py", "fast_lane.py"])
+        self.assertEqual(done, [("add_companies", -1), ("browser_uploads", 0), ("fast_lane", 0)])
 
     def test_new_companies_have_their_pages_searched_for(self):
         calls = []
