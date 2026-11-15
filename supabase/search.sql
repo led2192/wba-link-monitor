@@ -3543,6 +3543,37 @@ create table if not exists public.fact_trials (
 create index if not exists fact_trials_fact on public.fact_trials (fact_id);
 alter table public.fact_trials enable row level security;
 
+-- The trial of open models (fact_classify_trial.py) for the owner to judge: every fact a model was shown, with what
+-- the name-matching gave it and what each model said in its latest run (its metric, the fact's role, a name).
+create or replace function public.admin_fact_trials(key text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'models', (select coalesce(jsonb_agg(to_jsonb(x) order by x.model), '[]'::jsonb) from (
+        select t.model, max(t.run) as run, count(*) as facts, round(percentile_cont(0.5) within group (order by t.seconds)::numeric, 1) as seconds,
+               count(*) filter (where t.role is null) as unanswered
+        from public.fact_trials t
+        where t.run = (select max(r.run) from public.fact_trials r where r.model = t.model)
+        group by t.model) x),
+    'facts', (select coalesce(jsonb_agg(to_jsonb(y) order by y.company, y.what, y.id), '[]'::jsonb) from (
+        select f.id, f.company, f.what, f.kind, f.value, f.unit, f.answer, f.year, f.metric, m.label as metric_label,
+               (select jsonb_object_agg(t.model, jsonb_build_object('metric', t.metric, 'label', tm.label, 'role', t.role, 'name', t.name))
+                from public.fact_trials t left join public.fact_metrics tm on tm.key = t.metric
+                where t.fact_id = f.id and t.run = (select max(r.run) from public.fact_trials r where r.model = t.model)) as said
+        from public.ask_facts f left join public.fact_metrics m on m.key = f.metric
+        where exists (select 1 from public.fact_trials t where t.fact_id = f.id)
+        limit 500) y));
+end;
+$$;
+revoke all on function public.admin_fact_trials(text) from public, anon;
+grant execute on function public.admin_fact_trials(text) to authenticated;
+
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
 create or replace function public.admin_link_new(key text, name text)

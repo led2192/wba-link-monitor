@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v77 2026-11-15";
+  const CLIENT = "lantern v78 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1652,7 +1652,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2020,6 +2020,31 @@
       if (shownRows) body.appendChild(block);
     }
     if (st.changed && !body.querySelector("details")) body.append(el("p", null, "Nothing changed from one year to the next among these facts, and no two reports differ."));
+  }
+  // Model trial (v78): what open models run on the job server said of each fact (fact_classify_trial.py), beside what
+  // the name-matching gave it. For judging the models; nothing here changes a fact.
+  const factTrialsView = { only: "all" };
+  async function adminFactTrials(body) {
+    const st = factTrialsView; body.innerHTML = "";
+    const got = await authed("admin_fact_trials", { key }); if (!got) { body.textContent = "Not available."; return; }
+    if (!got.models.length) { body.append(el("p", null, "No trial has been run yet.")); return; }
+    const models = got.models.map(m => m.model);
+    const intro = el("p", null, "Open models run on the job server, at no cost, were shown each fact with the list of metrics. Each said the metric (or none), what the fact is to it, and a name when no metric fits. A trial: nothing here changes a fact.");
+    intro.style.color = "var(--muted, #667)"; body.appendChild(intro);
+    const same = (a, b) => (a || {}).metric === (b || {}).metric && (a || {}).role === (b || {}).role;
+    const agreeAll = f => models.every(m => same((f.said || {})[m], (f.said || {})[models[0]]));
+    body.appendChild(adminTable(["Model", "Facts", "Not answered as asked", "Seconds a fact (median)", "Same metric as the name-matching", "Another metric"], got.models.map(m => {
+      const known = got.facts.filter(f => f.metric && (f.said || {})[m.model]), ok = known.filter(f => f.said[m.model].metric === f.metric).length;
+      return [m.model, m.facts, m.unanswered, m.seconds, `${ok} of ${known.length}`, known.filter(f => f.said[m.model].metric && f.said[m.model].metric !== f.metric).length]; })));
+    const bar = el("div"); bar.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0 10px";
+    for (const [k, label] of [["all", "All facts"], ["differ", "Where the models differ"], ["new", "Name-matching gave no metric"]]) { const b = adminBtn(label, () => { st.only = k; adminFactTrials(body); }); if (st.only === k) { b.style.fontWeight = "700"; b.style.borderColor = "var(--fg)"; } bar.appendChild(b); }
+    const rows = got.facts.filter(f => st.only === "differ" ? !agreeAll(f) : st.only === "new" ? !f.metric : true);
+    bar.append(el("span", null, `${rows.length} of ${got.facts.length} facts; the models agree on ${got.facts.filter(agreeAll).length}`)); body.appendChild(bar);
+    const cell = x => { const d = el("span"); if (!x || !x.role) { d.textContent = "no answer"; d.style.color = "var(--muted, #667)"; return d; }
+      d.appendChild(el("b", null, x.label || (x.metric ? x.metric : "none"))); d.appendChild(document.createTextNode(` · ${x.role}`));
+      if (!x.metric && x.name) { d.appendChild(el("br")); const n = el("span", null, x.name); n.style.cssText = "font-size:12px;font-style:italic"; d.appendChild(n); } return d; };
+    body.appendChild(adminTable(["Company", "Fact", "Content", "Name-matching"].concat(models), rows.map(f => [f.company || "", f.what + (f.year ? ` · ${f.year}` : ""),
+      f.kind === "number" ? [fmt(Number(f.value)), f.unit].filter(Boolean).join(" ") : String(f.answer || "").slice(0, 90), f.metric_label || "",].concat(models.map(m => cell((f.said || {})[m])))) ));
   }
   async function adminCost(body) {
     const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available."; return; }

@@ -687,6 +687,26 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(cur.fetchall(), [(961, "scope_1", True), (963, None, None), (964, "human_rights_policy", None)])      # only the wrong ones are undone
             c.rollback()
 
+    def test_the_owner_sees_what_each_model_said_in_its_latest_run(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, value, metric) values (971, 'PT_T', 'Trial Co', 'Scope 1 emissions', 'number', 5, 'scope_1') returning id")
+            a = cur.fetchone()[0]
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, answer) values (972, 'PT_T', 'Trial Co', 'Reason for restatement', 'text', 'method') returning id")
+            b = cur.fetchone()[0]
+            cur.execute("insert into public.fact_trials (model, fact_id, metric, role, name, seconds, run) values "
+                        "('m1', %s, 'revenue', 'value', '', 9, '100'), ('m1', %s, 'scope_1', 'value', '', 5, '200'), ('m1', %s, null, 'explanation', 'Restatement reason', 7, '200'), "
+                        "('m2', %s, 'scope_1', 'restated', '', 11, '150'), ('m2', %s, null, null, null, 30, '150')", (a, a, b, a, b))
+            cur.execute("select public.admin_fact_trials('k')")
+            got = cur.fetchone()[0]
+            self.assertEqual([(m["model"], m["run"], m["facts"], m["unanswered"]) for m in got["models"]], [("m1", "200", 2, 0), ("m2", "150", 2, 1)])     # the latest run of each model
+            facts = {f["what"]: f for f in got["facts"] if f["company"] == "Trial Co"}
+            self.assertEqual(facts["Scope 1 emissions"]["said"]["m1"], {"metric": "scope_1", "label": "Scope 1 emissions", "role": "value", "name": ""})   # not run 100's answer
+            self.assertEqual(facts["Scope 1 emissions"]["said"]["m2"]["role"], "restated"); self.assertEqual(facts["Scope 1 emissions"]["metric_label"], "Scope 1 emissions")
+            self.assertEqual(facts["Reason for restatement"]["said"]["m1"]["name"], "Restatement reason"); self.assertIsNone(facts["Reason for restatement"]["said"]["m2"]["role"])
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:
