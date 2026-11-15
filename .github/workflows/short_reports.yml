@@ -1,0 +1,34 @@
+# A document of one or two pages is not a periodic report (short_reports.py): sets source_type_check to UNKNOWN on
+# live, unverified rows the AI or the address typed as an annual, integrated or sustainability report, a 10-K or a
+# registration document. Dry run by default; commit writes and keeps what each type was in public.type_corrections.
+name: Short reports
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "write (false = count only)"
+        type: boolean
+        default: false
+      limit:
+        description: "rows at most (0 = all)"
+        default: "0"
+
+jobs:
+  correct:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q -r requirements.txt
+      - name: Short reports
+        run: python short_reports.py --limit "${{ inputs.limit }}" ${{ inputs.commit && '--commit' || '' }}
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

@@ -381,7 +381,7 @@ def upsert_documents(conn, rows, batch=DOC_BATCH, say=print):
     sets = ", ".join(f"{k} = excluded.{k}" for k in rest)
     same = "(" + ", ".join(f"d.{k}" for k in rest) + ") is not distinct from (" + ", ".join(f"excluded.{k}" for k in rest) + ")"
     rows = list(rows)
-    n, n_said, t0 = 0, 0, time.time()
+    n, n_said, n_short, t0 = 0, 0, 0, time.time()
     for i in range(0, len(rows), batch):
         with conn.cursor() as c:
             c.execute("create temp table tmp_docs (like public.documents including defaults) on commit drop")
@@ -390,9 +390,10 @@ def upsert_documents(conn, rows, batch=DOC_BATCH, say=print):
                     cp.write_row(r)
             said = sender_years(c)
             n_said += said
-            c.execute(f"insert into public.documents as d ({cols}, year_by) select distinct on (library_id) {cols}, year_by from tmp_docs "
-                      f"on conflict (library_id) do update set {sets}, year_by = excluded.year_by, loaded_at = now() "
-                      f"where not ({same} and d.year_by is not distinct from excluded.year_by)")
+            n_short += short_types(c)
+            c.execute(f"insert into public.documents as d ({cols}, year_by, type_by) select distinct on (library_id) {cols}, year_by, type_by from tmp_docs "
+                      f"on conflict (library_id) do update set {sets}, year_by = excluded.year_by, type_by = excluded.type_by, loaded_at = now() "
+                      f"where not ({same} and d.year_by is not distinct from excluded.year_by and d.type_by is not distinct from excluded.type_by)")
             n += c.rowcount
         conn.commit()
         done = min(i + batch, len(rows))
@@ -400,6 +401,8 @@ def upsert_documents(conn, rows, batch=DOC_BATCH, say=print):
             say(f"  documents: {done:,} of {len(rows):,} looked at, {n:,} written, {(time.time() - t0) / 60:.1f} min", flush=True)
     if n_said:
         say(f"  documents: {n_said:,} carry the year their sender gave", flush=True)
+    if n_short:
+        say(f"  documents: {n_short:,} of one or two pages were typed as a periodic report and are kept as UNKNOWN", flush=True)
     return n
 
 
@@ -424,6 +427,25 @@ def sender_years(c):
     if not c.fetchone()[0]:
         return 0
     c.execute(SENDER_YEARS_SQL)
+    return c.rowcount
+
+
+# A periodic report is never one or two pages long. The Airtable AI field types documents from their first
+# pages and called 7,443 such documents an annual, integrated or sustainability report (15 Nov 2026): executive
+# biographies, press notes, covers. Here they keep their words and lose the type.
+REPORT_TYPES = ("Annual Report", "Integrated Report", "10K Form", "Registration Document",
+                "Sustainability Report", "ESG Report", "CSR Report", "Impact Report")
+SHORT_PAGES = 2
+SHORT_TYPES_SQL = """
+update tmp_docs set doc_type = 'UNKNOWN', type_by = 'too short'
+where doc_type = any(%s) and pages between 1 and %s"""
+
+
+def short_types(c):
+    """A document of one or two pages typed as a periodic report is written as UNKNOWN, with type_by saying why
+    (tmp_docs, before the rows are compared with the table, so the type does not flip every night). A document
+    with no page count keeps its type: nothing is known about its length. Returns the rows changed."""
+    c.execute(SHORT_TYPES_SQL, (list(REPORT_TYPES), SHORT_PAGES))
     return c.rowcount
 
 
