@@ -228,6 +228,14 @@ def main():
             cur.execute("select id, status, result from public.company_requests where id = any(%s)", (req_ids,))
             asked_for = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
         uploads, waiting, refused = resolve_requests(uploads, asked_for)
+        # a company a person has just added (15 Nov 2026) has its id at once and its row of `companies` a few
+        # minutes later (add_companies.py, the step before this one): its files wait for the row, they are not orphans
+        cur.execute("select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'company_requests' and column_name = 'wba_id'")
+        if cur.fetchone()[0]:
+            cur.execute("select wba_id from public.company_requests where status = 'new' and wba_id is not null and review is distinct from 'rejected'")
+            fresh = {r[0] for r in cur.fetchall()}
+            waiting += [u for u in uploads if u["wba_id"] in fresh]
+            uploads = [u for u in uploads if u["wba_id"] not in fresh]
         if waiting:
             print(f"  {len(waiting)} files wait for a company that was asked for and is not approved yet (company_requests in Airtable)", flush=True)
         for u, why in refused:

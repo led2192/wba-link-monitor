@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v68 2026-11-15";
+  const CLIENT = "lantern v69 2026-11-15";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -565,7 +565,7 @@
     const miss = el("div", "missing"); const ml = el("a", null, "Missing a document? Add its link, or the page that lists it"); ml.href = "#";
     ml.onclick = ev => { ev.preventDefault(); const hold = miss.querySelector(".values") || miss.appendChild(el("div", "values")); addSourceForm(hold, state.company && !state.company.includes(";") ? state.company : null); };
     miss.appendChild(ml);
-    const mc = el("a", null, "Missing a company? Ask for it"); mc.href = "#"; mc.style.marginLeft = "14px";
+    const mc = el("a", null, "Missing a company? Add it"); mc.href = "#"; mc.style.marginLeft = "14px";
     mc.onclick = ev => { ev.preventDefault(); const hold = miss.querySelector(".values") || miss.appendChild(el("div", "values")); askCompanyForm(hold); };
     miss.appendChild(mc); box.appendChild(miss);
     if (!append) knownNotHeld(box, miss);
@@ -866,14 +866,14 @@
     f.append(el("div", "what", "A document we do not hold, or a page that lists documents"), lab("Company"), co, lab("Links: documents (PDF) or pages that list them (a report hub)"), links, lab("Reporting year"), yr, lab("A note for the team"), why, msg, acts);
     holder.appendChild(f); (co.value ? links : co).focus();
   }
-  // "Missing a company? Ask for it": a request, read by a person before the company is added and its pages searched for
+  // "Missing a company? Add it": a request, read by a person before the company is added and its pages searched for
   function askCompanyForm(holder) {
     if (holder.querySelector(".askco")) return; const f = el("div", "fix add askco"); const lab = t => el("label", "lab", t);
     const nm = el("input"); nm.placeholder = "The company's name"; nm.maxLength = 120;
     const site = el("input"); site.placeholder = "https://… (optional)";
     const lei = el("input"); lei.placeholder = "20 characters (optional)"; lei.maxLength = 24;
     const why = el("textarea"); why.rows = 2; why.placeholder = "Optional: why it matters, where its reports are";
-    const msg = el("div", "what", ""); const go = el("button", null, "Ask for the company");
+    const msg = el("div", "what", ""); const go = el("button", null, "Add the company");
     const send = async () => {
       if (nm.value.trim().length < 2) { msg.textContent = "Write the company's name."; return; }
       const t = await token(); if (!t) { signInBox(holder, send); return; }
@@ -881,8 +881,9 @@
         const r = await fetch(`${CONFIG.url}/rest/v1/rpc/request_company`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
           body: JSON.stringify({ name: nm.value, website: site.value, lei: lei.value, note: why.value, client: CLIENT }) });
         const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.message || `HTTP ${r.status}`);
-        f.innerHTML = ""; f.append(el("div", "what", j.held ? `${j.name} is already in lanterN: search for it by name.` : j.again ? `You had already asked for ${j.name}.`
-          : `Thank you. ${j.name} is asked for: a person checks it, then its reports are searched for.`));
+        f.innerHTML = ""; f.append(el("div", "what", j.held ? `${j.name} is already in lanterN: search for it by name.`
+          : j.again ? (j.review === "rejected" ? `${j.name} was added before and not accepted${j.why ? `: ${j.why}` : ""}.` : `You had already added ${j.name}.`)
+          : `Thank you. ${j.name} is a company of lanterN now: its website is searched for its reports in the next minutes, and you can send its documents with the browser extension.`));
       } catch (e) { msg.textContent = `Not sent: ${e.message}`; }
     };
     go.onclick = send;
@@ -1625,35 +1626,81 @@
   }
   // The owner's panel (13 Nov 2026): links and people, the facts of answers and who marked them, and what Ask costs.
   // Shown only when the page was opened with the owner's link and the person is signed in (admin_ok); every admin
-  // function checks the same on the server. A window inside the page: the search under it stays as it is.
+  // function checks the same on the server.
   async function adminLink() {
     let ok = false; try { ok = (await authed("admin_ok", { key })) === true; } catch (e) { ok = false; }
     if (!ok || $("adminOpen")) return;
     const a = el("a", null, "Admin"); a.id = "adminOpen"; a.href = "#"; a.onclick = ev => { ev.preventDefault(); openAdmin(); };
     $("foot").append(document.createTextNode(" · "), a);
   }
-  function openAdmin() {
+  // v69 (the owner: "not a pop-up, and a little more professional"): a page of its own over the search, with its
+  // sections at the left, the number of things waiting beside each, and a way back. Esc goes back too.
+  function openAdmin(first) {
     let d = $("admin");
     if (!d) {
-      d = document.createElement("dialog"); d.id = "admin";
-      d.style.cssText = "width:min(1100px,94vw);max-height:88vh;border:1px solid var(--line);border-radius:14px;padding:0;background:var(--bg);color:var(--fg);font:inherit";
+      d = el("div"); d.id = "admin";
+      d.style.cssText = "position:fixed;inset:0;z-index:50;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;font:inherit";
       document.body.appendChild(d);
-      d.addEventListener("click", ev => { if (ev.target === d) d.close(); });      // a click outside closes it
+      document.addEventListener("keydown", ev => { if (ev.key === "Escape" && $("admin") && !$("admin").hidden && !document.querySelector("dialog[open]")) closeAdmin(); });
     }
-    d.innerHTML = "";
-    const head = el("div"); head.style.cssText = "display:flex;align-items:center;gap:8px;padding:14px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)";
-    head.append(el("b", null, "lanterN · admin"));
-    const tabs = el("div"); tabs.style.cssText = "display:flex;gap:6px;margin-left:16px"; head.appendChild(tabs);
-    const close = el("button", null, "Close"); close.type = "button"; close.style.cssText = "margin-left:auto;font:inherit;padding:4px 12px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer"; close.onclick = () => d.close(); head.appendChild(close);
-    const body = el("div"); body.style.cssText = "padding:16px 20px;overflow:auto;font-size:14px";
-    d.append(head, body);
-    const views = { "People and links": adminPeople, "Facts from answers": adminFacts, "Cost": adminCost };
+    d.hidden = false; d.innerHTML = ""; document.body.style.overflow = "hidden";
+    const head = el("div"); head.style.cssText = "display:flex;align-items:center;gap:14px;padding:12px 24px;border-bottom:1px solid var(--line)";
+    const back = el("a", null, "← Back to the search"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); closeAdmin(); };
+    const title = el("b", null, "lanterN · admin"); title.style.fontSize = "17px";
+    head.append(title, back); back.style.marginLeft = "auto";
+    const main = el("div"); main.style.cssText = "display:flex;flex:1;min-height:0";
+    const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
+    const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
+    main.append(nav, body); d.append(head, main);
+    const views = { "Companies": adminCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Cost": adminCost };
     for (const name of Object.keys(views)) {
-      const b = el("button", null, name); b.type = "button"; b.style.cssText = "font:inherit;padding:4px 12px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer";
-      b.onclick = () => { for (const x of tabs.children) { x.style.fontWeight = "400"; x.style.borderColor = "var(--line)"; } b.style.fontWeight = "700"; b.style.borderColor = "var(--fg)"; b.blur(); body.textContent = "Loading…"; views[name](body); };
-      tabs.appendChild(b);
+      const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
+      b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
+      b.onclick = () => { for (const x of nav.children) { x.style.fontWeight = "400"; x.style.background = "none"; } b.style.fontWeight = "700"; b.style.background = "var(--box)"; b.blur();
+        body.innerHTML = ""; const h = el("h2", null, name); h.style.cssText = "margin:0 0 14px;font-size:20px"; const inner = el("div", null, "Loading…"); body.append(h, inner); views[name](inner); };
+      nav.appendChild(b);
     }
-    d.showModal(); tabs.firstChild.click();
+    (nav.querySelector(`[data-view="${first || "Companies"}"]`) || nav.firstChild).click();
+    adminWaiting(nav);
+  }
+  function closeAdmin() { const d = $("admin"); if (d) d.hidden = true; document.body.style.overflow = ""; }
+  // the number of companies not looked at yet, beside the section's name
+  async function adminWaiting(nav) {
+    try { const rows = await authed("admin_companies", { key }); const n = (rows || []).filter(c => !c.review).length;
+      const b = nav.querySelector('[data-view="Companies"]'); if (b) b.textContent = n ? `Companies (${n})` : "Companies"; } catch (e) { }
+  }
+  // Companies people added (v69). A company exists from the moment a person adds it; here the owner reads who added
+  // it, the doubts the database noted (a name close to another company's, the same documents under another company)
+  // and accepts or rejects. Rejecting asks twice: the company leaves the list and its documents are discarded.
+  async function adminCompanies(body) {
+    const rows = await authed("admin_companies", { key }); if (!rows) { body.textContent = "Not available: open lanterN with the owner's link and sign in."; return; }
+    body.innerHTML = "";
+    body.appendChild(el("p", "what", "A company exists from the moment a person adds it, and its documents can be sent at once. Clear duplicates (the same name, website or LEI) are refused when it is added; what is left for you is here. Accept, or reject: a rejected company leaves lanterN, its documents are discarded with a reason and its pages are no longer read. Nothing is deleted from the library."));
+    if (!rows.length) { body.appendChild(el("p", null, "No company has been added by a person yet.")); return; }
+    const open = rows.filter(c => !c.review), done = rows.filter(c => c.review);
+    const line = c => {
+      const name = el("div"); const b = el("b", null, c.name); name.append(b, document.createTextNode(` ${c.id}`));
+      if (c.website) { const w = el("a", null, c.website.replace(/^https?:\/\//, "")); w.href = /^https?:/.test(c.website) ? c.website : `https://${c.website}`; w.target = "_blank"; w.rel = "noopener"; const l = el("div", "what"); l.appendChild(w); name.appendChild(l); }
+      if (c.lei || c.note) name.appendChild(el("div", "what", [c.lei && `LEI ${c.lei}`, c.note].filter(Boolean).join(" · ")));
+      const doubts = el("div");
+      for (const t of (c.doubts || "").split("\n").filter(Boolean)) doubts.appendChild(el("div", null, `• ${t}`));
+      for (const o of c.overlaps || []) { const x = el("div", null, `• ${o.n} of its documents ${o.n === 1 ? "is" : "are"} already held under ${o.name} (${o.id})`); x.style.fontWeight = "600"; doubts.appendChild(x); }
+      if (!doubts.childNodes.length) doubts.textContent = "none";
+      const act = el("div");
+      if (c.review) act.textContent = `${c.review}${c.reviewed_at ? `, ${adminWhen(c.reviewed_at)}` : ""}${c.review_note ? `: ${c.review_note}` : ""}`;
+      if (c.review !== "rejected") {
+        const say = el("span", "what", ""); const set = async (verdict, note) => { const r = await authed("admin_company_set", { key, request: c.request, verdict, note: note || null }); say.textContent = r && r.ok ? ` ${verdict}` : " not saved"; if (r && r.ok) setTimeout(() => { adminCompanies(body); const nav = $("admin").querySelector("[data-view]").parentElement; adminWaiting(nav); }, 700); };
+        if (!c.review) act.appendChild(adminBtn("Accept", () => set("accepted")));
+        const rej = adminBtn("Reject", () => {
+          if (act.querySelector("input")) return; const why = el("input"); why.placeholder = "Why (a duplicate of…, not a company…)"; why.maxLength = 300; why.style.cssText = "font:inherit;font-size:13px;width:230px;margin:4px 4px 0 0;display:block";
+          const sure = adminBtn("Reject this company", () => set("rejected", why.value)); sure.style.borderColor = "var(--fg)"; act.append(why, sure); why.focus(); });
+        act.append(rej, say);
+      }
+      return [name, c.by, adminWhen(c.at), doubts, `${c.files} sent, ${c.documents} in the search`, act];
+    };
+    const cols = ["Company", "Added by", "When", "Doubts", "Documents", ""];
+    if (open.length) { body.appendChild(el("h3", null, `To look at (${open.length})`)); body.appendChild(adminTable(cols, open.map(line))); }
+    if (done.length) { body.appendChild(el("h3", null, `Looked at (${done.length})`)); body.appendChild(adminTable(cols, done.map(line))); }
   }
   const adminTable = (cols, rows) => {
     const t = el("table"); t.style.cssText = "border-collapse:collapse;width:100%;margin:6px 0 18px";

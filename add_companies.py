@@ -10,11 +10,17 @@ table with an id:
   1. By hand. Add rows to `companies` in Airtable with company_name and website (lei and add_link if known)
      and leave wba_id empty; a list is pasted from a spreadsheet the same way. This script gives each row its
      id and discover_pages.py (next step of the workflow) searches its website for the report pages.
-  2. From the page. "Missing a company? Ask for it" in lanterN writes a request to the evidence database
-     (public.company_requests, status new). This script copies new requests to the Airtable table
-     `company_requests`, where a person reads them.
-  3. Approved requests. A request whose `approve` box is ticked becomes a row of `companies`, like one added
-     by hand, and the request is marked done in both places.
+  2. From the page or the browser extension (since 15 Nov 2026). A signed-in person adds a company and it exists
+     at once in the evidence database, with its id (public.request_company; the owner: "that I do not have to wait
+     for someone to confirm it"). This script gives it its row of `companies` here, at the watch's next side jobs
+     (about every 15 minutes), so that its documents have a company to go to. Clear duplicates were refused when
+     the person asked; one that only this table can see (a company added to it since last night's copy) is settled
+     here: the company made is withdrawn and the files sent for it go to the company we had.
+  3. Rejected companies. The owner accepts or rejects in lanterN's admin panel. A rejected company's row here says
+     so in intake_note, its documents are discarded with a reason and its pages are no longer read. Nothing is
+     deleted.
+  4. Requests made before 15 Nov 2026, which waited for the `approve` box of the Airtable table
+     `company_requests`: a ticked one still becomes a company.
 
 The id. A company with no WBA id gets lanterN's own: "LN_" and the first 8 hex digits of the SHA-1 of its LEI,
 or of its name without accents, case, punctuation and legal endings when it has no LEI. The same company
@@ -114,6 +120,38 @@ def decide(name, website, lei, existing):
     return "add", cid, f"added as {cid}" + ("" if h else "; no website given, so its pages cannot be searched for: fill website or add_link")
 
 
+def settle(name, website, lei, cid, existing):
+    """A company a person added in lanterN, which already has its id there. ('add', cid, note): give it its row;
+    ('done', cid, note): the row is there (a rerun); ('merge', other id, note): this table holds the same company
+    under another id, so the one made is withdrawn."""
+    if cid in existing[3]:
+        return "done", cid, f"added as {cid}"
+    what, got, note = decide(name, website, lei, existing)
+    if what == "add":
+        if got != cid:                      # the id the database gave stands (the two are computed the same way)
+            existing[3].discard(got); existing[3].add(cid)
+            for index in existing[:3]:
+                for k, v in list(index.items()):
+                    if v == got:
+                        index[k] = cid
+        return "add", cid, f"added as {cid}" + note[len(f"added as {got}"):]
+    m = re.search(r"already a company: (\S+)", note)
+    return ("merge", m.group(1), note) if m else ("add", cid, f"added as {cid}; {note}")
+
+
+REJECT_REASON = "Wrong company / misattributed"
+
+
+def rejection_patches(cid, library_rows, page_rows):
+    """What a rejected company changes in the library: [(table, record id, fields)]. Its documents are discarded
+    with a reason (never deleted) and its pages are no longer read. Rows already discarded or not read are left."""
+    out = [("report_library", r["id"], {"discard": True, "discard_reason": REJECT_REASON})
+           for r in library_rows if (r.get("fields", {}).get("wba_id") or "") == cid and not r["fields"].get("discard")]
+    out += [("monitored_links", r["id"], {"monitor": False})
+            for r in page_rows if (r.get("fields", {}).get("wba_id") or "") == cid and r["fields"].get("monitor")]
+    return out
+
+
 def clean(fields):
     """The fields with a value (Airtable is not sent empty ones on a new row)."""
     return {k: v for k, v in fields.items() if v not in (None, "")}
@@ -138,7 +176,7 @@ def main():
         os.environ["QA_COMMIT"] = "true"
     run = qa.Run("add_companies.py")
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    c = {"hand rows": 0, "added": 0, "not added": 0, "requests copied": 0, "requests approved": 0}
+    c = {"hand rows": 0, "added": 0, "not added": 0, "requests copied": 0, "requests approved": 0, "made by people": 0, "withdrawn": 0, "rejected": 0}
     new_ids = []
 
     records = list(sweep("companies", ["wba_id", "company_name", "website", "lei", "intake_note"]))
@@ -167,7 +205,63 @@ def main():
             cur = conn.cursor()
             cur.execute("select to_regclass('public.company_requests') is not null")
             if cur.fetchone()[0]:
-                cur.execute("select id, name, website, lei, note, at::date from public.company_requests where status = 'new' order by id limit %s", (a.limit,))
+                cur.execute("select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'company_requests' and column_name = 'wba_id'")
+                at_once = cur.fetchone()[0] > 0
+                made = []
+                if at_once:
+                    cur.execute("select id, name, website, lei, wba_id from public.company_requests where status = 'new' and wba_id is not null "
+                                "and review is distinct from 'rejected' order by id limit %s", (a.limit,))
+                    made = cur.fetchall()
+                for rid, name, website, lei, cid in made:
+                    what, got, note = settle(name, website, lei, cid, existing)
+                    c["made by people"] += 1
+                    print(f"  company {cid} (request {rid}): {what}{' into ' + got if what == 'merge' else ''}", flush=True)
+                    if what == "add":
+                        new_ids.append(cid); c["added"] += 1
+                    elif what == "merge":
+                        c["withdrawn"] += 1
+                    if not a.commit:
+                        continue
+                    if what == "add":
+                        airtable_request("POST", f"{API}/{BASE}/{quote('companies')}", headers, payload={"fields": clean({
+                            "wba_id": cid, "company_name": (name or "").strip(), "website": website,
+                            "lei": norm_lei(lei), "intake_note": f"{note}, added by a person in lanterN ({today})"})})
+                    if what in ("add", "done"):
+                        cur.execute("update public.company_requests set status = 'added', result = %s where id = %s", (note, rid))
+                    else:
+                        # the same company under another id: the files sent go to it (unless it has the same file),
+                        # the company made leaves the list, the request says why
+                        cur.execute("update public.browser_uploads b set wba_id = %s where b.wba_id = %s and not exists "
+                                    "(select 1 from public.browser_uploads o where o.wba_id = %s and o.sha256 = b.sha256)", (got, cid, got))
+                        cur.execute("delete from public.companies where wba_id = %s and wba_id like 'LN\\_%%'", (cid,))
+                        cur.execute("update public.company_requests set status = 'not added', result = %s, review = 'rejected', "
+                                    "review_note = %s, reviewed_at = now() where id = %s", (note, note[:300], rid))
+                    conn.commit()
+                # companies the owner rejected in the admin panel: the library's side
+                rejected = []
+                if at_once:
+                    cur.execute("select id, wba_id, review_note from public.company_requests where review = 'rejected' and status in ('new', 'added') "
+                                "and wba_id like 'LN\\_%%' order by id limit %s", (a.limit,))
+                    rejected = cur.fetchall()
+                for rid, cid, why in rejected:
+                    safe = cid.replace("'", "")
+                    patches = rejection_patches(cid, list(sweep("report_library", ["wba_id", "discard"], "{wba_id}='%s'" % safe)),
+                                                list(sweep("monitored_links", ["wba_id", "monitor"], "{wba_id}='%s'" % safe)))
+                    row = next((r for r in records if (r["fields"].get("wba_id") or "").strip() == cid), None)
+                    c["rejected"] += 1
+                    print(f"  company {cid} (request {rid}) rejected: {sum(1 for p in patches if p[0] == 'report_library')} documents discarded, "
+                          f"{sum(1 for p in patches if p[0] == 'monitored_links')} pages no longer read", flush=True)
+                    if not a.commit:
+                        continue
+                    for table, rec_id, fields in patches:
+                        airtable_request("PATCH", f"{API}/{BASE}/{quote(table)}/{rec_id}", headers, payload={"fields": fields})
+                    if row:
+                        airtable_request("PATCH", f"{API}/{BASE}/{quote('companies')}/{row['id']}", headers,
+                                         payload={"fields": {"intake_note": f"rejected in lanterN ({today})" + (f": {why}" if why else "")}})
+                    cur.execute("update public.company_requests set status = 'rejected' where id = %s", (rid,))
+                    conn.commit()
+                cur.execute("select id, name, website, lei, note, at::date from public.company_requests where status = 'new' "
+                            + ("and wba_id is null " if at_once else "") + "order by id limit %s", (a.limit,))
                 for rid, name, website, lei, note, at in cur.fetchall():
                     c["requests copied"] += 1
                     print(f"  request {rid}: copied to company_requests", flush=True)
@@ -211,7 +305,8 @@ def main():
 
     if a.ids_file:
         open(a.ids_file, "w").write(",".join(new_ids))
-    print(f"{c['hand rows']} rows added by hand, {c['requests copied']} requests copied, {c['requests approved']} approved: "
+    print(f"{c['made by people']} companies made by people ({c['withdrawn']} withdrawn as duplicates), {c['rejected']} rejected by the owner; "
+          f"{c['hand rows']} rows added by hand, {c['requests copied']} requests copied, {c['requests approved']} approved: "
           f"{c['added']} companies added, {c['not added']} not added" + ("" if a.commit else " (dry run: nothing written)"), flush=True)
     run.finish("ok", rows_in=c["hand rows"] + c["requests copied"] + c["requests approved"], rows_out=c["added"] if a.commit else 0,
                counters=c, notes="written" if a.commit else "dry run")
