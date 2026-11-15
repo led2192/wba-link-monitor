@@ -376,7 +376,7 @@ def hash_queue(limit):
     for about two hours, which bounds the work of one run (HASH_MINUTES)."""
     formula = f"AND({{{FILE_F}}}, {{{HASH_F}}} = BLANK(), {{{STAT_F}}} != BLANK())"
     rows, offset = [], None
-    while not limit or len(rows) < limit:
+    while True:                               # the whole queue: which rows a run takes is decided below, not by Airtable's order
         params = [("pageSize", 100), ("filterByFormula", formula), ("fields[]", FILE_F)]
         if offset:
             params.append(("offset", offset))
@@ -384,7 +384,19 @@ def hash_queue(limit):
         rows += j.get("records", []); offset = j.get("offset")
         if not offset:
             break
-    return rows[:limit] if limit else rows
+    return todays_share(rows, limit)
+
+
+def todays_share(rows, limit, day=None):
+    """The rows this run takes: a different part of the queue each day. Airtable lists the queue in the same order
+    every time, so the same 500 rows whose files cannot be fetched (414 dead downloads and 91 cut short, 14 and 15 Nov
+    2026) stood at its head every night and nothing behind them was ever reached. Sorted by a hash of the row and the
+    date, every row comes up within a few days and a row that fails takes one place a run, not the same place."""
+    if not limit or len(rows) <= limit:
+        return rows
+    import hashlib
+    day = day or time.strftime("%Y-%m-%d", time.gmtime())
+    return sorted(rows, key=lambda r: hashlib.md5((r["id"] + day).encode()).hexdigest())[:limit]
 
 
 HASH_MINUTES = 75          # one run's files are fetched within this time of their listing
