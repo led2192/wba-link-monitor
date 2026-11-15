@@ -33,7 +33,7 @@ Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run record (QA_COMMIT=true write
 import re
 import argparse, collections, os, sys, time
 
-MODEL = "intfloat/multilingual-e5-small"     # 384 dimensions, 100+ languages, 118M parameters: about 100 passages/s on 4 CPU cores
+MODEL = "intfloat/multilingual-e5-small"     # 384 dimensions, 100+ languages, 118M parameters: 13 passages/s on a GitHub machine, 19 on the job server (measured 15 Nov 2026)
 DIMS = 384
 # The reports in scope. 15 Nov 2026 (the owner): everything that is, or reads like, an annual or a sustainability
 # report: the impact, climate, environmental and social reports, and the annual report as two countries file it (the
@@ -177,6 +177,12 @@ def write_document(cur, lid, chunks, vectors, model, pairs=None):
 # The vectors in the table stay whole; find_meaning searches the index with the same cast (search.sql).
 INDEX_SQL = ("create index if not exists chunks_embedding on public.chunks using hnsw "
              "((embedding::extensions.halfvec(384)) extensions.halfvec_cosine_ops) with (m = 16, ef_construction = 64)")
+# A second, small index on the same embeddings (15 Nov 2026): each embedding reduced to its 384 signs, one bit each,
+# searched by how many bits differ. About a sixteenth of the half-precision vectors, so it stays in memory on a small
+# database machine when the passages are four times as many. It finds candidates only; the search then orders them by
+# the whole embeddings. Beside chunks_embedding, not in its place, until meaning_bits_compare.py says how much it loses.
+BITS_INDEX_SQL = ("create index if not exists chunks_bits on public.chunks using hnsw "
+                  "((extensions.binary_quantize(embedding)::bit(384)) extensions.bit_hamming_ops) with (m = 16, ef_construction = 64)")
 PAIRS_INDEX_SQL = "create index if not exists page_pairs_pairs on public.page_pairs using gin (pairs)"
 FILL_INDEXES = ("chunks_embedding", "page_pairs_pairs")      # dropped for the fill, built once at the end
 
@@ -251,6 +257,22 @@ def build_vector_index(cur, memory="512MB", workers=2, say=print):
     return time.time() - t
 
 
+def build_bits_index(cur, memory="512MB", workers=2, say=print):
+    """The index on the bits (BITS_INDEX_SQL), beside the others. Small enough to build on the everyday machine."""
+    memory, workers = build_settings(memory, workers)
+    cur.execute("set statement_timeout = 0")
+    cur.execute(f"set maintenance_work_mem = '{memory}'")
+    cur.execute(f"set max_parallel_maintenance_workers = {workers}")
+    cur.execute("select count(*) from public.chunks")
+    say(f">>> building the index on the bits of {cur.fetchone()[0]:,} chunks with maintenance_work_mem {memory} and {workers} parallel workers", flush=True)
+    t = time.time()
+    cur.execute(BITS_INDEX_SQL)
+    cur.connection.commit()
+    cur.execute("select pg_size_pretty(pg_relation_size('public.chunks_bits'))")
+    say(f">>> chunks_bits: {cur.fetchone()[0]}", flush=True)
+    return time.time() - t
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -264,6 +286,7 @@ def main():
     ap.add_argument("--try-query", default="", help="check the search by meaning: embed these words and print the ids of the nearest pages")
     ap.add_argument("--try-company", default="", help="with --try-query: a company (wba id or name); empty searches every company through the index")
     ap.add_argument("--remaining", action="store_true", help="print how many documents are done and left, and stop")
+    ap.add_argument("--build-bits", action="store_true", help="build the small index on the embeddings' bits, beside the others, and stop")
     ap.add_argument("--build-memory", default="512MB", help="maintenance_work_mem for --build-index: about half the database machine's RAM")
     ap.add_argument("--build-workers", type=int, default=2, help="parallel workers for --build-index: the machine's processors minus one")
     ap.add_argument("--drop-indexes", action="store_true", help="drop the indexes on the embeddings and the word pairs before filling (a first fill only: the search by meaning stops until --build-index)")
@@ -283,6 +306,12 @@ def main():
             secs = build_vector_index(conn.cursor(), a.build_memory, a.build_workers)
         print(f"The indexes on the embeddings and on the word pairs are built ({secs / 60:.1f} min).", flush=True)
         run.finish("ok", rows_in=0, rows_out=0, notes="index built")
+        return 0
+    if a.build_bits:
+        with evidence_db.connect() as conn:
+            secs = build_bits_index(conn.cursor(), a.build_memory, a.build_workers)
+        print(f"The index on the embeddings' bits is built ({secs / 60:.1f} min).", flush=True)
+        run.finish("ok", rows_in=0, rows_out=0, notes="bits index built")
         return 0
     if a.try_query:
         # A check of the search by meaning from outside the page (13 Nov 2026): the query embedded here, find_meaning
