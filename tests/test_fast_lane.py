@@ -109,3 +109,13 @@ class Store(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Scope(unittest.TestCase):
+    def test_the_semantic_scope_is_every_report_that_reads_like_an_annual_or_sustainability_report(self):
+        import semantic_index as S, evidence_health as H
+        for t in ("Annual Report", "Sustainability Report", "Impact Report", "Climate Report", "Environmental Reports", "Social Reports", "10K Form", "Registration Document"):
+            self.assertIn(t, S.MAIN_TYPES)
+        for t in ("CDP Report", "GRI", "Policy Documents", "Interim Reports", "Company Presentations"):
+            self.assertNotIn(t, S.MAIN_TYPES)
+        self.assertEqual(S.MAIN_TYPES, H.MAIN_TYPES)                    # the health check counts the same scope
