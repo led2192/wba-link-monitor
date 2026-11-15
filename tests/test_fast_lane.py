@@ -47,6 +47,18 @@ class Lane(unittest.TestCase):
         self.assertIn('("fast_lane", [sys.executable, "fast_lane.py", "--dispatch"])', src)
 
 
+class Indexes(unittest.TestCase):
+    def test_a_run_that_adds_documents_never_drops_the_index_of_meanings(self):
+        """15 Nov 2026: the fast lane's first real run dropped the index of 4 million embeddings."""
+        src = open(os.path.join(ROOT, "semantic_index.py"), encoding="utf-8").read()
+        self.assertIn("if a.commit and a.drop_indexes:\n            drop_vector_index(cur)", src)
+        self.assertEqual(src.count("drop_vector_index(cur)"), 2)                         # its definition and this one call
+        for _, cmd in F.steps(["A"], 1):
+            self.assertNotIn("--drop-indexes", cmd)
+        for wf in os.listdir(os.path.join(ROOT, ".github", "workflows")):
+            self.assertNotIn("--drop-indexes", open(os.path.join(ROOT, ".github", "workflows", wf), encoding="utf-8").read(), wf)
+
+
 class Store(unittest.TestCase):
     def test_the_files_of_one_run(self):
         listing = {n: {"size": 1} for n in (
