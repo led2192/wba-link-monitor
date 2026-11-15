@@ -17,6 +17,12 @@ class Cur:
             if params[0] in self.boom:
                 raise RuntimeError("database")
             self.rows = [({"vec": [0.1]} if params[0] in self.vectors else {"error": "x"},)]
+        elif "set_config" in sql:
+            self.settings = getattr(self, "settings", []) + [tuple(params)]
+        elif "from public.documents" in sql:
+            self.rows = [r for r in getattr(self, "docs", []) if r[0] in params[0]]
+        elif "find_company_ids" in sql:
+            self.rows = [(params[0].split(";"),)]
         else:
             q, vec = params[0], params[1]
             self.asked.append((("search" if "find_blend" in sql else "pages"), q, params[2], params[3], params[4], params[5]))
@@ -81,6 +87,49 @@ class SearchTimingLevels(unittest.TestCase):
         self.assertEqual(but_one, "((b) & (c:* | x <-> y)) | ((a:*) & (c:* | x <-> y)) | ((a:*) & (b))")
         for _, question, _ in T.LONG:
             self.assertNotIn("ANA", question)                       # our own sentences only: the log is public
+
+
+    def test_an_option_is_set_before_every_case_and_the_two_runs_are_compared(self):
+        cases = [(1, "kw", None, "q one?", "W1", ["L1|5"]), (2, "kw2", None, "q two?", "W2", ["L2|7"])]
+        cur = Cur(vectors=set(), with_vec={}, words_only={"kw": ["L1|5"], "kw2": ["x|1"]})
+        places = {}
+        A.evaluate(cur, cases, out=lambda s: None, option=("ask_later", "on"), places=places)
+        self.assertEqual(cur.settings, [("lantern.ask_later", "on")] * 2)             # a rollback would have undone one set once
+        self.assertEqual(places, {1: (1, True), 2: (0, False)})
+        line = A.compare({1: (1, True), 2: (0, False), 3: (2, True)}, {1: (0, True), 2: (4, True), 3: (5, True)})
+        self.assertIn("of 3 questions", line)
+        self.assertIn("1 gained and 1 lost", line)
+        self.assertIn("(1 kept it at another place)", line)
+        self.assertIn("1 gained and 0 lost.", line)
+
+    def test_why_counts_causes_and_names_nothing(self):
+        def case(i, right, wide, y0=None, y1=None, kind=None, company="W1"):
+            return (i, [f"kw{i}"], None, company, y0, y1, kind, set(right), wide)
+        cur = Cur(vectors=set(), with_vec={}, words_only={"kw4": ["x|1"] * 30 + ["L4|9"], "kw5": ["L5|2"], "kw6": ["x|1"], "kw7": ["x|1"]})
+        cur.docs = [("L2", 2022, "Annual Report", "W1", True), ("L3", 2024, "Policy", "W1", True), ("L3b", 2024, "Annual Report", "W9", True),
+                    ("L4", 2024, "Annual Report", "W1", True), ("L5", 2024, "Annual Report", "W1", True),
+                    ("L6", 2024, "Annual Report", "W1", True), ("L7", None, "Annual Report", "W1", False)]
+        missed = [case(1, ["L1|5"], ["L1|6", "x|1"]),                                   # the document is there, another page
+                  case(2, ["L2|5"], ["x|1"], y0=2023, y1=2024),                         # the years leave it out
+                  case(3, ["L3|5"], ["x|1"], kind="Annual Report"),                     # the type
+                  case(30, ["L3b|5"], ["x|1"]),                                         # the company
+                  case(4, ["L4|9"], ["x|1"]),                                           # deeper
+                  case(5, ["L5|9"], ["x|1"]),                                           # the document deeper, another page
+                  case(6, ["L6|9"], ["x|1"]), case(7, ["L7|9"], ["x|1"]),               # not found: indexed, not indexed
+                  case(8, ["L8|9"], ["x|1"])]                                           # gone
+        self.assertEqual([A.cause(cur, m) for m in missed],
+                         [A.CAUSES[0], A.CAUSES[2], A.CAUSES[3], A.CAUSES[4], A.CAUSES[5], A.CAUSES[6], A.CAUSES[7], A.CAUSES[8], A.CAUSES[1]])
+        lines = A.why(cur, missed, out=lambda s: None)
+        self.assertIn("9 questions", lines[0])
+        self.assertEqual(len(lines), 10)
+        for secret in ("L1", "L4", "kw4", "W1", "Policy"):
+            self.assertNotIn(secret, " ".join(lines))
+
+    def test_the_option_name_is_checked_and_writes_nothing(self):
+        with self.assertRaises(SystemExit):
+            A.main(["--option", "x; drop"])
+        with self.assertRaises(SystemExit):
+            A.main(["--option", "ask_later", "--commit"])
 
 
 if __name__ == "__main__":
