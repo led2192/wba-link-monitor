@@ -20,12 +20,19 @@ eight lost it, not the search). It grows as people confirm facts.
 
 The log is public: it prints counts and shares only, never a question, a company or a page.
 
-    python ask_eval.py [--limit 300] [--commit]
+    python ask_eval.py [--limit 300] [--commit] [--option ask_later] [--why]
 
---commit writes one row to public.ask_eval (the run's counts). Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run
+--commit writes one row to public.ask_eval (the run's counts).
+--option NAME runs the same questions twice in one session, with the option off and then on (set_config of
+  lantern.NAME, set again before every question because a failed question rolls the session's settings back), and
+  reports both lines and how many questions gained or lost their confirmed page. It writes nothing. (15 Nov 2026: the
+  option had been passed through PGOPTIONS, which this connection does not carry, so two runs compared nothing.)
+--why adds, for the questions whose confirmed page is not among the 24 pages of the search, a count by cause: the
+  document is there with another page, the search's own filters leave the document out, the page is found deeper
+  (places 25 to 200), or it is not found at all (and whether the document is indexed by meaning). Counts only. Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run
 record (QA_COMMIT is set by --commit).
 """
-import argparse, os, sys
+import argparse, os, re, sys
 
 import qa
 
@@ -65,15 +72,19 @@ def replay(keywords, search, question, wba):
     return tries + [question], wba, None, None, None, False
 
 
-def evaluate(cur, cases, out=print):
+def evaluate(cur, cases, out=print, option=None, places=None, missed=None):
     """Counts over the cases: found (words and meaning), found_words (words alone), first_three, no_vector, in_search
     (a confirmed page is among the 24 pages of the search, whether or not it is one of the eight read), and exact /
-    exact_found for the cases asked again exactly as they were."""
+    exact_found for the cases asked again exactly as they were. option = (name, 'on' or 'off') sets lantern.name for
+    the session before every case. places, when given, receives {ask id: (place among the eight, in the search)};
+    missed receives what --why needs of each case whose confirmed page is not among the 24."""
     c = dict(cases=0, found=0, found_words=0, first_three=0, no_vector=0, failed=0, exact=0, exact_found=0, in_search=0)
     for ask_id, keywords, search, question, wba, right_pages in cases:
         right = set(right_pages or [])
         tries, company, y0, y1, kind, exact = replay(keywords, search, question, wba)
         try:
+            if option:
+                cur.execute("select set_config(%s, %s, false)", (f"lantern.{option[0]}", option[1]))
             cur.execute("select public.query_vector_made(%s)", (question,))
             vec = (cur.fetchone()[0] or {}).get("vec")
             both = pages_for(cur, tries, vec, company, y0, y1, kind, ask_id)
@@ -92,7 +103,87 @@ def evaluate(cur, cases, out=print):
         c["in_search"] += 1 if place(wide, right) else 0
         c["exact"] += 1 if exact else 0
         c["exact_found"] += 1 if exact and at else 0
+        if places is not None:
+            places[ask_id] = (at, bool(place(wide, right)))
+        if missed is not None and not place(wide, right):
+            missed.append((ask_id, tries, vec, company, y0, y1, kind, right, wide))
     return c
+
+
+CAUSES = ("the document is among the 24 pages, with other pages of it",
+          "the document is no longer in the database",
+          "the search's years leave the document out",
+          "the search's type leaves the document out",
+          "the search's company leaves the document out",
+          "the page is found deeper, between places 25 and 200",
+          "the document is found deeper, with other pages of it",
+          "not found among 200 pages; the document is indexed by meaning",
+          "not found among 200 pages; the document is not indexed by meaning",
+          "not looked at (the database failed)")
+
+
+def doc_of(key):
+    return key.rsplit("|", 1)[0]
+
+
+def cause(cur, case):
+    """Why no confirmed page of this case is among the 24 pages of its search: the first of CAUSES that holds for any
+    of its confirmed pages, in that order (the mildest first)."""
+    ask_id, tries, vec, company, y0, y1, kind, right, wide = case
+    docs = sorted({doc_of(k) for k in right})
+    if {doc_of(k) for k in wide} & set(docs):
+        return CAUSES[0]
+    cur.execute("select d.library_id, d.year, d.doc_type, d.wba_id, exists (select 1 from public.chunk_docs c where c.library_id = d.library_id) "
+                "from public.documents d where d.library_id = any(%s)", (docs,))
+    rows = cur.fetchall()
+    if not rows:
+        return CAUSES[1]
+    ids = None
+    if company:
+        cur.execute("select public.find_company_ids(%s)", (company,))
+        ids = cur.fetchone()[0]
+    by_year = lambda r: (y0 is not None and (r[1] is None or r[1] < y0)) or (y1 is not None and (r[1] is None or r[1] > y1))
+    by_type = lambda r: bool(kind) and (r[2] or "") != kind
+    by_company = lambda r: ids is not None and r[3] not in ids
+    inside = [r for r in rows if not (by_year(r) or by_type(r) or by_company(r))]
+    if not inside:
+        return CAUSES[2] if all(by_year(r) for r in rows) else CAUSES[3] if all(by_year(r) or by_type(r) for r in rows) else CAUSES[4]
+    deep = []
+    for q in tries:
+        cur.execute("select library_id || '|' || page::text from public.find_blend('eval', %s, %s::real[], %s, %s, %s, %s, 200, 'eval', null, null, null, %s)",
+                    (q, vec, company, y0, y1, kind, f"eval {ask_id}"))
+        deep = [r[0] for r in cur.fetchall()]
+        if deep:
+            break
+    if place(deep, right):
+        return CAUSES[5]
+    if {doc_of(k) for k in deep} & set(docs):
+        return CAUSES[6]
+    return CAUSES[7] if any(r[4] for r in inside) else CAUSES[8]
+
+
+def why(cur, missed, out=print):
+    """A count by cause over the missed cases, as lines; nothing of a case is printed."""
+    n = {}
+    for case in missed:
+        try:
+            got = cause(cur, case)
+        except Exception as e:
+            cur.connection.rollback()
+            out(f"  one case not looked at ({type(e).__name__})")
+            got = CAUSES[-1]
+        n[got] = n.get(got, 0) + 1
+    return [f"Confirmed page not among the 24 pages of the search: {len(missed)} questions."] + [f"  {n[k]}: {k}" for k in CAUSES if k in n]
+
+
+def compare(off, on):
+    """One line: the questions that gained or lost their confirmed page with the option on, among the eight and in the search."""
+    both = [k for k in off if k in on]
+    g8 = sum(1 for k in both if on[k][0] and not off[k][0]); l8 = sum(1 for k in both if off[k][0] and not on[k][0])
+    gs = sum(1 for k in both if on[k][1] and not off[k][1]); ls = sum(1 for k in both if off[k][1] and not on[k][1])
+    moved = sum(1 for k in both if on[k][0] and off[k][0] and on[k][0] != off[k][0])
+    return (f"With the option on, of {len(both)} questions run both ways: among the eight, {g8} gained and {l8} lost their confirmed page "
+            f"({moved} kept it at another place); among the 24 of the search, {gs} gained and {ls} lost.")
 
 
 def pages_for(cur, tries, vec, company, y0, y1, kind, ask_id, search=False):
@@ -124,7 +215,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Do the pages an answer reads still include the pages people confirmed?")
     ap.add_argument("--limit", type=int, default=300)
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--option", default="", help="a search option (lantern.NAME) to run off and then on; writes nothing")
+    ap.add_argument("--why", action="store_true", help="count the causes of the questions whose confirmed page the search does not find")
     a = ap.parse_args(argv)
+    if a.option and not re.fullmatch(r"[a-z_]{1,40}", a.option):
+        sys.exit("--option takes the name of an option: small letters and underscores.")
+    if a.option and a.commit:
+        sys.exit("--option compares and writes nothing: leave --commit out.")
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
     if a.commit:
@@ -137,9 +234,24 @@ def main(argv=None):
             cur.execute("set statement_timeout = '60s'")
             cur.execute(CASES_SQL, (a.limit,))
             cases = cur.fetchall()
-            c = evaluate(cur, cases)
-            conn.rollback()                                   # the searches logged by the run are not kept
-            print(summary(c))
+            missed = [] if a.why else None
+            if a.option:
+                off, on = {}, {}
+                c_off = evaluate(cur, cases, option=(a.option, "off"), places=off)
+                conn.rollback()
+                c = evaluate(cur, cases, option=(a.option, "on"), places=on, missed=missed)
+                conn.rollback()
+                print(f"Option {a.option} off. " + summary(c_off))
+                print(f"Option {a.option} on. " + summary(c))
+                print(compare(off, on))
+            else:
+                c = evaluate(cur, cases, missed=missed)
+                conn.rollback()                               # the searches logged by the run are not kept
+                print(summary(c))
+            if a.why:
+                for line in why(cur, missed):
+                    print(line)
+                conn.rollback()
             if a.commit:
                 for stmt in TABLE_SQL.split(";"):
                     cur.execute(stmt)
