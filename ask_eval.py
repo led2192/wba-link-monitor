@@ -29,7 +29,9 @@ The log is public: it prints counts and shares only, never a question, a company
   option had been passed through PGOPTIONS, which this connection does not carry, so two runs compared nothing.)
 --why adds, for the questions whose confirmed page is not among the 24 pages of the search, a count by cause: the
   document is there with another page, the search's own filters leave the document out, the page is found deeper
-  (places 25 to 200), or it is not found at all (and whether the document is indexed by meaning). Counts only. Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run
+  (places 25 to 200), or it is not found at all (and whether the document is indexed by meaning). It ends with how
+  many of the questions whose confirmed page is not read have their confirmed figure printed on a page that is read
+  (a figure often stands on several pages of a report). Counts only. Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run
 record (QA_COMMIT is set by --commit).
 """
 import argparse, os, re, sys
@@ -194,6 +196,48 @@ def why(cur, missed, out=print):
     return lines
 
 
+def digits(value):
+    """The significant digits of a stored figure, as they would be printed whatever the scale: '390000.00' -> '39',
+    '12345.60' -> '123456'. Stored values are the printed number times the page's scale, so the zeros at the end say
+    nothing about what the page prints."""
+    t = str(value).strip().lstrip("-")
+    if "." in t:
+        t = t.rstrip("0")
+    return re.sub(r"\D", "", t).lstrip("0").rstrip("0")
+
+
+def printed(body):
+    """A page's text with the separators inside numbers taken out, so 1,234.5 and 1 234,5 both read 12345."""
+    return re.sub(r"(?<=\d)[,.'\u2019\u00a0\u202f ](?=\d)", "", body or "")
+
+
+def figures_read(cur, cases, places, out=print):
+    """Of the cases whose confirmed page is not among the eight read: how many have a confirmed figure (a number of at
+    least four significant digits) and, of those, in how many that figure is printed on one of the eight pages read.
+    A count of how far 'the confirmed page is not read' overstates 'the figure is not read'. One line, counts only."""
+    lost = [(n, cases[n]) for n in sorted(places) if not places[n][0]]
+    with_figure = on_a_page = 0
+    for n, (ask_id, _k, _s, _q, wba, _r) in lost:
+        try:
+            cur.execute("select f.value::text from public.ask_facts f where f.ask_id = %s and f.wba_id = %s and f.verdict = 'right' and f.kind = 'number' and f.value is not null", (ask_id, wba))
+            want = {d for d in (digits(r[0]) for r in cur.fetchall()) if len(d) >= 4}
+            if not want:
+                continue
+            with_figure += 1
+            keys = list(places[n][2])
+            if not keys:
+                continue
+            cur.execute("select p.body from public.pages p where p.library_id || '|' || p.page::text = any(%s) and p.library_id = any(%s)",
+                        (keys, sorted({doc_of(k) for k in keys})))
+            text = " ".join(printed(r[0]) for r in cur.fetchall())
+            on_a_page += 1 if any(d in text for d in want) else 0
+        except Exception as e:
+            cur.connection.rollback()
+            out(f"  one case not looked at ({type(e).__name__})")
+    return (f"Confirmed page not among the eight read: {len(lost)} questions. With a confirmed figure of four or more significant digits: {with_figure}; "
+            f"of those, the figure is printed on one of the eight pages read in {on_a_page}.")
+
+
 def compare(off, on):
     """One line: the questions that gained or lost their confirmed page with the option on, among the eight and in the search."""
     both = [k for k in off if k in on]
@@ -266,12 +310,14 @@ def main(argv=None):
                 print(f"Option {a.option} on. " + summary(c))
                 print(compare(off, on))
             else:
-                c = evaluate(cur, cases, missed=missed)
+                on = {} if a.why else None
+                c = evaluate(cur, cases, missed=missed, places=on)
                 conn.rollback()                               # the searches logged by the run are not kept
                 print(summary(c))
             if a.why:
                 for line in why(cur, missed):
                     print(line)
+                print(figures_read(cur, cases, on))
                 conn.rollback()
             if a.commit:
                 for stmt in TABLE_SQL.split(";"):

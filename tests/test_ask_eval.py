@@ -19,6 +19,10 @@ class Cur:
             self.rows = [({"vec": [0.1]} if params[0] in self.vectors else {"error": "x"},)]
         elif "set_config" in sql:
             self.settings = getattr(self, "settings", []) + [tuple(params)]
+        elif "from public.ask_facts" in sql:
+            self.rows = [(v,) for v in getattr(self, "values", {}).get(params[0], [])]
+        elif "from public.pages" in sql:
+            self.rows = [(getattr(self, "bodies", {}).get(k, ""),) for k in params[0]]
         elif "from public.documents" in sql:
             self.rows = [r for r in getattr(self, "docs", []) if r[0] in params[0]]
         elif "find_company_ids" in sql:
@@ -141,5 +145,22 @@ class SearchTimingLevels(unittest.TestCase):
             A.main(["--option", "ask_later", "--commit"])
 
 
+    def test_a_confirmed_figure_printed_on_a_page_that_is_read(self):
+        self.assertEqual((A.digits("390000.000"), A.digits("12345.60"), A.digits("-0.0512"), A.digits("1200")), ("39", "123456", "512", "12"))
+        self.assertIn("12345", A.printed("Scope 1: 1,234.5 t and 1\u00a0234,5 again"))
+        cases = [(1, "k", None, "q?", "W1", ["L1|5"]), (2, "k", None, "q?", "W1", ["L2|5"]), (3, "k", None, "q?", "W1", ["L3|5"]), (4, "k", None, "q?", "W1", ["L4|5"])]
+        places = {0: (0, False, ("A|1", "A|2")), 1: (0, False, ("B|1",)), 2: (0, True, ("C|1",)), 3: (2, True, ("L4|5",))}
+        cur = Cur(vectors=set(), with_vec={}, words_only={})
+        cur.values = {1: ["1234500.0"], 2: ["98765"], 3: ["1200"]}                   # the third has too few digits to look for
+        cur.bodies = {"A|1": "nothing", "A|2": "total 12,345 thousand", "B|1": "9,876 only"}
+        line = A.figures_read(cur, cases, places, out=lambda s: None)
+        self.assertIn("3 questions", line)
+        self.assertIn("significant digits: 2;", line)
+        self.assertIn("read in 1.", line)
+        for secret in ("12345", "98765", "L1", "W1"):
+            self.assertNotIn(secret, line)
+
+
 if __name__ == "__main__":
     unittest.main()
+
