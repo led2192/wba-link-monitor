@@ -805,6 +805,42 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([p for p, _ in no_company], [1, 2, 3, 4, 5, 6, 7, 8])                      # no company named: nothing to be the newest of
         self.assertEqual(a_year, [(100 + g, 2023) for g in range(1, 9)])                            # a year asked for: one search, its eight pages (the stub marks a search with a year)
 
+    def test_an_answer_about_a_company_may_take_more_pages_of_one_document(self):
+        """Option ask_doc_pages (16 Nov 2026): three pages a document is right for a list, not for an answer about one company."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.pages_a_document()"); plain = cur.fetchone()[0]
+            got = []
+            for v in ("6", "9", "0", "12", "x", ""):
+                cur.execute("select set_config('lantern.per_doc', %s, true)", (v,))
+                cur.execute("select public.pages_a_document()"); got.append(cur.fetchone()[0])
+            # the search as ask_pages sees it: a stub that says, in the excerpt, how many pages a document it was allowed
+            cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
+                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null,
+                             region_filter text default null, typed text default null)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$
+                             select null::bigint, g, 'D', 'C', 'W', 2024, 't', 'l', null::text, g, 0::real, public.pages_a_document()::text
+                             from generate_series(1, least(max_rows, 24)) g $f$""")
+            ask = "select distinct excerpt from public.ask_pages('k', 'q', null, %s, 2024, 2024, null, 'q?')"
+            after = "select coalesce(current_setting('lantern.per_doc', true), '')"
+            cur.execute(ask, ("C",)); default = cur.fetchall()
+            cur.execute("select set_config('lantern.ask_doc_pages', 'on', true)")
+            cur.execute(ask, ("C",)); on = cur.fetchall()
+            cur.execute(after); left = cur.fetchone()[0]
+            cur.execute(ask, (None,)); no_company = cur.fetchall()
+            cur.execute("select set_config('lantern.ask_doc_pages', 'off', true)")
+            cur.execute(ask, ("C",)); off = cur.fetchall()
+            cur.execute("select is_on from public.search_options where name = 'ask_doc_pages'"); stored = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual(plain, 3)
+        self.assertEqual(got, [6, 9, 3, 3, 3, 3])                                                    # a digit from 1 to 9, or three
+        self.assertEqual((default, off, no_company), ([("3",)], [("3",)], [("3",)]))                 # off until it is compared; no company: a list
+        self.assertEqual(on, [("6",)])
+        self.assertEqual(left, "")                                                                  # put back: the next search of the transaction is a list again
+        self.assertFalse(stored)
+
     def test_an_answer_about_a_year_reads_the_later_reports_too(self):
         """Option ask_later (15 Nov 2026): a figure of 2023 is printed again, sometimes restated, by the reports of 2024 and 2025."""
         import psycopg
