@@ -260,6 +260,7 @@ def main():
     ap.add_argument("--remaining", action="store_true", help="print how many documents are done and left, and stop")
     ap.add_argument("--build-memory", default="512MB", help="maintenance_work_mem for --build-index: about half the database machine's RAM")
     ap.add_argument("--build-workers", type=int, default=2, help="parallel workers for --build-index: the machine's processors minus one")
+    ap.add_argument("--drop-indexes", action="store_true", help="drop the indexes on the embeddings and the word pairs before filling (a first fill only: the search by meaning stops until --build-index)")
     ap.add_argument("--ids", default="", help="the fast lane: only these library ids (comma-separated), if they are in scope")
     ap.add_argument("--no-pairs", action="store_true", help="write the chunks only; the word pairs of these documents are left for a later pass")
     a = ap.parse_args()
@@ -309,7 +310,11 @@ def main():
         cur.execute("set statement_timeout = '120s'")
         cur.execute("select to_regclass('public.page_pairs') is not null")
         has_pairs = cur.fetchone()[0]                          # the table arrives with a full Evidence database load
-        if a.commit:
+        # The indexes are dropped only when asked (15 Nov 2026). Until this day every committed run dropped them,
+        # which was right during the first fill and wrong ever after: the fast lane's run for three documents dropped
+        # the index of 4 million embeddings, and the search by meaning without a company stopped until it was built
+        # again. A run that adds documents now leaves the indexes in place and each insert updates them.
+        if a.commit and a.drop_indexes:
             drop_vector_index(cur)
             cur.execute("set statement_timeout = '120s'")
         docs = documents_to_index(cur, years, partition, a.limit if a.limit else 1_000_000, [x.strip() for x in a.ids.split(",") if x.strip()] or None)
