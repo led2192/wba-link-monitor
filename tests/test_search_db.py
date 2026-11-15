@@ -448,6 +448,47 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([(g["what"], g["mine"]) for g in got], [("net zero target", True), ("Scope 1 and 2 reduction", False)])
         self.assertNotIn("verdict_by", got[0])                                     # who confirmed is not sent
 
+    def test_a_fact_gets_its_metric_by_name_and_the_owner_sees_the_taxonomy(self):
+        import json, psycopg, load_supabase as L
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.fact_key('Total Scope 1 emissions (2023)'), public.fact_key('Emissions, Scope 1'), public.fact_key('FY24 Número Employees')")
+            self.assertEqual(cur.fetchone(), ("1 emission scope", "1 emission scope", "employee numero"))
+            cur.execute("select public.fact_match('Direct GHG emissions (Scope 1)'), public.fact_match('Greenhouse gas emissions, Scope 1'), public.fact_match('Net sales 2024'), "
+                        "public.fact_match('Scope 2 emissions (market-based)'), public.fact_match('Scope 2 emissions'), public.fact_match('Number of pandas'), public.fact_match('2024')")
+            self.assertEqual(cur.fetchone(), ("scope_1", "scope_1", "revenue", "scope_2_market", "scope_2", None, None))
+            cur.execute("select count(*), count(distinct grp) from public.fact_metrics")
+            metrics, groups = cur.fetchone()
+            self.assertGreaterEqual(metrics, 80); self.assertEqual(groups, 24)
+            # no two metrics answer to the same name: a name would then go to whichever came first
+            cur.execute("select k, count(distinct key) from (select m.key, public.fact_key(n) as k from public.fact_metrics m, unnest(m.aliases || m.label) n) x group by k having count(distinct key) > 1")
+            self.assertEqual(cur.fetchall(), [])
+            sources = [{"n": 1, "wba_id": "PT_TAX", "company": "Taxonomy Co", "library_id": "tax-1", "page": 4, "url": "https://example.org/a.pdf", "year": 2024, "doc_type": "Annual Report"}]
+            facts = [{"what": "Scope 1 GHG emissions", "kind": "number", "value": "120", "unit": "tCO2e", "year": 2024, "source": 1},
+                     {"what": "Pandas adopted", "kind": "number", "value": "3", "year": 2024, "source": 1}]
+            cur.execute("select public.ask_keep_facts(901, %s::jsonb, %s::jsonb)", (json.dumps(facts), json.dumps(sources)))
+            kept = cur.fetchone()[0]
+            self.assertEqual([k["metric"] for k in kept], ["scope_1", None])
+            # the owner renames a metric and gives it the panda name; installing the file again keeps both and classifies the waiting fact
+            cur.execute("update public.fact_metrics set label = 'Sites near protected areas', aliases = aliases || 'Pandas adopted'::text where key = 'sites_near_protected_areas'")
+            cur.execute(L.guard_sql(open(os.path.join(pg_search.ROOT, "supabase", "search.sql"), encoding="utf-8").read()))
+            cur.execute("select label from public.fact_metrics where key = 'sites_near_protected_areas'")
+            self.assertEqual(cur.fetchone()[0], "Sites near protected areas")
+            cur.execute("select metric from public.ask_facts where ask_id = 901 order by id")
+            self.assertEqual([r[0] for r in cur.fetchall()], ["scope_1", "sites_near_protected_areas"])
+            cur.execute("insert into public.ask_facts (ask_id, wba_id, company, what, kind, answer) values (902, 'PT_TAX', 'Taxonomy Co', 'Favourite colour', 'text', 'blue'), (903, 'PT_TAX2', 'Other Co', 'Favourite colours 2023', 'text', 'red')")
+            cur.execute("select public.admin_taxonomy('k')")
+            t = cur.fetchone()[0]
+            self.assertEqual([b["key"] for b in t["blocks"]], ["company", "finance", "sustainability", "commitments"])
+            e1 = [g for b in t["blocks"] for g in b["groups"] if g["key"] == "e1"][0]
+            self.assertEqual(e1["standard"], "ESRS E1")
+            s1 = [m for m in e1["metrics"] if m["key"] == "scope_1"][0]
+            self.assertGreaterEqual(s1["facts"], 1); self.assertGreaterEqual(s1["companies"], 1)
+            colour = [u for u in t["unclassified"] if u["name"].startswith("Favourite")]
+            self.assertEqual([(u["facts"], u["companies"]) for u in colour], [(2, 2)])      # two spellings of one name, counted together
+            self.assertEqual(t["facts"] - t["classified"], sum(u["facts"] for u in t["unclassified"]))
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:

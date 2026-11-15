@@ -339,7 +339,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit"}
+    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -416,3 +416,16 @@ def test_contribute_offers_two_ways_and_the_old_name_is_gone():
     assert "grant execute on function public.gap_card(text, text[]) to anon, authenticated;" in SQL
     assert '<button type="button" id="goLucky">Contribute</button>' in PAGE and "I’m feeling lucky" not in PAGE
     assert 'choice("Review a value"' in PAGE and 'choice("Fill a document gap"' in PAGE and "addSourceForm(hold, g.wba_id)" in PAGE
+
+
+def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
+    for t in ("fact_blocks", "fact_groups", "fact_metrics", "fact_metric_log"):
+        assert f"create table if not exists public.{t} (" in SQL and f"alter table public.{t} enable row level security;" in SQL
+    seed = SQL[SQL.index("insert into public.fact_blocks"):SQL.index("create or replace function public.admin_taxonomy(")]
+    assert seed.count("on conflict (key) do nothing;") == 3                     # written once: a later change of the owner stays
+    assert "alter table public.ask_facts add column if not exists metric text;" in SQL
+    assert "public.fact_match(f ->> 'what'))" in SQL                            # a new fact gets its metric as it is kept
+    assert "where f.metric is null and public.fact_match(f.what) is not null;" in SQL      # a classified fact is never touched
+    assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
+    assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
+    assert 'const CLIENT = "lantern v71 2026-11-15";' in PAGE

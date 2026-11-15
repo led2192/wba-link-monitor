@@ -2014,12 +2014,13 @@ begin
     end if;
     continue when k = 'number' and num is null;
     continue when k <> 'number' and coalesce(btrim(f ->> 'answer'), '') = '';
-    insert into public.ask_facts (ask_id, wba_id, company, year, period, what, kind, value, unit, answer, library_id, page, url, wba_year)
+    insert into public.ask_facts (ask_id, wba_id, company, year, period, what, kind, value, unit, answer, library_id, page, url, wba_year, metric)
       values (the_ask, src ->> 'wba_id', src ->> 'company', yr, nullif(left(btrim(f ->> 'period'), 20), ''), left(btrim(f ->> 'what'), 120), k,
               case when k = 'number' then num end, nullif(left(btrim(f ->> 'unit'), 40), ''),
               case when k <> 'number' then left(btrim(f ->> 'answer'), 300) end, src ->> 'library_id', (src ->> 'page')::int, src ->> 'url',
               public.wba_year(public.fiscal_label_year(f ->> 'period'),
-                              (select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = src ->> 'wba_id')))
+                              (select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = src ->> 'wba_id')),
+              public.fact_match(f ->> 'what'))      -- its metric in the taxonomy, when a metric has that name
       returning id into new_id;
     n := n + 1;
     kept := kept || ((select to_jsonb(a) - 'ask_id' - 'verdict_by' - 'verdict_at' from public.ask_facts a where a.id = new_id)
@@ -2801,6 +2802,243 @@ end;
 $$;
 revoke all on function public.admin_fact_set(text, bigint, text) from public, anon;
 grant execute on function public.admin_fact_set(text, bigint, text) to authenticated;
+
+-- The taxonomy of facts (15 Nov 2026, the owner: the facts of answers need an order, and the same question asked of
+-- two companies should not give two sets of names). Three levels, all of them rows the owner can change from the
+-- admin page: block, group, metric. A fact points to its metric and to nothing else, so a metric that moves to
+-- another group takes its facts with it. A fact with no metric is "unclassified": kept, shown, never dropped.
+-- The rows below are a start, written once: "on conflict do nothing" leaves every later change of the owner alone.
+create table if not exists public.fact_blocks (
+  key       text primary key,
+  label     text not null,
+  position  int not null default 100
+);
+create table if not exists public.fact_groups (
+  key       text primary key,
+  block     text not null references public.fact_blocks (key) on update cascade,
+  label     text not null,
+  standard  text,                              -- the standard the group follows, as a label only ("ESRS E1")
+  position  int not null default 100
+);
+create table if not exists public.fact_metrics (
+  key          text primary key,
+  grp          text not null references public.fact_groups (key) on update cascade,
+  label        text not null,
+  kind         text not null default 'number',   -- number, yes_no, list, text, person, target
+  unit_family  text,                             -- co2e, energy, money, people, percent, water, mass, hours, count
+  standard_ref text,                             -- a label for finding and exporting ("ESRS E1-6"); nothing depends on it
+  aliases      text[] not null default '{}',     -- other names of the same thing, as the model or a report writes them
+  status       text not null default 'active',   -- active, proposed, merged, retired
+  merged_into  text,
+  proposed_by  text,
+  created_at   timestamptz not null default now()
+);
+create table if not exists public.fact_metric_log (
+  id      bigint generated always as identity primary key,
+  at      timestamptz not null default now(),
+  who     text,
+  metric  text,
+  change  text not null,
+  before  jsonb,
+  after   jsonb
+);
+alter table public.fact_blocks enable row level security;
+alter table public.fact_groups enable row level security;
+alter table public.fact_metrics enable row level security;
+alter table public.fact_metric_log enable row level security;
+alter table public.ask_facts add column if not exists metric text;       -- a key of fact_metrics; null: unclassified
+create index if not exists ask_facts_metric on public.ask_facts (metric, wba_id);
+
+-- A name reduced to what it says: no accents, no years ("2024", "FY24"), no filler words, no plural "s", the words
+-- in alphabetical order. "Total Scope 1 emissions (2023)" and "Emissions, Scope 1" are both "1 emission scope".
+create or replace function public.fact_key(name text) returns text
+language sql immutable
+as $$
+  select coalesce(string_agg(w, ' ' order by w), '')
+  from (
+    select distinct case when length(x) > 3 and x ~ '[^s]s$' then left(x, length(x) - 1) else x end as w
+    from regexp_split_to_table(
+           regexp_replace(
+             replace(lower(regexp_replace(normalize(coalesce(name, ''), NFD), '[̀-ͯ]', '', 'g')), 'greenhouse gas', 'ghg'),
+             '[^a-z0-9]+', ' ', 'g'),
+           ' ') x
+    where x <> '' and x !~ '^(19|20)[0-9]{2}$' and x !~ '^fy[0-9]{2,4}$'
+      and x <> all(array['the', 'of', 'and', 'in', 'for', 'a', 'an', 'to', 'by', 'total', 'company', 'group', 'global', 'annual', 'gross', 'reported', 's'])
+  ) t
+$$;
+
+-- The metric a name belongs to, by its label or one of its aliases; null when no metric has that name.
+create or replace function public.fact_match(name text) returns text
+language sql stable security definer
+set search_path = public, extensions
+as $$
+  select m.key
+  from public.fact_metrics m
+  where m.status in ('active', 'proposed') and public.fact_key(name) <> ''
+    and public.fact_key(name) in (select public.fact_key(n) from unnest(m.aliases || m.label) n)
+  order by (m.status = 'active') desc, m.created_at, m.key
+  limit 1
+$$;
+revoke all on function public.fact_match(text) from public, anon, authenticated;
+
+insert into public.fact_blocks (key, label, position) values
+  ('company', 'Company', 10), ('finance', 'Finance', 20), ('sustainability', 'Sustainability', 30), ('commitments', 'Commitments and policies', 40)
+on conflict (key) do nothing;
+
+insert into public.fact_groups (key, block, label, standard, position) values
+  ('identity', 'company', 'Identity', null, 10),
+  ('people', 'company', 'People and board', null, 20),
+  ('workforce_size', 'company', 'Workforce size', null, 30),
+  ('structure', 'company', 'Structure', null, 40),
+  ('results', 'finance', 'Results', null, 10),
+  ('balance', 'finance', 'Balance sheet', null, 20),
+  ('investment', 'finance', 'Investment', null, 30),
+  ('tax', 'finance', 'Tax', null, 40),
+  ('shareholders', 'finance', 'Shareholders', null, 50),
+  ('pay', 'finance', 'Executive pay', null, 60),
+  ('e1', 'sustainability', 'Climate', 'ESRS E1', 10),
+  ('e2', 'sustainability', 'Pollution', 'ESRS E2', 20),
+  ('e3', 'sustainability', 'Water', 'ESRS E3', 30),
+  ('e4', 'sustainability', 'Biodiversity', 'ESRS E4', 40),
+  ('e5', 'sustainability', 'Circular economy and waste', 'ESRS E5', 50),
+  ('s1', 'sustainability', 'Own workforce', 'ESRS S1', 60),
+  ('s2', 'sustainability', 'Workers in the value chain', 'ESRS S2', 70),
+  ('s3', 'sustainability', 'Communities', 'ESRS S3', 80),
+  ('s4', 'sustainability', 'Consumers', 'ESRS S4', 90),
+  ('g1', 'sustainability', 'Business conduct', 'ESRS G1', 100),
+  ('targets', 'commitments', 'Targets', null, 10),
+  ('policies', 'commitments', 'Policies', null, 20),
+  ('assurance', 'commitments', 'Assurance and verification', null, 30),
+  ('frameworks', 'commitments', 'Frameworks and memberships', null, 40)
+on conflict (key) do nothing;
+
+insert into public.fact_metrics (key, grp, label, kind, unit_family, standard_ref, aliases) values
+  ('headquarters', 'identity', 'Headquarters', 'text', null, null, '{"Head office","Headquarters location","Registered office"}'),
+  ('year_founded', 'identity', 'Year founded', 'number', 'count', null, '{"Founded","Founding year","Year of foundation"}'),
+  ('stock_listing', 'identity', 'Stock exchange listing', 'text', null, null, '{"Listed on","Stock exchange","Listing"}'),
+  ('ceo', 'people', 'Chief executive officer', 'person', null, null, '{"CEO","Chief executive","CEO name"}'),
+  ('chair', 'people', 'Chair of the board', 'person', null, null, '{"Chairman","Chairperson","Board chair","Chairman of the board"}'),
+  ('cfo', 'people', 'Chief financial officer', 'person', null, null, '{"CFO"}'),
+  ('board_size', 'people', 'Board members', 'number', 'count', null, '{"Board size","Number of board members","Number of directors","Directors"}'),
+  ('board_women_share', 'people', 'Women on the board', 'number', 'percent', 'ESRS GOV-1', '{"Share of women on the board","Female board members","Board gender diversity","Women directors"}'),
+  ('board_independent_share', 'people', 'Independent board members', 'number', 'percent', 'ESRS GOV-1', '{"Independent directors","Share of independent directors","Board independence"}'),
+  ('employees', 'workforce_size', 'Employees', 'number', 'people', 'ESRS S1-6', '{"Number of employees","Headcount","Employee headcount","Workforce","Workforce size","Employee count","Full-time employees","Number of staff"}'),
+  ('countries_of_operation', 'structure', 'Countries of operation', 'number', 'count', null, '{"Number of countries","Countries","Countries where it operates","Operating countries"}'),
+  ('business_segments', 'structure', 'Business segments', 'list', null, null, '{"Segments","Operating segments","Reportable segments","Divisions"}'),
+  ('revenue', 'results', 'Revenue', 'number', 'money', null, '{"Revenues","Net sales","Sales","Turnover","Net revenue","Net revenues","Sales revenue"}'),
+  ('operating_income', 'results', 'Operating income', 'number', 'money', null, '{"Operating profit","EBIT","Income from operations","Operating result"}'),
+  ('ebitda', 'results', 'EBITDA', 'number', 'money', null, '{"Adjusted EBITDA"}'),
+  ('net_income', 'results', 'Net income', 'number', 'money', null, '{"Net profit","Profit for the year","Net earnings","Net result","Profit after tax","Net income attributable to shareholders"}'),
+  ('earnings_per_share', 'results', 'Earnings per share', 'number', 'money', null, '{"EPS","Diluted earnings per share","Basic earnings per share","Diluted EPS"}'),
+  ('total_assets', 'balance', 'Total assets', 'number', 'money', null, '{"Assets"}'),
+  ('total_equity', 'balance', 'Total equity', 'number', 'money', null, '{"Shareholders'' equity","Equity","Stockholders'' equity"}'),
+  ('net_debt', 'balance', 'Net debt', 'number', 'money', null, '{"Net financial debt"}'),
+  ('capital_expenditure', 'investment', 'Capital expenditure', 'number', 'money', null, '{"Capex","Capital expenditures","Capital spending","Investments in property, plant and equipment"}'),
+  ('research_development', 'investment', 'Research and development expense', 'number', 'money', null, '{"R&D","R&D expense","R&D spending","Research and development","R&D investment"}'),
+  ('income_tax_paid', 'tax', 'Income tax paid', 'number', 'money', 'GRI 207-4', '{"Taxes paid","Income taxes paid","Corporate income tax paid","Tax paid"}'),
+  ('effective_tax_rate', 'tax', 'Effective tax rate', 'number', 'percent', null, '{"Effective income tax rate"}'),
+  ('dividends_paid', 'shareholders', 'Dividends paid', 'number', 'money', null, '{"Dividends","Dividend payments","Dividends paid to shareholders"}'),
+  ('dividend_per_share', 'shareholders', 'Dividend per share', 'number', 'money', null, '{"DPS","Dividends per share"}'),
+  ('share_buybacks', 'shareholders', 'Share buybacks', 'number', 'money', null, '{"Share repurchases","Buybacks","Repurchase of shares"}'),
+  ('ceo_pay', 'pay', 'CEO total pay', 'number', 'money', null, '{"CEO compensation","CEO total compensation","CEO remuneration","CEO total remuneration","Chief executive pay"}'),
+  ('ceo_pay_ratio', 'pay', 'CEO pay ratio', 'number', 'count', 'ESRS S1-16', '{"CEO to median employee pay ratio","Pay ratio","CEO to worker pay ratio","Annual total remuneration ratio"}'),
+  ('scope_1', 'e1', 'Scope 1 emissions', 'number', 'co2e', 'ESRS E1-6', '{"Scope 1","Scope 1 GHG emissions","Direct GHG emissions","Direct emissions","Direct GHG emissions (Scope 1)","Scope 1 CO2e emissions","Scope 1 carbon emissions"}'),
+  ('scope_2', 'e1', 'Scope 2 emissions', 'number', 'co2e', 'ESRS E1-6', '{"Scope 2","Scope 2 GHG emissions","Indirect GHG emissions (Scope 2)","Energy indirect emissions","Scope 2 CO2e emissions"}'),
+  ('scope_2_location', 'e1', 'Scope 2 emissions, location-based', 'number', 'co2e', 'ESRS E1-6', '{"Scope 2 location-based","Scope 2 (location-based)","Location-based Scope 2 emissions","Scope 2 GHG emissions location-based"}'),
+  ('scope_2_market', 'e1', 'Scope 2 emissions, market-based', 'number', 'co2e', 'ESRS E1-6', '{"Scope 2 market-based","Scope 2 (market-based)","Market-based Scope 2 emissions","Scope 2 GHG emissions market-based"}'),
+  ('scope_3', 'e1', 'Scope 3 emissions', 'number', 'co2e', 'ESRS E1-6', '{"Scope 3","Scope 3 GHG emissions","Value chain emissions","Other indirect GHG emissions (Scope 3)","Scope 3 CO2e emissions"}'),
+  ('scope_1_2', 'e1', 'Scope 1 and 2 emissions', 'number', 'co2e', 'ESRS E1-6', '{"Scope 1 + 2 emissions","Scope 1 and Scope 2 emissions","Scope 1 & 2 GHG emissions","Operational emissions","Scope 1 and 2 GHG emissions"}'),
+  ('ghg_total', 'e1', 'Total GHG emissions', 'number', 'co2e', 'ESRS E1-6', '{"GHG emissions","Scope 1, 2 and 3 emissions","Carbon footprint","Total carbon emissions","Total emissions","Total CO2e emissions"}'),
+  ('ghg_intensity', 'e1', 'GHG emissions intensity', 'number', null, 'ESRS E1-6', '{"Emissions intensity","Carbon intensity","GHG intensity","GHG intensity per revenue"}'),
+  ('energy_consumption', 'e1', 'Energy consumption', 'number', 'energy', 'ESRS E1-5', '{"Total energy consumption","Energy use","Energy consumed","Energy usage"}'),
+  ('renewable_energy_share', 'e1', 'Renewable energy share', 'number', 'percent', 'ESRS E1-5', '{"Share of renewable energy","Renewable energy","Percentage of renewable energy","Renewable energy use"}'),
+  ('renewable_electricity_share', 'e1', 'Renewable electricity share', 'number', 'percent', 'ESRS E1-5', '{"Share of renewable electricity","Renewable electricity","Percentage of renewable electricity","Electricity from renewable sources"}'),
+  ('internal_carbon_price', 'e1', 'Internal carbon price', 'number', 'money', 'ESRS E1-8', '{"Carbon price","Internal price on carbon"}'),
+  ('nox_emissions', 'e2', 'NOx emissions', 'number', 'mass', 'ESRS E2-4', '{"Nitrogen oxides emissions","Nitrogen oxide emissions"}'),
+  ('sox_emissions', 'e2', 'SOx emissions', 'number', 'mass', 'ESRS E2-4', '{"Sulphur oxides emissions","Sulfur oxides emissions","SO2 emissions"}'),
+  ('water_withdrawal', 'e3', 'Water withdrawal', 'number', 'water', 'ESRS E3-4', '{"Total water withdrawal","Water withdrawn","Water withdrawals","Water abstraction"}'),
+  ('water_consumption', 'e3', 'Water consumption', 'number', 'water', 'ESRS E3-4', '{"Total water consumption","Water consumed","Water use","Water usage"}'),
+  ('water_discharge', 'e3', 'Water discharge', 'number', 'water', 'ESRS E3-4', '{"Total water discharge","Water discharged","Wastewater discharge"}'),
+  ('sites_near_protected_areas', 'e4', 'Sites in or near protected areas', 'number', 'count', 'ESRS E4-5', '{"Sites in or near biodiversity-sensitive areas","Operations near protected areas"}'),
+  ('waste_generated', 'e5', 'Waste generated', 'number', 'mass', 'ESRS E5-5', '{"Total waste","Total waste generated","Waste","Waste produced"}'),
+  ('hazardous_waste', 'e5', 'Hazardous waste', 'number', 'mass', 'ESRS E5-5', '{"Hazardous waste generated","Total hazardous waste"}'),
+  ('waste_recycled_share', 'e5', 'Waste recycled', 'number', 'percent', 'ESRS E5-5', '{"Recycling rate","Waste recycling rate","Share of waste recycled","Waste diverted from disposal","Waste diverted from landfill"}'),
+  ('recycled_content_share', 'e5', 'Recycled content', 'number', 'percent', 'ESRS E5-4', '{"Recycled materials","Share of recycled materials","Recycled input materials"}'),
+  ('women_workforce_share', 's1', 'Women in the workforce', 'number', 'percent', 'ESRS S1-6', '{"Share of women","Female employees","Women employees","Percentage of women in the workforce","Share of female employees"}'),
+  ('women_management_share', 's1', 'Women in management', 'number', 'percent', 'ESRS S1-9', '{"Share of women in management","Women in leadership","Female managers","Women in senior management","Women in leadership positions"}'),
+  ('employee_turnover', 's1', 'Employee turnover', 'number', 'percent', 'ESRS S1-6', '{"Turnover rate","Employee turnover rate","Staff turnover","Attrition rate","Voluntary turnover"}'),
+  ('lost_time_injury_rate', 's1', 'Lost time injury rate', 'number', null, 'ESRS S1-14', '{"LTIFR","LTIR","Lost time injury frequency rate","Lost-time injury rate"}'),
+  ('recordable_injury_rate', 's1', 'Recordable injury rate', 'number', null, 'ESRS S1-14', '{"TRIR","TRIFR","Total recordable incident rate","Total recordable injury rate","Total recordable injury frequency rate"}'),
+  ('fatalities', 's1', 'Work-related fatalities', 'number', 'count', 'ESRS S1-14', '{"Fatalities","Number of fatalities","Employee fatalities","Fatal accidents"}'),
+  ('training_hours', 's1', 'Training hours per employee', 'number', 'hours', 'ESRS S1-13', '{"Average training hours","Average hours of training per employee","Training hours","Hours of training per employee"}'),
+  ('gender_pay_gap', 's1', 'Gender pay gap', 'number', 'percent', 'ESRS S1-16', '{"Pay gap","Unadjusted gender pay gap","Gender wage gap"}'),
+  ('collective_bargaining_coverage', 's1', 'Collective bargaining coverage', 'number', 'percent', 'ESRS S1-8', '{"Employees covered by collective bargaining agreements","Collective agreement coverage","Share of employees covered by collective agreements"}'),
+  ('living_wage', 's1', 'Pays a living wage', 'yes_no', null, 'ESRS S1-10', '{"Living wage","Living wage commitment","Adequate wages"}'),
+  ('suppliers_audited', 's2', 'Suppliers audited', 'number', 'count', null, '{"Supplier audits","Number of supplier audits","Suppliers assessed","Number of suppliers audited"}'),
+  ('community_investment', 's3', 'Community investment', 'number', 'money', null, '{"Community investments","Charitable donations","Donations","Community contributions","Philanthropic contributions"}'),
+  ('product_recalls', 's4', 'Product recalls', 'number', 'count', null, '{"Number of product recalls","Recalls"}'),
+  ('corruption_incidents', 'g1', 'Confirmed incidents of corruption', 'number', 'count', 'ESRS G1-4', '{"Incidents of corruption","Corruption cases","Confirmed corruption incidents","Corruption incidents"}'),
+  ('political_contributions', 'g1', 'Political contributions', 'number', 'money', 'ESRS G1-5', '{"Political donations","Political spending","Lobbying expenditure"}'),
+  ('whistleblower_reports', 'g1', 'Whistleblower reports', 'number', 'count', 'ESRS G1-1', '{"Reports to the whistleblowing channel","Ethics hotline reports","Whistleblowing cases","Speak-up reports"}'),
+  ('net_zero_target', 'targets', 'Net zero target', 'target', null, 'ESRS E1-4', '{"Net-zero target","Net zero commitment","Net zero target year","Net-zero commitment","Carbon neutrality target","Climate neutrality target"}'),
+  ('scope_1_2_target', 'targets', 'Scope 1 and 2 reduction target', 'target', 'percent', 'ESRS E1-4', '{"Scope 1 and 2 target","Scope 1 and 2 emissions reduction target","Scope 1 & 2 reduction target","Operational emissions reduction target"}'),
+  ('scope_3_target', 'targets', 'Scope 3 reduction target', 'target', 'percent', 'ESRS E1-4', '{"Scope 3 target","Scope 3 emissions reduction target","Value chain emissions reduction target"}'),
+  ('ghg_reduction_target', 'targets', 'GHG reduction target', 'target', 'percent', 'ESRS E1-4', '{"Emissions reduction target","GHG emissions reduction target","Carbon reduction target","Emission reduction target"}'),
+  ('renewable_energy_target', 'targets', 'Renewable energy target', 'target', 'percent', 'ESRS E1-4', '{"Renewable electricity target","100% renewable electricity target","RE100 target"}'),
+  ('water_target', 'targets', 'Water target', 'target', null, 'ESRS E3-3', '{"Water reduction target","Water use reduction target","Water withdrawal reduction target"}'),
+  ('waste_target', 'targets', 'Waste target', 'target', null, 'ESRS E5-3', '{"Waste reduction target","Zero waste to landfill target","Zero waste target"}'),
+  ('sbti_validated', 'targets', 'Targets validated by the SBTi', 'yes_no', null, null, '{"SBTi validated","SBTi validation","SBTi approved targets","Science-based targets validated","SBTi-approved target","Science Based Targets initiative validation"}'),
+  ('human_rights_policy', 'policies', 'Human rights policy', 'yes_no', null, 'ESRS S1-1', '{"Has a human rights policy","Human rights commitment"}'),
+  ('anti_corruption_policy', 'policies', 'Anti-corruption policy', 'yes_no', null, 'ESRS G1-1', '{"Anti-bribery policy","Anti-bribery and corruption policy","Has an anti-corruption policy"}'),
+  ('supplier_code_of_conduct', 'policies', 'Supplier code of conduct', 'yes_no', null, 'ESRS G1-2', '{"Has a supplier code of conduct","Supplier code"}'),
+  ('climate_policy', 'policies', 'Climate policy', 'yes_no', null, 'ESRS E1-2', '{"Climate change policy","Has a climate policy"}'),
+  ('deforestation_policy', 'policies', 'Deforestation policy', 'yes_no', null, 'ESRS E4-2', '{"No-deforestation policy","Zero deforestation commitment","Deforestation-free commitment","No deforestation commitment"}'),
+  ('whistleblower_mechanism', 'policies', 'Whistleblowing mechanism', 'yes_no', null, 'ESRS G1-1', '{"Whistleblower mechanism","Grievance mechanism","Whistleblowing channel","Has a whistleblower channel","Speak-up channel"}'),
+  ('emissions_verified', 'assurance', 'GHG emissions verified by a third party', 'yes_no', null, null, '{"Emissions verified","Third-party verification of emissions","GHG emissions assured","External assurance of GHG emissions","Emissions third-party verified","GHG emissions verification","Third-party verification of GHG emissions","Emissions externally verified"}'),
+  ('sustainability_report_assured', 'assurance', 'Sustainability report externally assured', 'yes_no', null, null, '{"External assurance","Sustainability report assured","External assurance of the sustainability report","Third-party assurance","Independent assurance"}'),
+  ('assurance_provider', 'assurance', 'Assurance provider', 'text', null, null, '{"Assurer","External assurance provider","Verifier","Auditor of the sustainability report"}'),
+  ('assurance_level', 'assurance', 'Level of assurance', 'text', null, null, '{"Assurance level","Limited or reasonable assurance"}'),
+  ('reports_gri', 'frameworks', 'Reports with GRI', 'yes_no', null, null, '{"GRI reporting","Reports in accordance with GRI","GRI Standards","Uses GRI Standards"}'),
+  ('reports_tcfd', 'frameworks', 'Reports with TCFD', 'yes_no', null, null, '{"TCFD reporting","TCFD aligned","TCFD disclosure","Supports TCFD"}'),
+  ('cdp_score', 'frameworks', 'CDP climate score', 'text', null, null, '{"CDP score","CDP rating","CDP climate change score"}'),
+  ('un_global_compact', 'frameworks', 'UN Global Compact signatory', 'yes_no', null, null, '{"UN Global Compact","UNGC signatory","Signatory of the UN Global Compact","UNGC member"}')
+on conflict (key) do nothing;
+
+-- The facts kept before the taxonomy, and those a new alias now reaches: every fact with no metric is looked up again
+-- each time this file is installed. A fact that has a metric is never touched here.
+update public.ask_facts f set metric = public.fact_match(f.what) where f.metric is null and public.fact_match(f.what) is not null;
+
+-- The taxonomy for the owner's page: blocks, their groups, their metrics with how many facts and companies each has;
+-- the names of the facts with no metric, the most used first; and how much of all facts is classified.
+create or replace function public.admin_taxonomy(key text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'facts', (select count(*) from public.ask_facts),
+    'classified', (select count(*) from public.ask_facts where metric is not null),
+    'blocks', (select coalesce(jsonb_agg(jsonb_build_object('key', b.key, 'label', b.label, 'groups',
+        (select coalesce(jsonb_agg(jsonb_build_object('key', g.key, 'label', g.label, 'standard', g.standard, 'metrics',
+            (select coalesce(jsonb_agg(jsonb_build_object('key', m.key, 'label', m.label, 'kind', m.kind, 'unit_family', m.unit_family,
+                        'standard_ref', m.standard_ref, 'aliases', m.aliases, 'status', m.status,
+                        'facts', (select count(*) from public.ask_facts f where f.metric = m.key),
+                        'companies', (select count(distinct f.wba_id) from public.ask_facts f where f.metric = m.key)) order by m.label), '[]'::jsonb)
+             from public.fact_metrics m where m.grp = g.key and m.status in ('active', 'proposed'))) order by g.position, g.label), '[]'::jsonb)
+         from public.fact_groups g where g.block = b.key)) order by b.position, b.label), '[]'::jsonb)
+      from public.fact_blocks b),
+    'unclassified', (select coalesce(jsonb_agg(to_jsonb(u) order by u.facts desc, u.name), '[]'::jsonb) from (
+        select min(f.what) as name, count(*) as facts, count(distinct f.wba_id) as companies, mode() within group (order by f.kind) as kind
+        from public.ask_facts f where f.metric is null
+        group by public.fact_key(f.what) order by count(*) desc limit 300) u));
+end;
+$$;
+revoke all on function public.admin_taxonomy(text) from public, anon;
+grant execute on function public.admin_taxonomy(text) to authenticated;
 
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
