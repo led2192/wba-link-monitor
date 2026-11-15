@@ -63,5 +63,25 @@ class HashBackfill(unittest.TestCase):
         self.assertEqual(B.hash_one({"id": "r", "fields": {}}), ("r", None, "no attachment address"))
 
 
+
+class Rotation(unittest.TestCase):
+    def test_a_different_part_of_the_queue_each_day_and_every_row_within_days(self):
+        import build_cover_text as B
+        rows = [{"id": f"rec{i:04d}"} for i in range(2000)]
+        d1 = {r["id"] for r in B.todays_share(rows, 500, day="2026-11-15")}
+        d2 = {r["id"] for r in B.todays_share(rows, 500, day="2026-11-16")}
+        self.assertEqual((len(d1), len(d2)), (500, 500))
+        self.assertLess(len(d1 & d2), 200)                                    # not the same head of the list (about 125 by chance)
+        self.assertEqual(B.todays_share(rows, 500, day="2026-11-15"), B.todays_share(list(reversed(rows)), 500, day="2026-11-15"))
+        seen = set()
+        for day in range(1, 31):
+            seen |= {r["id"] for r in B.todays_share(rows, 500, day=f"2026-12-{day:02d}")}
+        self.assertEqual(len(seen), 2000)
+
+    def test_a_short_queue_is_taken_whole(self):
+        import build_cover_text as B
+        rows = [{"id": "a"}, {"id": "b"}]
+        self.assertEqual(B.todays_share(rows, 500), rows); self.assertEqual(B.todays_share(rows, 0), rows)
+
 if __name__ == "__main__":
     unittest.main()
