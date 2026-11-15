@@ -41,9 +41,14 @@ def test_a_phrase_is_marked_as_one_piece_and_typos_are_offered():
     assert 'rpc("did_you_mean"' in PAGE and "Did you mean " in PAGE
 
 
-def test_only_the_scheduled_load_starts_a_paid_pass():
+def test_only_the_clock_starts_a_paid_pass():
+    """Since 15 Nov 2026 the nightly pass has one starter: the server's clock, with as_scheduled ticked. No load that
+    finishes (a functions install by hand did, on 11 Nov) and no cron of GitHub's can start a second paid pass."""
     wf = open(os.path.join(ROOT, ".github", "workflows", "propose_values.yml"), encoding="utf-8").read()
-    assert '[ "${{ github.event.workflow_run.event }}" != "schedule" ]' in wf
+    assert "workflow_run" not in wf and "cron:" not in wf
+    assert 'elif [ "${{ inputs.as_scheduled }}" = "true" ]; then' in wf
+    table = open(os.path.join(ROOT, "server", "clock.json"), encoding="utf-8").read()
+    assert table.count('"propose_values.yml"') == 1
 
 
 def load_tests(loader, standard, pattern):

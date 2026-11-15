@@ -9,11 +9,15 @@ name: Evidence database load
 # database (pg_cron job build-pages-search: over three hours on the full corpus, longer than a job may
 # run). A pull
 # request touching it runs a dry run (schema checked and rolled back) and posts what is waiting.
+# Started by lanterN's own clock on the server (clock.py, server/clock.json) at 19:41 and 01:41 UTC since 15 Nov 2026:
+# GitHub's scheduler started this hours late or not at all. as_scheduled = do exactly what the scheduled run did.
 on:
-  schedule:
-    - cron: "41 19,1 * * *"
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "run as the nightly load (the clock ticks this)"
+        type: boolean
+        default: false
       mode:
         description: "dry_run or commit"
         default: "dry_run"
@@ -59,7 +63,7 @@ jobs:
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           MAX_GB: ${{ inputs.max_gb || vars.SUPABASE_MAX_GB || '6' }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${{ inputs.as_scheduled }}" = "true" ]; then
                # never past 06:00 UTC (07:00 Madrid in winter): loading slows every search
                LEFT=$(( ( $(date -u -d 'tomorrow 06:00' +%s) - $(date -u +%s) ) / 60 % 1440 ))
                [ "$LEFT" -gt 300 ] && LEFT=300

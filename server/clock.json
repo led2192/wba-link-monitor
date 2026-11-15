@@ -1,0 +1,5 @@
+[
+  {"workflow": "load_supabase.yml", "name": "Evidence database load", "at": ["01:41", "19:41"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "propose_values.yml", "name": "Propose values (the nightly pass)", "at": ["03:30"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "library_mirror.yml", "name": "Library mirror", "at": ["04:43"], "inputs": {"as_scheduled": "true"}}
+]
