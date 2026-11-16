@@ -9,7 +9,7 @@ on:
       mode:
         description: "check (reads only), install, open, close, stop; link (tell Supabase the address and the secret); probe (measure the way from Supabase)"
         type: choice
-        options: [check, install, open, close, stop, link, probe, storm, pause, resume, restart-db]
+        options: [check, install, open, close, stop, link, probe, storm, breaker, pause, resume, restart-db]
         default: check
       host:
         description: "with open and link: the name that points to the server"
@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: The service
-        if: inputs.mode != 'link' && inputs.mode != 'probe' && inputs.mode != 'storm'
+        if: inputs.mode != 'link' && inputs.mode != 'probe' && inputs.mode != 'storm' && inputs.mode != 'breaker'
         run: bash server/service_install.sh "$MODE" "$HOST_NAME"
         env:
           MODE: ${{ inputs.mode }}
@@ -52,4 +52,9 @@ jobs:
         run: /usr/bin/python3 server/meaning_link.py --storm "$TIMES"
         env:
           TIMES: ${{ inputs.times || '10' }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      - name: The breaker asked in a row (a rehearsal; the option is on for this session only)
+        if: inputs.mode == 'breaker'
+        run: /usr/bin/python3 server/meaning_link.py --breaker
+        env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
