@@ -60,7 +60,8 @@ class Service(unittest.TestCase):
         bad = [b"", b"not json", b"[]", json.dumps({"vec": [0.1] * 383}).encode(), json.dumps({"vec": ["a"] * 384}).encode(),
                json.dumps({"vec": [True] * 384}).encode(), json.dumps({"vec": [1e9] * 384}).encode(), good(limit=0), good(limit=401), good(limit="5"),
                good(year_from=1800), good(year_to="2024"), good(companies=[]), good(companies=["ok", "x'; drop table"]), good(companies="PT_1"),
-               good(types=["a" * 81]), good(types=[1]), good(other=1), good(companies=["a"] * 501),
+               good(types=["a" * 81]), good(types=[1]), good(other=1), good(companies=["a"] * 501), good(limit=None),
+               b'{"vec": ' + b"[" * 100000 + b"]" * 100000 + b"}",
                b'{"vec": [' + b"NaN," * 383 + b"NaN]}"]
         for body in bad:
             (status, kind, data), pool, _ = ask(body=body)
@@ -80,6 +81,11 @@ class Service(unittest.TestCase):
         (status, _, _), pool, _ = ask(body=good(companies=["PT_00123", "PT_9"]))
         self.assertIn("f.wba_id = any(%(ids)s)", pool.calls[0][0])
         self.assertIn("+ 0 as dist", pool.calls[0][0])                                             # exact inside the companies' documents
+        (status, _, _), pool, _ = ask(body=good(companies=[f"PT_{i}" for i in range(51)]))
+        self.assertNotIn("+ 0 as dist", pool.calls[0][0])                                          # many companies: the index with the filter, not an exact search
+        self.assertIn("where f.live and f.wba_id = any(%(ids)s) and", pool.calls[0][0])
+        (_, _, data), _, _ = ask(body=good(), pool=FakePool(rows=[("B", 1, 0, 0.5), ("A", 2, 0, 0.1)]))
+        self.assertEqual([r[0] for r in json.loads(data)["rows"]], ["A", "B"])                     # sorted before it is sent
         self.assertNotIn("0.01", " ".join(map(str, logs)))                                         # the vector is never logged
 
     def test_errors_say_nothing(self):
@@ -104,10 +110,88 @@ class Service(unittest.TestCase):
         self.assertIn("chmod 640", INSTALL)
         self.assertIn('ThreadingHTTPServer(("127.0.0.1"', open(os.path.join(HERE, "server", "meaning_service.py")).read())
         self.assertNotIn("5432/tcp", INSTALL)
+        self.assertNotRegex(INSTALL, r"pip3? install")                                            # the library comes from the system's packages
+        self.assertIn('if ! sudo test -s "$ETC/meaning.env"; then', INSTALL)                      # a second install keeps the password: no gap
+        self.assertIn("method POST", INSTALL)
+        self.assertNotIn("path /health", INSTALL)                                                 # the health route is not passed on by the web server
+        self.assertIn("caddy validate", INSTALL)
+        self.assertIn("Nothing opened.", INSTALL)                                                 # the name must point here before a certificate is asked for
+        for guard in ("IPAddressDeny=any", "TasksMax=200", "CapabilityBoundingSet=", "connection limit 6"):
+            self.assertIn(guard, INSTALL)
         self.assertNotRegex(INSTALL, r"echo .*\$PW")                                               # the password is never printed
         for line in INSTALL.splitlines():
             if "ufw allow" in line:
                 self.assertRegex(line, r"ufw allow (80|443)/tcp")
+
+
+class OnASocket(unittest.TestCase):
+    """The handler on a real socket: what a caller can do before and around handle()."""
+    @classmethod
+    def setUpClass(cls):
+        import tempfile, threading
+        from http.server import ThreadingHTTPServer
+        f = tempfile.NamedTemporaryFile("w", delete=False); f.write(SECRET + "\n"); f.close()
+        cls.secrets, cls.pool = f.name, FakePool(rows=[("L1", 3, 0, 0.1)])
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), S.make_handler(cls.pool, f.name, S.Rate(1000, 1000), "meaning", lambda *a: None))
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown(); cls.httpd.server_close(); os.unlink(cls.secrets)
+
+    def raw(self, text, wait=3):
+        import socket
+        with socket.create_connection(("127.0.0.1", self.httpd.server_address[1]), timeout=wait) as c:
+            c.sendall(text if isinstance(text, bytes) else text.encode())
+            data = b""
+            try:
+                while True:
+                    part = c.recv(65536)
+                    if not part:
+                        break
+                    data += part
+            except OSError:
+                pass
+        return data
+
+    def test_a_good_request(self):
+        body = good().decode()
+        out = self.raw(f"POST /near HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {SECRET}\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n{body}")
+        self.assertTrue(out.startswith(b"HTTP/1.1 200"))
+        self.assertIn(b'{"rows":[["L1",3,0,0.1]]}', out)
+        self.assertIn(b"Server: lantern", out)                                                    # no version of anything
+
+    def test_without_the_secret_no_body_is_waited_for(self):
+        import time
+        t = time.time()
+        out = self.raw("POST /near HTTP/1.1\r\nHost: x\r\nContent-Length: 60000\r\n\r\n")      # says a body is coming and sends none
+        self.assertTrue(out.startswith(b"HTTP/1.1 401"))
+        self.assertLess(time.time() - t, 2)                                                       # answered at once, connection closed
+        self.assertIn(b"Connection: close", out.replace(b"connection", b"Connection"))
+
+    def test_other_methods_and_bodies_with_no_length_close_the_connection(self):
+        auth = f"Authorization: Bearer {SECRET}\r\n"
+        smuggle = "GET /health HTTP/1.1\r\nHost: x\r\n\r\n"
+        for first, status in ((f"DELETE /near HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n\r\nabcd", b"405"),
+                              (f"PUT /near HTTP/1.1\r\nHost: x\r\n{auth}Content-Length: 4\r\n\r\nabcd", b"405"),
+                              (f"POST /near HTTP/1.1\r\nHost: x\r\n{auth}Transfer-Encoding: chunked\r\n\r\n4\r\nabcd\r\n0\r\n\r\n", b"411"),
+                              (f"POST /near HTTP/1.1\r\nHost: x\r\n{auth}Content-Length: -5\r\n\r\n", b"411"),
+                              (f"POST /near HTTP/1.1\r\nHost: x\r\n{auth}\r\n", b"411"),
+                              (f"POST /near HTTP/1.1\r\nHost: x\r\n{auth}Content-Length: 99999999\r\n\r\n", b"413")):
+            out = self.raw(first + smuggle)
+            self.assertTrue(out.startswith(b"HTTP/1.1 " + status), out[:40])
+            self.assertEqual(out.count(b"HTTP/1.1 "), 1, first[:30])                              # what follows on the connection is never read as a request
+
+
+class NoOutsideCodeOnTheServer(unittest.TestCase):
+    def test_no_workflow_that_a_pull_request_starts_runs_on_the_server(self):
+        """The runners on the server can act as root there: a job started by a pull request must never reach them."""
+        import glob, re
+        for path in glob.glob(os.path.join(HERE, ".github", "workflows", "*.yml")):
+            text = open(path, encoding="utf-8").read()
+            if re.search(r"^\s*pull_request(_target)?\s*:", text, re.M) or re.search(r"on:\s*\[[^\]]*pull_request", text):
+                self.assertNotIn("self-hosted", text, path)
+                self.assertNotIn("LANTERN_JOBS", text, path)
 
 
 if __name__ == "__main__":
