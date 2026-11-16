@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v78 2026-11-15";
+  const CLIENT = "lantern v79 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1749,11 +1749,37 @@
       out.textContent = copied ? `Link "${r.name}" created and copied: paste it to its person now, it is not shown again.` : link;
       adminPeople(body).then(() => { const again = body.querySelector("[data-out]"); if (again) again.textContent = out.textContent; });
     }), out); out.dataset.out = "1"; body.appendChild(form);
-    body.appendChild(adminTable(["Link", "State", "Searches, 7 days", "30 days", "Last used", ""], o.links.map(l => [l.name, l.active ? "on" : "off", l.searches_7d, l.searches_30d, adminWhen(l.last_used),
+    // v79 (the owner): a link's name, or a person, opens what they searched or asked, each with a way to run the same search.
+    const detail = el("div");
+    const opener = (text, args, title) => { const a = el("a", null, text); a.href = "#"; a.title = title; a.onclick = ev => { ev.preventDefault(); adminSearches(detail, args, text); }; return a; };
+    body.appendChild(adminTable(["Link", "State", "Searches, 7 days", "30 days", "Last used", ""], o.links.map(l => [opener(l.name, { link: l.name }, "See what this link searched"), l.active ? "on" : "off", l.searches_7d, l.searches_30d, adminWhen(l.last_used),
       l.name === "owner" ? "" : adminBtn(l.active ? "Switch off" : "Switch on", async () => { await authed("admin_link_set", { key, name: l.name, active: !l.active }); adminPeople(body); })])));
     body.append(el("h3", null, "People who signed in"));
     body.appendChild(adminTable(["Person", "Answers, 7 days", "Answers in all", "Facts marked right", "wrong", "Values reviewed", "Last seen"],
-      o.people.map(p => [p.email, p.answers_7d, p.answers, p.facts_right, p.facts_wrong, p.value_reviews, adminWhen(p.last_seen)])));
+      o.people.map(p => [opener(p.email, { person: p.email }, "See what this person asked"), p.answers_7d, p.answers, p.facts_right, p.facts_wrong, p.value_reviews, adminWhen(p.last_seen)])));
+    body.appendChild(detail);
+  }
+  // What a link searched or a person asked, newest first (admin_searches). "Run it" opens the search page in a new tab
+  // with the same words in the box: the search runs again, as the owner. The link says as=search, so a question is
+  // searched, not answered: an answer is spent only when the owner presses Ask himself.
+  const adminRun = (text, label) => { const a = el("a", null, label || "Run it"); a.href = location.pathname + "?as=search&q=" + encodeURIComponent(text || ""); a.target = "_blank"; a.rel = "noopener"; a.title = "Open the search with these words in a new tab"; return a; };
+  async function adminSearches(box, args, who) {
+    box.innerHTML = ""; box.append(el("p", null, "Loading…"));
+    const r = await authed("admin_searches", { key, link: args.link || null, person: args.person || null, max_rows: 200 });
+    box.innerHTML = "";
+    if (!r) { box.textContent = "Not available."; return; }
+    if (args.link) {
+      box.append(el("h3", null, `Searches of the link "${who}" (${r.searches.length}${r.searches.length >= 200 ? "+" : ""}, newest first)`));
+      if (!r.searches.length) box.append(el("p", null, "No searches yet."));
+      else box.appendChild(adminTable(["When", "What was typed", "Filters read", "Pages", "Opened", "ms", ""], r.searches.map(x => [adminWhen(x.at), x.typed || "",
+        [x.company, x.year_from || x.year_to ? `${x.year_from || ""}–${x.year_to || ""}` : "", x.doc_type, x.profile].filter(Boolean).join(" · ") + (x.as_typed ? "" : " (older search: the words the engine read)"),
+        x.n, x.clicks || "", x.ms, adminRun(x.typed)])));
+    } else {
+      box.append(el("h3", null, `Questions of ${who} (${r.questions.length}${r.questions.length >= 200 ? "+" : ""}, newest first)`));
+      if (!r.questions.length) box.append(el("p", null, "No questions yet."));
+      else box.appendChild(adminTable(["When", "Question", "Answered", "Facts kept", ""], r.questions.map(x => [adminWhen(x.at), x.question, x.failed ? "failed" : x.answered ? "yes" : "no", x.facts || "", adminRun(x.question, "Run its search")])));
+    }
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   // Facts from answers. v58 (the owner): one search box for a word or a company, and the list grouped by company
   // (each company a block that folds, with its counts) or flat, newest first.
@@ -2056,7 +2082,9 @@
   adminLink();
   loadCompanies().then(() => {
     const q0 = new URLSearchParams(location.search).get("q");
-    if (q0) { $("q").value = q0; go(); }
+    // as=search (the owner's panel, v79): run the words as a search even when they read like a question, so that
+    // looking at what someone asked never launches (and spends) an answer
+    if (q0) { $("q").value = q0; new URLSearchParams(location.search).get("as") === "search" ? (closeHistory(), search(false)) : go(); }
   });
 })();
 </script>
