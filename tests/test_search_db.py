@@ -781,7 +781,7 @@ class SearchOnPostgres(unittest.TestCase):
                     cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year) values (%s, %s, %s, 'Annual Report', 2024)", ("D" + wba, wba, name))
                     cur.execute("insert into public.pages (library_id, page, body) values (%s, 1, %s)", ("D" + wba, f"{name} page text"))
             # the search and the reader, stubbed: Delta has no page; Beta's reader fails; Gamma says not stated
-            cur.execute("""create or replace function public.ask_pages(key text, q text, qvec real[], company_filter text, year_from int, year_to int, type_filter text, asked text)
+            cur.execute("""create or replace function public.ask_pages(key text, q text, qvec real[], company_filter text, year_from int, year_to int, type_filter text, asked text, industry_filter text default null, country_filter text default null, region_filter text default null)
                            returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text) language sql as $f$
                              select 'D' || company_filter, 'x', company_filter, 2024, 'Annual Report', 'the report', 'http://x', g, 'e' from generate_series(1, 8) g where company_filter <> 'S4' $f$""")
             cur.execute("""create or replace function public.ask_model(api_key text, http_schema text, model text, system_text text, user_text text, max_tokens int) returns jsonb language sql as $f$

@@ -2503,8 +2503,12 @@ insert into public.search_options (name, is_on, note) values ('ask_latest', fals
 -- withdrawal 0 -> 3), none fewer, ten unchanged, seconds unchanged.
 update public.search_options set is_on = true, changed = now(), note = note || ' (on since 15 Nov 2026, run 43710164737)' where name = 'ask_latest' and not is_on and note not like '%on since%';
 
+-- 16 Nov 2026: the industry, country and region of the box travel with the question too. Before, an answer asked
+-- with "Industry: Oil & Gas" was written from pages of any industry, while the list under it showed oil and gas.
+drop function if exists public.ask_pages(text, text, real[], text, int, int, text, text);
 create or replace function public.ask_pages(
-  key text, q text, qvec real[], company_filter text, year_from int, year_to int, type_filter text, asked text)
+  key text, q text, qvec real[], company_filter text, year_from int, year_to int, type_filter text, asked text,
+  industry_filter text default null, country_filter text default null, region_filter text default null)
 returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text)
 language plpgsql security definer           -- plpgsql, not sql: find_blend is defined further down this file, and a sql body is checked when it is created
 set search_path = public, extensions
@@ -2554,9 +2558,9 @@ begin
     end if;
   end if;
   return query
-    with c as materialized (select * from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask', null, null, null, asked)),
+    with c as materialized (select * from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask', industry_filter, country_filter, region_filter, asked)),
          newest as (select max(c.year) as y from c),
-         r as materialized (select * from public.find_blend(key, q, qvec, company_filter, later_from, null, type_filter, 8, case when later then 'ask later' else 'ask latest' end, null, null, null, asked)
+         r as materialized (select * from public.find_blend(key, q, qvec, company_filter, later_from, null, type_filter, 8, case when later then 'ask later' else 'ask latest' end, industry_filter, country_filter, region_filter, asked)
                             where later_from is not null),
          u as (select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt, c.rank, 0 as src from c
                union all
@@ -2572,7 +2576,7 @@ begin
   perform set_config('lantern.per_doc', '', true);
 end;
 $$;
-revoke all on function public.ask_pages(text, text, real[], text, int, int, text, text) from public, anon, authenticated;
+revoke all on function public.ask_pages(text, text, real[], text, int, int, text, text, text, text, text) from public, anon, authenticated;
 
 -- What Ask is told about the fiscal years of the companies it reads: one line a company whose year does not end in
 -- December, with an example of WBA's reporting year. '' when no such company.
@@ -2597,6 +2601,7 @@ revoke all on function public.ask_fiscal_lines(jsonb) from public, anon, authent
 -- sends the question's vector, the meaning), eight of them, and each source carries its document and an excerpt so
 -- that the page can put the pages the answer cites first in the list under it.
 drop function if exists public.ask(text, text, text, text, int, int, text, text);
+drop function if exists public.ask(text, text, text, text, int, int, text, text, real[]);
 -- What the reader is told and what it is sent, as two functions (15 Nov 2026) so that a comparison (ask_names_trial)
 -- sends exactly what Ask sends. with_names false: the instructions as they were before the option ask_metric_names.
 -- How many answers a day a person may have (16 Nov 2026, the owner: while Ask is being tried, raise a colleague's
@@ -2662,7 +2667,8 @@ $fn$;
 
 create or replace function public.ask(
   key text, question text, q text default null, company_filter text default null, year_from int default null, year_to int default null,
-  type_filter text default null, client text default null, qvec real[] default null)
+  type_filter text default null, client text default null, qvec real[] default null,
+  industry_filter text default null, country_filter text default null, region_filter text default null)
 returns jsonb
 language plpgsql security definer
 set search_path = public, extensions
@@ -2762,7 +2768,8 @@ begin
     exit when n > 0;
     for r in
       select f.library_id, f.company, f.wba_id, f.year, f.doc_type, f.label, f.url, f.page, f.excerpt
-      from public.ask_pages(key, case when attempt = 1 then keywords else search_q end, qvec, company_filter, year_from, year_to, type_filter, asked) f
+      from public.ask_pages(key, case when attempt = 1 then keywords else search_q end, qvec, company_filter, year_from, year_to, type_filter, asked,
+                            industry_filter, country_filter, region_filter) f
     loop
       n := n + 1;
       select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
@@ -2821,8 +2828,8 @@ begin
                             'confirmed', confirmed);   -- for telling apart: no list written, a list not readable, facts with no page
 end;
 $$;
-revoke all on function public.ask(text, text, text, text, int, int, text, text, real[]) from public, anon;
-grant execute on function public.ask(text, text, text, text, int, int, text, text, real[]) to authenticated;
+revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) from public, anon;
+grant execute on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) to authenticated;
 
 -- The owner's panel (13 Nov 2026). lanterN is now used by colleagues: the owner needs to tell the people and the
 -- links apart, to see and correct what people confirmed among the facts of answers, and to see what Ask costs.
