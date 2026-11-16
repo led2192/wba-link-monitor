@@ -429,7 +429,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v84 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v85 2026-11-16";' in PAGE
+    assert '"petroleo y gas"],' in PAGE and '"oil", "gas"]' not in PAGE                                 # v85: "greenhouse gas" is not an industry
     assert 'authed("survey_step", { key, survey: id, companies: 3 })' in PAGE and '"Surveys": adminSurveys' in PAGE          # v84: surveys, in the owner's panel first
     assert "No page found" in PAGE and "Not stated in the pages read" in PAGE                                               # kept apart from a no
     fm = SQL[SQL.index("create or replace function public.find_meaning("):SQL.index("revoke all on function public.find_meaning(")]

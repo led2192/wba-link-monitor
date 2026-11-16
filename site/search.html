@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v84 2026-11-16";
+  const CLIENT = "lantern v85 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -349,7 +349,7 @@
   const REGION_ALIASES = { "East Asia & Pacific": ["Asia Pacific", "Asia", "APAC", "Asia-Pacific", "Asia y Pacífico"], "Europe & Central Asia": ["Europe", "Europa", "EMEA"],
     "North America": ["North America", "Norteamérica", "América del Norte"], "Latin America & Caribbean": ["Latin America", "LatAm", "Latinoamérica", "América Latina", "Caribbean"],
     "South Asia": ["South Asia", "Asia del Sur"], "Middle East & North Africa": ["Middle East", "MENA", "Oriente Medio", "North Africa"], "Sub-Saharan Africa": ["Africa", "África", "Sub-Saharan Africa"] };
-  const INDUSTRY_ALIASES = { "Oil & Gas": ["oil and gas", "oil y gas", "petróleo y gas", "petroleo y gas", "oil", "gas"], "Metals & Mining": ["mining", "minería", "metals and mining"],
+  const INDUSTRY_ALIASES = { "Oil & Gas": ["oil and gas", "oil y gas", "petróleo y gas", "petroleo y gas"],   // never "oil" or "gas" alone (v85): "greenhouse gas emissions" is not the Oil & Gas industry, nor is "palm oil" "Metals & Mining": ["mining", "minería", "metals and mining"],
     "Apparel & Footwear": ["apparel", "fashion", "footwear", "moda"], "Food Production": ["food producers", "food production", "alimentación"], "Food Retailers": ["food retail", "supermarkets", "supermercados"],
     "Motor Vehicles & Parts": ["automotive", "carmakers", "automóviles", "cars"], "Banks": ["banking", "banca", "bancos"], "Utilities": ["electric utilities", "eléctricas"],
     "Telecommunications": ["telecom", "telecoms", "telecomunicaciones"], "Construction & Engineering": ["construction", "construcción"], "Pension Funds": ["pensions", "pension funds", "pensiones"] };
