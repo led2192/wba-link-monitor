@@ -30,6 +30,7 @@ check() {
   echo "service listens on: $(sudo ss -ltnH 2>/dev/null | awk -v p=":$PORT" '$4 ~ p"$"{print $4}' | sort -u | tr '\n' ' ')"
   echo "health, asked on the machine: $(curl -s -m 3 "http://127.0.0.1:$PORT/health" || echo 'no answer')"
   echo "without the secret: HTTP $(curl -s -m 3 -o /dev/null -w '%{http_code}' -X POST -d '{}' "http://127.0.0.1:$PORT/near" || echo '-')"
+  echo "searches answered in the last hour: $(sudo journalctl -u "$UNIT" --since '-60 min' --no-pager 2>/dev/null | grep -c ' near [0-9]' || true); failed: $(sudo journalctl -u "$UNIT" --since '-60 min' --no-pager 2>/dev/null | grep -c ' near failed' || true)"
   echo "web server: $(systemctl is-active caddy 2>/dev/null || true)"
   echo "firewall lets in: $(sudo ufw status | awk '/ALLOW/{print $1}' | sort -u | tr '\n' ' ')"
   echo "secrets kept: $(sudo sh -c "[ -s $ETC/meaning.secrets ] && grep -c . $ETC/meaning.secrets || echo 0"); files readable by others: $(sudo find $ETC -type f -perm /o+r 2>/dev/null | wc -l)"

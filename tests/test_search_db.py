@@ -734,6 +734,10 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("update public.meaning_remote_state set skip_until = now() - interval '1 second'")
             cur.execute("select set_config('test.reply', %s, true)", ('{"rows": []}',))
             self.assertEqual(rows(), []); self.assertEqual(state(), (0, False))  # the minute is over and it answers: closed again
+            cur.execute("select asked, failed, skipped, used, too_little from public.meaning_remote_days where day = current_date")
+            self.assertEqual(cur.fetchone(), (2, 4, 1, 0, 0))                    # counted as they happen: two answers; four without one (this side's mistake too); one pause
+            cur.execute("select public.meaning_remote_count('used'), public.meaning_remote_count('x; drop')")
+            cur.execute("select used from public.meaning_remote_days where day = current_date"); self.assertEqual(cur.fetchone()[0], 1)
             cur.execute("select has_function_privilege('anon', 'public.meaning_remote_call(real[], text[], int, int, text[], int)', 'execute'), "
                         "has_function_privilege('authenticated', 'public.meaning_remote_probe(int)', 'execute'), (select is_on from public.search_options where name = 'meaning_remote')")
             self.assertEqual(cur.fetchone(), (False, False, False))
