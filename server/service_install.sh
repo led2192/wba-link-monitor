@@ -8,6 +8,8 @@
 #                                                   then fetches and renews the certificate on its own
 #   bash server/service_install.sh close            the way back: closes 80 and 443 and stops the web server
 #   bash server/service_install.sh stop             stops the service too (deletes nothing)
+#   bash server/service_install.sh pause | resume   rehearsals: the service alone stopped (the web server answers 502), and started
+#   bash server/service_install.sh restart-db       rehearsals: the database restarted, so its memory is cold
 #
 # What is kept on the server, readable by root and the service's user only, never printed and never in the repository:
 #   /etc/lantern/meaning.env       the database address of the read-only role, with a password made here
@@ -167,5 +169,8 @@ case "$MODE" in
            check; echo "from outside, without the secret: HTTP ${code:-no answer} (401 expected); the health route from outside: HTTP $(curl -s -m 10 -o /dev/null -w '%{http_code}' "https://$HOST/health" || true) (404 expected)" ;;
   close)   close_door; check ;;
   stop)    close_door; sudo systemctl disable --now "$UNIT"; echo "stopped; nothing deleted." ;;
-  *)       echo "check, install, open HOST, close or stop"; exit 2 ;;
+  pause)   sudo systemctl stop "$UNIT"; echo "paused: the service is stopped, the web server still answers."; check || true ;;
+  resume)  sudo systemctl start "$UNIT"; sleep 2; echo "resumed."; check ;;
+  restart-db) sudo systemctl restart postgresql@17-main.service; echo "the database was restarted at $(date -u +%H:%M:%S) UTC."; ;;
+  *)       echo "check, install, open HOST, close, stop, pause, resume or restart-db"; exit 2 ;;
 esac
