@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v85 2026-11-16";
+  const CLIENT = "lantern v86 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1369,7 +1369,8 @@
     let j = null;
     try {
       const r = await fetch(`${CONFIG.url}/rest/v1/rpc/ask`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ key, question: text, q: state.q || null, company_filter: state.company || null, year_from: state.from || null, year_to: state.to || null, type_filter: state.type || null, client: CLIENT + (auto ? " auto" : ""), qvec: vec }) });
+        body: JSON.stringify({ key, question: text, q: state.q || null, company_filter: state.company || null, year_from: state.from || null, year_to: state.to || null, type_filter: state.type || null, client: CLIENT + (auto ? " auto" : ""), qvec: vec,
+                               industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null }) });   // v86: the answer reads the industry the box filters by
       j = await r.json().catch(() => ({})); if (!r.ok) j = { error: j.message || `HTTP ${r.status}` };
     } catch (e) { j = { error: e.message }; }
     const left = typeof j.left === "number" ? `${j.left} of ${j.per_day || 50} answers left today` : ""; cap.lastChild.textContent = left;
@@ -1389,6 +1390,14 @@
     c.appendChild(body);
     const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; li.appendChild(a); ol.appendChild(li); }
     c.append(ol, el("div", "what", (j.keywords ? `Pages found by searching “${j.keywords.replace(/\s+/g, " ")}”. ` : "") + "Written by a model from these pages only. Check the source before using a figure."));
+    // v86 (the owner asked a question about many companies in the box and got eight pages' worth): with no company
+    // named, say what this answer is and, for those who may, offer the survey with the question and the scope carried over.
+    if (!state.company && $("adminOpen")) {
+      const more = el("div", "what"); more.append(document.createTextNode("No company is named, so this reads eight pages across companies and cannot count. "));
+      const a = el("a", null, "Ask every company in the scope instead (a survey)"); a.href = "#";
+      a.onclick = ev => { ev.preventDefault(); surveySeed = { q: text, industry: state.industry || "", region: state.region || "", country: state.country || "", from: state.from || "", to: state.to || "" }; openAdmin("Surveys"); };
+      more.append(a); c.append(more);
+    }
   }
   const pageUrl = s => !s.url ? "#" : (/#/.test(s.url) ? s.url : `${s.url}#page=${s.page || 1}`);
   // "fiscal year to May 2020 (often printed FY20)" for reporting year 2019 of a company whose year ends in May; nothing for a December year end.
@@ -2143,6 +2152,7 @@
   const SURVEY_WORDS = { yes: "Yes", no: "No", not_stated: "Not stated in the pages read", no_page: "No page found", failed: "Not read (failed)", pending: "Waiting" };
   const surveyCounts = c => `Yes ${c.yes} · No ${c.no} · Not stated in the pages read ${c.not_stated} · No page found ${c.no_page}` + (c.failed ? ` · Not read ${c.failed}` : "") + (c.pending ? ` · Waiting ${c.pending}` : "") + ` · of ${c.companies} companies`;
   let surveyRun = 0;                                     // a newer run, or leaving the section, stops the loop of an older one
+  let surveySeed = null;                                 // a question and its scope carried over from the box (v86), used once
   async function adminSurveys(body) {
     const mine = ++surveyRun;
     const o = await authed("admin_surveys", { key }); if (!o) { body.textContent = "Not available."; return; }
@@ -2158,6 +2168,7 @@
     q.onchange = () => { try { const p = parse(q.value); if (p.industry && !ind.value) ind.value = p.industry; if (p.region && !reg.value) reg.value = p.region; if (p.country && !cty.value) cty.value = p.country; if (p.from && !y0.value) y0.value = p.from; if (p.to && !y1.value) y1.value = p.to; } catch (e) {} };
     const r1 = row(), r2 = row(), out = el("div");
     r1.append(q); r2.append(ind, reg, cty, y0, y1);
+    if (surveySeed) { q.value = surveySeed.q; ind.value = surveySeed.industry; reg.value = surveySeed.region; cty.value = surveySeed.country; y0.value = surveySeed.from; y1.value = surveySeed.to; surveySeed = null; }
     const show = g => {
       out.innerHTML = "";
       if (!g) { out.textContent = "That survey is not available."; return; }
