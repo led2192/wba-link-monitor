@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v93 2026-11-16";
+  const CLIENT = "lantern v94 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1460,10 +1460,10 @@
       const foot = el("div", "what"); foot.style.marginTop = "8px";
       foot.append(link(all ? "Show only the yes" : `Show all ${n.companies}`, () => { all = !all; show(last, running); }), document.createTextNode(" · "), link("Download as CSV", () => saveText(surveyFile(last), surveyCsv(last))));
       if (!running && g.status !== "done") foot.append(document.createTextNode(" · "), link("Continue", () => run(g.id)));
-      // v92: a survey that stopped at the ceiling is carried on to the rest of its scope, as one more of the day's surveys
+      // v92, v94: a survey that stopped at the ceiling is carried on to the rest of its scope, as part of the same survey
       const unasked = g.in_scope - n.companies, read = n.companies - n.pending - n.no_page;
       if (!running && g.status === "done" && unasked > 0 && (g.industry || g.region || g.country)) foot.append(document.createTextNode(" · "),
-        link(`Ask the remaining ${unasked} companies` + (read > 0 && Number(n.usd) > 0 ? ` (about ${(unasked * Number(n.usd) / read).toFixed(2)} USD, one of today's surveys)` : " (one of today's surveys)"), () => more(g.id)));
+        link(`Ask the remaining ${unasked} companies` + (read > 0 && Number(n.usd) > 0 ? ` (about ${(unasked * Number(n.usd) / read).toFixed(2)} USD)` : ""), () => more(g.id)));
       if (!running && o.may) foot.append(document.createTextNode(" · "), link("Ask again", start));
       out.append(foot);
       const scoped = [(g.industry || "").replace(/;/g, ", "), g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}–${g.year_to || ""}` : ""].filter(Boolean).join(" · ");
@@ -1487,9 +1487,7 @@
       if (!document.body.contains(out)) return;
       if (!r) { note.textContent = "Not added: no answer from the database."; return; }
       if (r.off) { note.textContent = r.why || "Surveys are not switched on for this address."; return; }
-      if (r.limit) { note.textContent = `Today's ${r.per_day} surveys for this address are used; the rest can be asked tomorrow.`; return; }
       if (r.none || !r.added) { note.textContent = "No company of the scope is left to ask."; if (r.rows) show(r, false); return; }
-      if (typeof r.left_today === "number" && o.per_day) cap.lastChild.textContent = `${r.left_today} of ${o.per_day} surveys left today`;
       note.textContent = `Reading… ${r.added} companies to go.`; show(r, true); run(id);
     }
     async function start() {

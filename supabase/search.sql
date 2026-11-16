@@ -3790,8 +3790,9 @@ create index if not exists survey_rows_read on public.survey_rows (read_at) wher
 -- A person's check of a row against its page (16 Nov 2026): right or wrong, by whom and when. Only a yes or a no can
 -- be checked this way: "not stated" would need the company's reports read whole. These rows are the first validated
 -- answers to questions of fact, which the gold bases do not hold.
--- A survey that stopped at the ceiling of companies can be carried on to the rest of its scope (survey_more). Each
--- time counts as one of the person's surveys of the day, which is where a price can later be put.
+-- A survey that stopped at the ceiling of companies can be carried on to the rest of its scope (survey_more). It is
+-- part of the same survey and uses none of the day's surveys (the owner, 16 Nov 2026); each time is kept here, which
+-- is where a price can later be put.
 create table if not exists public.survey_extensions (
   survey_id bigint not null references public.surveys (id),
   at        timestamptz not null default now(),
@@ -3881,12 +3882,12 @@ begin
 end;
 $$;
 
--- Surveys a person has used today: those started and those carried on to more companies.
+-- Surveys a person has used today: those started. Carrying a survey on to the rest of its scope is part of the same
+-- survey and is not counted (the owner, 16 Nov 2026).
 create or replace function public.surveys_used_today(who text) returns int
 language sql stable security definer set search_path = public
 as $$
   select (select count(*) from public.surveys x where x.asker = $1 and x.at >= date_trunc('day', now()))::int
-       + (select count(*) from public.survey_extensions e where e.asker = $1 and e.at >= date_trunc('day', now()))::int
 $$;
 revoke all on function public.surveys_used_today(text) from public, anon, authenticated;
 
@@ -4169,8 +4170,9 @@ grant execute on function public.survey_offer(text, text, text, text, text, int,
 
 -- A survey that stopped at the ceiling, carried on: the companies of its scope not asked yet are added (by name, up
 -- to the ceiling again) and the survey is open once more; survey_step then reads them. Only a survey with a filter
--- (one without asked the companies a search found: there is no rest). It uses one of the person's surveys of the day.
--- {added, usd, left_today} with the survey, or {off}, {limit, per_day}, {none}.
+-- (one without asked the companies a search found: there is no rest). It is part of the same survey: it uses none of
+-- the day's surveys, and the ceiling of readings a day (survey_step) still holds.
+-- {added, usd} with the survey, or {off}, {none}.
 create or replace function public.survey_more(key text, survey bigint)
 returns jsonb
 language plpgsql security definer
@@ -4198,12 +4200,8 @@ begin
     return jsonb_build_object('none', true) || public.survey_get(key, survey);
   end if;
   select coalesce((select l.surveys_per_day from public.ask_limits l where l.email = who), 0) into allowed;
-  used := public.surveys_used_today(who);
   if allowed <= 0 then
     return jsonb_build_object('off', true, 'why', 'Surveys are not switched on for this address.');
-  end if;
-  if used >= allowed then
-    return jsonb_build_object('limit', true, 'per_day', allowed);
   end if;
   select * into st from public.survey_settings x where x.one;
   insert into public.survey_rows (survey_id, wba_id, company)
@@ -4219,7 +4217,7 @@ begin
   update public.surveys x set status = 'open', finished_at = null,
          in_scope = (select count(*) from public.companies c where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id))
    where x.id = s.id;
-  return jsonb_build_object('added', n, 'usd', round(n * (s.pages * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3), 'left_today', allowed - used - 1) || public.survey_get(key, survey);
+  return jsonb_build_object('added', n, 'usd', round(n * (s.pages * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3)) || public.survey_get(key, survey);
 end;
 $$;
 revoke all on function public.survey_more(text, bigint) from public, anon;
