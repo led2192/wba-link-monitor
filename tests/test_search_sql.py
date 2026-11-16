@@ -94,7 +94,7 @@ def test_scores_for_one_company_with_places_counted():
 
 def test_ask_is_signed_limited_and_keeps_the_key_out_of_the_page():
     ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("-- A company's benchmark results")]
-    assert "public.email_may_search(who)" in ask and "per_day constant int := 50;" in ask
+    assert "public.email_may_search(who)" in ask and "per_day int := 50;" in ask and "per_day := public.ask_per_day(who);" in ask
     assert "from vault.decrypted_secrets d where d.name = 'anthropic_api_key'" in ask          # the key lives in the vault, nowhere else
     assert "sk-ant" not in SQL
     assert "a.answered and a.at >= date_trunc('day', now())" in ask                               # only answered questions count
@@ -339,7 +339,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches"}
+    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -429,7 +429,9 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v81 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v82 2026-11-16";' in PAGE
+    assert 'authed("admin_ask_limit_set", { key, email, per_day: n })' in PAGE                                             # v82: a person's answers a day, set by the owner
+    assert "revoke all on function public.ask_per_day(text) from public, anon, authenticated;" in SQL
     assert 'g = await rpc("company_gaps", { key, company: id })' in PAGE and '<div class="gaps" id="gaps"></div>' in PAGE     # v81: the gaps of the last years, quietly
     assert "grant execute on function public.company_gaps(text, text) to anon, authenticated;" in SQL
     assert 'if (!isQuestion(text)) for (const [w, t] of Object.entries(TYPE_WORDS)) {' in PAGE       # v80: in a question a kind of report is the subject, not a filter
