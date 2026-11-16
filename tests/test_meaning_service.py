@@ -224,6 +224,12 @@ class Link(unittest.TestCase):
         self.assertIn("median 21 ms, 95th percentile 1500 ms", line)
         self.assertIn("paused no", line)
         self.assertEqual(L.probe_line({"error": "no kept question vector"}), "probe not run: no kept question vector")
+        self.assertIn("first three 10, 12, 30 ms", line)
+        line = L.storm_line([(310.0, 24), (305.0, 20), (900.0, None)], [(40.0, 24), (50.0, 24), (45.0, 24)], {"fails": 3, "skip_until": "x"})
+        self.assertIn("3 searches at once with the server asked first: 2 of 3 answered, median 310 ms, slowest 900 ms, pages a search 20 to 24.", line)
+        self.assertIn("without the server: 3 of 3 answered, median 45 ms", line)
+        self.assertIn("paused yes", line)
+        self.assertIn("'rehearsal')", L.SEARCH)
 
 
 if __name__ == "__main__":
