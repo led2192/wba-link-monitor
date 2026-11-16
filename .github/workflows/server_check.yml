@@ -43,6 +43,8 @@ jobs:
           echo "security updates waiting: $(apt list --upgradable 2>/dev/null | grep -c -i security || true)"
           echo "reboot needed: $([ -e /var/run/reboot-required ] && echo yes || echo no)"
           exit $bad
+      - name: The database of the search by meaning
+        run: bash server/db_install.sh check
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

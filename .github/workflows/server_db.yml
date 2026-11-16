@@ -1,0 +1,28 @@
+# lanterN's own database on the job machine (server/db_install.sh, docs/server.md): look at it, install it, or stop it.
+# Manual only. "check" reads; "install" is safe to run again; "stop" deletes nothing. No secret is used: step 2 of the
+# move creates no role and holds no data.
+name: Server database
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check (reads only), install, or stop"
+        type: choice
+        options: [check, install, stop]
+        default: check
+
+concurrency:
+  group: server-db
+  cancel-in-progress: false
+
+jobs:
+  db:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: The database
+        run: bash server/db_install.sh "$MODE"
+        env:
+          MODE: ${{ inputs.mode }}
