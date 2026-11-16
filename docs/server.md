@@ -8,7 +8,7 @@ The server was installed on 14 Nov 2026 and its six runners answer. No pipeline 
 - Ubuntu 24.04, automatic security updates, a firewall that lets only SSH in, fail2ban against password guessing.
 - A user `runner` the jobs run as.
 - Six GitHub Actions runners (`lantern-1` to `lantern-6`), each a service that starts with the machine, all with the label `lantern`. A job goes to the server when its workflow says `runs-on: [self-hosted, lantern]`.
-- No secret is stored on the server. The jobs receive their secrets from GitHub at run time, as on GitHub's machines.
+- No secret of the jobs is stored on the server: they receive their secrets from GitHub at run time, as on GitHub's machines. Since 16 Nov 2026 the server keeps two secrets of its own, made there (see "The service").
 
 ## Setting it up (once, about 10 minutes)
 1. In the provider's panel, install Ubuntu 24.04 if the server came with something else.
@@ -58,6 +58,17 @@ The server also holds a database of its own, for the search by meaning: PostgreS
 Before real data goes in, **Server rehearsal** (Actions, manual) measures the move on a sample: it copies a million passages from Supabase, builds their index, measures and drops them. Its numbers decide the settings of the full build.
 
 **Server meaning** (Actions, manual) then holds the real copy: the schema `meaning` with `chunks` (a passage's document, page, number and half-precision embedding; never its text) and `chunk_filters` (a document's company, year and type), the index on the embeddings, and the comparison with Supabase search by search. Until the switch `meaning_remote` exists and is on, nothing reads it: the search people use is Supabase's own.
+
+## The service (16 Nov 2026)
+One small door in front of the database of passages, for Supabase's search to ask "the passages nearest in meaning to this question, with these filters". `server/meaning_service.py` is the service and `server/service_install.sh` installs it; the workflow **Server service** (Actions, manual) runs `check`, `install`, `open`, `close` and `stop`.
+
+- Two routes and nothing else: `POST /near` (needs the secret; answers keys and distances, never text) and `GET /health` (on the machine itself only, for the checker).
+- The service listens on the machine itself. A web server (Caddy) in front holds the certificate and passes on `POST /near` only. `install` opens no port; `open NAME` opens 80 and 443 once the name points to the server, and the certificate is fetched and renewed on its own. `close` shuts them again.
+- The secret is checked before any body is read, in constant time; two secrets can be valid at once so one can be replaced without a gap. Every input is checked exactly. A request with no stated length, another method, or a body over 64 KB is refused unread and the connection closed.
+- The database role can only read the two tables, six connections at most, two seconds a statement. Requests a minute are limited for each caller and in all.
+- What the server now keeps, readable by root and the service's user only: `/etc/lantern/meaning.env` (the read-only role's password, made on the server) and `/etc/lantern/meaning.secrets` (the secret Supabase sends). Neither is printed or leaves the machine through a log. This ends "no secret is stored on the server" for these two.
+- What it does not protect against: a job run on this machine. The runners can act as root here, so they can read those files and the database. The guards for that are who may run a job here (approval for every outside contributor; no workflow started by a pull request may run on the server, which a test checks) and, later, the repository going private.
+- Reviewed by an outside session before any port was opened (16 Nov): twelve findings, all taken (the health route not passed on, the secret before the body, connections closed on refusal, no unlimited `limit`, a retry on a connection kept across a database restart, system packages instead of pip, a stricter unit, the name checked before a certificate is asked for).
 
 ## Checking it
 The workflow **Server check** (Actions, manual, and every Monday) runs on the server and fails if the firewall, fail2ban or the automatic updates are off, or if the first-boot token is still on disk. It also shows the cores, memory and free disk, and installs the repository's packages the way a job does.

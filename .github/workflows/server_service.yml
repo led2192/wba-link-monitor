@@ -1,0 +1,32 @@
+# The service in front of the server's database of passages (server/service_install.sh, docs/server.md).
+# Manual only, never on a pull request. "check" reads; "install" opens nothing; "open" lets the world reach the one
+# route under the given name; "close" and "stop" are the ways back. Nothing secret is printed: this log is public.
+name: Server service
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check (reads only), install, open, close or stop"
+        type: choice
+        options: [check, install, open, close, stop]
+        default: check
+      host:
+        description: "with open: the name that points to the server"
+        default: ""
+
+concurrency:
+  group: server-db
+  cancel-in-progress: false
+
+jobs:
+  service:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: The service
+        run: bash server/service_install.sh "$MODE" "$HOST_NAME"
+        env:
+          MODE: ${{ inputs.mode }}
+          HOST_NAME: ${{ inputs.host }}
