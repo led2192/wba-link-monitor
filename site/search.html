@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v83 2026-11-16";
+  const CLIENT = "lantern v84 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1697,7 +1697,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2136,6 +2136,96 @@
       if (!x.metric && x.name) { d.appendChild(el("br")); const n = el("span", null, x.name); n.style.cssText = "font-size:12px;font-style:italic"; d.appendChild(n); } return d; };
     body.appendChild(adminTable(["Company", "Fact", "Content", "Name-matching"].concat(models), rows.map(f => [f.company || "", f.what + (f.year ? ` · ${f.year}` : ""),
       f.kind === "number" ? [fmt(Number(f.value)), f.unit].filter(Boolean).join(" ") : String(f.answer || "").slice(0, 90), f.metric_label || "",].concat(models.map(m => cell((f.said || {})[m])))) ));
+  }
+  // v84 (the owner, 16 Nov 2026): surveys, in the owner's panel first. One question asked of each company in scope:
+  // start fixes the scope and says what it will cost; run reads a few companies a call until none is left (leaving the
+  // page stops it, "Open" on a past survey continues it); the table keeps yes, no, not stated and no page found apart.
+  const SURVEY_WORDS = { yes: "Yes", no: "No", not_stated: "Not stated in the pages read", no_page: "No page found", failed: "Not read (failed)", pending: "Waiting" };
+  const surveyCounts = c => `Yes ${c.yes} · No ${c.no} · Not stated in the pages read ${c.not_stated} · No page found ${c.no_page}` + (c.failed ? ` · Not read ${c.failed}` : "") + (c.pending ? ` · Waiting ${c.pending}` : "") + ` · of ${c.companies} companies`;
+  let surveyRun = 0;                                     // a newer run, or leaving the section, stops the loop of an older one
+  async function adminSurveys(body) {
+    const mine = ++surveyRun;
+    const o = await authed("admin_surveys", { key }); if (!o) { body.textContent = "Not available."; return; }
+    body.innerHTML = "";
+    const field = (ph, width, type) => { const i = document.createElement("input"); i.placeholder = ph; if (type) i.type = type; i.style.cssText = `font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:${width}px;background:var(--box);color:var(--fg)`; return i; };
+    const pick = (label, list) => { const sel = document.createElement("select"); sel.style.cssText = "font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--box);color:var(--fg);max-width:260px"; sel.append(new Option(label, "")); for (const x of list) sel.append(new Option(x, x)); return sel; };
+    const row = () => { const d = el("div"); d.style.cssText = "display:flex;gap:8px;align-items:center;margin:0 0 10px;flex-wrap:wrap"; return d; };
+    const note = el("p"); note.style.cssText = "font-size:13px;margin:0 0 10px;color:var(--muted, #667)";
+    body.append(el("p", null, "One question asked of every company in a scope: a small reading a company, a table with the source of each row. \"No page found\" and \"not stated in the pages read\" are never counted as a no."));
+    // the question and its scope
+    const q = field("the question, e.g. Does the company tie executive pay to greenhouse gas emissions?", 620);
+    const ind = pick("any industry", industries), reg = pick("any region", regions), cty = field("country, ISO code", 130), y0 = field("from year", 90, "number"), y1 = field("to year", 90, "number");
+    q.onchange = () => { try { const p = parse(q.value); if (p.industry && !ind.value) ind.value = p.industry; if (p.region && !reg.value) reg.value = p.region; if (p.country && !cty.value) cty.value = p.country; if (p.from && !y0.value) y0.value = p.from; if (p.to && !y1.value) y1.value = p.to; } catch (e) {} };
+    const r1 = row(), r2 = row(), out = el("div");
+    r1.append(q); r2.append(ind, reg, cty, y0, y1);
+    const show = g => {
+      out.innerHTML = "";
+      if (!g) { out.textContent = "That survey is not available."; return; }
+      const c = g.counts, scope = [g.industry, g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}–${g.year_to || ""}` : ""].filter(Boolean).join(" · ") || "no filter: the companies a search for the words found";
+      out.append(el("h3", null, g.question));
+      const line = el("p", null, `${scope}. Searched with “${g.words}”, ${g.pages} pages a company` + (g.in_scope > c.companies ? `; the scope holds ${g.in_scope} companies and the ceiling kept ${c.companies}` : "") + `. So far about ${Number(c.usd).toFixed(3)} USD.`); line.style.cssText = "font-size:13px;color:var(--muted, #667);margin:0 0 6px";
+      const sum = el("p", null, surveyCounts(c)); sum.style.cssText = "font-weight:600;margin:0 0 8px";
+      out.append(line, sum);
+      out.appendChild(adminTable(["Company", "Answer", "In short", "Year", "The sentence", "Source"], g.rows.map(x => {
+        const src = el("span");
+        if (x.library_id && x.page) { const a = el("a", null, `${x.doc_year || ""} ${x.doc_type || "document"}, page ${x.page}`.trim()); a.href = "#"; a.title = "The page's text, inside lanterN"; a.onclick = ev => { ev.preventDefault(); openReader(x.library_id, x.page, x.evidence || ""); }; src.append(a); }
+        return [x.company, SURVEY_WORDS[x.status] || x.status, x.value || "", x.year || "", x.evidence || "", src];
+      })));
+    };
+    const run = async id => {
+      const me = ++surveyRun;
+      for (;;) {
+        const g = await authed("survey_step", { key, survey: id, companies: 3 });
+        if (me !== surveyRun || !document.body.contains(out)) return;          // another run started, or the section was left
+        if (!g) { note.textContent = "The survey stopped: no answer from the database. \"Open\" continues it."; return; }
+        show(g);
+        if (g.off || g.limit) { note.textContent = g.limit ? "Today's ceiling of readings is reached; it continues tomorrow with \"Open\"." : `Not run: ${g.why || "the reader is not set up"}.`; return; }
+        if (g.status === "done") { note.textContent = "Done."; return; }
+        note.textContent = `Reading… ${g.counts.pending} companies to go. Leaving this section stops it; \"Open\" continues it.`;
+      }
+    };
+    const start = adminBtn("Start", async () => {
+      const text = q.value.trim(); if (text.length < 8) { note.textContent = "A question of at least 8 characters."; return; }
+      note.textContent = "Fixing the scope…"; out.innerHTML = "";
+      let vec = null; try { vec = await queryVector(text); } catch (e) { vec = null; }
+      const g = await authed("survey_start", { key, question: text, qvec: vec, industry_filter: ind.value || null, country_filter: cty.value.trim().toUpperCase() || null, region_filter: reg.value || null,
+                                               year_from: parseInt(y0.value, 10) || null, year_to: parseInt(y1.value, 10) || null, client: CLIENT });
+      if (!g) { note.textContent = "Not started."; return; }
+      if (g.off) { note.textContent = (g.why || "Surveys are off for this address.") + " Give the address a number of surveys a day below."; return; }
+      if (g.limit) { note.textContent = `Today's ${g.per_day} surveys for this address are used.`; return; }
+      if (!g.companies) { note.textContent = "No company in that scope."; return; }
+      note.textContent = "";
+      const ask = row();
+      ask.append(el("span", null, `${g.companies} companies` + (g.in_scope > g.companies ? ` (the scope holds ${g.in_scope}; the ceiling is ${g.companies})` : "") + `, ${g.pages} pages each, searched with “${g.words}”: about ${Number(g.usd).toFixed(2)} USD.`),
+                 adminBtn("Run it", () => { ask.remove(); run(g.id); }), adminBtn("Not now", () => { ask.remove(); note.textContent = "Kept, not run. \"Open\" below runs it later."; adminSurveys(body); }));
+      out.append(ask);
+    });
+    r1.append(start);
+    body.append(r1, r2, note, out);
+    if (mine !== surveyRun) return;
+    // past surveys
+    if (o.surveys.length) {
+      body.append(el("h3", null, "Surveys run"));
+      body.appendChild(adminTable(["When", "Who", "Question", "Companies", "Yes", "USD", "State", ""], o.surveys.map(x => [adminWhen(x.at), x.asker, x.question, x.companies, x.yes, Number(x.usd).toFixed(3), x.status === "done" ? "done" : "not finished",
+        adminBtn(x.status === "done" ? "Open" : "Open and continue", async () => { const g = await authed("survey_get", { key, survey: x.id }); show(g); out.scrollIntoView({ behavior: "smooth", block: "start" }); if (g && g.status !== "done") run(x.id); })])));
+    }
+    // who may, and the settings
+    body.append(el("h3", null, "Who may run surveys"));
+    const setNote = el("span"); setNote.style.cssText = "font-size:13px;margin-left:8px";
+    const save = async args => { const r = await authed("admin_surveys", Object.assign({ key }, args)); if (!r || r.error) { setNote.textContent = (r && r.error) || "Not saved."; return; } await adminSurveys(body); };
+    if (o.people.length) body.appendChild(adminTable(["Person", "Surveys today", "A day", ""], o.people.map(p => { const i = field("", 60, "number"); i.value = p.per_day; return [p.email, p.today, i, adminBtn("Save", () => save({ email: p.email, per_day: parseInt(i.value, 10) }))]; })));
+    else body.append(el("p", null, "Nobody yet: surveys are off for every address until one is given a number here."));
+    const who = field("address", 280), per = field("a day", 70, "number"); per.value = 3;
+    const r3 = row(); r3.append(who, per, adminBtn("Allow", () => save({ email: who.value.trim(), per_day: parseInt(per.value, 10) })), setNote);
+    body.append(r3);
+    body.append(el("h3", null, "Settings"));
+    const pg = field("", 60, "number"), mx = field("", 80, "number"), rd = field("", 90, "number"); pg.value = o.settings.pages; mx.value = o.settings.max_companies; rd.value = o.settings.readings;
+    const lab = t => { const sp = el("span", null, t); sp.style.fontSize = "13px"; return sp; };
+    const r4 = row(); r4.append(lab("Pages read a company"), pg, lab("Companies a survey, at most"), mx, lab("Readings a day, everyone together"), rd,
+                               adminBtn("Save settings", () => save({ pages: parseInt(pg.value, 10), max_companies: parseInt(mx.value, 10), readings: parseInt(rd.value, 10) })));
+    body.append(r4);
+    const today = el("p", null, `Read today: ${o.read_today} companies. A reading of ${o.settings.pages} pages costs about ${((o.settings.pages * 750 * 0.10 + 800 * 0.50) / 10000).toFixed(2)} US cents.`); today.style.cssText = "font-size:13px;color:var(--muted, #667)";
+    body.append(today);
   }
   async function adminCost(body) {
     const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available."; return; }
