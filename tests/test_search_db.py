@@ -874,17 +874,16 @@ class SearchOnPostgres(unittest.TestCase):
             with self.assertRaises(psycopg.errors.InvalidParameterValue):
                 cur.execute("select public.survey_verdict('k', %s, 'S1', 'maybe')", (made["id"],))
             cur.execute("rollback to savepoint bad")
-            # a survey that stopped at the ceiling is carried on to the rest of its scope, as one more of the day's surveys
+            # a survey that stopped at the ceiling is carried on to the rest of its scope, as part of the same survey
             more = lambda: (cur.execute("select public.survey_more('k', %s)", (made["id"],)), cur.fetchone()[0])[1]
-            self.assertEqual(more(), {"limit": True, "per_day": 1})                                      # the day's one survey is used
-            jwt("e.owner@worldbenchmarkingalliance.org")
-            cur.execute("select public.admin_surveys('k', null, null, null, 'ana@worldbenchmarkingalliance.org', 2)")
-            jwt("ana@worldbenchmarkingalliance.org")
-            got = more()
-            self.assertEqual((got["added"], got["left_today"], got["status"], got["counts"]["companies"], got["counts"]["pending"], got["in_scope"]), (1, 0, "open", 5, 1, 5))
+            got = more()                                                                                 # the day's one survey is used, and this is not another
+            self.assertEqual((got["added"], got["status"], got["counts"]["companies"], got["counts"]["pending"], got["in_scope"]), (1, "open", 5, 1, 5))
             self.assertEqual([r["company"] for r in got["rows"] if r["status"] == "pending"], ["Gamma"])     # the one the ceiling left out; what was read stays
-            self.assertEqual(more(), {"limit": True, "per_day": 2})                                      # carrying on counted as a survey
-            cur.execute(offer); self.assertEqual(cur.fetchone()[0]["left_today"], 0)
+            self.assertTrue(more()["none"])                                                              # nothing is left to add
+            cur.execute("select count(*), sum(companies) from public.survey_extensions where survey_id = %s", (made["id"],))
+            self.assertEqual(cur.fetchone(), (1, 1))                                                     # kept, for a price later
+            cur.execute(offer); o = cur.fetchone()[0]
+            self.assertEqual((o["left_today"], o["per_day"]), (0, 1))                                    # the day's count is the surveys started
             cur.execute("select public.survey_step('k', %s, 5)", (made["id"],)); got = cur.fetchone()[0]
             self.assertEqual((got["status"], got["counts"]["not_stated"]), ("done", 1))
             jwt("someone.else@worldbenchmarkingalliance.org")
