@@ -24,6 +24,9 @@ on:
       compare:
         description: "question vectors to ask both ways after the load (0 = none)"
         default: "0"
+      exact:
+        description: "with compare: for this many searches, also the exact search on the server (the truth)"
+        default: "0"
       trial:
         description: "compare against the trial schema"
         type: boolean
@@ -57,10 +60,11 @@ jobs:
           sudo -u postgres psql -d lantern -qc "grant create on database lantern to lantern_load"
           export LOCAL_DB_URL="postgresql://lantern_load:$PW@127.0.0.1:5432/lantern"
           /srv/lantern/venv/bin/python server_meaning.py ${{ inputs.load && '--load' || '' }} ${{ inputs.commit && '--commit' || '' }} ${{ inputs.reload && '--reload' || '' }} ${{ inputs.trial && '--trial' || '' }} \
-            --sample "$SAMPLE" --compare "$COMPARE" --memory "$MEMORY" --workers "$WORKERS"
+            --sample "$SAMPLE" --compare "$COMPARE" --exact "$EXACT" --memory "$MEMORY" --workers "$WORKERS"
         env:
           SAMPLE: ${{ inputs.sample || '0' }}
           COMPARE: ${{ inputs.compare || '0' }}
+          EXACT: ${{ inputs.exact || '0' }}
           MEMORY: ${{ inputs.memory || '8GB' }}
           WORKERS: ${{ inputs.workers || '6' }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
