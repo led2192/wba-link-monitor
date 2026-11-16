@@ -3718,6 +3718,386 @@ $$;
 revoke all on function public.admin_ask_limit_set(text, text, int) from public, anon;
 grant execute on function public.admin_ask_limit_set(text, text, int) to authenticated;
 
+-- ---------------------------------------------------------------------------------------------------------------
+-- Surveys: one question asked of many companies (16 Nov 2026; the owner: "how many companies of industry X tie
+-- remuneration to GHG emissions?" cannot be answered from eight pages). The same question is asked of each company
+-- in scope, one small reading a company, and the result is a table with a source a row and counts with honest
+-- denominators: yes, no, not stated in the pages read, no page found.
+--   survey_start  the scope and the words, no reading yet: who may (surveys a day, 0 for everyone unless the owner
+--                 set a number), which companies (the industry, country or region filter; with no filter, the
+--                 companies a wide search finds), capped; returns the count and an estimate of the cost.
+--   survey_step   reads a few companies a call (the page calls it until none is left, so no call outlives the
+--                 time a request may take; closing the page stops it and opening it again continues).
+--   survey_get    the survey, its counts and its rows.
+-- Settings the owner can change without a change of code: pages read a company (6), companies a survey (150),
+-- readings a day for everyone together (2,000: the most a day of surveys can cost stays fixed, about 2 USD).
+create table if not exists public.survey_settings (
+  one             boolean primary key default true check (one),
+  pages_a_company int not null default 6 check (pages_a_company between 1 and 8),
+  max_companies   int not null default 150 check (max_companies between 1 and 1000),
+  readings_a_day  int not null default 2000 check (readings_a_day between 0 and 20000)
+);
+alter table public.survey_settings enable row level security;
+insert into public.survey_settings (one) values (true) on conflict (one) do nothing;
+do $$
+begin   -- only the first time: an install must not lock a table a search reads (a person given surveys alone keeps 50 answers a day)
+  if (select c.column_default from information_schema.columns c where c.table_schema = 'public' and c.table_name = 'ask_limits' and c.column_name = 'per_day') is null then
+    alter table public.ask_limits alter column per_day set default 50;
+  end if;
+end $$;
+alter table public.ask_limits add column if not exists surveys_per_day int not null default 0 check (surveys_per_day between 0 and 50);
+
+create table if not exists public.surveys (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  asker       text not null,
+  question    text not null,
+  words       text not null,                 -- what each company's reports are searched with
+  qvec        real[],                        -- the question's vector, when the page sent one
+  industry    text, country text, region text, year_from int, year_to int,
+  in_scope    int not null default 0,        -- companies the scope holds, before the ceiling
+  pages       int not null,                  -- pages read a company, as set when it started
+  status      text not null default 'open' check (status in ('open', 'done')),
+  finished_at timestamptz,
+  client      text
+);
+create index if not exists surveys_asker on public.surveys (asker, at desc);
+alter table public.surveys enable row level security;
+create table if not exists public.survey_rows (
+  survey_id     bigint not null references public.surveys (id),
+  wba_id        text not null,
+  company       text not null,
+  status        text not null default 'pending' check (status in ('pending', 'yes', 'no', 'not_stated', 'no_page', 'failed')),
+  value         text,                        -- a short answer in words when the question asks for one
+  evidence      text,                        -- the sentence that says it, as the page prints it
+  year          int,                         -- the year the statement is about
+  library_id    text, page int, doc_year int, doc_type text, label text, url text,
+  input_tokens  int, output_tokens int,
+  note          text,                        -- why a row failed (never text of a page)
+  read_at       timestamptz,
+  primary key (survey_id, wba_id)
+);
+create index if not exists survey_rows_read on public.survey_rows (read_at) where read_at is not null;
+alter table public.survey_rows enable row level security;
+
+-- What a call to the reader needs: the key from the vault and the schema the http extension lives in. Nulls when
+-- either is missing. Not callable by anyone but the functions of this file.
+create or replace function public.reader_ready() returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  api_key text;
+  http_schema text;
+begin
+  begin
+    select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;
+  exception when others then
+    api_key := null;
+  end;
+  select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
+  return jsonb_build_object('api_key', api_key, 'http_schema', http_schema);
+end;
+$$;
+revoke all on function public.reader_ready() from public, anon, authenticated;
+
+create or replace function public.survey_instructions() returns text
+language sql immutable
+as $$
+  select 'You read a few pages of one company''s reports and answer one question about that company, from those pages only. '
+      || 'Reply with one JSON object and nothing else: '
+      || '{"answer": "yes" | "no" | "not stated", "value": <a short answer in words or figures, 12 words at most, when the question asks for one; otherwise null>, '
+      || '"evidence": <the one sentence of the pages that says it, copied exactly, 30 words at most; null when not stated>, '
+      || '"year": <the year the statement is about, as a number, or null>, "source": <the number in square brackets of the page the evidence is on, or null>}. '
+      || 'Answer "yes" or "no" only when a page says so in words or figures about this company. A page that does not mention the matter is not a "no": answer "not stated". '
+      || 'A plan, an intention or a target not yet in force is "no" for a question about what the company does today, and say so in the value. '
+      || 'When the question is not a yes-or-no question, answer "yes" when the pages give what is asked and put it in the value, and "not stated" when they do not. '
+      || 'Never use what you know from elsewhere, and never answer about another company.'
+$$;
+
+-- What a reading said, read out of the model's text: the first JSON object in it. Null when there is none.
+create or replace function public.survey_parse(reply text) returns jsonb
+language plpgsql immutable
+as $$
+declare
+  found text := substring(coalesce(reply, '') from '\{.*\}');
+  j jsonb;
+  said text;
+begin
+  if found is null then return null; end if;
+  begin
+    j := found::jsonb;
+  exception when others then
+    return null;
+  end;
+  said := lower(btrim(coalesce(j ->> 'answer', '')));
+  if said not in ('yes', 'no', 'not stated') then return null; end if;
+  return jsonb_build_object(
+    'status', case said when 'not stated' then 'not_stated' else said end,
+    'value', nullif(left(btrim(coalesce(j ->> 'value', '')), 160), ''),
+    'evidence', nullif(left(btrim(coalesce(j ->> 'evidence', '')), 400), ''),
+    'year', case when (j ->> 'year') ~ '^(19|20)\d\d$' then (j ->> 'year')::int end,
+    'source', case when (j ->> 'source') ~ '^\d{1,2}$' then (j ->> 'source')::int end);
+end;
+$$;
+
+create or replace function public.survey_start(
+  key text, question text, qvec real[] default null, industry_filter text default null, country_filter text default null,
+  region_filter text default null, year_from int default null, year_to int default null, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '60s'
+as $$
+#variable_conflict use_variable
+declare
+  model constant text := 'claude-haiku-5-5';
+  who text := lower(auth.jwt() ->> 'email');
+  asked text := btrim(coalesce(question, ''));
+  st public.survey_settings%rowtype;
+  allowed int;
+  used int;
+  api_key text;
+  http_schema text;
+  got jsonb;
+  words text;
+  ids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
+  in_scope int := 0;
+  new_id bigint;
+  made int;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to ask' using errcode = '42501';
+  end if;
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if length(asked) < 8 or length(asked) > 400 then
+    raise exception 'a question of 8 to 400 characters' using errcode = '22023';
+  end if;
+  select * into st from public.survey_settings s where s.one;
+  select coalesce((select l.surveys_per_day from public.ask_limits l where l.email = who), 0) into allowed;
+  select count(*) into used from public.surveys s where s.asker = who and s.at >= date_trunc('day', now());
+  if allowed <= 0 then
+    return jsonb_build_object('off', true, 'why', 'Surveys are not switched on for this address.');
+  end if;
+  if used >= allowed then
+    return jsonb_build_object('limit', true, 'per_day', allowed);
+  end if;
+  got := public.reader_ready(); api_key := got ->> 'api_key'; http_schema := got ->> 'http_schema';
+  -- the words each company's reports are searched with: a question written in full is not a search (see ask)
+  words := asked;
+  if api_key is not null and http_schema is not null and coalesce(array_length((public.find_terms(asked)).words, 1), 0) > 4 then
+    got := public.ask_model(api_key, http_schema, model,
+      'You turn a question asked of many companies into the words to search each company''s reports with. Reply with 3 to 5 words, in lower case, '
+      || 'separated by spaces: the words most likely to be printed on the page that answers the question. Write abbreviations in full. '
+      || 'No company names, no industries, no countries, no years, no punctuation, nothing else.', left(asked, 400), 800);
+    if nullif(btrim(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g')), '') is not null then
+      words := btrim(left(regexp_replace(lower(got ->> 'text'), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
+    end if;
+  end if;
+  insert into public.surveys (asker, question, words, qvec, industry, country, region, year_from, year_to, pages, client)
+    values (who, asked, words, case when coalesce(array_length(qvec, 1), 0) = 384 then qvec end, nullif(btrim(industry_filter), ''), nullif(btrim(country_filter), ''),
+            nullif(btrim(region_filter), ''), year_from, year_to, st.pages_a_company, left(client, 60))
+    returning id into new_id;
+  if ids is not null then
+    -- a filter: every company of the scope that the library holds a document for, by name, up to the ceiling
+    select count(*) into in_scope from public.companies c
+     where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id);
+    insert into public.survey_rows (survey_id, wba_id, company)
+      select new_id, c.wba_id, c.name from public.companies c
+       where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id)
+       order by c.name limit st.max_companies;
+  else
+    -- no filter: the companies a wide search for the words finds, best first, up to the ceiling
+    insert into public.survey_rows (survey_id, wba_id, company)
+      select new_id, f.wba_id, min(f.company) from public.find_blend(key, words, qvec, null, year_from, year_to, null, 100, 'survey', null, null, null, asked) f
+       where f.wba_id is not null group by f.wba_id order by min(f.rank) limit st.max_companies;
+    get diagnostics in_scope = row_count;
+  end if;
+  select count(*) into made from public.survey_rows r where r.survey_id = new_id;
+  update public.surveys s set in_scope = in_scope, status = case when made = 0 then 'done' else 'open' end,
+         finished_at = case when made = 0 then now() end where s.id = new_id;
+  return jsonb_build_object('id', new_id, 'companies', made, 'in_scope', in_scope, 'pages', st.pages_a_company, 'words', words,
+    'usd', round(made * (st.pages_a_company * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3), 'left_today', allowed - used - 1);
+end;
+$$;
+revoke all on function public.survey_start(text, text, real[], text, text, text, int, int, text) from public, anon;
+grant execute on function public.survey_start(text, text, real[], text, text, text, int, int, text) to authenticated;
+
+create or replace function public.survey_get(key text, survey bigint)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  s public.surveys%rowtype;
+begin
+  if who is null or public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select * into s from public.surveys x where x.id = survey and (x.asker = who or public.admin_ok(key));
+  if s.id is null then
+    return null;
+  end if;
+  return jsonb_build_object(
+    'id', s.id, 'at', s.at, 'question', s.question, 'words', s.words, 'status', s.status, 'in_scope', s.in_scope, 'pages', s.pages,
+    'industry', s.industry, 'country', s.country, 'region', s.region, 'year_from', s.year_from, 'year_to', s.year_to,
+    'counts', (select jsonb_build_object('companies', count(*), 'yes', count(*) filter (where r.status = 'yes'), 'no', count(*) filter (where r.status = 'no'),
+                        'not_stated', count(*) filter (where r.status = 'not_stated'), 'no_page', count(*) filter (where r.status = 'no_page'),
+                        'failed', count(*) filter (where r.status = 'failed'), 'pending', count(*) filter (where r.status = 'pending'),
+                        'usd', round((coalesce(sum(r.input_tokens), 0) * 0.10 + coalesce(sum(r.output_tokens), 0) * 0.50) / 1000000.0, 4))
+               from public.survey_rows r where r.survey_id = s.id),
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('wba_id', r.wba_id, 'company', r.company, 'status', r.status, 'value', r.value, 'evidence', r.evidence,
+                        'year', r.year, 'library_id', r.library_id, 'page', r.page, 'doc_year', r.doc_year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url)
+                      order by array_position(array['yes', 'no', 'not_stated', 'no_page', 'failed', 'pending'], r.status), r.company), '[]'::jsonb)
+             from public.survey_rows r where r.survey_id = s.id));
+end;
+$$;
+revoke all on function public.survey_get(text, bigint) from public, anon;
+grant execute on function public.survey_get(text, bigint) to authenticated;
+
+create or replace function public.survey_step(key text, survey bigint, companies int default 3)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '75s'
+as $$
+#variable_conflict use_variable
+declare
+  model constant text := 'claude-haiku-5-5';
+  who text := lower(auth.jwt() ->> 'email');
+  s public.surveys%rowtype;
+  st public.survey_settings%rowtype;
+  api_key text;
+  http_schema text;
+  read_today int;
+  todo record;
+  r record;
+  n int;
+  context text;
+  sources jsonb;
+  body text;
+  got jsonb;
+  said jsonb;
+  src jsonb;
+  done int := 0;
+  t0 timestamptz := clock_timestamp();
+begin
+  if who is null or not public.email_may_search(who) or public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select * into s from public.surveys x where x.id = survey and x.asker = who;
+  if s.id is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select * into st from public.survey_settings x where x.one;
+  got := public.reader_ready(); api_key := got ->> 'api_key'; http_schema := got ->> 'http_schema';
+  if api_key is null or http_schema is null then
+    return jsonb_build_object('off', true, 'why', 'the reader is not set up') || public.survey_get(key, survey);
+  end if;
+  for todo in
+    select x.wba_id, x.company from public.survey_rows x where x.survey_id = s.id and x.status = 'pending'
+     order by x.company limit least(greatest(coalesce(companies, 3), 1), 5) for update skip locked
+  loop
+    exit when clock_timestamp() - t0 > interval '45 seconds';      -- a call never outlives the request; the page asks again
+    select count(*) into read_today from public.survey_rows x where x.read_at >= date_trunc('day', now()) and x.input_tokens is not null;
+    if read_today >= st.readings_a_day then
+      return jsonb_build_object('limit', true, 'everyone', true) || public.survey_get(key, survey);
+    end if;
+    n := 0; context := ''; sources := '[]'::jsonb;
+    begin
+      for r in
+        select f.library_id, f.company, f.year, f.doc_type, f.label, f.url, f.page
+        from public.ask_pages(key, s.words, s.qvec, todo.wba_id, s.year_from, s.year_to, null, s.question) f limit s.pages
+      loop
+        n := n + 1;
+        select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
+        context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
+        sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url);
+      end loop;
+    exception when others then
+      update public.survey_rows x set status = 'failed', note = 'the search failed', read_at = now() where x.survey_id = s.id and x.wba_id = todo.wba_id;
+      done := done + 1;
+      continue;
+    end;
+    if n = 0 then
+      update public.survey_rows x set status = 'no_page', read_at = now() where x.survey_id = s.id and x.wba_id = todo.wba_id;
+      done := done + 1;
+      continue;
+    end if;
+    got := public.ask_model(api_key, http_schema, model, public.survey_instructions(),
+                            format(E'Question: %s\nCompany: %s\n\nPages:\n%s', s.question, todo.company, context), 1500);
+    said := public.survey_parse(got ->> 'text');
+    if said is null then
+      update public.survey_rows x set status = 'failed', note = left(coalesce(got ->> 'error', 'the reader gave no answer that could be read'), 200),
+             input_tokens = (got ->> 'in')::int, output_tokens = (got ->> 'out')::int, read_at = now()
+       where x.survey_id = s.id and x.wba_id = todo.wba_id;
+    else
+      select e into src from jsonb_array_elements(sources) e where (e ->> 'n')::int = coalesce((said ->> 'source')::int, case when said ->> 'status' in ('yes', 'no') then 1 end);
+      update public.survey_rows x set status = said ->> 'status', value = said ->> 'value', evidence = said ->> 'evidence', year = (said ->> 'year')::int,
+             library_id = src ->> 'library_id', page = (src ->> 'page')::int, doc_year = (src ->> 'year')::int, doc_type = src ->> 'doc_type',
+             label = src ->> 'label', url = src ->> 'url', input_tokens = (got ->> 'in')::int, output_tokens = (got ->> 'out')::int, read_at = now()
+       where x.survey_id = s.id and x.wba_id = todo.wba_id;
+    end if;
+    done := done + 1;
+  end loop;
+  if not exists (select 1 from public.survey_rows x where x.survey_id = s.id and x.status = 'pending') then
+    update public.surveys x set status = 'done', finished_at = coalesce(x.finished_at, now()) where x.id = s.id;
+  end if;
+  return jsonb_build_object('read', done) || public.survey_get(key, survey);
+end;
+$$;
+revoke all on function public.survey_step(text, bigint, int) from public, anon;
+grant execute on function public.survey_step(text, bigint, int) to authenticated;
+
+-- The owner's side: the settings, who may run surveys and how many a day, and the surveys run (newest first).
+create or replace function public.admin_surveys(key text, pages int default null, max_companies int default null, readings int default null,
+                                                email text default null, per_day int default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(btrim(coalesce(email, '')));
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if pages is not null or max_companies is not null or readings is not null then
+    if coalesce(pages, 6) not between 1 and 8 or coalesce(max_companies, 150) not between 1 and 1000 or coalesce(readings, 2000) not between 0 and 20000 then
+      return jsonb_build_object('error', 'Pages a company 1 to 8; companies a survey 1 to 1,000; readings a day 0 to 20,000.');
+    end if;
+    update public.survey_settings s set pages_a_company = coalesce(pages, s.pages_a_company), max_companies = coalesce(max_companies, s.max_companies),
+           readings_a_day = coalesce(readings, s.readings_a_day) where s.one;
+  end if;
+  if who <> '' then
+    if who !~ '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$' or per_day is null or per_day not between 0 and 50 then
+      return jsonb_build_object('error', 'An address like name@organisation.org and a number of surveys a day from 0 to 50.');
+    end if;
+    insert into public.ask_limits (email, surveys_per_day, by) values (who, per_day, lower(auth.jwt() ->> 'email'))
+      on conflict on constraint ask_limits_pkey do update set surveys_per_day = excluded.surveys_per_day, by = excluded.by, at = now();
+  end if;
+  return jsonb_build_object(
+    'settings', (select jsonb_build_object('pages', s.pages_a_company, 'max_companies', s.max_companies, 'readings', s.readings_a_day) from public.survey_settings s where s.one),
+    'people', (select coalesce(jsonb_agg(jsonb_build_object('email', l.email, 'per_day', l.surveys_per_day,
+                        'today', (select count(*) from public.surveys x where x.asker = l.email and x.at >= date_trunc('day', now()))) order by l.email), '[]'::jsonb)
+               from public.ask_limits l where l.surveys_per_day > 0),
+    'read_today', (select count(*) from public.survey_rows x where x.read_at >= date_trunc('day', now()) and x.input_tokens is not null),
+    'surveys', (select coalesce(jsonb_agg(to_jsonb(y) order by y.at desc), '[]'::jsonb) from (
+                  select x.id, x.at, x.asker, x.question, x.status, x.in_scope,
+                         (select count(*) from public.survey_rows r where r.survey_id = x.id) as companies,
+                         (select count(*) from public.survey_rows r where r.survey_id = x.id and r.status = 'yes') as yes,
+                         (select round((coalesce(sum(r.input_tokens), 0) * 0.10 + coalesce(sum(r.output_tokens), 0) * 0.50) / 1000000.0, 4) from public.survey_rows r where r.survey_id = x.id) as usd
+                  from public.surveys x order by x.at desc limit 50) y));
+end;
+$$;
+revoke all on function public.admin_surveys(text, int, int, int, text, int) from public, anon;
+grant execute on function public.admin_surveys(text, int, int, int, text, int) to authenticated;
+
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
 create or replace function public.admin_link_new(key text, name text)
