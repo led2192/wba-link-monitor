@@ -793,6 +793,8 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("create or replace function public.reader_ready() returns jsonb language sql as $f$ select '{\"api_key\": \"k\", \"http_schema\": \"h\"}'::jsonb $f$")
             start = "select public.survey_start('k', 'Do executives have an incentive tied to greenhouse gas emissions?', null, 'Testing industry')"
             cur.execute(start); self.assertTrue(cur.fetchone()[0]["off"])                              # nobody may until the owner says so
+            offer = "select public.survey_offer('k', 'do executives have an incentive tied to greenhouse gas emissions?', 'Testing industry')"
+            cur.execute(offer); self.assertEqual(cur.fetchone()[0], {"may": False, "why": "off", "have": None})   # and nothing is offered
             jwt("e.owner@worldbenchmarkingalliance.org")
             cur.execute("select public.admin_surveys('k', 6, 4, null, 'ana@worldbenchmarkingalliance.org', 1)")
             got = cur.fetchone()[0]
@@ -800,7 +802,17 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select per_day from public.ask_limits where email = 'ana@worldbenchmarkingalliance.org'")
             self.assertEqual(cur.fetchone()[0], 50)                                                    # surveys alone leave the answers a day as they are
             jwt("ana@worldbenchmarkingalliance.org")
+            cur.execute(offer); o = cur.fetchone()[0]                                                    # before anything is spent: how many, about how much
+            self.assertEqual((o["may"], o["companies"], o["in_scope"], o["up_to"], o["pages"], o["left_today"], o["have"]), (True, 4, 5, False, 6, 1, None))
+            self.assertGreater(float(o["usd"]), 0)
+            cur.execute("select public.survey_offer('k', 'a question with no filter at all?')")
+            wide = cur.fetchone()[0]
+            self.assertEqual([wide[k] for k in ("companies", "up_to", "in_scope")], [4, True, None])    # no filter: the ceiling, not a count
             cur.execute(start); made = cur.fetchone()[0]
+            cur.execute(offer); o = cur.fetchone()[0]
+            self.assertEqual((o["may"], o["why"], o["have"]["id"], o["have"]["status"]), (False, "limit", made["id"], "open"))   # the survey already run is opened, not paid twice
+            cur.execute("select public.survey_offer('k', 'Do executives have an incentive tied to greenhouse gas emissions?', 'Testing industry', null, null, 2024)")
+            self.assertIsNone(cur.fetchone()[0]["have"])                                                 # another scope is another survey
             self.assertEqual((made["companies"], made["in_scope"], made["pages"]), (4, 5, 6))            # five with documents, the ceiling keeps four, by name
             cur.execute(start); self.assertTrue(cur.fetchone()[0]["limit"])                             # one a day was allowed
             cur.execute("select public.survey_get('k', %s)", (made["id"],))
@@ -822,8 +834,15 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual((eps["status"], eps["library_id"], eps["page"]), ("yes", None, None))        # and no page at all rather than one chosen for it
             self.assertGreater(float(got["counts"]["usd"]), 0)
             cur.execute("select has_function_privilege('anon', 'public.survey_start(text, text, real[], text, text, text, int, int, text)', 'execute'), "
-                        "has_function_privilege('authenticated', 'public.reader_ready()', 'execute')")
-            self.assertEqual(cur.fetchone(), (False, False))
+                        "has_function_privilege('authenticated', 'public.reader_ready()', 'execute'), "
+                        "has_function_privilege('authenticated', 'public.survey_read(text, text, text, real[], text, text, int, int, int)', 'execute'), "
+                        "has_function_privilege('authenticated', 'public.survey_words(text)', 'execute'), "
+                        "has_function_privilege('anon', 'public.survey_offer(text, text, text, text, text, int, int)', 'execute')")
+            self.assertEqual(cur.fetchone(), (False, False, False, False, False))
+            cur.execute("update public.pages set body = 'Epsilon page text, long enough to be found by its start' where library_id = 'DS6'")
+            cur.execute("select public.survey_read('k', 'q?', 'w', null, 'S6', 'Epsilon', null, null, 6)")           # one reading, as the measurement asks it
+            one = cur.fetchone()[0]
+            self.assertEqual((one["status"], one["library_id"], one["page"], one["printed"], one["pages"], one["in"]), ("yes", "DS6", 1, True, 6, 4000))
             jwt("someone.else@worldbenchmarkingalliance.org")
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):                              # a survey is read on by its asker alone
                 cur.execute("select public.survey_step('k', %s, 1)", (made["id"],))

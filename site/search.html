@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v87 2026-11-16";
+  const CLIENT = "lantern v88 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1348,7 +1348,7 @@
   // Ask: the question goes to the database, which finds the pages (the same search), gives the first lines of the best six
   // to the reader model and returns an answer that cites them. Signed in; twenty answers a day a person (counted there).
   // auto: the box held a question and nobody pressed Ask; then nothing interrupts the search (no sign-in form, a short line instead).
-  async function ask(auto) {
+  async function ask(auto, quick) {
     auto = auto === true;
     const text = $("q").value.trim(), box = $("answer"); box.innerHTML = ""; const c = el("div", "answer"); box.appendChild(c);
     const cap = el("div", "cap"); cap.append(el("span", null, "Ask · an answer written from the pages found"), el("span", null, "")); c.appendChild(cap);
@@ -1364,6 +1364,16 @@
     note.textContent = "Reading the pages…";
     search(false);                                           // the results under the answer, as for any search; it also reads the filters in the box
     const seq = searchSeq;
+    // v88 (the owner, 16 Nov 2026): a question that names no company is about many companies. Before an answer is
+    // spent on eight pages, those who may run surveys are offered one (or shown the one they already ran); the quick
+    // answer stays one press away. Everyone else is answered as before.
+    state.surveyMay = false;
+    if (!state.company && quick !== true) {
+      let o = null; try { o = await authed("survey_offer", surveyScope(text)); } catch (e) { o = null; }
+      if (seq !== searchSeq || !document.body.contains(c)) return;
+      state.surveyMay = !!(o && o.may);
+      if (o && (o.may || o.have)) { surveyCard(c, text, o); return; }
+    }
     let vec = null;                                           // the question's vector, when the language model is at hand within 4 s: the answer then reads the one search's pages
     if (canBlend()) { try { vec = await Promise.race([queryVector(meaningWords()), new Promise(r => setTimeout(() => r(null), 4000))]); } catch (e) { vec = null; } }
     let j = null;
@@ -1390,13 +1400,84 @@
     c.appendChild(body);
     const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; li.appendChild(a); ol.appendChild(li); }
     c.append(ol, el("div", "what", (j.keywords ? `Pages found by searching “${j.keywords.replace(/\s+/g, " ")}”. ` : "") + "Written by a model from these pages only. Check the source before using a figure."));
-    // v86 (the owner asked a question about many companies in the box and got eight pages' worth): with no company
-    // named, say what this answer is and, for those who may, offer the survey with the question and the scope carried over.
-    if (!state.company && $("adminOpen")) {
+    // v86, v88: with no company named, say what this answer is and, for those who may, offer the survey in its place.
+    if (!state.company) {
       const more = el("div", "what"); more.append(document.createTextNode("No company is named, so this reads eight pages across companies and cannot count. "));
-      const a = el("a", null, "Ask every company in the scope instead (a survey)"); a.href = "#";
-      a.onclick = ev => { ev.preventDefault(); surveySeed = { q: text, industry: state.industry || "", region: state.region || "", country: state.country || "", from: state.from || "", to: state.to || "" }; openAdmin("Surveys"); };
-      more.append(a); c.append(more);
+      if (state.surveyMay) { const a = el("a", null, "Ask every company in the scope instead"); a.href = "#"; a.onclick = ev => { ev.preventDefault(); ask(); }; more.append(a); }
+      c.append(more);
+    }
+  }
+  // v88: a survey in the place of the answer. The offer first (how many companies, about how much), then the result
+  // kept short: the count as the headline, the companies that say yes with their page, and the whole table and the
+  // file one press away. A survey this person already ran for the same question and scope is opened, not run again.
+  const surveyScope = text => ({ key, question: text, industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null, year_from: state.from || null, year_to: state.to || null });
+  function surveyCard(c, text, o) {
+    c.innerHTML = "";
+    const scope = surveyScope(text), where = [state.industry, state.region, state.countryName || state.country, state.from || state.to ? `${state.from || ""}–${state.to || ""}` : ""].filter(Boolean).join(" · ");
+    const cap = el("div", "cap"); cap.append(el("span", null, "Survey · one question asked of each company"), el("span", null, typeof o.left_today === "number" && o.per_day ? `${o.left_today} of ${o.per_day} surveys left today` : "")); c.appendChild(cap);
+    const note = el("div", "what"), out = el("div"); c.append(note, out);
+    const link = (words, fn) => { const a = el("a", null, words); a.href = "#"; a.onclick = ev => { ev.preventDefault(); fn(); }; return a; };
+    let all = false, last = null;
+    const show = (g, running) => {
+      last = g; out.innerHTML = ""; if (!g) { note.textContent = "That survey is not available."; return; }
+      const n = g.counts, yes = g.rows.filter(x => x.status === "yes");
+      const head = el("div", "text"); head.style.fontWeight = "600"; head.textContent = `Yes: ${n.yes} of ${n.companies} companies`;
+      const rest = el("div", "what", `No ${n.no} · not stated in the pages read ${n.not_stated} · no page found ${n.no_page}` + (n.failed ? ` · not read ${n.failed}` : "") + (n.pending ? ` · waiting ${n.pending}` : ""));
+      rest.title = "Not stated and no page found are never counted as a no"; out.append(head, rest);
+      const source = x => { if (!(x.library_id && x.page)) return null; const a = link(`${x.doc_year || ""} ${x.doc_type || "document"}, page ${x.page}`.trim(), () => openReader(x.library_id, x.page, x.evidence || "")); a.title = x.evidence || ""; return a; };
+      if (all) {
+        const t = adminTable(["Company", "Answer", "In short, and the sentence", "Source"], g.rows.map(x => {
+          const said = el("span"); said.append(document.createTextNode(x.value || "")); if (x.evidence) { const q = el("div", null, `“${x.evidence}”`); q.style.cssText = "color:var(--muted);font-size:12px;margin-top:2px"; said.append(q); }
+          return [x.company, SURVEY_WORDS[x.status] || x.status, said, source(x) || (x.status === "yes" || x.status === "no" ? "page not named by the reader" : "")]; }));
+        t.style.fontSize = "13px"; t.style.margin = "10px 0 4px"; out.append(t);
+      } else if (yes.length) {
+        const ul = el("ul"); ul.style.cssText = "margin:10px 0 4px;padding-left:18px;font-size:14px;line-height:1.5";
+        for (const x of yes) { const li = el("li"), b = el("b", null, x.company); li.append(b, document.createTextNode(x.value ? ` · ${x.value} ` : " ")); const a = source(x) || el("span", null, "page not named by the reader"); a.style.fontSize = "12.5px"; if (a.tagName !== "A") a.style.color = "var(--muted)"; li.append(a); ul.append(li); }
+        out.append(ul);
+      }
+      const foot = el("div", "what"); foot.style.marginTop = "8px";
+      foot.append(link(all ? "Show only the yes" : `Show all ${n.companies}`, () => { all = !all; show(last, running); }), document.createTextNode(" · "), link("Download as CSV", () => saveText(surveyFile(last), surveyCsv(last))));
+      if (!running && g.status !== "done") foot.append(document.createTextNode(" · "), link("Continue", () => run(g.id)));
+      if (!running && o.may) foot.append(document.createTextNode(" · "), link("Ask again", start));
+      out.append(foot);
+      const scoped = [g.industry, g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}–${g.year_to || ""}` : ""].filter(Boolean).join(" · ");
+      const what = el("div", "what", `${scoped || "No filter: the companies a search for the words found"}. Each company's reports searched with “${g.words}”, ${g.pages} pages read a company by a model` + (g.in_scope > n.companies ? `; the scope holds ${g.in_scope} companies and the ceiling kept ${n.companies}` : "") + ". Check the source before using a row."); what.style.fontSize = "12.5px";
+      out.append(what);
+    };
+    const run = async id => {
+      const me = ++surveyRun;
+      for (;;) {
+        const g = await authed("survey_step", { key, survey: id, companies: 3 });
+        if (me !== surveyRun || !document.body.contains(out)) return;          // another survey started, or a new search took the box
+        if (!g) { note.textContent = "The survey stopped: no answer from the database. "; note.append(link("Continue", () => run(id))); if (last) show(last, false); return; }
+        if (g.off || g.limit) { note.textContent = g.limit ? "Today's ceiling of readings is reached; it continues tomorrow." : `Not run: ${g.why || "the reader is not set up"}.`; show(g, false); return; }
+        if (g.status === "done") { note.textContent = ""; show(g, false); return; }
+        note.textContent = `Reading… ${g.counts.pending} companies to go. A new search stops it; asking the same question again continues it.`; show(g, true);
+      }
+    };
+    async function start() {
+      note.textContent = "Fixing the scope…"; out.innerHTML = "";
+      let vec = null; try { vec = await Promise.race([queryVector(text), new Promise(r => setTimeout(() => r(null), 4000))]); } catch (e) { vec = null; }
+      const g = await authed("survey_start", Object.assign({ qvec: vec, client: CLIENT }, scope));
+      if (!document.body.contains(out)) return;
+      if (!g) { note.textContent = "Not started."; return; }
+      if (g.off) { note.textContent = g.why || "Surveys are not switched on for this address."; return; }
+      if (g.limit) { note.textContent = `Today's ${g.per_day} surveys for this address are used.`; return; }
+      if (!g.companies) { note.textContent = "No company in that scope."; return; }
+      if (typeof g.left_today === "number" && o.per_day) cap.lastChild.textContent = `${g.left_today} of ${o.per_day} surveys left today`;
+      note.textContent = `Reading… ${g.companies} companies to go.`; run(g.id);
+    }
+    if (o.have) {
+      note.textContent = "Opening the survey you ran for this question…";
+      authed("survey_get", { key, survey: o.have.id }).then(g => { if (!document.body.contains(out)) return; note.textContent = g ? `You asked this on ${adminWhen(o.have.at)}; this is that survey, not a new one.` : ""; show(g, false); if (!g && o.may) offer(); });
+    } else offer();
+    function offer() {
+      const many = o.up_to ? `up to ${o.companies} companies a search finds` : `each of the ${o.companies} companies` + (where ? ` in ${where}` : "") + (o.in_scope > o.companies ? ` (the scope holds ${o.in_scope}; the ceiling is ${o.companies})` : "");
+      note.textContent = `No company is named, so one answer from eight pages cannot count companies. `;
+      const go1 = adminBtn(`Ask ${many}`, start), go2 = adminBtn("A quick answer from the eight best pages", () => ask(false, true));
+      const line = el("div"); line.style.cssText = "margin:8px 0 4px;display:flex;gap:6px;flex-wrap:wrap"; line.append(go1, go2);
+      const cost = el("div", "what", `${o.pages} pages read a company, about ${Number(o.usd).toFixed(2)} USD and a few minutes. The table comes with the source of each row.`); cost.style.fontSize = "12.5px";
+      out.append(line, cost);
     }
   }
   const pageUrl = s => !s.url ? "#" : (/#/.test(s.url) ? s.url : `${s.url}#page=${s.page || 1}`);
@@ -2162,7 +2243,6 @@
   const surveyFile = g => `survey-${g.id}-${String(g.question || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60)}.csv`;
   const saveText = (name, text) => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + text], { type: "text/csv;charset=utf-8" })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
   let surveyRun = 0;                                     // a newer run, or leaving the section, stops the loop of an older one
-  let surveySeed = null;                                 // a question and its scope carried over from the box (v86), used once
   async function adminSurveys(body) {
     const mine = ++surveyRun;
     const o = await authed("admin_surveys", { key }); if (!o) { body.textContent = "Not available."; return; }
@@ -2178,7 +2258,6 @@
     q.onchange = () => { try { const p = parse(q.value); if (p.industry && !ind.value) ind.value = p.industry; if (p.region && !reg.value) reg.value = p.region; if (p.country && !cty.value) cty.value = p.country; if (p.from && !y0.value) y0.value = p.from; if (p.to && !y1.value) y1.value = p.to; } catch (e) {} };
     const r1 = row(), r2 = row(), out = el("div");
     r1.append(q); r2.append(ind, reg, cty, y0, y1);
-    if (surveySeed) { q.value = surveySeed.q; ind.value = surveySeed.industry; reg.value = surveySeed.region; cty.value = surveySeed.country; y0.value = surveySeed.from; y1.value = surveySeed.to; surveySeed = null; }
     const show = g => {
       out.innerHTML = "";
       if (!g) { out.textContent = "That survey is not available."; return; }
