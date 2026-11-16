@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v92 2026-11-16";
+  const CLIENT = "lantern v93 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1420,6 +1420,15 @@
   // v88: a survey in the place of the answer. The offer first (how many companies, about how much), then the result
   // kept short: the count as the headline, the companies that say yes with their page, and the whole table and the
   // file one press away. A survey this person already ran for the same question and scope is opened, not run again.
+  // v91, v93: a row checked against its page, right or wrong (pressing the same mark again takes it back). The same
+  // marks in the search's survey card and in the owner's Surveys table (the owner looked for them there first).
+  const surveyMarks = (g, x, redraw) => { const w = el("span"); w.style.cssText = "white-space:nowrap;margin-left:6px";
+    for (const [v, sign, tip] of [["right", "✓", "The page says so"], ["wrong", "✗", "The page does not say so"]]) {
+      const b = el("button", null, sign); b.type = "button"; b.title = tip + (x.verdict === v ? " (marked; press to take it back)" : "");
+      b.style.cssText = `font:inherit;font-size:12px;line-height:1;padding:2px 6px;margin-left:2px;border-radius:999px;cursor:pointer;border:1px solid var(--line);background:${x.verdict === v ? (v === "right" ? "#d7f0dd" : "#f6d9d6") : "var(--box)"};color:var(--fg)`;
+      b.onclick = async () => { const to = x.verdict === v ? "" : v; const r = await authed("survey_verdict", { key, survey: g.id, wba: x.wba_id, verdict: to }); if (!r) return; x.verdict = to || null; g.counts.right = r.right; g.counts.wrong = r.wrong; redraw(); };
+      w.append(b); }
+    return w; };
   const surveyScope = text => ({ key, question: text, industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null, year_from: state.from || null, year_to: state.to || null });
   function surveyCard(c, text, o) {
     c.innerHTML = "";
@@ -1434,14 +1443,7 @@
       const head = el("div", "text"); head.style.fontWeight = "600"; head.textContent = `At least ${n.yes} of the ${n.companies} companies asked: yes`;
       const rest = el("div", "what", `No ${n.no} · not stated in the pages read ${n.not_stated} · no page found ${n.no_page}` + (n.failed ? ` · not read ${n.failed}` : "") + (n.pending ? ` · waiting ${n.pending}` : ""));
       rest.title = "Not stated and no page found are never counted as a no"; out.append(head, rest);
-      // v91: a row checked against its page, right or wrong (pressing the same mark again takes it back)
-      const marks = x => { const w = el("span"); w.style.cssText = "white-space:nowrap;margin-left:6px";
-        for (const [v, sign, tip] of [["right", "✓", "The page says so"], ["wrong", "✗", "The page does not say so"]]) {
-          const b = el("button", null, sign); b.type = "button"; b.title = tip + (x.verdict === v ? " (marked; press to take it back)" : "");
-          b.style.cssText = `font:inherit;font-size:12px;line-height:1;padding:2px 6px;margin-left:2px;border-radius:999px;cursor:pointer;border:1px solid var(--line);background:${x.verdict === v ? (v === "right" ? "#d7f0dd" : "#f6d9d6") : "var(--box)"};color:var(--fg)`;
-          b.onclick = async () => { const to = x.verdict === v ? "" : v; const r = await authed("survey_verdict", { key, survey: g.id, wba: x.wba_id, verdict: to }); if (!r) return; x.verdict = to || null; n.right = r.right; n.wrong = r.wrong; show(last, running); };
-          w.append(b); }
-        return w; };
+      const marks = x => surveyMarks(g, x, () => show(last, running));
       if (n.right || n.wrong) { const checked = el("div", "what", `Checked against the page: ${n.right} right, ${n.wrong} wrong.`); out.append(checked); }
       const source = x => { if (!(x.library_id && x.page)) return null; const a = link(`${x.doc_year || ""} ${x.doc_type || "document"}, page ${x.page}`.trim(), () => openReader(x.library_id, x.page, x.evidence || "")); a.title = x.evidence || ""; return a; };
       if (all) {
@@ -2303,11 +2305,12 @@
       const file = adminBtn("Download as CSV", () => saveText(surveyFile(g), surveyCsv(g))); file.title = "Every row of this survey, as it stands now, for Excel";
       sum.append(document.createTextNode("  "), file);
       out.append(line, sum);
-      out.appendChild(adminTable(["Company", "Answer", "In short", "Year", "The sentence", "Source"], g.rows.map(x => {
+      if (c.right || c.wrong) sum.append(document.createTextNode(`  Checked against the page: ${c.right} right, ${c.wrong} wrong.`));
+      out.appendChild(adminTable(["Company", "Answer", "In short", "Year", "The sentence", "Source", "Check"], g.rows.map(x => {
         const src = el("span");
         if (x.library_id && x.page) { const a = el("a", null, `${x.doc_year || ""} ${x.doc_type || "document"}, page ${x.page}`.trim()); a.href = "#"; a.title = "The page's text, inside lanterN"; a.onclick = ev => { ev.preventDefault(); openReader(x.library_id, x.page, x.evidence || ""); }; src.append(a); }
         else if (x.status === "yes" || x.status === "no") { src.textContent = "page not named by the reader"; src.style.color = "var(--muted, #667)"; }
-        return [x.company, SURVEY_WORDS[x.status] || x.status, x.value || "", x.year || "", x.evidence || "", src];
+        return [x.company, SURVEY_WORDS[x.status] || x.status, x.value || "", x.year || "", x.evidence || "", src, x.status === "yes" || x.status === "no" ? surveyMarks(g, x, () => show(g)) : ""];
       })));
     };
     const run = async id => {
