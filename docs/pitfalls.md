@@ -398,4 +398,4 @@ The Scan now watch runs five and a half hours and starts other scripts from its 
 
 ## A script written for a one-time fill has side effects a small run must not have (15 Nov 2026)
 `semantic_index.py` dropped the indexes on the embeddings and word pairs at the start of every committed run: right for the first fill (inserting into an HNSW index took 33 of 48 minutes), harmful once the index was live. The fast lane reused the script for three documents and its first real run dropped the index of 4 million embeddings; building it again takes about 40 minutes with 6 GB of maintenance memory. Rule: before reusing a script in a new, frequent path, read what it does before and after its main loop (drops, truncates, rebuilds), not only the loop. A destructive preparation step is opt-in by a flag, never the default.
-
+- A reader asked for "the number of the page" does not always give one that can be used: it may write `[3]`, a page it was not given, or nothing. Never fill the gap with a default page (the first survey code gave page 1): look for the copied sentence on the pages given, and show no source when it is on none (#606).

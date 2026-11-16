@@ -3844,7 +3844,7 @@ begin
     'value', nullif(left(btrim(coalesce(j ->> 'value', '')), 160), ''),
     'evidence', nullif(left(btrim(coalesce(j ->> 'evidence', '')), 400), ''),
     'year', case when (j ->> 'year') ~ '^(19|20)\d\d$' then (j ->> 'year')::int end,
-    'source', case when (j ->> 'source') ~ '^\d{1,2}$' then (j ->> 'source')::int end);
+    'source', substring(j ->> 'source' from '^\s*\[?\s*(\d{1,2})\s*\]?\s*$')::int);      -- 3, "3" and "[3]" are the same page
 end;
 $$;
 
@@ -4023,7 +4023,8 @@ begin
         n := n + 1;
         select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
         context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
-        sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url);
+        sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url,
+                                                 'body', lower(coalesce(body, '')));
       end loop;
     exception when others then
       update public.survey_rows x set status = 'failed', note = 'the search failed', read_at = now() where x.survey_id = s.id and x.wba_id = todo.wba_id;
@@ -4043,7 +4044,15 @@ begin
              input_tokens = (got ->> 'in')::int, output_tokens = (got ->> 'out')::int, read_at = now()
        where x.survey_id = s.id and x.wba_id = todo.wba_id;
     else
-      select e into src from jsonb_array_elements(sources) e where (e ->> 'n')::int = coalesce((said ->> 'source')::int, case when said ->> 'status' in ('yes', 'no') then 1 end);
+      -- The page of a row is the one the reader named; when it named none, or one that was not given, the page that
+      -- prints the start of the sentence it copied. Never a page chosen for it: a yes with no page says so (16 Nov 2026,
+      -- a yes shown with no source, and before that a silent first page).
+      src := null;
+      select e into src from jsonb_array_elements(sources) e where (e ->> 'n')::int = (said ->> 'source')::int;
+      if src is null and length(coalesce(said ->> 'evidence', '')) >= 20 then
+        select e into src from jsonb_array_elements(sources) e
+         where position(lower(left(regexp_replace(said ->> 'evidence', '\s+', ' ', 'g'), 40)) in e ->> 'body') > 0 order by (e ->> 'n')::int limit 1;
+      end if;
       update public.survey_rows x set status = said ->> 'status', value = said ->> 'value', evidence = said ->> 'evidence', year = (said ->> 'year')::int,
              library_id = src ->> 'library_id', page = (src ->> 'page')::int, doc_year = (src ->> 'year')::int, doc_type = src ->> 'doc_type',
              label = src ->> 'label', url = src ->> 'url', input_tokens = (got ->> 'in')::int, output_tokens = (got ->> 'out')::int, read_at = now()
