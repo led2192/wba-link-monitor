@@ -874,6 +874,19 @@ class SearchOnPostgres(unittest.TestCase):
             with self.assertRaises(psycopg.errors.InvalidParameterValue):
                 cur.execute("select public.survey_verdict('k', %s, 'S1', 'maybe')", (made["id"],))
             cur.execute("rollback to savepoint bad")
+            # a survey that stopped at the ceiling is carried on to the rest of its scope, as one more of the day's surveys
+            more = lambda: (cur.execute("select public.survey_more('k', %s)", (made["id"],)), cur.fetchone()[0])[1]
+            self.assertEqual(more(), {"limit": True, "per_day": 1})                                      # the day's one survey is used
+            jwt("e.owner@worldbenchmarkingalliance.org")
+            cur.execute("select public.admin_surveys('k', null, null, null, 'ana@worldbenchmarkingalliance.org', 2)")
+            jwt("ana@worldbenchmarkingalliance.org")
+            got = more()
+            self.assertEqual((got["added"], got["left_today"], got["status"], got["counts"]["companies"], got["counts"]["pending"], got["in_scope"]), (1, 0, "open", 5, 1, 5))
+            self.assertEqual([r["company"] for r in got["rows"] if r["status"] == "pending"], ["Gamma"])     # the one the ceiling left out; what was read stays
+            self.assertEqual(more(), {"limit": True, "per_day": 2})                                      # carrying on counted as a survey
+            cur.execute(offer); self.assertEqual(cur.fetchone()[0]["left_today"], 0)
+            cur.execute("select public.survey_step('k', %s, 5)", (made["id"],)); got = cur.fetchone()[0]
+            self.assertEqual((got["status"], got["counts"]["not_stated"]), ("done", 1))
             jwt("someone.else@worldbenchmarkingalliance.org")
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):                              # a survey is read on by its asker alone
                 cur.execute("select public.survey_step('k', %s, 1)", (made["id"],))

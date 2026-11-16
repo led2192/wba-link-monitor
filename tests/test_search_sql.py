@@ -429,7 +429,9 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v91 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v92 2026-11-16";' in PAGE
+    assert 'const r = await authed("survey_more", { key, survey: id });' in PAGE and "link(`Ask the remaining ${unasked} companies`" in PAGE   # v92: a survey at the ceiling is carried on
+    assert SQL.count("used := public.surveys_used_today(who);") == 3                                                    # starting, offering and carrying on count the same day
     assert 'await authed("survey_verdict", { key, survey: g.id, wba: x.wba_id, verdict: to })' in PAGE                    # v91: a row checked against its page
     sv = SQL[SQL.index("create or replace function public.survey_verdict("):SQL.index("revoke all on function public.survey_verdict(")]
     assert "where x.id = survey and (x.asker = who or public.admin_ok(key))" in sv and "r.status in ('yes', 'no')" in sv   # the asker or the owner; in the tests every key is the owner's
