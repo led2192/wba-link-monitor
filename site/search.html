@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v86 2026-11-16";
+  const CLIENT = "lantern v87 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2151,6 +2151,16 @@
   // page stops it, "Open" on a past survey continues it); the table keeps yes, no, not stated and no page found apart.
   const SURVEY_WORDS = { yes: "Yes", no: "No", not_stated: "Not stated in the pages read", no_page: "No page found", failed: "Not read (failed)", pending: "Waiting" };
   const surveyCounts = c => `Yes ${c.yes} · No ${c.no} · Not stated in the pages read ${c.not_stated} · No page found ${c.no_page}` + (c.failed ? ` · Not read ${c.failed}` : "") + (c.pending ? ` · Waiting ${c.pending}` : "") + ` · of ${c.companies} companies`;
+  // v87 (the owner, 16 Nov 2026): a survey's table as a file. Made in the page from the rows already shown, so nothing
+  // is asked of the database. A cell that a spreadsheet would run as a formula (=, +, -, @ first) is given a leading
+  // apostrophe; the file starts with a byte-order mark so that Excel reads the accents.
+  const csvCell = v => { let t = v == null ? "" : String(v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const surveyCsv = g => [["Company", "WBA id", "Answer", "In short", "Year", "The sentence", "Document year", "Document type", "Page", "Link", "Question", "Scope"]]
+    .concat(g.rows.map(x => [x.company, x.wba_id, SURVEY_WORDS[x.status] || x.status, x.value, x.year, x.evidence, x.doc_year, x.doc_type, x.page, x.url && x.page ? pageUrl(x) : (x.url || ""), g.question,
+                             [g.industry, g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}-${g.year_to || ""}` : ""].filter(Boolean).join(", ")]))
+    .map(r => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  const surveyFile = g => `survey-${g.id}-${String(g.question || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60)}.csv`;
+  const saveText = (name, text) => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + text], { type: "text/csv;charset=utf-8" })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
   let surveyRun = 0;                                     // a newer run, or leaving the section, stops the loop of an older one
   let surveySeed = null;                                 // a question and its scope carried over from the box (v86), used once
   async function adminSurveys(body) {
@@ -2176,10 +2186,13 @@
       out.append(el("h3", null, g.question));
       const line = el("p", null, `${scope}. Searched with “${g.words}”, ${g.pages} pages a company` + (g.in_scope > c.companies ? `; the scope holds ${g.in_scope} companies and the ceiling kept ${c.companies}` : "") + `. So far about ${Number(c.usd).toFixed(3)} USD.`); line.style.cssText = "font-size:13px;color:var(--muted, #667);margin:0 0 6px";
       const sum = el("p", null, surveyCounts(c)); sum.style.cssText = "font-weight:600;margin:0 0 8px";
+      const file = adminBtn("Download as CSV", () => saveText(surveyFile(g), surveyCsv(g))); file.title = "Every row of this survey, as it stands now, for Excel";
+      sum.append(document.createTextNode("  "), file);
       out.append(line, sum);
       out.appendChild(adminTable(["Company", "Answer", "In short", "Year", "The sentence", "Source"], g.rows.map(x => {
         const src = el("span");
         if (x.library_id && x.page) { const a = el("a", null, `${x.doc_year || ""} ${x.doc_type || "document"}, page ${x.page}`.trim()); a.href = "#"; a.title = "The page's text, inside lanterN"; a.onclick = ev => { ev.preventDefault(); openReader(x.library_id, x.page, x.evidence || ""); }; src.append(a); }
+        else if (x.status === "yes" || x.status === "no") { src.textContent = "page not named by the reader"; src.style.color = "var(--muted, #667)"; }
         return [x.company, SURVEY_WORDS[x.status] || x.status, x.value || "", x.year || "", x.evidence || "", src];
       })));
     };
