@@ -1,0 +1,57 @@
+# A small rehearsal of the search by meaning on the server's own database (server_rehearsal.py, docs/server.md).
+# Manual only. Reads a sample of passages from Supabase, builds their index on the server in a schema of its own,
+# measures, and drops that schema. The role it uses on the server gets a password made for this run, never printed
+# or stored, and cannot log in once the run ends.
+name: Server rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "run the rehearsal (unticked: say what would be done)"
+        type: boolean
+        default: false
+      rows:
+        description: "passages to copy"
+        default: "1000000"
+      memory:
+        description: "memory for the index build (maintenance_work_mem)"
+        default: "8GB"
+      workers:
+        description: "parallel workers for the index build"
+        default: "6"
+      keep:
+        description: "leave the rehearsal schema in place at the end"
+        type: boolean
+        default: false
+
+concurrency:
+  group: server-db
+  cancel-in-progress: false
+
+jobs:
+  rehearsal:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: The job's environment
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          /srv/lantern/venv/bin/pip install -q "psycopg[binary]" requests
+      - name: Rehearsal
+        run: |
+          PW=$(openssl rand -hex 24); echo "::add-mask::$PW"
+          sudo -u postgres psql -d lantern -Atc "select 1 from pg_roles where rolname = 'rehearsal'" | grep -q 1 || sudo -u postgres createuser rehearsal
+          printf "alter role rehearsal login password '%s';\n" "$PW" | sudo -u postgres psql -d lantern -q
+          sudo -u postgres psql -d lantern -qc "grant create on database lantern to rehearsal"
+          export LOCAL_DB_URL="postgresql://rehearsal:$PW@127.0.0.1:5432/lantern"
+          /srv/lantern/venv/bin/python server_rehearsal.py --rows "$ROWS" --memory "$MEMORY" --workers "$WORKERS" ${{ inputs.commit && '--commit' || '' }} ${{ inputs.keep && '--keep' || '' }}
+        env:
+          ROWS: ${{ inputs.rows || '1000000' }}
+          MEMORY: ${{ inputs.memory || '8GB' }}
+          WORKERS: ${{ inputs.workers || '6' }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      - name: The role can no longer log in
+        if: always()
+        run: sudo -u postgres psql -d lantern -qc "alter role rehearsal nologin password null" && bash server/db_install.sh check
