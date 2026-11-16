@@ -6,6 +6,17 @@ name: Server meaning
 on:
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "what the clock starts every night: refresh the server's copy and compare the counts"
+        type: boolean
+        default: false
+      refresh:
+        description: "bring the server's copy up to date (with commit; without it, only says what differs)"
+        type: boolean
+        default: false
+      switch:
+        description: "question vectors to ask of Supabase's search with the option off and on (0 = none)"
+        default: "0"
       load:
         description: "copy the passages to the server and build their index (needs commit)"
         type: boolean
@@ -59,11 +70,16 @@ jobs:
           printf "alter role lantern_load login password '%s';\n" "$PW" | sudo -u postgres psql -d lantern -q
           sudo -u postgres psql -d lantern -qc "grant create on database lantern to lantern_load"
           export LOCAL_DB_URL="postgresql://lantern_load:$PW@127.0.0.1:5432/lantern"
-          /srv/lantern/venv/bin/python server_meaning.py ${{ inputs.load && '--load' || '' }} ${{ inputs.commit && '--commit' || '' }} ${{ inputs.reload && '--reload' || '' }} ${{ inputs.trial && '--trial' || '' }} \
+          /srv/lantern/venv/bin/python server_meaning.py ${{ inputs.load && '--load' || '' }} ${{ (inputs.commit || inputs.as_scheduled) && '--commit' || '' }} ${{ inputs.reload && '--reload' || '' }} ${{ inputs.trial && '--trial' || '' }} \
+            ${{ (inputs.refresh || inputs.as_scheduled) && '--refresh' || '' }} --switch "$SWITCH" \
             --sample "$SAMPLE" --compare "$COMPARE" --exact "$EXACT" --memory "$MEMORY" --workers "$WORKERS"
         env:
           SAMPLE: ${{ inputs.sample || '0' }}
           COMPARE: ${{ inputs.compare || '0' }}
+          SWITCH: ${{ inputs.switch || '0' }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: ${{ inputs.as_scheduled && 'true' || 'false' }}
           EXACT: ${{ inputs.exact || '0' }}
           MEMORY: ${{ inputs.memory || '8GB' }}
           WORKERS: ${{ inputs.workers || '6' }}

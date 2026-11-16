@@ -28,8 +28,12 @@ class ServerMeaning(unittest.TestCase):
 
     def test_supabase_is_only_read(self):
         low = SCRIPT.lower()
-        for word in ("insert into public", "update public", "delete from", "drop table", "alter table public", "truncate public", "create index if not exists chunks_embedding on public"):
+        for word in ("insert into public", "drop table", "alter table public", "truncate public", "create index if not exists chunks_embedding on public", "delete from public"):
             self.assertNotIn(word, low)
+        self.assertEqual(low.count("update public"), 1)                                  # one row, ever: the option switched off when the copy is not current
+        self.assertIn("update public.search_options set is_on = false where name = 'meaning_remote' and is_on", SCRIPT)
+        self.assertEqual(low.count("delete from"), 1)                                    # the server's own copy of a document, before it is copied again
+        self.assertIn('d.execute(f"delete from {schema}.chunks where library_id = any(%s)"', SCRIPT)
         self.assertEqual(SCRIPT.count("truncate {schema}.chunks, {schema}.chunk_filters"), 1)        # the server's copy, and only with --reload
         self.assertIn("if held and not reload:", SCRIPT)
 
@@ -64,6 +68,36 @@ class ServerMeaning(unittest.TestCase):
         self.assertNotIn("pull_request", FLOW)
         self.assertIn("nologin password null", FLOW)
         self.assertIn("::add-mask::", FLOW)
+
+
+    def test_what_differs_between_the_two_copies(self):
+        theirs, ours = {"A": 10, "B": 5, "C": 7}, {"A": 10, "B": 4, "D": 2, "E": 9}
+        self.assertEqual(M.drift(theirs, ours, dead=["E"]), (["C"], ["B"], ["D"]))             # new, changed, gone (one already marked is not gone again)
+        self.assertTrue(M.SAFE_ID.match("recAbC_12.x:y-z")); self.assertFalse(M.SAFE_ID.match("a,b")); self.assertFalse(M.SAFE_ID.match("a}'"))
+        dry = "\n".join(M.refresh_report(dict(new=3, changed=1, gone=2, copied=0, skipped=0, left=4, switched_off=False), "meaning", False))
+        self.assertIn("dry run, nothing copied", dry); self.assertNotIn("NOT current", dry)
+        bad = "\n".join(M.refresh_report(dict(new=3, changed=1, gone=2, copied=3, skipped=1, left=1, switched_off=True), "meaning", True))
+        self.assertIn("Documents that still differ: 1.", bad)
+        self.assertIn("was switched off: Supabase's own search carries on.", bad)
+
+    def test_the_switch_report_judges_both_against_the_truth(self):
+        res = {v: dict(off=[], on=[], truth=[], ms_off=[], ms_on=[]) for v in M.VARIANTS[:3]}
+        res["no filter"].update(truth=[["a", "b", "c", "d"]] * 10, off=[["a", "b", "c", "x"]] * 10, on=[["a", "b", "c", "d"]] * 10, ms_off=[400.0] * 10, ms_on=[90.0] * 10)
+        res["two years"].update(truth=[["a", "b", "c", "d"]] * 10, off=[["a", "b", "c", "d"]] * 10, on=[["a", "b"]] * 10, ms_off=[20.0] * 10, ms_on=[95.0] * 10)
+        lines, worse = M.switch_report(res)
+        text = "\n".join(lines)
+        self.assertEqual(worse, ["two years"])
+        self.assertIn("| no filter | 10 | 75.0% | 100.0% | 0 | 4.0 / 4.0 | 400 / 400 | 90 / 90 |", text)
+        self.assertIn("LOWER with the option on by more than 3 points: two years.", text)
+        self.assertIn("| a type | 0 |", text)
+
+    def test_the_clock_starts_the_refresh_every_night(self):
+        import json
+        clock = json.load(open(os.path.join(HERE, "server", "clock.json")))
+        mine = [c for c in clock if c["workflow"] == "server_meaning.yml"]
+        self.assertEqual((len(mine), mine[0]["inputs"]), (1, {"as_scheduled": "true"}))
+        self.assertIn("(inputs.refresh || inputs.as_scheduled) && '--refresh'", FLOW)
+        self.assertIn("(inputs.commit || inputs.as_scheduled) && '--commit'", FLOW)
 
 
 if __name__ == "__main__":

@@ -21,6 +21,17 @@ Two things, each on its own:
               gave 93% agreement between the two indexes where no company is named, which fails the 98% mark and says
               nothing about which index is right.
 
+  --refresh   keeps the server's copy current (the daily job; needs --commit): documents whose passages Supabase holds
+              and the server does not, or holds in a different number, are copied again; documents Supabase no longer
+              holds are marked not live (the service leaves them out; their passages stay); every document's company,
+              year and type are brought up to date. Then the count a document is compared again: if any still
+              differs, the option meaning_remote is switched off in Supabase (its own search carries on) and the run
+              fails loudly. That one row is the only thing this script ever writes in Supabase.
+  --switch N  asks N kept question vectors of Supabase's own search (find_meaning) with the option off and on, each
+              with no filter, with two years and with a type (never a company: that path is exact on both sides),
+              and judges both against the exact search on the server with the same filter. The comparison outside
+              review 3 asked for before the switch. Reads only.
+
   --sample P  with --load: a block sample of P percent into the schema "meaning_trial" instead, to try the whole
               path small first. --compare then reads that schema with --trial (its overlap means nothing: most
               passages are missing; it shows that the path runs).
@@ -151,6 +162,143 @@ def load(src, dst, schema, sample, reload, memory, workers, out=print):
     return dict(rows=rows, docs=docs, filters=filters, orphans=orphans, differ=differ, copy_s=copy_s, build_s=build_s, table_bytes=table_bytes, index_bytes=index_bytes)
 
 
+SAFE_ID = re.compile(r"^[A-Za-z0-9_.:\-]{1,80}$")
+
+
+def drift(theirs, ours, dead=()):
+    """(new, changed, gone): documents Supabase has and the server lacks; both have, in different numbers; the server
+    has and Supabase lacks (those already marked not live are not counted as gone again)."""
+    new = sorted(k for k in theirs if k not in ours)
+    changed = sorted(k for k in theirs if k in ours and theirs[k] != ours[k])
+    gone = sorted(k for k in ours if k not in theirs and k not in set(dead))
+    return new, changed, gone
+
+
+def counts(src, dst, schema):
+    s, d = src.cursor(), dst.cursor()
+    s.execute("set statement_timeout = '30min'")
+    s.execute("select library_id, count(*) from public.chunks where embedding is not null group by 1")
+    theirs = dict(s.fetchall())
+    d.execute(f"select library_id, count(*) from {schema}.chunks group by 1")
+    ours = dict(d.fetchall())
+    d.execute(f"select library_id from {schema}.chunk_filters where not live")
+    dead = [r[0] for r in d.fetchall()]
+    src.rollback(); dst.rollback()
+    return theirs, ours, dead
+
+
+def refresh(src, dst, schema, commit, out=print):
+    """The daily refresh. Returns a dict of counts; 'left' is how many documents still differ afterwards."""
+    s, d = src.cursor(), dst.cursor()
+    theirs, ours, dead = counts(src, dst, schema)
+    new, changed, gone = drift(theirs, ours, dead)
+    m = dict(new=len(new), changed=len(changed), gone=len(gone), copied=0, skipped=0, left=len(new) + len(changed), switched_off=False)
+    out(f">>> documents: {len(theirs):,} in Supabase, {len(ours):,} on the server; new {len(new):,}, changed {len(changed):,}, gone {len(gone):,}", flush=True)
+    if not commit:
+        return m
+    todo = [k for k in new + changed if SAFE_ID.match(k)]
+    m["skipped"] = len(new) + len(changed) - len(todo)
+    for i in range(0, len(todo), 200):
+        batch = todo[i:i + 200]
+        d.execute(f"delete from {schema}.chunks where library_id = any(%s)", (batch,))          # the server's copy of these documents, replaced whole
+        ids = "{" + ",".join(batch) + "}"
+        with s.copy(f"copy (select library_id, page, n, embedding::extensions.halfvec({DIMENSIONS}) from public.chunks where library_id = any('{ids}'::text[]) and embedding is not null) to stdout") as source, \
+             d.copy(f"copy {schema}.chunks from stdin") as target:
+            for block in source:
+                target.write(block)
+        dst.commit(); src.rollback()
+        m["copied"] += len(batch)
+    # every document's company, year and type, and whether Supabase still holds it
+    d.execute("create temp table fresh (library_id text primary key, wba_id text, year int, doc_type text) on commit drop")
+    with s.copy("copy (select d.library_id, d.wba_id, d.year, d.doc_type from public.documents d where exists (select 1 from public.chunk_docs c where c.library_id = d.library_id)) to stdout") as source, \
+         d.copy("copy fresh from stdin") as target:
+        for block in source:
+            target.write(block)
+    d.execute(f"insert into {schema}.chunk_filters (library_id, wba_id, year, doc_type, live) select library_id, wba_id, year, doc_type, true from fresh "
+              f"on conflict (library_id) do update set wba_id = excluded.wba_id, year = excluded.year, doc_type = excluded.doc_type, live = true")
+    d.execute(f"update {schema}.chunk_filters f set live = false where f.live and not exists (select 1 from fresh x where x.library_id = f.library_id)")
+    dst.commit(); src.rollback()
+    theirs, ours, dead = counts(src, dst, schema)
+    new, changed, gone = drift(theirs, ours, dead)
+    m["left"] = len(new) + len(changed)
+    if m["left"]:
+        s.execute("update public.search_options set is_on = false where name = 'meaning_remote' and is_on")
+        m["switched_off"] = s.rowcount > 0
+        src.commit()
+    return m
+
+
+def refresh_report(m, schema, commit):
+    lines = [f"### The server's copy of the passages, refreshed (schema {schema})" if commit else f"### The server's copy of the passages (schema {schema}; dry run, nothing copied)", "",
+             f"Documents new in Supabase: {m['new']:,}; with a different number of passages: {m['changed']:,}; no longer in Supabase: {m['gone']:,}."]
+    if commit:
+        lines.append(f"Copied again: {m['copied']:,}; left out for an odd name: {m['skipped']:,}. Documents that still differ: {m['left']:,}.")
+        if m["left"]:
+            lines.append("The copy is NOT current. The option meaning_remote " + ("was switched off: Supabase's own search carries on." if m["switched_off"] else "was already off."))
+    return lines
+
+
+def switch_compare(src, dst, schema, n, out=print):
+    """Supabase's own search with the option off and on, and the exact search on the server with the same filter.
+    Returns {variant: {off, on, truth, ms_off, ms_on}}."""
+    s, d = src.cursor(), dst.cursor()
+    s.execute("select vec from public.query_vectors where array_length(vec, 1) = %s order by at desc limit %s", (DIMENSIONS, n))
+    vectors = [r[0] for r in s.fetchall()]
+    s.execute("select public.types_matching(%s)", (TYPE,))
+    types = s.fetchone()[0]
+    src.rollback()
+    res = {v: dict(off=[], on=[], truth=[], ms_off=[], ms_on=[]) for v in VARIANTS[:3]}
+    exact = (f"with docs as (select f.library_id from {schema}.chunk_filters f where f.live and {conditions()}), "
+             f"near as materialized (select c.library_id, c.page, (c.embedding <=> %(q)s::halfvec({DIMENSIONS})) + 0 as dist from {schema}.chunks c "
+             f"where %(all)s or c.library_id in (select library_id from docs) order by dist limit {NEAR}), "
+             f"pages as (select distinct on (n.library_id, n.page) n.library_id, n.page, n.dist from near n order by n.library_id, n.page, n.dist), "
+             f"kept as (select p.*, row_number() over (partition by p.library_id order by p.dist) as in_doc from pages p) "
+             f"select x.library_id || '|' || x.page from kept x where x.in_doc <= {PER_DOC} order by x.dist limit 10")
+    for vec in vectors:
+        qtext = "[" + ",".join(repr(float(x)) for x in vec) + "]"
+        for variant in VARIANTS[:3]:
+            y0, y1 = YEARS if variant == "two years" else (None, None)
+            tf = TYPE if variant == "a type" else None
+            try:
+                got = {}
+                for option in ("off", "on"):
+                    s.execute("select set_config('lantern.meaning_remote', %s, false)", (option,))
+                    t = time.time()
+                    s.execute("select library_id || '|' || page from public.find_meaning('eval', %s::real[], null, %s, %s, %s, 10)", (vec, y0, y1, tf))
+                    got[option] = ([r[0] for r in s.fetchall()], (time.time() - t) * 1000)
+                    src.rollback()
+                d.execute("set max_parallel_workers_per_gather = 6")
+                d.execute(exact, dict(q=qtext, y0=y0, y1=y1, types=types if tf else None, all=variant == "no filter"))
+                truth = [r[0] for r in d.fetchall()]
+                dst.rollback()
+                r = res[variant]
+                r["off"].append(got["off"][0]); r["on"].append(got["on"][0]); r["truth"].append(truth)
+                r["ms_off"].append(got["off"][1]); r["ms_on"].append(got["on"][1])
+            except Exception as e:
+                src.rollback(); dst.rollback()
+                out(f"  one search not compared ({variant}: {type(e).__name__})")
+    return res
+
+
+def switch_report(res):
+    md = ["### The switch, on the searches people type: no company, with and without a year or a type", "",
+          "| Search | Searches | Of the true first ten: option off | option on | The same ten pages off and on | Pages returned, off / on (ten asked) | ms, off (median / 95th) | ms, on (median / 95th) |", "|---|---|---|---|---|---|---|---|"]
+    worse = []
+    for v, r in res.items():
+        if not r["truth"]:
+            md.append(f"| {v} | 0 | | | | | | |"); continue
+        off, on = overlap(r["truth"], r["off"]), overlap(r["truth"], r["on"])
+        same = sum(1 for a, b in zip(r["off"], r["on"]) if set(a) == set(b))
+        full = lambda lists: f"{statistics.mean(len(x) for x in lists):.1f}"
+        md.append(f"| {v} | {len(r['truth'])} | {100 * off:.1f}% | {100 * on:.1f}% | {same} | {full(r['off'])} / {full(r['on'])} | "
+                  f"{statistics.median(r['ms_off']):.0f} / {percentile(r['ms_off'], 95):.0f} | {statistics.median(r['ms_on']):.0f} / {percentile(r['ms_on'], 95):.0f} |")
+        if on < off - 0.03:
+            worse.append(v)
+    md += ["", "The true first ten are the exact search on the server with the same filter (every passage of the documents the filter allows, no index). "
+               + ("No kind of search is lower with the option on by more than 3 points." if not worse else "LOWER with the option on by more than 3 points: " + ", ".join(worse) + ".")]
+    return md, worse
+
+
 def load_report(m, schema, memory, workers):
     gb = lambda b: b / 1024 ** 3
     return [f"### The passages on the server (schema {schema})", "", "| Measured | Value |", "|---|---|",
@@ -250,6 +398,8 @@ def compare_report(res, schema):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="The passages on the server's database and the comparison with Supabase.")
     ap.add_argument("--load", action="store_true")
+    ap.add_argument("--refresh", action="store_true", help="bring the server's copy up to date (needs --commit)")
+    ap.add_argument("--switch", type=int, default=0, help="kept question vectors to ask of Supabase's search with the option off and on")
     ap.add_argument("--compare", type=int, default=0, help="kept question vectors to ask both ways")
     ap.add_argument("--exact", type=int, default=0, help="with --compare: for this many of them, also the exact search on the server, to judge both indexes against the truth")
     ap.add_argument("--sample", type=float, default=0, help="with --load: a block sample of this percent, into the schema meaning_trial")
@@ -259,14 +409,14 @@ def main(argv=None):
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--commit", action="store_true")
     a = ap.parse_args(argv)
-    if not re.fullmatch(r"\d{1,3}(MB|GB)", a.memory) or not 1 <= a.workers <= 12 or not 0 <= a.sample <= 100 or not 0 <= a.compare <= 2000:
+    if not re.fullmatch(r"\d{1,3}(MB|GB)", a.memory) or not 1 <= a.workers <= 12 or not 0 <= a.sample <= 100 or not 0 <= a.compare <= 2000 or not 0 <= a.switch <= 500:
         sys.exit("--memory like 8GB; --workers 1 to 12; --sample 0 to 100; --compare 0 to 2,000.")
     if not os.environ.get("SUPABASE_DB_URL") or not os.environ.get("LOCAL_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL and LOCAL_DB_URL.")
     schema = "meaning_trial" if (a.sample or a.trial) else "meaning"
     import psycopg
     run = qa.Run("server_meaning.py")
-    md, counters = [], {}
+    md, counters, stale = [], {}, False
     try:
         with psycopg.connect(os.environ["SUPABASE_DB_URL"]) as src, psycopg.connect(os.environ["LOCAL_DB_URL"]) as dst:
             s, d = src.cursor(), dst.cursor()
@@ -286,6 +436,18 @@ def main(argv=None):
                 m = load(src, dst, schema, a.sample, a.reload, a.memory, a.workers)
                 md += load_report(m, schema, a.memory, a.workers)
                 counters.update(rows=m["rows"], docs=m["docs"], differ=m["differ"] if m["differ"] is not None else -1, copy_s=round(m["copy_s"]), build_s=round(m["build_s"]))
+            if a.refresh:
+                m = refresh(src, dst, schema, a.commit)
+                md += ([""] if md else []) + refresh_report(m, schema, a.commit)
+                counters.update(new=m["new"], changed=m["changed"], gone=m["gone"], copied=m["copied"], left=m["left"])
+                if a.commit and m["left"]:
+                    run.failure("RUN_FAILED", f"server_meaning.py: the server's copy of the passages is not current ({m['left']} documents differ)", key="server_meaning_refresh")
+                    stale = True
+            if a.switch:
+                res = switch_compare(src, dst, schema, a.switch)
+                lines, worse = switch_report(res)
+                md += ([""] if md else []) + lines
+                counters.update(switch_worse=len(worse))
             if a.compare:
                 res = compare(src, dst, schema, a.compare, exact=a.exact)
                 lines, ov, med, p95 = compare_report(res, schema)
@@ -303,8 +465,8 @@ def main(argv=None):
         run.failure("RUN_FAILED", f"server_meaning.py stopped: {type(e).__name__}", key="server_meaning", message=str(e)[:300])
         run.finish(status="failed")
         raise
-    run.finish(status="ok", rows_in=counters.get("rows", 0), rows_out=counters.get("rows", 0), counters=counters)
-    return 0
+    run.finish(status="failed" if stale else "ok", rows_in=counters.get("rows", 0), rows_out=counters.get("rows", 0), counters=counters)
+    return 1 if stale else 0
 
 
 if __name__ == "__main__":
