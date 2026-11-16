@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v88 2026-11-16";
+  const CLIENT = "lantern v89 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1421,7 +1421,7 @@
     const show = (g, running) => {
       last = g; out.innerHTML = ""; if (!g) { note.textContent = "That survey is not available."; return; }
       const n = g.counts, yes = g.rows.filter(x => x.status === "yes");
-      const head = el("div", "text"); head.style.fontWeight = "600"; head.textContent = `Yes: ${n.yes} of ${n.companies} companies`;
+      const head = el("div", "text"); head.style.fontWeight = "600"; head.textContent = `At least ${n.yes} of the ${n.companies} companies asked: yes`;
       const rest = el("div", "what", `No ${n.no} · not stated in the pages read ${n.not_stated} · no page found ${n.no_page}` + (n.failed ? ` · not read ${n.failed}` : "") + (n.pending ? ` · waiting ${n.pending}` : ""));
       rest.title = "Not stated and no page found are never counted as a no"; out.append(head, rest);
       const source = x => { if (!(x.library_id && x.page)) return null; const a = link(`${x.doc_year || ""} ${x.doc_type || "document"}, page ${x.page}`.trim(), () => openReader(x.library_id, x.page, x.evidence || "")); a.title = x.evidence || ""; return a; };
@@ -1441,7 +1441,7 @@
       if (!running && o.may) foot.append(document.createTextNode(" · "), link("Ask again", start));
       out.append(foot);
       const scoped = [g.industry, g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}–${g.year_to || ""}` : ""].filter(Boolean).join(" · ");
-      const what = el("div", "what", `${scoped || "No filter: the companies a search for the words found"}. Each company's reports searched with “${g.words}”, ${g.pages} pages read a company by a model` + (g.in_scope > n.companies ? `; the scope holds ${g.in_scope} companies and the ceiling kept ${n.companies}` : "") + ". Check the source before using a row."); what.style.fontSize = "12.5px";
+      const what = el("div", "what", `${scoped || "No filter: the companies a search for the words found"}. Each company's reports searched with “${g.words}”, ${g.pages} pages read a company by a model` + (g.in_scope > n.companies ? `; the scope holds ${g.in_scope} companies and the ceiling kept ${n.companies}` : "") + ". A floor, not a count: measured against analysts' validated answers, a survey finds a little over half of the yes, and about one yes in four is doubtful. Check the source before using a row."); what.style.fontSize = "12.5px";
       out.append(what);
     };
     const run = async id => {
