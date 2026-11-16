@@ -429,7 +429,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v79 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v80 2026-11-16";' in PAGE
+    assert 'if (!isQuestion(text)) for (const [w, t] of Object.entries(TYPE_WORDS)) {' in PAGE       # v80: in a question a kind of report is the subject, not a filter
     assert 'authed("admin_searches", { key, link: args.link || null, person: args.person || null, max_rows: 200 })' in PAGE      # v79: what a link searched, a person asked
     assert 'a.href = location.pathname + "?as=search&q=" + encodeURIComponent(text || "")' in PAGE                       # run the same search
     assert 'new URLSearchParams(location.search).get("as") === "search" ? (closeHistory(), search(false)) : go();' in PAGE   # a question opened from the panel is searched, never answered
