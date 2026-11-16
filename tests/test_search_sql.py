@@ -429,12 +429,17 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v87 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v88 2026-11-16";' in PAGE
+    assert 'o = await authed("survey_offer", surveyScope(text));' in PAGE and "if (o && (o.may || o.have)) { surveyCard(c, text, o); return; }" in PAGE   # v88: the survey is offered before an answer is spent
+    assert 'adminBtn("A quick answer from the eight best pages", () => ask(false, true))' in PAGE and "if (!state.company && quick !== true) {" in PAGE
+    assert "surveySeed" not in PAGE
+    ss = SQL[SQL.index("create or replace function public.survey_step("):SQL.index("revoke all on function public.survey_step(")]
+    assert "said := public.survey_read(key, s.question, s.words, s.qvec, todo.wba_id, todo.company, s.year_from, s.year_to, s.pages);" in ss and "ask_model" not in ss   # one reading, one function: what is measured is what runs
+    assert "public.survey_read('eval', %s, %s, %s::real[], %s, %s, %s, %s, %s)" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "survey_eval.py"), encoding="utf-8").read()
     assert 'adminBtn("Download as CSV", () => saveText(surveyFile(g), surveyCsv(g)))' in PAGE                    # v87: a survey's table as a file, made in the page
     assert """if (/^[=+\\-@\\t\\r]/.test(t)) t = "'" + t;""" in PAGE                                          # a cell is never run as a formula
     assert "case when said ->> 'status' in ('yes', 'no') then 1 end" not in SQL                                    # a row's page is never chosen for it
     assert "industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null }) });" in PAGE   # v86: the answer reads the industry the box filters by
-    assert 'openAdmin("Surveys")' in PAGE and "surveySeed = { q: text" in PAGE                                  # a question about many companies is offered as a survey
     ap = SQL[SQL.index("create or replace function public.ask_pages("):SQL.index("revoke all on function public.ask_pages(")]
     assert "24, 'ask', industry_filter, country_filter, region_filter, asked)" in ap
     assert "drop function if exists public.ask(text, text, text, text, int, int, text, text, real[]);" in SQL       # one function named ask, never two

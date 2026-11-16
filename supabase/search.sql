@@ -3848,6 +3848,99 @@ begin
 end;
 $$;
 
+-- The words each company's reports are searched with: a question written in full is not a search (see ask). The
+-- question itself when it is short, or when the reader is not set up or gives nothing.
+create or replace function public.survey_words(question text) returns text
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  asked text := btrim(coalesce(question, ''));
+  got jsonb := public.reader_ready();
+  words text := asked;
+begin
+  if got ->> 'api_key' is not null and got ->> 'http_schema' is not null and coalesce(array_length((public.find_terms(asked)).words, 1), 0) > 4 then
+    got := public.ask_model(got ->> 'api_key', got ->> 'http_schema', 'claude-haiku-5-5',
+      'You turn a question asked of many companies into the words to search each company''s reports with. Reply with 3 to 5 words, in lower case, '
+      || 'separated by spaces: the words most likely to be printed on the page that answers the question. Write abbreviations in full. '
+      || 'No company names, no industries, no countries, no years, no punctuation, nothing else.', left(asked, 400), 800);
+    if nullif(btrim(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g')), '') is not null then
+      words := btrim(left(regexp_replace(lower(got ->> 'text'), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
+    end if;
+  end if;
+  return words;
+end;
+$$;
+revoke all on function public.survey_words(text) from public, anon, authenticated;
+
+-- One reading: the question asked of one company. The pages are the ones an answer would read for that company
+-- (ask_pages), the reader sees the first 3,000 characters of each, and what it said is read by survey_parse.
+-- Returns {status: yes | no | not_stated | no_page | failed, value, evidence, year, library_id, page, doc_year,
+-- doc_type, label, url, in, out, note, pages, printed}. "printed": the start of the sentence it copied stands on the
+-- page of the row (null when there is no sentence or no page). The page of a row is the one the reader named; when it
+-- named none, or one that was not given, the page that prints the start of the sentence. Never a page chosen for it:
+-- a yes with no page says so (16 Nov 2026, a yes shown with no source, and before that a silent first page).
+-- Used by survey_step and by the measurement against validated answers (survey_eval.py), so that what is measured is
+-- what a survey does. Nobody may call it but the database's owner.
+create or replace function public.survey_read(key text, question text, words text, qvec real[], wba text, company text, year_from int, year_to int, pages int)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  ready jsonb := public.reader_ready();
+  r record;
+  n int := 0;
+  context text := '';
+  sources jsonb := '[]'::jsonb;
+  body text;
+  got jsonb;
+  said jsonb;
+  src jsonb;
+  head text;
+begin
+  if ready ->> 'api_key' is null or ready ->> 'http_schema' is null then
+    return jsonb_build_object('status', 'failed', 'note', 'the reader is not set up');
+  end if;
+  begin
+    for r in
+      select f.library_id, f.company, f.year, f.doc_type, f.label, f.url, f.page
+      from public.ask_pages(key, words, qvec, wba, year_from, year_to, null, question) f limit least(greatest(coalesce(pages, 6), 1), 8)
+    loop
+      n := n + 1;
+      select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
+      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
+      sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url,
+                                               'body', lower(coalesce(body, '')));
+    end loop;
+  exception when others then
+    return jsonb_build_object('status', 'failed', 'note', 'the search failed');
+  end;
+  if n = 0 then
+    return jsonb_build_object('status', 'no_page', 'pages', 0);
+  end if;
+  got := public.ask_model(ready ->> 'api_key', ready ->> 'http_schema', 'claude-haiku-5-5', public.survey_instructions(),
+                          format(E'Question: %s\nCompany: %s\n\nPages:\n%s', question, company, context), 1500);
+  said := public.survey_parse(got ->> 'text');
+  if said is null then
+    return jsonb_build_object('status', 'failed', 'note', left(coalesce(got ->> 'error', 'the reader gave no answer that could be read'), 200),
+                              'in', (got ->> 'in')::int, 'out', (got ->> 'out')::int, 'pages', n);
+  end if;
+  head := case when length(coalesce(said ->> 'evidence', '')) >= 20 then lower(left(regexp_replace(said ->> 'evidence', '\s+', ' ', 'g'), 40)) end;
+  select e into src from jsonb_array_elements(sources) e where (e ->> 'n')::int = (said ->> 'source')::int;
+  if src is null and head is not null then
+    select e into src from jsonb_array_elements(sources) e where position(head in e ->> 'body') > 0 order by (e ->> 'n')::int limit 1;
+  end if;
+  return jsonb_build_object('status', said ->> 'status', 'value', said ->> 'value', 'evidence', said ->> 'evidence', 'year', (said ->> 'year')::int,
+    'library_id', src ->> 'library_id', 'page', (src ->> 'page')::int, 'doc_year', (src ->> 'year')::int, 'doc_type', src ->> 'doc_type',
+    'label', src ->> 'label', 'url', src ->> 'url', 'in', (got ->> 'in')::int, 'out', (got ->> 'out')::int, 'pages', n,
+    'printed', case when head is not null and src is not null then position(head in src ->> 'body') > 0 end);
+end;
+$$;
+revoke all on function public.survey_read(text, text, text, real[], text, text, int, int, int) from public, anon, authenticated;
+
 create or replace function public.survey_start(
   key text, question text, qvec real[] default null, industry_filter text default null, country_filter text default null,
   region_filter text default null, year_from int default null, year_to int default null, client text default null)
@@ -3891,18 +3984,7 @@ begin
   if used >= allowed then
     return jsonb_build_object('limit', true, 'per_day', allowed);
   end if;
-  got := public.reader_ready(); api_key := got ->> 'api_key'; http_schema := got ->> 'http_schema';
-  -- the words each company's reports are searched with: a question written in full is not a search (see ask)
-  words := asked;
-  if api_key is not null and http_schema is not null and coalesce(array_length((public.find_terms(asked)).words, 1), 0) > 4 then
-    got := public.ask_model(api_key, http_schema, model,
-      'You turn a question asked of many companies into the words to search each company''s reports with. Reply with 3 to 5 words, in lower case, '
-      || 'separated by spaces: the words most likely to be printed on the page that answers the question. Write abbreviations in full. '
-      || 'No company names, no industries, no countries, no years, no punctuation, nothing else.', left(asked, 400), 800);
-    if nullif(btrim(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g')), '') is not null then
-      words := btrim(left(regexp_replace(lower(got ->> 'text'), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
-    end if;
-  end if;
+  words := public.survey_words(asked);
   insert into public.surveys (asker, question, words, qvec, industry, country, region, year_from, year_to, pages, client)
     values (who, asked, words, case when coalesce(array_length(qvec, 1), 0) = 384 then qvec end, nullif(btrim(industry_filter), ''), nullif(btrim(country_filter), ''),
             nullif(btrim(region_filter), ''), year_from, year_to, st.pages_a_company, left(client, 60))
@@ -3966,6 +4048,56 @@ $$;
 revoke all on function public.survey_get(text, bigint) from public, anon;
 grant execute on function public.survey_get(text, bigint) to authenticated;
 
+-- Before anything is spent (page v88): what a survey of this question in this scope would be, for the person asking.
+-- {may, left_today, companies, in_scope, pages, usd, have}. "may" is false when surveys are off for the address or the
+-- day's surveys are used ("why" says which). With no filter the companies are those a search will find, so the
+-- number is the ceiling ("up_to": true). "have": this person's latest survey of the same question in the same scope
+-- (id, at, status), to be opened again and not paid for twice. Calls no model and writes nothing.
+create or replace function public.survey_offer(key text, question text, industry_filter text default null, country_filter text default null,
+                                               region_filter text default null, year_from int default null, year_to int default null)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  asked text := btrim(coalesce(question, ''));
+  st public.survey_settings%rowtype;
+  allowed int;
+  used int;
+  ids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
+  in_scope int;
+  n int;
+  have jsonb;
+begin
+  if who is null or not public.email_may_search(who) or public.search_key_name(key) is null then
+    return jsonb_build_object('may', false, 'why', 'sign in');
+  end if;
+  select coalesce((select l.surveys_per_day from public.ask_limits l where l.email = who), 0) into allowed;
+  select jsonb_build_object('id', x.id, 'at', x.at, 'status', x.status) into have from public.surveys x
+   where x.asker = who and lower(x.question) = lower(asked)
+     and x.industry is not distinct from nullif(btrim(industry_filter), '') and x.country is not distinct from nullif(btrim(country_filter), '')
+     and x.region is not distinct from nullif(btrim(region_filter), '') and x.year_from is not distinct from year_from and x.year_to is not distinct from year_to
+     and exists (select 1 from public.survey_rows r where r.survey_id = x.id)
+   order by x.at desc limit 1;
+  if allowed <= 0 then
+    return jsonb_build_object('may', false, 'why', 'off', 'have', have);
+  end if;
+  select * into st from public.survey_settings x where x.one;
+  select count(*) into used from public.surveys x where x.asker = who and x.at >= date_trunc('day', now());
+  if ids is not null then
+    select count(*) into in_scope from public.companies c where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id);
+  end if;
+  n := least(coalesce(in_scope, st.max_companies), st.max_companies);
+  return jsonb_build_object('may', used < allowed, 'why', case when used >= allowed then 'limit' end, 'per_day', allowed, 'left_today', greatest(allowed - used, 0),
+    'companies', n, 'in_scope', in_scope, 'up_to', ids is null, 'pages', st.pages_a_company,
+    'usd', round(n * (st.pages_a_company * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3), 'have', have);
+end;
+$$;
+revoke all on function public.survey_offer(text, text, text, text, text, int, int) from public, anon;
+grant execute on function public.survey_offer(text, text, text, text, text, int, int) to authenticated;
+
 create or replace function public.survey_step(key text, survey bigint, companies int default 3)
 returns jsonb
 language plpgsql security definer
@@ -4014,50 +4146,12 @@ begin
     if read_today >= st.readings_a_day then
       return jsonb_build_object('limit', true, 'everyone', true) || public.survey_get(key, survey);
     end if;
-    n := 0; context := ''; sources := '[]'::jsonb;
-    begin
-      for r in
-        select f.library_id, f.company, f.year, f.doc_type, f.label, f.url, f.page
-        from public.ask_pages(key, s.words, s.qvec, todo.wba_id, s.year_from, s.year_to, null, s.question) f limit s.pages
-      loop
-        n := n + 1;
-        select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
-        context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
-        sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url,
-                                                 'body', lower(coalesce(body, '')));
-      end loop;
-    exception when others then
-      update public.survey_rows x set status = 'failed', note = 'the search failed', read_at = now() where x.survey_id = s.id and x.wba_id = todo.wba_id;
-      done := done + 1;
-      continue;
-    end;
-    if n = 0 then
-      update public.survey_rows x set status = 'no_page', read_at = now() where x.survey_id = s.id and x.wba_id = todo.wba_id;
-      done := done + 1;
-      continue;
-    end if;
-    got := public.ask_model(api_key, http_schema, model, public.survey_instructions(),
-                            format(E'Question: %s\nCompany: %s\n\nPages:\n%s', s.question, todo.company, context), 1500);
-    said := public.survey_parse(got ->> 'text');
-    if said is null then
-      update public.survey_rows x set status = 'failed', note = left(coalesce(got ->> 'error', 'the reader gave no answer that could be read'), 200),
-             input_tokens = (got ->> 'in')::int, output_tokens = (got ->> 'out')::int, read_at = now()
-       where x.survey_id = s.id and x.wba_id = todo.wba_id;
-    else
-      -- The page of a row is the one the reader named; when it named none, or one that was not given, the page that
-      -- prints the start of the sentence it copied. Never a page chosen for it: a yes with no page says so (16 Nov 2026,
-      -- a yes shown with no source, and before that a silent first page).
-      src := null;
-      select e into src from jsonb_array_elements(sources) e where (e ->> 'n')::int = (said ->> 'source')::int;
-      if src is null and length(coalesce(said ->> 'evidence', '')) >= 20 then
-        select e into src from jsonb_array_elements(sources) e
-         where position(lower(left(regexp_replace(said ->> 'evidence', '\s+', ' ', 'g'), 40)) in e ->> 'body') > 0 order by (e ->> 'n')::int limit 1;
-      end if;
-      update public.survey_rows x set status = said ->> 'status', value = said ->> 'value', evidence = said ->> 'evidence', year = (said ->> 'year')::int,
-             library_id = src ->> 'library_id', page = (src ->> 'page')::int, doc_year = (src ->> 'year')::int, doc_type = src ->> 'doc_type',
-             label = src ->> 'label', url = src ->> 'url', input_tokens = (got ->> 'in')::int, output_tokens = (got ->> 'out')::int, read_at = now()
-       where x.survey_id = s.id and x.wba_id = todo.wba_id;
-    end if;
+    said := public.survey_read(key, s.question, s.words, s.qvec, todo.wba_id, todo.company, s.year_from, s.year_to, s.pages);
+    update public.survey_rows x set status = said ->> 'status', value = said ->> 'value', evidence = said ->> 'evidence', year = (said ->> 'year')::int,
+           library_id = said ->> 'library_id', page = (said ->> 'page')::int, doc_year = (said ->> 'doc_year')::int, doc_type = said ->> 'doc_type',
+           label = said ->> 'label', url = said ->> 'url', input_tokens = (said ->> 'in')::int, output_tokens = (said ->> 'out')::int,
+           note = said ->> 'note', read_at = now()
+     where x.survey_id = s.id and x.wba_id = todo.wba_id;
     done := done + 1;
   end loop;
   if not exists (select 1 from public.survey_rows x where x.survey_id = s.id and x.status = 'pending') then

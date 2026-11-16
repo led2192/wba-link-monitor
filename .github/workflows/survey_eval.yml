@@ -1,0 +1,55 @@
+# When a survey says yes, is it right? (survey_eval.py). Manual. Reads the gold bases (read-only token) and the
+# evidence database; calls the reader through the database (a paid model: about 0.0008 USD a reading, stopped at the
+# ceiling given); writes nothing to the database. Prints attribute codes and counts only.
+name: Survey evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "validated answers an attribute (0 = all)"
+        default: "30"
+      auto:
+        description: "also the N development yes/no attributes with most validated answers"
+        default: "4"
+      heldout:
+        description: "read only the N held-out yes/no attributes with most validated answers (0 = development)"
+        default: "0"
+      pages:
+        description: "pages read a company (1 to 8)"
+        default: "6"
+      max_usd:
+        description: "stop reading at this cost, in USD"
+        default: "1.0"
+      commit:
+        description: "record the run's counters in Pipeline QA"
+        type: boolean
+        default: false
+
+concurrency:
+  group: survey-eval
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt sentence-transformers
+      - name: Evaluate
+        run: python survey_eval.py --limit "$LIMIT" --auto "$AUTO" --heldout "$HELDOUT" --pages "$PAGES" --max-usd "$MAX_USD" ${{ inputs.commit && '--commit' || '' }}
+        env:
+          LIMIT: ${{ inputs.limit || '30' }}
+          AUTO: ${{ inputs.auto || '0' }}
+          HELDOUT: ${{ inputs.heldout || '0' }}
+          PAGES: ${{ inputs.pages || '6' }}
+          MAX_USD: ${{ inputs.max_usd || '1.0' }}
+          GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
