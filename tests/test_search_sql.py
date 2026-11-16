@@ -429,7 +429,10 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v86 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v87 2026-11-16";' in PAGE
+    assert 'adminBtn("Download as CSV", () => saveText(surveyFile(g), surveyCsv(g)))' in PAGE                    # v87: a survey's table as a file, made in the page
+    assert """if (/^[=+\\-@\\t\\r]/.test(t)) t = "'" + t;""" in PAGE                                          # a cell is never run as a formula
+    assert "case when said ->> 'status' in ('yes', 'no') then 1 end" not in SQL                                    # a row's page is never chosen for it
     assert "industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null }) });" in PAGE   # v86: the answer reads the industry the box filters by
     assert 'openAdmin("Surveys")' in PAGE and "surveySeed = { q: text" in PAGE                                  # a question about many companies is offered as a survey
     ap = SQL[SQL.index("create or replace function public.ask_pages("):SQL.index("revoke all on function public.ask_pages(")]
