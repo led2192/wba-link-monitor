@@ -6,11 +6,13 @@ import survey_eval as S
 class Cur:
     """Stub of the evidence database: what a reading returns for each company."""
     def __init__(self, said, boom=()):
-        self.said, self.boom, self.connection, self.rollbacks, self.asked, self.rows = said, set(boom), self, 0, [], []
+        self.said, self.boom, self.connection, self.rollbacks, self.asked, self.rows, self.settings = said, set(boom), self, 0, [], [], []
 
     def rollback(self): self.rollbacks += 1
 
     def execute(self, sql, params=None):
+        if "set_config" in sql:
+            self.settings.append(tuple(params)); return
         assert "public.survey_read('eval'" in sql
         self.asked.append(tuple(params))
         if params[3] in self.boom:
@@ -44,7 +46,15 @@ class SurveyEval(unittest.TestCase):
         self.assertIn("the survey says yes for 1 of 4 (25%)", text)
         self.assertIn("the analysts also say yes for 1 of 2 (50%)", text)
         self.assertIn("a page is named for 1 of 2 (50%)", text)
+        self.assertIn("whose sentence stands on its page: the analysts also say yes for 1 of 1 (100%)", text)
+        self.assertEqual(cur.settings[:2], [("lantern.survey_strict", "off"), ("lantern.survey_again", "off")])   # every reading says which options it runs with
         self.assertNotIn("Does it?", text)                                                              # the log is public: codes and counts only
+
+    def test_an_option_is_set_before_every_reading(self):
+        cur = Cur({"W1": {"status": "yes"}, "W2": {"status": "no"}})
+        S.run_eval(cur, [G("W1", True), G("W2", True)], ATTRS, 8, 1.0, options=("survey_again",))
+        self.assertEqual(cur.settings, [("lantern.survey_strict", "off"), ("lantern.survey_again", "on")] * 2)   # a rollback undoes a setting
+        self.assertEqual(cur.asked[0][-1], 8)
 
     def test_reading_stops_at_the_ceiling_of_spending(self):
         cur = Cur({"W1": {"status": "yes", "in": 5_000_000, "out": 0}, "W2": {"status": "yes"}})

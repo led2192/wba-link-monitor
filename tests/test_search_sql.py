@@ -429,7 +429,11 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v88 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v89 2026-11-16";' in PAGE
+    assert "head.textContent = `At least ${n.yes} of the ${n.companies} companies asked: yes`;" in PAGE                 # v89: a survey's count is a floor (measured: 57% of the analysts' yes found)
+    sr = SQL[SQL.index("create or replace function public.survey_read("):SQL.index("revoke all on function public.survey_read(")]
+    assert "public.survey_instructions(tight)" in sr and "rounds int := case when public.survey_option('survey_again') then 2 else 1 end;" in sr
+    assert "values ('survey_strict', false," in SQL and "values ('survey_again', false," in SQL                         # both options off until compared
     assert 'o = await authed("survey_offer", surveyScope(text));' in PAGE and "if (o && (o.may || o.have)) { surveyCard(c, text, o); return; }" in PAGE   # v88: the survey is offered before an answer is spent
     assert 'adminBtn("A quick answer from the eight best pages", () => ask(false, true))' in PAGE and "if (!state.company && quick !== true) {" in PAGE
     assert "surveySeed" not in PAGE

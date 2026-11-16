@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-16: A survey's count is shown as a floor
+Measured against validated yes/no answers (run 43910239208): a survey finds 57% of the analysts' yes and 74% of its yes are shared by the analysts. Chosen: the headline says "At least N of the M companies asked: yes" and the note says it is a floor; the list of companies with their page is the product, the count is not. Rejected: keeping "Yes: N of M" (it reads as a count of the scope); hiding surveys until they are better (the list with sources is useful today). Two candidate improvements ship as options, off, under the rule that a change to a reader is compared on the same answers first (#608).
+
 ### 2026-11-16: A question with no company is offered as a survey before an answer is spent
 The first link to a survey stood under the finished answer, so a person paid for an answer that could not count before being shown the thing that can. Chosen (page v88): for those who may run surveys, a question that names no company shows the offer first (companies, pages, about how much) with the quick answer one press away; the survey's result takes the answer's place, kept to the count, the companies that say yes and their page, with the whole table and the CSV behind a link; the same question in the same scope opens the survey already run. Rejected: sending such a question straight to a survey (a general question such as a definition names no company either, and a survey costs more than an answer); showing the whole table in the search (90 rows push the results off the screen). The measurement (`survey_eval.py`) calls the same function a survey calls (`survey_read`), so a change to the reading cannot be measured on one code and run on another (#607).
 
