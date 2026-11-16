@@ -787,6 +787,7 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("""create or replace function public.ask_model(api_key text, http_schema text, model text, system_text text, user_text text, max_tokens int) returns jsonb language sql as $f$
                              select case when user_text like '%Company: Alpha%' then jsonb_build_object('in', 4000, 'out', 300, 'text', 'Thinking. {"answer": "yes", "value": "10% of bonus", "evidence": "Ten per cent of the bonus depends on emissions.", "year": 2024, "source": 2}')
                                          when user_text like '%Company: Epsilon%' then jsonb_build_object('in', 4000, 'out', 300, 'text', '{"answer": "yes", "value": null, "evidence": "Epsilon  page text, long enough to be found by its start", "year": null, "source": 9}')
+                                         when user_text like '%Company: Gamma%' and user_text like '%[7]%' then jsonb_build_object('in', 4000, 'out', 300, 'text', '{"answer": "yes", "value": "found later", "evidence": null, "year": null, "source": 7}')
                                          when user_text like '%Company: Gamma%' then jsonb_build_object('in', 4000, 'out', 200, 'text', '{"answer": "Not stated", "value": null, "evidence": null, "year": null, "source": null}')
                                          when user_text like '%search each company%' or system_text like '%words to search%' then jsonb_build_object('in', 10, 'out', 5, 'text', 'remuneration emissions incentive')
                                          else jsonb_build_object('error', 'no reply') end $f$""")
@@ -840,6 +841,22 @@ class SearchOnPostgres(unittest.TestCase):
                         "has_function_privilege('anon', 'public.survey_offer(text, text, text, text, text, int, int)', 'execute')")
             self.assertEqual(cur.fetchone(), (False, False, False, False, False))
             cur.execute("update public.pages set body = 'Epsilon page text, long enough to be found by its start' where library_id = 'DS6'")
+            # option survey_again: after "not stated", the next pages of the wider search are read, numbered on from the first
+            cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
+                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null, region_filter text default null, typed text default null)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text) language sql as $f$
+                             select 1::bigint, g, 'D' || company_filter, 'x', company_filter, 2024, 'Annual Report', 'the report', 'http://x', g, 1::real, 'e' from generate_series(5, 12) g $f$""")
+            read = "select public.survey_read('k', 'q?', 'w', null, 'S3', 'Gamma', null, null, 6)"
+            cur.execute("select is_on from public.search_options where name = 'company_first'")
+            self.assertTrue(cur.fetchone()[0])                                                           # another option is on: it must not switch these on
+            cur.execute(read); once = cur.fetchone()[0]
+            self.assertEqual((once["status"], once["pages"], once["in"]), ("not_stated", 6, 4000))
+            cur.execute("select set_config('lantern.survey_again', 'on', true)")
+            cur.execute(read); twice = cur.fetchone()[0]
+            self.assertEqual((twice["status"], twice["page"], twice["pages"], twice["in"]), ("yes", 7, 12, 8000))     # pages 5 and 6 were read already: 7 to 12 are the next
+            cur.execute("select set_config('lantern.survey_again', 'off', true)")
+            cur.execute("select public.survey_instructions(true) like '%this company itself%', public.survey_instructions() like '%this company itself%', public.survey_option('survey_strict')")
+            self.assertEqual(cur.fetchone(), (True, False, False))                                       # the strict wording is an option, off
             cur.execute("select public.survey_read('k', 'q?', 'w', null, 'S6', 'Epsilon', null, null, 6)")           # one reading, as the measurement asks it
             one = cur.fetchone()[0]
             self.assertEqual((one["status"], one["library_id"], one["page"], one["printed"], one["pages"], one["in"]), ("yes", "DS6", 1, True, 6, 4000))

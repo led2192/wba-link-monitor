@@ -3233,6 +3233,8 @@ grant execute on function public.admin_taxonomy(text) to authenticated;
 -- the same thing. Off until it is compared on the answers' own check: it changes what the reader is told.
 insert into public.search_options (name, is_on, note) values ('ask_later', false, 'Ask with a year and a company: read pages of the company''s later reports too (a figure of a year is printed again, sometimes restated, by later reports)') on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('ask_doc_pages', false, 'Ask about a company: the search may give up to six pages of one document instead of three') on conflict (name) do nothing;
+insert into public.search_options (name, is_on, note) values ('survey_strict', false, 'Surveys: a yes needs the company''s own statement in the question''s terms') on conflict (name) do nothing;
+insert into public.search_options (name, is_on, note) values ('survey_again', false, 'Surveys: a second reading of other pages when the first says not stated') on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('ask_metric_names', false, 'Ask: the reader is given the metric names in use and writes facts under them') on conflict (name) do nothing;
 
 -- The names for one question, one a line: up to max_names metrics (those sharing a word with the question first, then
@@ -3808,7 +3810,19 @@ end;
 $$;
 revoke all on function public.reader_ready() from public, anon, authenticated;
 
-create or replace function public.survey_instructions() returns text
+-- Two options of a survey's reading (off; search_options, or lantern.NAME for one session as the measurement sets it):
+-- survey_strict (a yes needs the company's own statement in the question's terms) and survey_again (a second reading
+-- of other pages when the first says "not stated").
+create or replace function public.survey_option(option text) returns boolean
+language sql stable security definer set search_path = public
+as $$
+  -- the argument is not called "name": in an SQL function a column of that name would win over it, and any option on would switch all on
+  select coalesce(current_setting('lantern.' || $1, true), '') = 'on'
+      or (coalesce(current_setting('lantern.' || $1, true), '') <> 'off' and exists (select 1 from public.search_options o where o.name = $1 and o.is_on))
+$$;
+revoke all on function public.survey_option(text) from public, anon, authenticated;
+drop function if exists public.survey_instructions();
+create or replace function public.survey_instructions(tight boolean default false) returns text
 language sql immutable
 as $$
   select 'You read a few pages of one company''s reports and answer one question about that company, from those pages only. '
@@ -3819,6 +3833,9 @@ as $$
       || 'Answer "yes" or "no" only when a page says so in words or figures about this company. A page that does not mention the matter is not a "no": answer "not stated". '
       || 'A plan, an intention or a target not yet in force is "no" for a question about what the company does today, and say so in the value. '
       || 'When the question is not a yes-or-no question, answer "yes" when the pages give what is asked and put it in the value, and "not stated" when they do not. '
+      || case when tight then 'Answer "yes" only when a page states that this company itself does it or has it, for the period the page reports on, and the question''s own terms are met: '
+           || 'a framework, a standard or a law described in general, what peers or the industry do, a related but different matter, or a broader statement that does not name what the question asks is "not stated". '
+           || 'The evidence must be one sentence copied word for word from the page. ' else '' end
       || 'Never use what you know from elsewhere, and never answer about another company.'
 $$;
 
@@ -3891,43 +3908,69 @@ as $$
 #variable_conflict use_variable
 declare
   ready jsonb := public.reader_ready();
+  tight boolean := public.survey_option('survey_strict');
+  rounds int := case when public.survey_option('survey_again') then 2 else 1 end;
+  take int := least(greatest(coalesce(pages, 6), 1), 8);
   r record;
   n int := 0;
-  context text := '';
+  n_round int;
+  context text;
   sources jsonb := '[]'::jsonb;
   body text;
   got jsonb;
+  parsed jsonb;
   said jsonb;
   src jsonb;
   head text;
+  tin int := 0;
+  tout int := 0;
 begin
   if ready ->> 'api_key' is null or ready ->> 'http_schema' is null then
     return jsonb_build_object('status', 'failed', 'note', 'the reader is not set up');
   end if;
-  begin
-    for r in
-      select f.library_id, f.company, f.year, f.doc_type, f.label, f.url, f.page
-      from public.ask_pages(key, words, qvec, wba, year_from, year_to, null, question) f limit least(greatest(coalesce(pages, 6), 1), 8)
-    loop
-      n := n + 1;
-      select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
-      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
-      sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url,
-                                               'body', lower(coalesce(body, '')));
-    end loop;
-  exception when others then
-    return jsonb_build_object('status', 'failed', 'note', 'the search failed');
-  end;
-  if n = 0 then
-    return jsonb_build_object('status', 'no_page', 'pages', 0);
-  end if;
-  got := public.ask_model(ready ->> 'api_key', ready ->> 'http_schema', 'claude-haiku-5-5', public.survey_instructions(),
-                          format(E'Question: %s\nCompany: %s\n\nPages:\n%s', question, company, context), 1500);
-  said := public.survey_parse(got ->> 'text');
-  if said is null then
-    return jsonb_build_object('status', 'failed', 'note', left(coalesce(got ->> 'error', 'the reader gave no answer that could be read'), 200),
-                              'in', (got ->> 'in')::int, 'out', (got ->> 'out')::int, 'pages', n);
-  end if;
+  for turn in 1..rounds loop
+    context := ''; n_round := 0;
+    begin
+      for r in
+        -- the first reading: the pages an answer would read; the second (option survey_again, only after "not stated"):
+        -- the next pages of the wider search that the first did not read
+        select f.library_id, f.company, f.year, f.doc_type, f.label, f.url, f.page
+          from public.ask_pages(key, words, qvec, wba, year_from, year_to, null, question) f where turn = 1
+        union all
+        select f.library_id, f.company, f.year, f.doc_type, f.label, f.url, f.page from (
+          select g.* from public.find_blend(key, words, qvec, wba, year_from, year_to, null, 24, 'survey', null, null, null, question) g
+           where turn = 2 and not exists (select 1 from jsonb_array_elements(sources) e where e ->> 'library_id' = g.library_id and (e ->> 'page')::int = g.page)
+           order by g.rank) f
+        limit take
+      loop
+        n := n + 1; n_round := n_round + 1;
+        select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
+        context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
+        sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url,
+                                                 'body', lower(coalesce(body, '')));
+      end loop;
+    exception when others then
+      if turn = 1 then return jsonb_build_object('status', 'failed', 'note', 'the search failed'); end if;
+      n_round := 0;
+    end;
+    if n = 0 then
+      return jsonb_build_object('status', 'no_page', 'pages', 0);
+    end if;
+    exit when n_round = 0;                                   -- no further page: what the first reading said stands
+    got := public.ask_model(ready ->> 'api_key', ready ->> 'http_schema', 'claude-haiku-5-5', public.survey_instructions(tight),
+                            format(E'Question: %s\nCompany: %s\n\nPages:\n%s', question, company, context), 1500);
+    tin := tin + coalesce((got ->> 'in')::int, 0); tout := tout + coalesce((got ->> 'out')::int, 0);
+    parsed := public.survey_parse(got ->> 'text');
+    if parsed is null then
+      if turn = 1 then
+        return jsonb_build_object('status', 'failed', 'note', left(coalesce(got ->> 'error', 'the reader gave no answer that could be read'), 200),
+                                  'in', nullif(tin, 0), 'out', nullif(tout, 0), 'pages', n);
+      end if;
+      exit;
+    end if;
+    said := parsed;
+    exit when said ->> 'status' <> 'not_stated';
+  end loop;
   head := case when length(coalesce(said ->> 'evidence', '')) >= 20 then lower(left(regexp_replace(said ->> 'evidence', '\s+', ' ', 'g'), 40)) end;
   select e into src from jsonb_array_elements(sources) e where (e ->> 'n')::int = (said ->> 'source')::int;
   if src is null and head is not null then
@@ -3935,7 +3978,7 @@ begin
   end if;
   return jsonb_build_object('status', said ->> 'status', 'value', said ->> 'value', 'evidence', said ->> 'evidence', 'year', (said ->> 'year')::int,
     'library_id', src ->> 'library_id', 'page', (src ->> 'page')::int, 'doc_year', (src ->> 'year')::int, 'doc_type', src ->> 'doc_type',
-    'label', src ->> 'label', 'url', src ->> 'url', 'in', (got ->> 'in')::int, 'out', (got ->> 'out')::int, 'pages', n,
+    'label', src ->> 'label', 'url', src ->> 'url', 'in', tin, 'out', tout, 'pages', n,
     'printed', case when head is not null and src is not null then position(head in src ->> 'body') > 0 end);
 end;
 $$;
