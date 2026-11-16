@@ -429,7 +429,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v89 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v90 2026-11-16";' in PAGE
+    assert 'if (take(["companies", "firms", "sector", "industry", "producers", "businesses"].map(k => `${w} ${k}`).concat([`empresas de ${w}`]))) { found.industry = list.join(";"); break; }' in PAGE   # v90: "food companies" is the food industries
     assert "head.textContent = `At least ${n.yes} of the ${n.companies} companies asked: yes`;" in PAGE                 # v89: a survey's count is a floor (measured: 57% of the analysts' yes found)
     sr = SQL[SQL.index("create or replace function public.survey_read("):SQL.index("revoke all on function public.survey_read(")]
     assert "public.survey_instructions(tight)" in sr and "rounds int := case when public.survey_option('survey_again') then 2 else 1 end;" in sr
