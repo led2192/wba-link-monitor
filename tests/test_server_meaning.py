@@ -48,6 +48,11 @@ class ServerMeaning(unittest.TestCase):
         self.assertIn("95th percentile 20 ms (mark under 800): PASS", text)
         self.assertIn("fewer than ten pages (it filters after taking the nearest 400 passages): 7; of those, the server returns ten when it filters while it searches: 6.", text)
         self.assertIn("| a company | 0 |", text)
+        res["no filter"]["exact"] = [(["a|1", "b|2"], ["a|1", "c|3"], ["a|1", "c|3"])] * 10
+        text = "\n".join(M.compare_report(res, "meaning")[0])
+        self.assertIn("Supabase's index returns 50.0% of the true first ten, the server's index 100.0%.", text)
+        self.assertIn("+ 0 as dist", M.exact_sql("meaning"))                               # every passage read, never the index
+        self.assertNotIn("chunk_filters", M.exact_sql("meaning"))
 
     def test_dry_by_default_arguments_checked_and_the_workflow_manual(self):
         os.environ.pop("LOCAL_DB_URL", None)
