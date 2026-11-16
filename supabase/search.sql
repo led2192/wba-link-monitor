@@ -3790,6 +3790,16 @@ create index if not exists survey_rows_read on public.survey_rows (read_at) wher
 -- A person's check of a row against its page (16 Nov 2026): right or wrong, by whom and when. Only a yes or a no can
 -- be checked this way: "not stated" would need the company's reports read whole. These rows are the first validated
 -- answers to questions of fact, which the gold bases do not hold.
+-- A survey that stopped at the ceiling of companies can be carried on to the rest of its scope (survey_more). Each
+-- time counts as one of the person's surveys of the day, which is where a price can later be put.
+create table if not exists public.survey_extensions (
+  survey_id bigint not null references public.surveys (id),
+  at        timestamptz not null default now(),
+  asker     text not null,
+  companies int not null
+);
+create index if not exists survey_extensions_asker on public.survey_extensions (asker, at desc);
+alter table public.survey_extensions enable row level security;
 alter table public.survey_rows add column if not exists verdict text;
 alter table public.survey_rows add column if not exists verdict_by text;
 alter table public.survey_rows add column if not exists verdict_at timestamptz;
@@ -3870,6 +3880,15 @@ begin
     'source', substring(j ->> 'source' from '^\s*\[?\s*(\d{1,2})\s*\]?\s*$')::int);      -- 3, "3" and "[3]" are the same page
 end;
 $$;
+
+-- Surveys a person has used today: those started and those carried on to more companies.
+create or replace function public.surveys_used_today(who text) returns int
+language sql stable security definer set search_path = public
+as $$
+  select (select count(*) from public.surveys x where x.asker = $1 and x.at >= date_trunc('day', now()))::int
+       + (select count(*) from public.survey_extensions e where e.asker = $1 and e.at >= date_trunc('day', now()))::int
+$$;
+revoke all on function public.surveys_used_today(text) from public, anon, authenticated;
 
 -- The words each company's reports are searched with: a question written in full is not a search (see ask). The
 -- question itself when it is short, or when the reader is not set up or gives nothing.
@@ -4026,7 +4045,7 @@ begin
   end if;
   select * into st from public.survey_settings s where s.one;
   select coalesce((select l.surveys_per_day from public.ask_limits l where l.email = who), 0) into allowed;
-  select count(*) into used from public.surveys s where s.asker = who and s.at >= date_trunc('day', now());
+  used := public.surveys_used_today(who);
   if allowed <= 0 then
     return jsonb_build_object('off', true, 'why', 'Surveys are not switched on for this address.');
   end if;
@@ -4135,7 +4154,7 @@ begin
     return jsonb_build_object('may', false, 'why', 'off', 'have', have);
   end if;
   select * into st from public.survey_settings x where x.one;
-  select count(*) into used from public.surveys x where x.asker = who and x.at >= date_trunc('day', now());
+  used := public.surveys_used_today(who);
   if ids is not null then
     select count(*) into in_scope from public.companies c where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id);
   end if;
@@ -4147,6 +4166,64 @@ end;
 $$;
 revoke all on function public.survey_offer(text, text, text, text, text, int, int) from public, anon;
 grant execute on function public.survey_offer(text, text, text, text, text, int, int) to authenticated;
+
+-- A survey that stopped at the ceiling, carried on: the companies of its scope not asked yet are added (by name, up
+-- to the ceiling again) and the survey is open once more; survey_step then reads them. Only a survey with a filter
+-- (one without asked the companies a search found: there is no rest). It uses one of the person's surveys of the day.
+-- {added, usd, left_today} with the survey, or {off}, {limit, per_day}, {none}.
+create or replace function public.survey_more(key text, survey bigint)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  s public.surveys%rowtype;
+  st public.survey_settings%rowtype;
+  allowed int;
+  used int;
+  ids text[];
+  n int;
+begin
+  if who is null or not public.email_may_search(who) or public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select * into s from public.surveys x where x.id = survey and x.asker = who;
+  if s.id is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  ids := public.profile_matching(s.industry, s.country, s.region);
+  if ids is null then
+    return jsonb_build_object('none', true) || public.survey_get(key, survey);
+  end if;
+  select coalesce((select l.surveys_per_day from public.ask_limits l where l.email = who), 0) into allowed;
+  used := public.surveys_used_today(who);
+  if allowed <= 0 then
+    return jsonb_build_object('off', true, 'why', 'Surveys are not switched on for this address.');
+  end if;
+  if used >= allowed then
+    return jsonb_build_object('limit', true, 'per_day', allowed);
+  end if;
+  select * into st from public.survey_settings x where x.one;
+  insert into public.survey_rows (survey_id, wba_id, company)
+    select s.id, c.wba_id, c.name from public.companies c
+     where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id)
+       and not exists (select 1 from public.survey_rows r where r.survey_id = s.id and r.wba_id = c.wba_id)
+     order by c.name limit st.max_companies;
+  get diagnostics n = row_count;
+  if n = 0 then
+    return jsonb_build_object('none', true) || public.survey_get(key, survey);
+  end if;
+  insert into public.survey_extensions (survey_id, asker, companies) values (s.id, who, n);
+  update public.surveys x set status = 'open', finished_at = null,
+         in_scope = (select count(*) from public.companies c where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id))
+   where x.id = s.id;
+  return jsonb_build_object('added', n, 'usd', round(n * (s.pages * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3), 'left_today', allowed - used - 1) || public.survey_get(key, survey);
+end;
+$$;
+revoke all on function public.survey_more(text, bigint) from public, anon;
+grant execute on function public.survey_more(text, bigint) to authenticated;
 
 -- A row checked against its page by the person who ran the survey, or the owner: 'right', 'wrong', or nothing to
 -- take the mark back. Only rows that say yes or no. Returns the survey's counts of right and wrong.
