@@ -430,6 +430,12 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
     assert 'const CLIENT = "lantern v83 2026-11-16";' in PAGE
+    fm = SQL[SQL.index("create or replace function public.find_meaning("):SQL.index("revoke all on function public.find_meaning(")]
+    assert "remote := public.meaning_remote_rows(qvec, ids, year_from, year_to, types);" in fm          # the server first, only with the option on
+    assert "if remote_pages >= least(need, 10) then" in fm                                              # too little from the server: this database's own search, unchanged
+    assert fm.index("remote := public.meaning_remote_rows") < fm.index("if to_regclass('public.chunks_embedding') is null then")
+    assert SQL.count("http_reset_curlopt()") == 3                                                       # before the call, after it, and when it fails
+    assert "revoke all on function public.meaning_remote_call(real[], text[], int, int, text[], int) from public, anon, authenticated;" in SQL
     assert "const strong = (typed !== typed.toLowerCase() && !first) || /[;,]$/.test(m[0]);" in PAGE       # v83: a word-name first in the box is the company only when no other company is named
     assert "const m = !hits.length && new RegExp(" in PAGE
     assert 'authed("admin_ask_limit_set", { key, email, per_day: n })' in PAGE                                             # v82: a person's answers a day, set by the owner
