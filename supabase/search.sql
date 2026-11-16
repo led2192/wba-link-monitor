@@ -3787,6 +3787,12 @@ create table if not exists public.survey_rows (
   primary key (survey_id, wba_id)
 );
 create index if not exists survey_rows_read on public.survey_rows (read_at) where read_at is not null;
+-- A person's check of a row against its page (16 Nov 2026): right or wrong, by whom and when. Only a yes or a no can
+-- be checked this way: "not stated" would need the company's reports read whole. These rows are the first validated
+-- answers to questions of fact, which the gold bases do not hold.
+alter table public.survey_rows add column if not exists verdict text;
+alter table public.survey_rows add column if not exists verdict_by text;
+alter table public.survey_rows add column if not exists verdict_at timestamptz;
 alter table public.survey_rows enable row level security;
 
 -- What a call to the reader needs: the key from the vault and the schema the http extension lives in. Nulls when
@@ -4080,10 +4086,11 @@ begin
     'counts', (select jsonb_build_object('companies', count(*), 'yes', count(*) filter (where r.status = 'yes'), 'no', count(*) filter (where r.status = 'no'),
                         'not_stated', count(*) filter (where r.status = 'not_stated'), 'no_page', count(*) filter (where r.status = 'no_page'),
                         'failed', count(*) filter (where r.status = 'failed'), 'pending', count(*) filter (where r.status = 'pending'),
+                        'right', count(*) filter (where r.verdict = 'right'), 'wrong', count(*) filter (where r.verdict = 'wrong'),
                         'usd', round((coalesce(sum(r.input_tokens), 0) * 0.10 + coalesce(sum(r.output_tokens), 0) * 0.50) / 1000000.0, 4))
                from public.survey_rows r where r.survey_id = s.id),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('wba_id', r.wba_id, 'company', r.company, 'status', r.status, 'value', r.value, 'evidence', r.evidence,
-                        'year', r.year, 'library_id', r.library_id, 'page', r.page, 'doc_year', r.doc_year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url)
+                        'year', r.year, 'library_id', r.library_id, 'page', r.page, 'doc_year', r.doc_year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url, 'verdict', r.verdict)
                       order by array_position(array['yes', 'no', 'not_stated', 'no_page', 'failed', 'pending'], r.status), r.company), '[]'::jsonb)
              from public.survey_rows r where r.survey_id = s.id));
 end;
@@ -4140,6 +4147,38 @@ end;
 $$;
 revoke all on function public.survey_offer(text, text, text, text, text, int, int) from public, anon;
 grant execute on function public.survey_offer(text, text, text, text, text, int, int) to authenticated;
+
+-- A row checked against its page by the person who ran the survey, or the owner: 'right', 'wrong', or nothing to
+-- take the mark back. Only rows that say yes or no. Returns the survey's counts of right and wrong.
+create or replace function public.survey_verdict(key text, survey bigint, wba text, verdict text)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  mark text := nullif(lower(btrim(coalesce(verdict, ''))), '');
+  n int;
+begin
+  if who is null or not public.email_may_search(who) or public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if mark is not null and mark not in ('right', 'wrong') then
+    raise exception 'right, wrong or nothing' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.surveys x where x.id = survey and (x.asker = who or public.admin_ok(key))) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  update public.survey_rows r set verdict = mark, verdict_by = case when mark is null then null else who end, verdict_at = case when mark is null then null else now() end
+   where r.survey_id = survey and r.wba_id = wba and r.status in ('yes', 'no');
+  get diagnostics n = row_count;
+  return (select jsonb_build_object('marked', n, 'verdict', mark, 'right', count(*) filter (where r.verdict = 'right'), 'wrong', count(*) filter (where r.verdict = 'wrong'))
+            from public.survey_rows r where r.survey_id = survey);
+end;
+$$;
+revoke all on function public.survey_verdict(text, bigint, text, text) from public, anon;
+grant execute on function public.survey_verdict(text, bigint, text, text) to authenticated;
 
 create or replace function public.survey_step(key text, survey bigint, companies int default 3)
 returns jsonb
