@@ -42,6 +42,19 @@ What differs on the server and has to be watched for each job moved: the pages a
 ## The clock
 The server starts the scheduled jobs at their time (`clock.py`, workflow **Clock**, always running like the Scan now watch). What starts when is the table `server/clock.json`: the workflow file, its times of day in UTC, and the inputs. To move a scheduled workflow to the clock: remove its `schedule:`, add the input `as_scheduled` and make it do what the scheduled run did, add its line to the table. A test fails if a workflow in the table still has a schedule of its own.
 
+## The database (16 Nov 2026)
+The server also holds a database of its own, for the search by meaning: PostgreSQL 17 with pgvector 0.8, the same major versions as Supabase, so the same SQL runs on both. Why here: the passages of every year and their index (about 21 million passages, an index of about 21 GB) need more memory than the Supabase machine has, and this machine has it already. Supabase keeps everything else.
+
+`server/db_install.sh` installs it and the workflow **Server database** (Actions, manual) runs it: `check` reads, `install` is safe to run again, `stop` is the way back and deletes nothing.
+
+- It listens on the machine itself only. The firewall is not changed: the database's port is shut to the world.
+- Every connection over the network interface needs a password. The one way in without a password is the system user `postgres` on the machine's own socket, for administration.
+- A ceiling of 28 GB of memory and six cores for its processes, so the other jobs are not starved. An index build raises it for the time of the build, with the runners paused.
+- The packages come from the PostgreSQL project's own source (Ubuntu 24.04 carries pgvector 0.6, which has no half-precision vectors), set up by the script Ubuntu ships for that. Their security updates arrive with the system's automatic updates.
+- Step 2 creates an empty database `lantern` with the vector extension: no tables, no roles, no data.
+- The runners on this machine can act as root, so a job run here can reach the database whatever its passwords. The guard is who may run a job here: step 2 of "Setting it up" (approval for every outside contributor) while the repository is public.
+- Never on this database: company contacts.
+
 ## Checking it
 The workflow **Server check** (Actions, manual, and every Monday) runs on the server and fails if the firewall, fail2ban or the automatic updates are off, or if the first-boot token is still on disk. It also shows the cores, memory and free disk, and installs the repository's packages the way a job does.
 
