@@ -120,13 +120,15 @@
   .values::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; border: 2px solid var(--box); }
   .values::-webkit-scrollbar-thumb:hover { background: var(--muted); }
   .values::-webkit-scrollbar-button { display: none; height: 0; }
+  .gaps { font-size: 12.5px; color: var(--muted); margin: 0 0 6px 2px; min-height: 0; }
+  .gaps a { color: var(--muted); }
   .missing { margin: 18px 0 6px; font-size: 13px; }
   .unheld { margin: 22px 0 4px; padding: 12px 14px; border: 1px solid var(--line, #dfe4ea); border-radius: 10px; font-size: 14px; }
   .unheld-h { color: var(--muted, #5b6675); margin-bottom: 6px; }
   .unheld ul { margin: 0; padding-left: 18px; } .unheld li { margin: 3px 0; overflow-wrap: anywhere; }
   .unheld-t { color: var(--muted, #5b6675); font-size: 13px; }
   .missing a { color: var(--muted); }
-  .missing .values { border: 0; padding: 0; margin-top: 8px; display: block; position: static; width: auto; max-width: 420px; max-height: none; overflow: visible; }
+  .missing .values, .gaps .values { border: 0; padding: 0; margin-top: 8px; display: block; position: static; width: auto; max-width: 420px; max-height: none; overflow: visible; }
   .me { max-width: calc(100vw - 36px); }
   .values summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
   .values summary::-webkit-details-marker { display: none; }
@@ -288,6 +290,7 @@
     <button type="button" id="goLucky">Contribute</button>
   </div>
   <div class="chips" id="chips"></div>
+  <div class="gaps" id="gaps"></div>
   <div class="filters" id="filters" hidden>
     <div class="row">
       <input id="fCompany" list="companies" placeholder="Company">
@@ -309,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v80 2026-11-16";
+  const CLIENT = "lantern v81 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -472,6 +475,34 @@
     if (state.industry) add("Industry", state.industry, () => { state.industry = null; });
     if (state.country) add("Country", state.countryName || state.country, () => { state.country = state.countryName = null; });
     if (state.region) add("Region", state.region, () => { state.region = null; });
+    showGaps();
+  }
+  // v81 (the owner, 16 Nov 2026): with one company chosen, a quiet line under the filters says which main reports of
+  // the last three years the library does not hold, so a reader knows what a search or an answer could not have read.
+  // A year a person excused (published inside the annual report, by the parent, not published) is not a gap.
+  // Asked once a company (kept for the visit); a failure shows nothing.
+  const gapsSeen = new Map();
+  const gapWords = g => {
+    const miss = [];
+    for (const y of g.years || []) {
+      const a = !y.annual && (y.annual_note || "gap") === "gap", s = !y.sustainability && (y.sustainability_note || "gap") === "gap";
+      if (a && s) miss.push(`${y.year} annual and sustainability report`); else if (a) miss.push(`${y.year} annual report`); else if (s) miss.push(`${y.year} sustainability report`);
+    }
+    return miss;
+  };
+  async function showGaps() {
+    const box = $("gaps"), id = state.company && !state.company.includes(";") ? state.company : null; box.innerHTML = "";
+    if (!id) return;
+    if (!gapsSeen.has(id)) { let g = null; try { g = await rpc("company_gaps", { key, company: id }); } catch (e) { g = null; } gapsSeen.set(id, g || null); }
+    const g = gapsSeen.get(id);
+    if (!g || state.company !== id) return;                      // nothing to say, or the filter changed while it was asked
+    box.innerHTML = "";
+    const miss = gapWords(g);
+    if (!miss.length) { box.textContent = `Main reports of ${g.from} to ${g.to}: all in the library.`; return; }
+    box.append(document.createTextNode(`Not in the library: ${miss.join(" · ")}. `));
+    const a = el("a", null, "Add a link"); a.href = "#"; a.title = "Tell us where the document is";
+    a.onclick = ev => { ev.preventDefault(); const hold = box.querySelector(".values") || box.appendChild(el("div", "values")); addSourceForm(hold, id); };
+    box.appendChild(a);
   }
 
   function excerptHtml(t) {
