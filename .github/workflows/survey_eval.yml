@@ -18,6 +18,9 @@ on:
       pages:
         description: "pages read a company (1 to 8)"
         default: "6"
+      options:
+        description: "reading options to switch on for this run (survey_strict, survey_again), comma separated"
+        default: ""
       max_usd:
         description: "stop reading at this cost, in USD"
         default: "1.0"
@@ -42,13 +45,14 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt sentence-transformers
       - name: Evaluate
-        run: python survey_eval.py --limit "$LIMIT" --auto "$AUTO" --heldout "$HELDOUT" --pages "$PAGES" --max-usd "$MAX_USD" ${{ inputs.commit && '--commit' || '' }}
+        run: python survey_eval.py --limit "$LIMIT" --auto "$AUTO" --heldout "$HELDOUT" --pages "$PAGES" --max-usd "$MAX_USD" ${OPTIONS:+--options "$OPTIONS"} ${{ inputs.commit && '--commit' || '' }}
         env:
           LIMIT: ${{ inputs.limit || '30' }}
           AUTO: ${{ inputs.auto || '0' }}
           HELDOUT: ${{ inputs.heldout || '0' }}
           PAGES: ${{ inputs.pages || '6' }}
           MAX_USD: ${{ inputs.max_usd || '1.0' }}
+          OPTIONS: ${{ inputs.options }}
           GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}

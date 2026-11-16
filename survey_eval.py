@@ -32,7 +32,11 @@ Nothing is written to the database: every reading is rolled back, so the searche
 
 The log is public: attribute codes and counts only, never a company, a question, a sentence or a page.
 
-    python survey_eval.py [--limit 30] [--auto 4 | --heldout 6] [--pages 6] [--max-usd 1.0] [--commit]
+    python survey_eval.py [--limit 30] [--auto 4 | --heldout 6] [--pages 6] [--options survey_strict,survey_again] [--max-usd 1.0] [--commit]
+
+--options NAMES switches reading options on for this run only (lantern.NAME for the session; search.sql, survey_option).
+The answers read are the same from run to run (pick), so a run with an option is compared with the run without it.
+A reader does not answer twice alike: on 180 answers, a difference of a few answers is chance.
 
 --commit records the run's counters in Pipeline QA (QA_COMMIT). Env: GOLD_TOKEN (read-only), SUPABASE_DB_URL.
 """
@@ -61,14 +65,20 @@ def cost(stats):
     return stats["in"] * USD_IN + stats["out"] * USD_OUT
 
 
-def read_one(cur, g, attr, pages):
-    """One reading, as a survey does it: what public.survey_read returned (a dict), never kept in the database."""
+OPTIONS = ("survey_strict", "survey_again")
+
+
+def read_one(cur, g, attr, pages, options=()):
+    """One reading, as a survey does it: what public.survey_read returned (a dict), never kept in the database.
+    The options are set before every reading: a setting is undone by the rollback that follows each one."""
+    for name in OPTIONS:
+        cur.execute("select set_config(%s, %s, false)", (f"lantern.{name}", "on" if name in options else "off"))
     cur.execute("select public.survey_read('eval', %s, %s, %s::real[], %s, %s, %s, %s, %s)",
                 (attr["question"], attr["words"], attr.get("vec"), g["wba"], g["company"], int(g["year"]), int(g["year"]) + 1, pages))
     return cur.fetchone()[0] or {"status": "failed"}
 
 
-def run_eval(cur, todo, attrs, pages, max_usd, out=print):
+def run_eval(cur, todo, attrs, pages, max_usd, out=print, options=()):
     """{code: Counter} over the answers. Keys: yes_<said>, no_<said> (analyst then survey), named, printed, in, out,
     failed. Stops reading once the cost reaches max_usd ("unread" counts what was left)."""
     stats = collections.defaultdict(collections.Counter)
@@ -79,7 +89,7 @@ def run_eval(cur, todo, attrs, pages, max_usd, out=print):
             s["unread"] += 1
             continue
         try:
-            r = read_one(cur, g, attrs[g["attribute"]], pages)
+            r = read_one(cur, g, attrs[g["attribute"]], pages, options)
             cur.connection.rollback()
         except Exception as e:
             cur.connection.rollback()
@@ -90,6 +100,7 @@ def run_eval(cur, todo, attrs, pages, max_usd, out=print):
         if said == "yes":
             s["named"] += 1 if r.get("page") else 0
             s["printed"] += 1 if r.get("printed") else 0
+            s["printed_shared"] += 1 if r.get("printed") and g["truth"] else 0
         s["in"] += int(r.get("in") or 0)
         s["out"] += int(r.get("out") or 0)
         spent += int(r.get("in") or 0) * USD_IN + int(r.get("out") or 0) * USD_OUT
@@ -128,6 +139,8 @@ def table(stats, title):
            f"The other {t['no_yes']} are a yes where the analyst found no evidence: the survey's mistakes at most.",
            f"Of the analysts' no, the survey says no for {t['no_no']} and leaves {t['no_not_stated'] + t['no_no_page']} unanswered, of {side(t, 'no')}.",
            f"Of the survey's yes, a page is named for {share(t['named'], said_yes)} and the copied sentence stands on that page for {share(t['printed'], said_yes)}.",
+           f"Counting only the yes whose sentence stands on its page: the analysts also say yes for {share(t['printed_shared'], t['printed'])}, "
+           f"and {share(t['printed_shared'], side(t, 'yes'))} of the analysts' yes are found.",
            f"Read: {side(t, 'yes') + side(t, 'no')} answers, about {cost(t):.2f} USD ({t['in']:,} tokens in, {t['out']:,} out)"
            + (f"; {t['unread']} left unread at the ceiling of spending." if t["unread"] else ".")]
     return md
@@ -150,11 +163,15 @@ def main(argv=None):
     ap.add_argument("--auto", type=int, default=0, help="also the N development yes/no attributes with most validated answers")
     ap.add_argument("--heldout", type=int, default=0, help="read only the N held-out yes/no attributes with most validated answers")
     ap.add_argument("--pages", type=int, default=6, help="pages read a company (a survey's setting; 1 to 8)")
+    ap.add_argument("--options", default="", help="reading options to switch on for this run, comma separated: " + ", ".join(OPTIONS))
     ap.add_argument("--max-usd", type=float, default=1.0, help="stop reading at this cost")
     ap.add_argument("--commit", action="store_true", help="record the run's counters in Pipeline QA")
     a = ap.parse_args(argv)
     if not 1 <= a.pages <= 8 or a.limit < 0 or a.auto < 0 or a.heldout < 0 or not 0 < a.max_usd <= 5:
         sys.exit("--pages 1 to 8; --limit, --auto and --heldout 0 or more; --max-usd above 0 and at most 5.")
+    options = tuple(o.strip() for o in a.options.split(",") if o.strip())
+    if any(o not in OPTIONS for o in options):
+        sys.exit("--options takes: " + ", ".join(OPTIONS))
     token = os.environ.get("GOLD_TOKEN", "").strip()
     if not token or not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set GOLD_TOKEN (read-only) and SUPABASE_DB_URL.")
@@ -205,10 +222,10 @@ def main(argv=None):
             conn.rollback()
             for g in todo:
                 g["company"] = names.get(g["wba"]) or g["wba"]
-            stats = run_eval(cur, todo, attrs, a.pages, a.max_usd)
+            stats = run_eval(cur, todo, attrs, a.pages, a.max_usd, options=options)
             conn.rollback()
         text = "\n".join(table(stats, f"Surveys against the analysts' validated yes/no answers ({'held-out' if a.heldout else 'development'} attributes, "
-                                      f"{'with' if vectors else 'without'} the question's vector)"))
+                                      f"{a.pages} pages a company, {'options ' + ', '.join(options) if options else 'no option'}, {'with' if vectors else 'without'} the question's vector)"))
         print(text)
         if os.environ.get("GITHUB_STEP_SUMMARY"):
             open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8").write(text + "\n")
@@ -218,7 +235,7 @@ def main(argv=None):
         raise
     t = total(stats)
     log.finish(status="ok", rows_in=side(t, "yes") + side(t, "no"), rows_out=0,
-               counters={k: t[k] for k in ("yes_yes", "yes_no", "yes_not_stated", "yes_no_page", "no_yes", "no_no", "no_not_stated", "no_no_page", "named", "printed", "in", "out")})
+               counters={k: t[k] for k in ("yes_yes", "yes_no", "yes_not_stated", "yes_no_page", "no_yes", "no_no", "no_not_stated", "no_no_page", "named", "printed", "printed_shared", "in", "out")})
     return 0
 
 
