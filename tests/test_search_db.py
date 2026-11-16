@@ -707,6 +707,29 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(facts["Reason for restatement"]["said"]["m1"]["name"], "Restatement reason"); self.assertIsNone(facts["Reason for restatement"]["said"]["m2"]["role"])
             c.rollback()
 
+    def test_the_owner_sets_how_many_answers_a_day_a_person_has(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.ask_per_day('new@x.org')")
+            self.assertEqual(cur.fetchone()[0], 50)                              # what everyone has
+            cur.execute("select public.admin_ask_limit_set('k', ' Luis@X.org ', 120), public.admin_ask_limit_set('k', 'not an address', 10), public.admin_ask_limit_set('k', 'a@x.org', 501)")
+            ok, bad, high = cur.fetchone()
+            self.assertEqual((ok["email"], ok["per_day"], "error" in bad, "error" in high), ("luis@x.org", 120, True, True))
+            cur.execute("select public.admin_ask_limit_set('k', 'luis@x.org', 80)")          # set again: one line, the new number
+            cur.execute("select public.ask_per_day('LUIS@x.org'), (select count(*) from public.ask_limits where email = 'luis@x.org')")
+            self.assertEqual(cur.fetchone(), (80, 1))
+            cur.execute("insert into public.ask_log (asker, question, answered) values ('luis@x.org', 'q one?', true), ('luis@x.org', 'q two?', false)")
+            cur.execute("select public.admin_overview('k')")
+            person = [p for p in cur.fetchone()[0]["people"] if p["email"] == "luis@x.org"][0]
+            self.assertEqual((person["per_day"], person["answers_today"], person["answers"]), (80, 1, 1))
+            cur.execute("select public.admin_ask_limit_set('k', 'soon@x.org', 5)")
+            cur.execute("select public.admin_overview('k')")
+            self.assertIn("soon@x.org", [p["email"] for p in cur.fetchone()[0]["people"]])     # listed before a first question
+            cur.execute("select has_function_privilege('authenticated', 'public.ask_per_day(text)', 'execute')")
+            self.assertFalse(cur.fetchone()[0])
+            c.rollback()
+
     def test_the_owner_sees_what_a_link_searched_and_a_person_asked(self):
         import psycopg
         with psycopg.connect(URL) as c:

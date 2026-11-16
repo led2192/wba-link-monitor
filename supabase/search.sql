@@ -2599,6 +2599,23 @@ revoke all on function public.ask_fiscal_lines(jsonb) from public, anon, authent
 drop function if exists public.ask(text, text, text, text, int, int, text, text);
 -- What the reader is told and what it is sent, as two functions (15 Nov 2026) so that a comparison (ask_names_trial)
 -- sends exactly what Ask sends. with_names false: the instructions as they were before the option ask_metric_names.
+-- How many answers a day a person may have (16 Nov 2026, the owner: while Ask is being tried, raise a colleague's
+-- limit or his own from the panel). Fifty unless the owner set another number for the address. The ceiling for
+-- everyone together (per_day_all in ask) is not raised by this: it stays the most a day can cost.
+create table if not exists public.ask_limits (
+  email   text primary key,
+  per_day int not null check (per_day between 0 and 500),
+  by      text,
+  at      timestamptz not null default now()
+);
+alter table public.ask_limits enable row level security;
+create or replace function public.ask_per_day(who text) returns int
+language sql stable security definer set search_path = public, extensions
+as $$
+  select coalesce((select l.per_day from public.ask_limits l where l.email = lower(btrim(who))), 50)
+$$;
+revoke all on function public.ask_per_day(text) from public, anon, authenticated;
+
 create or replace function public.ask_instructions(with_names boolean) returns text
 language sql immutable
 as $fn$
@@ -2653,7 +2670,7 @@ set statement_timeout = '75s'
 as $$
 #variable_conflict use_variable
 declare
-  per_day constant int := 50;           -- 13 Nov 2026 (the owner): 20 were used up in a morning of ordinary use, and 20 answers cost under 0.10 USD
+  per_day int := 50;                    -- 13 Nov 2026 (the owner): 20 were used up in a morning of ordinary use, and 20 answers cost under 0.10 USD; since 16 Nov the owner can set a person's own number (ask_limits)
   per_day_all constant int := 1000;     -- every person together: the most Ask can cost in a day is fixed (about 5 USD), however many people come (11 Nov 2026; 300 until 13 Nov)
   model constant text := 'claude-haiku-5-5';
   who text := lower(auth.jwt() ->> 'email');
@@ -2694,6 +2711,7 @@ begin
   if length(asked) < 8 or length(asked) > 400 then
     raise exception 'a question of 8 to 400 characters' using errcode = '22023';
   end if;
+  per_day := public.ask_per_day(who);
   select count(*) into used from public.ask_log a where a.asker = who and a.answered and a.at >= date_trunc('day', now());
   if used >= per_day then
     return jsonb_build_object('limit', true, 'left', 0, 'per_day', per_day);
@@ -2836,6 +2854,8 @@ begin
         from public.search_keys k) x),
     'people', (select coalesce(jsonb_agg(to_jsonb(x) order by x.last_seen desc nulls last), '[]'::jsonb) from (
         select e.email,
+               (select count(*) from public.ask_log a where a.asker = e.email and a.answered and a.at >= date_trunc('day', now())) as answers_today,
+               public.ask_per_day(e.email) as per_day,
                (select count(*) from public.ask_log a where a.asker = e.email and a.answered and a.at > now() - interval '7 days') as answers_7d,
                (select count(*) from public.ask_log a where a.asker = e.email and a.answered) as answers,
                (select count(*) from public.ask_facts f where f.verdict_by = e.email and f.verdict = 'right') as facts_right,
@@ -2845,7 +2865,7 @@ begin
                         (select max(f.verdict_at) from public.ask_facts f where f.verdict_by = e.email),
                         (select max(r.at) from public.value_reviews r where r.reviewer = e.email)) as last_seen
         from (select asker as email from public.ask_log union select verdict_by from public.ask_facts where verdict_by is not null
-              union select reviewer from public.value_reviews) e) x),
+              union select reviewer from public.value_reviews union select email from public.ask_limits) e) x),
     'days', (select coalesce(jsonb_agg(to_jsonb(x) order by x.day desc), '[]'::jsonb) from (
         select (a.at at time zone 'utc')::date as day, count(*) filter (where a.answered) as answers, count(*) as asked,
                count(distinct a.asker) as people, coalesce(sum(a.input_tokens), 0) as tokens_in, coalesce(sum(a.output_tokens), 0) as tokens_out,
@@ -3669,6 +3689,34 @@ end;
 $$;
 revoke all on function public.admin_searches(text, text, text, int) from public, anon;
 grant execute on function public.admin_searches(text, text, text, int) to authenticated;
+
+-- The owner sets how many answers a day an address may have (0 to 500; 50 is what everyone has without a line here).
+-- The address need not have asked yet: a limit can be set before a colleague's first question.
+create or replace function public.admin_ask_limit_set(key text, email text, per_day int)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(btrim(coalesce(email, '')));
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if who !~ '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$' then
+    return jsonb_build_object('error', 'An address like name@organisation.org.');
+  end if;
+  if per_day is null or per_day < 0 or per_day > 500 then
+    return jsonb_build_object('error', 'A number of answers a day from 0 to 500.');
+  end if;
+  insert into public.ask_limits (email, per_day, by) values (who, per_day, lower(auth.jwt() ->> 'email'))
+    on conflict on constraint ask_limits_pkey do update set per_day = excluded.per_day, by = excluded.by, at = now();
+  return jsonb_build_object('ok', true, 'email', who, 'per_day', per_day, 'may_ask', public.email_may_search(who));
+end;
+$$;
+revoke all on function public.admin_ask_limit_set(text, text, int) from public, anon;
+grant execute on function public.admin_ask_limit_set(text, text, int) to authenticated;
 
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.

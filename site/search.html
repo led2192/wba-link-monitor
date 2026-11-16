@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v81 2026-11-16";
+  const CLIENT = "lantern v82 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1789,8 +1789,28 @@
     body.appendChild(adminTable(["Link", "State", "Searches, 7 days", "30 days", "Last used", ""], o.links.map(l => [opener(l.name, { link: l.name }, "See what this link searched"), l.active ? "on" : "off", l.searches_7d, l.searches_30d, adminWhen(l.last_used),
       l.name === "owner" ? "" : adminBtn(l.active ? "Switch off" : "Switch on", async () => { await authed("admin_link_set", { key, name: l.name, active: !l.active }); adminPeople(body); })])));
     body.append(el("h3", null, "People who signed in"));
-    body.appendChild(adminTable(["Person", "Answers, 7 days", "Answers in all", "Facts marked right", "wrong", "Values reviewed", "Last seen"],
-      o.people.map(p => [opener(p.email, { person: p.email }, "See what this person asked"), p.answers_7d, p.answers, p.facts_right, p.facts_wrong, p.value_reviews, adminWhen(p.last_seen)])));
+    // v82 (the owner): answers today against the person's limit, and the limit set here (50 a day unless changed).
+    const limitNote = el("span"); limitNote.style.cssText = "font-size:13px;margin-left:8px";
+    const setLimit = async (email, value) => {
+      const n = parseInt(value, 10); if (!(n >= 0 && n <= 500)) { limitNote.textContent = "A number from 0 to 500."; return; }
+      const r = await authed("admin_ask_limit_set", { key, email, per_day: n });
+      if (!r || r.error) { limitNote.textContent = (r && r.error) || "Not saved."; return; }
+      await adminPeople(body);
+      const again = body.querySelector("[data-limit-note]"); if (again) again.textContent = `${r.email}: ${r.per_day} answers a day.` + (r.may_ask ? "" : " This address cannot sign in to Ask today (not a WBA address).");
+    };
+    const limitCell = p => { const w = el("span"); const i = document.createElement("input"); i.type = "number"; i.min = 0; i.max = 500; i.value = p.per_day; i.title = "Answers a day for this person";
+      i.style.cssText = "font:inherit;width:64px;padding:2px 6px;border:1px solid var(--line);border-radius:8px;background:var(--box);color:var(--fg);margin-right:6px";
+      i.onkeydown = ev => { if (ev.key === "Enter") setLimit(p.email, i.value); };
+      w.append(i, adminBtn("Save", () => setLimit(p.email, i.value))); return w; };
+    body.appendChild(adminTable(["Person", "Answers today", "A day (limit)", "Answers, 7 days", "Answers in all", "Facts marked right", "wrong", "Values reviewed", "Last seen"],
+      o.people.map(p => [opener(p.email, { person: p.email }, "See what this person asked"), `${p.answers_today} of ${p.per_day}`, limitCell(p), p.answers_7d, p.answers, p.facts_right, p.facts_wrong, p.value_reviews, adminWhen(p.last_seen)])));
+    const more = el("div"); more.style.cssText = "display:flex;gap:8px;align-items:center;margin:0 0 14px;flex-wrap:wrap";
+    const who = document.createElement("input"); who.placeholder = "address of someone not listed yet"; who.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--box);color:var(--fg)";
+    const num = document.createElement("input"); num.type = "number"; num.min = 0; num.max = 500; num.value = 50; num.style.cssText = "font:inherit;width:72px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--box);color:var(--fg)";
+    limitNote.dataset.limitNote = "1";
+    more.append(who, num, adminBtn("Set answers a day", () => setLimit(who.value.trim(), num.value)), limitNote);
+    const cap = el("p", null, "Everyone has 50 answers a day unless a number is set here. All people together stop at 1,000 a day, whatever their own limits."); cap.style.cssText = "color:var(--muted, #667);font-size:13px;margin:0 0 6px";
+    body.append(cap, more);
     body.appendChild(detail);
   }
   // What a link searched or a person asked, newest first (admin_searches). "Run it" opens the search page in a new tab
