@@ -57,6 +57,8 @@ The server also holds a database of its own, for the search by meaning: PostgreS
 
 Before real data goes in, **Server rehearsal** (Actions, manual) measures the move on a sample: it copies a million passages from Supabase, builds their index, measures and drops them. Its numbers decide the settings of the full build.
 
+**Server meaning** (Actions, manual) then holds the real copy: the schema `meaning` with `chunks` (a passage's document, page, number and half-precision embedding; never its text) and `chunk_filters` (a document's company, year and type), the index on the embeddings, and the comparison with Supabase search by search. Until the switch `meaning_remote` exists and is on, nothing reads it: the search people use is Supabase's own.
+
 ## Checking it
 The workflow **Server check** (Actions, manual, and every Monday) runs on the server and fails if the firewall, fail2ban or the automatic updates are off, or if the first-boot token is still on disk. It also shows the cores, memory and free disk, and installs the repository's packages the way a job does.
 
