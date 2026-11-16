@@ -429,7 +429,9 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v82 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v83 2026-11-16";' in PAGE
+    assert "const strong = (typed !== typed.toLowerCase() && !first) || /[;,]$/.test(m[0]);" in PAGE       # v83: a word-name first in the box is the company only when no other company is named
+    assert "const m = !hits.length && new RegExp(" in PAGE
     assert 'authed("admin_ask_limit_set", { key, email, per_day: n })' in PAGE                                             # v82: a person's answers a day, set by the owner
     assert "revoke all on function public.ask_per_day(text) from public, anon, authenticated;" in SQL
     assert 'g = await rpc("company_gaps", { key, company: id })' in PAGE and '<div class="gaps" id="gaps"></div>' in PAGE     # v81: the gaps of the last years, quietly
