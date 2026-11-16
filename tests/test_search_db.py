@@ -707,6 +707,61 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(facts["Reason for restatement"]["said"]["m1"]["name"], "Restatement reason"); self.assertIsNone(facts["Reason for restatement"]["said"]["m2"]["role"])
             c.rollback()
 
+    def test_the_server_is_asked_only_when_switched_on_and_a_breaker_guards_it(self):
+        """meaning_remote (16 Nov 2026): off by default; three failures in a row and the server is not asked for a minute."""
+        import psycopg
+        call = """create or replace function public.meaning_remote_call(qvec real[], ids text[], year_from int, year_to int, types text[], max_rows int default 400)
+                  returns jsonb language plpgsql as $f$ begin perform nextval('public.calls_seen'); return current_setting('test.reply')::jsonb; end $f$"""
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.meaning_remote_call(array[0.1]::real[], null, null, null, null)")
+            self.assertEqual(cur.fetchone()[0]["counts"], False)                 # nothing set up here: an error that does not count against the server
+            cur.execute("create sequence public.calls_seen"); cur.execute(call)
+            rows = lambda: (cur.execute("select public.meaning_remote_rows(array[0.1]::real[], null, null, null, null)"), cur.fetchone()[0])[1]
+            calls = lambda: (cur.execute("select last_value, is_called from public.calls_seen"), (lambda r: r[0] if r[1] else 0)(cur.fetchone()))[1]
+            state = lambda: (cur.execute("select fails, skip_until is not null from public.meaning_remote_state"), cur.fetchone())[1]
+            cur.execute("select set_config('test.reply', %s, true)", ('{"rows": [["L", 1, 0, 0.1]]}',))
+            self.assertIsNone(rows()); self.assertEqual(calls(), 0)              # the option is off: the server is never asked
+            cur.execute("select set_config('lantern.meaning_remote', 'on', true)")
+            self.assertEqual(rows(), [["L", 1, 0, 0.1]]); self.assertEqual((calls(), state()), (1, (0, False)))
+            cur.execute("select set_config('test.reply', %s, true)", ('{"error": "HTTP 400", "counts": false}',))
+            self.assertIsNone(rows()); self.assertEqual(state(), (0, False))     # this side's mistake: not held against the server
+            cur.execute("select set_config('test.reply', %s, true)", ('{"error": "no answer", "counts": true}',))
+            self.assertIsNone(rows()); self.assertIsNone(rows()); self.assertEqual(state(), (2, False))
+            self.assertIsNone(rows()); self.assertEqual(state(), (3, True))      # the third in a row opens the breaker
+            before = calls()
+            self.assertIsNone(rows()); self.assertEqual(calls(), before)         # and now nobody waits for the server
+            cur.execute("update public.meaning_remote_state set skip_until = now() - interval '1 second'")
+            cur.execute("select set_config('test.reply', %s, true)", ('{"rows": []}',))
+            self.assertEqual(rows(), []); self.assertEqual(state(), (0, False))  # the minute is over and it answers: closed again
+            cur.execute("select has_function_privilege('anon', 'public.meaning_remote_call(real[], text[], int, int, text[], int)', 'execute'), "
+                        "has_function_privilege('authenticated', 'public.meaning_remote_probe(int)', 'execute'), (select is_on from public.search_options where name = 'meaning_remote')")
+            self.assertEqual(cur.fetchone(), (False, False, False))
+            c.rollback()
+
+    def test_the_servers_keys_become_pages_checked_against_this_database(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("create table if not exists public.chunks (library_id text not null, page int not null, n int not null, body text not null, primary key (library_id, page, n))")
+            for lib, wba, year, kind in (("RA", "W1", 2024, "Annual Report"), ("RB", "W2", 2023, "Policy"), ("RC", "W1", 2025, "Annual Report")):
+                cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year) values (%s, %s, %s, %s, %s)", (lib, wba, wba, kind, year))
+            cur.execute("insert into public.chunks (library_id, page, n, body) values ('RA', 1, 0, 'a one'), ('RA', 1, 1, 'a one b'), ('RA', 2, 0, 'a two'), ('RA', 3, 0, 'a three'), ('RA', 4, 0, 'a four'), ('RB', 9, 0, 'b nine')")
+            remote = '[["RA",1,1,0.30],["RA",1,0,0.10],["RB",9,0,0.20],["RA",2,0,0.25],["RA",3,0,0.26],["RA",4,0,0.27],["GONE",1,0,0.01],["RC",1,0,0.02],"x",["RA",1]]'
+            q = "select library_id, page, rank, excerpt, round(score::numeric, 2) from public.meaning_remote_pages(%s::jsonb, %s, %s, %s, %s, %s)"
+            cur.execute(q, (remote, None, None, None, None, 10))
+            got = cur.fetchall()
+            # nearest first; one line a page (its best passage); three pages a document; a key this database does not hold is dropped
+            self.assertEqual([(g[0], g[1], g[2]) for g in got], [("RA", 1, 1), ("RB", 9, 2), ("RA", 2, 3), ("RA", 3, 4)])
+            self.assertEqual((got[0][3], float(got[0][4])), ("a one", 0.9))
+            cur.execute(q, (remote, ["W1"], 2024, 2024, ["Annual Report"], 10))
+            self.assertEqual({g[0] for g in cur.fetchall()}, {"RA"})             # company, year and type checked again here
+            cur.execute(q, (remote, None, None, None, None, 2))
+            self.assertEqual(len(cur.fetchall()), 2)
+            cur.execute(q, (None, None, None, None, None, 5))
+            self.assertEqual(cur.fetchall(), [])
+            c.rollback()
+
     def test_the_owner_sets_how_many_answers_a_day_a_person_has(self):
         import psycopg
         with psycopg.connect(URL) as c:
