@@ -55,6 +55,8 @@ The server also holds a database of its own, for the search by meaning: PostgreS
 - The runners on this machine can act as root, so a job run here can reach the database whatever its passwords. The guard is who may run a job here: step 2 of "Setting it up" (approval for every outside contributor) while the repository is public.
 - Never on this database: company contacts.
 
+Before real data goes in, **Server rehearsal** (Actions, manual) measures the move on a sample: it copies a million passages from Supabase, builds their index, measures and drops them. Its numbers decide the settings of the full build.
+
 ## Checking it
 The workflow **Server check** (Actions, manual, and every Monday) runs on the server and fails if the firewall, fail2ban or the automatic updates are off, or if the first-boot token is still on disk. It also shows the cores, memory and free disk, and installs the repository's packages the way a job does.
 
