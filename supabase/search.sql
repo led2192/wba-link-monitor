@@ -4484,6 +4484,34 @@ alter table public.meaning_remote_state enable row level security;
 insert into public.meaning_remote_state (one) values (true) on conflict (one) do nothing;
 insert into public.search_options (name, is_on, note) values ('meaning_remote', false, 'Search by meaning asked of lanterN''s own server, with this database''s own index as the fallback') on conflict (name) do nothing;
 
+-- What became of the searches that could ask the server, a day (16 Nov 2026, outside review 3: "too little from the
+-- server" and the pauses were recorded nowhere, so a week of watching had nothing to watch). One row a day; written
+-- only with the option on. asked: the server was asked; used: its pages were the answer; too_little: it answered
+-- and this database's own search was used instead; failed: no answer that counts; skipped: the breaker was open.
+create table if not exists public.meaning_remote_days (
+  day        date primary key,
+  asked      int not null default 0,
+  used       int not null default 0,
+  too_little int not null default 0,
+  failed     int not null default 0,
+  skipped    int not null default 0
+);
+alter table public.meaning_remote_days enable row level security;
+create or replace function public.meaning_remote_count(what text) returns void
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  if what not in ('asked', 'used', 'too_little', 'failed', 'skipped') then return; end if;
+  begin
+    execute format('insert into public.meaning_remote_days (day, %1$I) values (current_date, 1) on conflict (day) do update set %1$I = public.meaning_remote_days.%1$I + 1', what);
+  exception when others then
+    null;                                        -- a count never costs a search (a read-only transaction cannot write it)
+  end;
+end;
+$$;
+revoke all on function public.meaning_remote_count(text) from public, anon, authenticated;
+
 create or replace function public.meaning_remote_call(qvec real[], ids text[], year_from int, year_to int, types text[], max_rows int default 400)
 returns jsonb
 language plpgsql security definer
@@ -4555,9 +4583,11 @@ begin
   end if;
   select s.fails, s.skip_until into st from public.meaning_remote_state s where s.one;
   if st.skip_until is not null and st.skip_until > now() then
+    perform public.meaning_remote_count('skipped');
     return null;                                 -- unwell a moment ago: not asked, nobody waits
   end if;
   got := public.meaning_remote_call(qvec, ids, year_from, year_to, types, 400);
+  perform public.meaning_remote_count(case when got ? 'rows' then 'asked' else 'failed' end);
   begin                                          -- the state, only when it changes; a read-only transaction cannot write it and must still be answered
     if got ? 'rows' then
       if coalesce(st.fails, 0) > 0 or st.skip_until is not null then
@@ -4668,9 +4698,13 @@ begin
   if remote is not null and jsonb_array_length(remote) > 0 then
     select count(*) into remote_pages from public.meaning_remote_pages(remote, ids, year_from, year_to, types, need);
     if remote_pages >= least(need, 10) then
+      perform public.meaning_remote_count('used');
       return query select * from public.meaning_remote_pages(remote, ids, year_from, year_to, types, need);
       return;
     end if;
+  end if;
+  if remote is not null then
+    perform public.meaning_remote_count('too_little');
   end if;
   if ids is null then
     if to_regclass('public.chunks_embedding') is null then
