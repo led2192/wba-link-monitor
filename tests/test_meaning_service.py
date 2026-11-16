@@ -225,9 +225,12 @@ class Link(unittest.TestCase):
         self.assertIn("paused no", line)
         self.assertEqual(L.probe_line({"error": "no kept question vector"}), "probe not run: no kept question vector")
         self.assertIn("first three 10, 12, 30 ms", line)
-        line = L.storm_line([(310.0, 24), (305.0, 20), (900.0, None)], [(40.0, 24), (50.0, 24), (45.0, 24)], {"fails": 3, "skip_until": "x"})
-        self.assertIn("3 searches at once with the server asked first: 2 of 3 answered, median 310 ms, slowest 900 ms, pages a search 20 to 24.", line)
-        self.assertIn("without the server: 3 of 3 answered, median 45 ms", line)
+        line = L.storm_line([(60.0, 24)] * 3, [(310.0, 24), (305.0, 20), (900.0, None)], [(40.0, 24), (50.0, 24), (45.0, 24)], {"fails": 3, "skip_until": "x"})
+        self.assertIn("With the server asked first: 2 of 3 answered, median 310 ms, slowest 900 ms, pages a search 20 to 24.", line)
+        self.assertIn("Without the server again: 3 of 3 answered, median 45 ms", line)
+        self.assertIn("3) nothing in 24 ms, failures on record 3, paused", L.breaker_line([(25.0, False, 1, False), (24.0, False, 2, False), (24.0, False, 3, True)]))
+        runs = L.storm.__code__.co_consts
+        self.assertIn(("off", "on", "off"), runs)                                                 # the fair comparison: without, with, without again
         self.assertIn("paused yes", line)
         self.assertIn("'rehearsal')", L.SEARCH)
 
