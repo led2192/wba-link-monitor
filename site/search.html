@@ -309,7 +309,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v79 2026-11-16";
+  const CLIENT = "lantern v80 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -446,7 +446,10 @@
     q = q.replace(/\s(20[0-3]\d)\s*[-–]\s*(20[0-3]\d)(?=\s)/g, (m, a, b) => { years.push(+a, +b); return " "; });
     q = q.replace(/\s(20[0-3]\d)(?=\s)/g, (m, a) => { years.push(+a); return " "; });
     if (years.length) { found.from = Math.min(...years); found.to = Math.max(...years); }
-    for (const [w, t] of Object.entries(TYPE_WORDS)) {
+    // v80 (the owner, 16 Nov 2026): in a question the name of a kind of report is what is asked about, not a filter.
+    // "Does Mercadona publish a separate sustainability report?" was searched only inside sustainability reports, found
+    // nothing and could not be answered. The words stay words; the Type filter of the panel still filters a question.
+    if (!isQuestion(text)) for (const [w, t] of Object.entries(TYPE_WORDS)) {
       const re = new RegExp("\\s" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "s?\\s", "i");
       if (re.test(q)) { found.type = t; found.typeWords = w; q = q.replace(re, " "); break; }
     }
