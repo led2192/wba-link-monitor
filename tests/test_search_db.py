@@ -762,6 +762,76 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(cur.fetchall(), [])
             c.rollback()
 
+    def test_a_survey_asks_each_company_and_counts_honestly(self):
+        """Surveys (16 Nov 2026): off unless the owner gives a number; a filter is the scope; a reading a company; no page is not a no."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("create or replace function auth.jwt() returns jsonb language sql as $f$ select current_setting('test.jwt')::jsonb $f$")   # undone by the rollback
+            jwt = lambda who: cur.execute("select set_config('test.jwt', %s, true)", ('{"email": "%s"}' % who,))
+            jwt("ana@worldbenchmarkingalliance.org")
+            cur.execute("create table if not exists public.companies (wba_id text primary key, name text, industry text, country text, region text, website text, lantern_id text)")
+            for wba, name in (("S1", "Alpha"), ("S2", "Beta"), ("S3", "Gamma"), ("S4", "Delta"), ("S5", "No Documents")):
+                cur.execute("insert into public.companies (wba_id, name, industry) values (%s, %s, 'Testing industry') on conflict do nothing", (wba, name))
+                if wba != "S5":
+                    cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year) values (%s, %s, %s, 'Annual Report', 2024)", ("D" + wba, wba, name))
+                    cur.execute("insert into public.pages (library_id, page, body) values (%s, 1, %s)", ("D" + wba, f"{name} page text"))
+            # the search and the reader, stubbed: Delta has no page; Beta's reader fails; Gamma says not stated
+            cur.execute("""create or replace function public.ask_pages(key text, q text, qvec real[], company_filter text, year_from int, year_to int, type_filter text, asked text)
+                           returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text) language sql as $f$
+                             select 'D' || company_filter, 'x', company_filter, 2024, 'Annual Report', 'the report', 'http://x', g, 'e' from generate_series(1, 8) g where company_filter <> 'S4' $f$""")
+            cur.execute("""create or replace function public.ask_model(api_key text, http_schema text, model text, system_text text, user_text text, max_tokens int) returns jsonb language sql as $f$
+                             select case when user_text like '%Company: Alpha%' then jsonb_build_object('in', 4000, 'out', 300, 'text', 'Thinking. {"answer": "yes", "value": "10% of bonus", "evidence": "Ten per cent of the bonus depends on emissions.", "year": 2024, "source": 2}')
+                                         when user_text like '%Company: Gamma%' then jsonb_build_object('in', 4000, 'out', 200, 'text', '{"answer": "Not stated", "value": null, "evidence": null, "year": null, "source": null}')
+                                         when user_text like '%search each company%' or system_text like '%words to search%' then jsonb_build_object('in', 10, 'out', 5, 'text', 'remuneration emissions incentive')
+                                         else jsonb_build_object('error', 'no reply') end $f$""")
+            cur.execute("create or replace function public.reader_ready() returns jsonb language sql as $f$ select '{\"api_key\": \"k\", \"http_schema\": \"h\"}'::jsonb $f$")
+            start = "select public.survey_start('k', 'Do executives have an incentive tied to greenhouse gas emissions?', null, 'Testing industry')"
+            cur.execute(start); self.assertTrue(cur.fetchone()[0]["off"])                              # nobody may until the owner says so
+            jwt("e.owner@worldbenchmarkingalliance.org")
+            cur.execute("select public.admin_surveys('k', 6, 3, null, 'ana@worldbenchmarkingalliance.org', 1)")
+            got = cur.fetchone()[0]
+            self.assertEqual((got["settings"], got["people"][0]["per_day"]), ({"pages": 6, "max_companies": 3, "readings": 2000}, 1))
+            cur.execute("select per_day from public.ask_limits where email = 'ana@worldbenchmarkingalliance.org'")
+            self.assertEqual(cur.fetchone()[0], 50)                                                    # surveys alone leave the answers a day as they are
+            jwt("ana@worldbenchmarkingalliance.org")
+            cur.execute(start); made = cur.fetchone()[0]
+            self.assertEqual((made["companies"], made["in_scope"], made["pages"]), (3, 4, 6))            # four with documents, the ceiling keeps three, by name
+            cur.execute(start); self.assertTrue(cur.fetchone()[0]["limit"])                             # one a day was allowed
+            cur.execute("select public.survey_get('k', %s)", (made["id"],))
+            self.assertEqual([r["company"] for r in cur.fetchone()[0]["rows"]], ["Alpha", "Beta", "Delta"])
+            self.assertEqual(made["words"], "remuneration emissions incentive")                         # a question in full is searched with a few words
+            cur.execute("select public.survey_step('k', %s, 2)", (made["id"],)); got = cur.fetchone()[0]
+            self.assertEqual((got["read"], got["status"], got["counts"]["pending"]), (2, "open", 1))      # a few companies a call
+            cur.execute("select public.survey_step('k', %s, 5)", (made["id"],)); got = cur.fetchone()[0]
+            self.assertEqual((got["status"], got["counts"]["yes"], got["counts"]["failed"], got["counts"]["no_page"], got["counts"]["pending"]), ("done", 1, 1, 1, 0))
+            alpha, beta, delta = (next(r for r in got["rows"] if r["company"] == n) for n in ("Alpha", "Beta", "Delta"))
+            self.assertEqual((alpha["status"], alpha["value"], alpha["year"], alpha["library_id"], alpha["page"], alpha["label"]), ("yes", "10% of bonus", 2024, "DS1", 2, "the report"))
+            self.assertEqual((beta["status"], delta["status"], delta["evidence"]), ("failed", "no_page", None))     # no page found is never a no
+            self.assertGreater(float(got["counts"]["usd"]), 0)
+            cur.execute("select has_function_privilege('anon', 'public.survey_start(text, text, real[], text, text, text, int, int, text)', 'execute'), "
+                        "has_function_privilege('authenticated', 'public.reader_ready()', 'execute')")
+            self.assertEqual(cur.fetchone(), (False, False))
+            jwt("someone.else@worldbenchmarkingalliance.org")
+            with self.assertRaises(psycopg.errors.InsufficientPrivilege):                              # a survey is read on by its asker alone
+                cur.execute("select public.survey_step('k', %s, 1)", (made["id"],))
+            c.rollback()
+
+    def test_what_a_reading_said(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            parse = lambda text: (cur.execute("select public.survey_parse(%s)", (text,)), cur.fetchone()[0])[1]
+            self.assertEqual(parse('I think. {"answer": "YES", "value": "x", "evidence": "It says so.", "year": 2024, "source": 3} done'),
+                             {"status": "yes", "value": "x", "evidence": "It says so.", "year": 2024, "source": 3})
+            self.assertEqual(parse('{"answer": "not stated", "value": null, "evidence": null, "year": "soon", "source": "the first"}')["status"], "not_stated")
+            self.assertIsNone(parse('{"answer": "maybe"}')); self.assertIsNone(parse("no json here")); self.assertIsNone(parse('{"answer": "yes"')); self.assertIsNone(parse(None))
+            cur.execute("select public.survey_instructions()")
+            text = cur.fetchone()[0]
+            self.assertIn('A page that does not mention the matter is not a "no"', text)
+            self.assertIn("Never use what you know from elsewhere", text)
+            c.rollback()
+
     def test_the_owner_sets_how_many_answers_a_day_a_person_has(self):
         import psycopg
         with psycopg.connect(URL) as c:
