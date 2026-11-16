@@ -16,7 +16,10 @@ Two things, each on its own:
               the time of a search on the server (marks: median under 300 ms, 95th percentile under 800 ms). It also
               counts the searches with a year or a type where Supabase returns fewer than ten pages because it filters
               after taking the nearest 400 passages, and what the server returns when it filters while it searches.
-              Reads only, on both sides.
+              Reads only, on both sides. --exact M adds, for M of them, the exact search (every passage read, no
+              index) on the server, and says how much of that truth each index returns: the first run (16 Nov 2026)
+              gave 93% agreement between the two indexes where no company is named, which fails the 98% mark and says
+              nothing about which index is right.
 
   --sample P  with --load: a block sample of P percent into the schema "meaning_trial" instead, to try the whole
               path small first. --compare then reads that schema with --trial (its overlap means nothing: most
@@ -56,6 +59,15 @@ def overlap(theirs, ours):
 def conditions(alias="f"):
     return (f"(%(y0)s::int is null or {alias}.year >= %(y0)s) and (%(y1)s::int is null or {alias}.year <= %(y1)s) "
             f"and (%(types)s::text[] is null or {alias}.doc_type = any(%(types)s))")
+
+
+def exact_sql(schema):
+    """The true nearest passages, by reading every passage (no index), then pages as find_meaning chooses them."""
+    q = f"%(q)s::halfvec({DIMENSIONS})"
+    return (f"with near as materialized (select c.library_id, c.page, (c.embedding <=> {q}) + 0 as dist from {schema}.chunks c order by dist limit {NEAR}), "
+            f"pages as (select distinct on (n.library_id, n.page) n.library_id, n.page, n.dist from near n order by n.library_id, n.page, n.dist), "
+            f"kept as (select p.*, row_number() over (partition by p.library_id order by p.dist) as in_doc from pages p) "
+            f"select x.library_id || '|' || x.page from kept x where x.in_doc <= {PER_DOC} order by x.dist limit 10")
 
 
 def server_sql(schema, company, inside=False):
@@ -149,7 +161,7 @@ def load_report(m, schema, memory, workers):
             f"| Index | {gb(m['index_bytes']):.2f} GB, built in {m['build_s'] / 60:.1f} min with {memory} and {workers} workers |"]
 
 
-def compare(src, dst, schema, n, out=print):
+def compare(src, dst, schema, n, out=print, exact=0):
     """Stage A. Returns {variant: {theirs, ours, ms_server, ms_supabase, short, filled}} over n kept question vectors."""
     s, d = src.cursor(), dst.cursor()
     s.execute("select vec from public.query_vectors where array_length(vec, 1) = %s order by at desc limit %s", (DIMENSIONS, n))
@@ -158,7 +170,8 @@ def compare(src, dst, schema, n, out=print):
     types = s.fetchone()[0]
     d.execute(f"set hnsw.ef_search = {EF_SEARCH}")
     res = {v: dict(theirs=[], ours=[], ms_server=[], ms_supabase=[], short=0, filled=0) for v in VARIANTS}
-    for vec in vectors:
+    res["no filter"]["exact"] = []
+    for number, vec in enumerate(vectors):
         qtext = "[" + ",".join(repr(float(x)) for x in vec) + "]"
         company = None
         for variant in VARIANTS:
@@ -187,6 +200,9 @@ def compare(src, dst, schema, n, out=print):
                 r["theirs"].append([g[0] for g in got]); r["ours"].append(ours); r["ms_server"].append(ms_ours); r["ms_supabase"].append(ms_theirs)
                 if variant == "no filter" and got:
                     company = got[0][1]
+                if variant == "no filter" and number < exact:          # the truth both indexes are approximations of
+                    d.execute(exact_sql(schema), dict(q=qtext))
+                    r["exact"].append(([g[0] for g in got], ours, [x[0] for x in d.fetchall()]))
                 if variant in ("two years", "a type") and len(got) < 10:
                     r["short"] += 1
                     d.execute("set hnsw.iterative_scan = relaxed_order")
@@ -223,6 +239,11 @@ def compare_report(res, schema):
                "The server's times are measured on the server; the hop from Supabase (6 ms measured on 15 Nov) is added once the service exists.",
            "", f"Searches with a year or a type where Supabase returns fewer than ten pages (it filters after taking the nearest {NEAR} passages): "
                f"{sum(res[v]['short'] for v in ('two years', 'a type'))}; of those, the server returns ten when it filters while it searches: {sum(res[v]['filled'] for v in ('two years', 'a type'))}."]
+    truth = res["no filter"].get("exact") or []
+    if truth:
+        of = lambda i: 100 * overlap([t[2] for t in truth], [t[i] for t in truth])
+        md += ["", f"Against an exact search (every passage read, no index), over {len(truth)} searches with no filter: Supabase's index returns {of(0):.1f}% of the true first ten, "
+                   f"the server's index {of(1):.1f}%. Two indexes built apart are two approximations of the same truth: they need not agree with each other, and each is judged against the truth."]
     return md, ov, med, p95
 
 
@@ -230,6 +251,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="The passages on the server's database and the comparison with Supabase.")
     ap.add_argument("--load", action="store_true")
     ap.add_argument("--compare", type=int, default=0, help="kept question vectors to ask both ways")
+    ap.add_argument("--exact", type=int, default=0, help="with --compare: for this many of them, also the exact search on the server, to judge both indexes against the truth")
     ap.add_argument("--sample", type=float, default=0, help="with --load: a block sample of this percent, into the schema meaning_trial")
     ap.add_argument("--trial", action="store_true", help="with --compare: read the schema meaning_trial")
     ap.add_argument("--reload", action="store_true", help="with --load: empty the server's copy first")
@@ -265,7 +287,7 @@ def main(argv=None):
                 md += load_report(m, schema, a.memory, a.workers)
                 counters.update(rows=m["rows"], docs=m["docs"], differ=m["differ"] if m["differ"] is not None else -1, copy_s=round(m["copy_s"]), build_s=round(m["build_s"]))
             if a.compare:
-                res = compare(src, dst, schema, a.compare)
+                res = compare(src, dst, schema, a.compare, exact=a.exact)
                 lines, ov, med, p95 = compare_report(res, schema)
                 md += ([""] if md else []) + lines
                 counters.update(overlap_pct=round(100 * ov, 1), median_ms=round(med), p95_ms=round(p95))
