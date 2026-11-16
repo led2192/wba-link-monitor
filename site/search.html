@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v82 2026-11-16";
+  const CLIENT = "lantern v83 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -408,7 +408,7 @@
     // Company names are matched without accents and whatever the case ("Nestlé" is the company "Nestle", "Loreal" is
     // "L'Oréal": 10 Nov 2026), and a name may be followed by a comma or a semicolon ("Unilever; Nestlé living wage").
     const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const hits = [];
+    const hits = [], weak = [];
     // (a name of two or three letters, "BP", "3M", "HP", is the company only as its name is written, capitals and all: "bp" may be a unit, "eni" a word)
     const byLength = companies.filter(c => (c.name || "").length >= 2).sort((a, b) => b.name.length - a.name.length);
     let fq = fold(q); const sameLength = () => fq.length === q.length;
@@ -422,14 +422,25 @@
       // A company whose name is an everyday word ("target", "shell", "orange"): the company when it is written as a
       // name (a capital, or first in the box, or before a comma or semicolon), the word otherwise. 11 Nov 2026:
       // "unilever scope 3 emissions target" searched the companies Unilever and Target for "scope 3 emissions".
+      // v83 (16 Nov 2026): first in the box is weak evidence. "target emissions baseline value polyus?" searched the
+      // companies Polyus and Target. A word-name that is only first in the box (a capital there is how any sentence
+      // starts) is the company when no other company is named, and the word when one is: decided after the loop.
       if (WORD_NAMES.has(name)) {
-        const typed = q.slice(m.index + 1, m.index + 2);
-        if (!(typed !== typed.toLowerCase() || fold(text.trim()).toLowerCase().startsWith(name) || /[;,]$/.test(m[0]))) { found.maybe = found.maybe || { id: c.id, name: c.name, word: name }; continue; }
+        const typed = q.slice(m.index + 1, m.index + 2), first = fold(text.trim()).toLowerCase().startsWith(name);
+        const strong = (typed !== typed.toLowerCase() && !first) || /[;,]$/.test(m[0]);
+        if (!strong) { if (first) weak.push({ c, name }); else found.maybe = found.maybe || { id: c.id, name: c.name, word: name }; continue; }
       }
       hits.push(c);
       q = q.slice(0, m.index) + " " + q.slice(m.index + m[0].length);
       fq = fq.slice(0, m.index) + " " + fq.slice(m.index + m[0].length);
       if (hits.length >= 6) break;
+    }
+    for (const w of weak) {                                             // a word-name first in the box: the company only when it is the one company named
+      const m = !hits.length && new RegExp("\\s" + esc(w.name) + "(?:'s)?[;,]?(?=\\s)", "i").exec(fq);
+      if (!m) { found.maybe = found.maybe || { id: w.c.id, name: w.c.name, word: w.name }; continue; }
+      hits.push(w.c);
+      q = q.slice(0, m.index) + " " + q.slice(m.index + m[0].length);
+      fq = fq.slice(0, m.index) + " " + fq.slice(m.index + m[0].length);
     }
     if (hits.length) q = q.replace(/\s[;,](?=\s)/g, " ");
     if (hits.length) { found.company = hits.map(c => c.id).join(";"); found.companyName = hits.map(c => c.name).join(", "); }
