@@ -7,13 +7,16 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check (reads only), install, open, close or stop"
+        description: "check (reads only), install, open, close, stop; link (tell Supabase the address and the secret); probe (measure the way from Supabase)"
         type: choice
-        options: [check, install, open, close, stop]
+        options: [check, install, open, close, stop, link, probe]
         default: check
       host:
-        description: "with open: the name that points to the server"
+        description: "with open and link: the name that points to the server"
         default: ""
+      times:
+        description: "with probe: how many calls"
+        default: "20"
 
 concurrency:
   group: server-db
@@ -26,7 +29,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: The service
+        if: inputs.mode != 'link' && inputs.mode != 'probe'
         run: bash server/service_install.sh "$MODE" "$HOST_NAME"
         env:
           MODE: ${{ inputs.mode }}
           HOST_NAME: ${{ inputs.host }}
+      # the secret goes from the server's file to Supabase's vault inside this one process: nothing of it is printed
+      - name: Tell Supabase the address and the secret
+        if: inputs.mode == 'link'
+        run: sudo --preserve-env=SUPABASE_DB_URL /usr/bin/python3 server/meaning_link.py --link "$HOST_NAME"
+        env:
+          HOST_NAME: ${{ inputs.host }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      - name: Measure the way from Supabase
+        if: inputs.mode == 'probe'
+        run: /usr/bin/python3 server/meaning_link.py --probe "$TIMES"
+        env:
+          TIMES: ${{ inputs.times || '20' }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}

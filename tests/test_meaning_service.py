@@ -194,5 +194,37 @@ class NoOutsideCodeOnTheServer(unittest.TestCase):
                 self.assertNotIn("LANTERN_JOBS", text, path)
 
 
+class Link(unittest.TestCase):
+    def test_the_secret_is_never_shown_and_the_vault_is_written_by_name(self):
+        import tempfile
+        import meaning_link as L
+        with tempfile.NamedTemporaryFile("w", delete=False) as f:
+            f.write(f"{SECRET}\nshort\n{OTHER}\n")
+        self.assertEqual(L.first_secret(f.name), OTHER)                                           # the newest line
+        os.unlink(f.name)
+
+        class Cur:
+            def __init__(self, have): self.have, self.done, self.row = have, [], None
+            def execute(self, sql, args=None):
+                self.done.append((sql, args)); self.row = ("id-1",) if "from vault.secrets" in sql and args[0] in self.have else None
+            def fetchone(self): return self.row
+        cur = Cur({"meaning_remote_url"})
+        self.assertEqual((L.keep(cur, "meaning_remote_url", "https://h.example", "d"), L.keep(cur, "meaning_remote_secret", SECRET, "d")), ("replaced", "made"))
+        self.assertIn("vault.update_secret", cur.done[1][0]); self.assertIn("vault.create_secret", cur.done[3][0])
+        src = open(os.path.join(HERE, "server", "meaning_link.py"), encoding="utf-8").read()
+        self.assertNotRegex(src, r"print\([^)]*\bsecret\b(?!\))[^)]*\{secret\}")
+        self.assertIn("({len(secret)} characters, not shown)", src)
+        with self.assertRaises(SystemExit):
+            L.main(["--link", "bad host; x"])
+
+    def test_a_probe_is_reported_as_counts(self):
+        import meaning_link as L
+        line = L.probe_line({"ms": [10, 12, 30, 1500], "errors": {"no answer": 1}, "rows": 1200, "state": {"fails": 1, "skip_until": None}})
+        self.assertIn("4 calls from Supabase to the server: 3 answered, 1 failed (no answer x1)", line)
+        self.assertIn("median 21 ms, 95th percentile 1500 ms", line)
+        self.assertIn("paused no", line)
+        self.assertEqual(L.probe_line({"error": "no kept question vector"}), "probe not run: no kept question vector")
+
+
 if __name__ == "__main__":
     unittest.main()

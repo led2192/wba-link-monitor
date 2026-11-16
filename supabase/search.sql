@@ -4078,6 +4078,185 @@ revoke all on function public.review_score(text) from public, anon, authenticate
 -- passages. Without one it uses the index on the embeddings (chunks_embedding), and says so while that index is
 -- not built. Passages exist for the main document types of 2024 and later (semantic_index.py). The same shape of
 -- rows as find_pages, at most three pages a document; the excerpt is the nearest passage. Not logged yet.
+-- ---------------------------------------------------------------------------------------------------------------
+-- The search by meaning asked of lanterN's own server (16 Nov 2026; docs/server.md "The service"; option
+-- meaning_remote, OFF). The passages of every year and their index do not fit this database's machine; the server
+-- holds a copy of the passages' keys and embeddings and answers "the nearest to this vector, with these filters" in
+-- about 12 ms. This database asks it over HTTPS, joins the keys to its own passages and documents, and when the
+-- server gives nothing, too little or an error, searches its own index exactly as before. Nothing here is used
+-- until the option is on.
+--
+-- meaning_remote_call: one request. Returns {"rows": [[library_id, page, n, distance], ...]} or {"error": kind,
+--   "counts": whether the failure says the server is unwell}. A timeout, no answer, 429 or 5xx count; 400 and 401 are
+--   mistakes of this side and do not. The address and the secret are read from the vault and never appear in a
+--   message. The http extension's options belong to the session and sessions are shared, so they are put back to
+--   their defaults before and after the call: this call's 1.5 seconds must never become the reader's time limit.
+-- meaning_remote_rows: the breaker around it. After three failures in a row the server is not asked for 60 seconds.
+--   The state is written only when it changes (a failure, or the first success after failures).
+create table if not exists public.meaning_remote_state (
+  one        boolean primary key default true check (one),
+  fails      int not null default 0,
+  skip_until timestamptz,
+  last_error text,
+  changed    timestamptz not null default now()
+);
+alter table public.meaning_remote_state enable row level security;
+insert into public.meaning_remote_state (one) values (true) on conflict (one) do nothing;
+insert into public.search_options (name, is_on, note) values ('meaning_remote', false, 'Search by meaning asked of lanterN''s own server, with this database''s own index as the fallback') on conflict (name) do nothing;
+
+create or replace function public.meaning_remote_call(qvec real[], ids text[], year_from int, year_to int, types text[], max_rows int default 400)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  address text;
+  secret text;
+  http_schema text;
+  status int;
+  body text;
+begin
+  begin
+    select d.decrypted_secret into address from vault.decrypted_secrets d where d.name = 'meaning_remote_url' limit 1;
+    select d.decrypted_secret into secret from vault.decrypted_secrets d where d.name = 'meaning_remote_secret' limit 1;
+  exception when others then
+    return jsonb_build_object('error', 'vault', 'counts', false);
+  end;
+  select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
+  if address is null or secret is null or http_schema is null or address !~ '^https://[a-z0-9.-]+$' then
+    return jsonb_build_object('error', 'not set up', 'counts', false);
+  end if;
+  begin
+    execute format('select %I.http_reset_curlopt()', http_schema);
+    begin
+      execute format('select %1$I.http_set_curlopt(''CURLOPT_CONNECTTIMEOUT_MS'', ''300''), %1$I.http_set_curlopt(''CURLOPT_TIMEOUT_MS'', ''1500'')', http_schema);
+    exception when others then                  -- an older extension without the millisecond options: whole seconds
+      execute format('select %1$I.http_set_curlopt(''CURLOPT_CONNECTTIMEOUT'', ''1''), %1$I.http_set_curlopt(''CURLOPT_TIMEOUT'', ''2'')', http_schema);
+    end;
+    execute format(
+      'select h.status, h.content from %1$I.http(row(''POST'', $1, array[%1$I.http_header(''Authorization'', $2)], $4, $3)::%1$I.http_request) h', http_schema)
+      into status, body
+      using address || '/near', 'Bearer ' || secret,
+        jsonb_strip_nulls(jsonb_build_object('vec', to_jsonb(qvec), 'companies', to_jsonb(ids), 'year_from', year_from, 'year_to', year_to,
+                                             'types', to_jsonb(types), 'limit', least(greatest(coalesce(max_rows, 400), 1), 400)))::text,
+        'application/json';
+    execute format('select %I.http_reset_curlopt()', http_schema);
+  exception when others then
+    begin execute format('select %I.http_reset_curlopt()', http_schema); exception when others then null; end;
+    return jsonb_build_object('error', 'no answer', 'counts', true);      -- a timeout, a refused connection, a name that does not resolve
+  end;
+  if status = 200 then
+    begin
+      return jsonb_build_object('rows', coalesce(body::jsonb -> 'rows', '[]'::jsonb));
+    exception when others then
+      return jsonb_build_object('error', 'unreadable answer', 'counts', true);
+    end;
+  end if;
+  return jsonb_build_object('error', 'HTTP ' || status, 'counts', status = 429 or status >= 500);
+end;
+$$;
+revoke all on function public.meaning_remote_call(real[], text[], int, int, text[], int) from public, anon, authenticated;
+
+create or replace function public.meaning_remote_rows(qvec real[], ids text[], year_from int, year_to int, types text[])
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  st record;
+  got jsonb;
+begin
+  if not (coalesce(current_setting('lantern.meaning_remote', true), '') = 'on'
+          or (coalesce(current_setting('lantern.meaning_remote', true), '') <> 'off'
+              and exists (select 1 from public.search_options o where o.name = 'meaning_remote' and o.is_on))) then
+    return null;
+  end if;
+  select s.fails, s.skip_until into st from public.meaning_remote_state s where s.one;
+  if st.skip_until is not null and st.skip_until > now() then
+    return null;                                 -- unwell a moment ago: not asked, nobody waits
+  end if;
+  got := public.meaning_remote_call(qvec, ids, year_from, year_to, types, 400);
+  begin                                          -- the state, only when it changes; a read-only transaction cannot write it and must still be answered
+    if got ? 'rows' then
+      if coalesce(st.fails, 0) > 0 or st.skip_until is not null then
+        update public.meaning_remote_state s set fails = 0, skip_until = null, last_error = null, changed = now() where s.one;
+      end if;
+    elsif coalesce((got ->> 'counts')::boolean, false) then
+      update public.meaning_remote_state s
+         set fails = s.fails + 1, skip_until = case when s.fails + 1 >= 3 then now() + interval '60 seconds' end,
+             last_error = left(got ->> 'error', 60), changed = now()
+       where s.one;
+    end if;
+  exception when others then
+    null;
+  end;
+  return got -> 'rows';                          -- null when the call failed
+end;
+$$;
+revoke all on function public.meaning_remote_rows(real[], text[], int, int, text[]) from public, anon, authenticated;
+
+-- The pages of an answer from the server: its keys joined to this database's passages (for the text) and documents
+-- (whose company, year and type are checked again here: the two stores can drift), nearest first, the best passage
+-- a page, at most pages_a_document() a document. The same shape as find_meaning returns.
+create or replace function public.meaning_remote_pages(remote jsonb, ids text[], year_from int, year_to int, types text[], need int)
+returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
+               label text, url text, page int, score real, excerpt text)
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_column
+begin
+  return query
+  with near as materialized (
+         select r ->> 0 as library_id, (r ->> 1)::int as page, (r ->> 2)::int as n, (r ->> 3)::real as dist
+         from jsonb_array_elements(coalesce(remote, '[]'::jsonb)) r where jsonb_typeof(r) = 'array' and jsonb_array_length(r) = 4),
+       found as (select n.library_id, n.page, c.body, n.dist from near n join public.chunks c on c.library_id = n.library_id and c.page = n.page and c.n = n.n),
+       pages as (select distinct on (f.library_id, f.page) f.library_id, f.page, f.body, f.dist from found f order by f.library_id, f.page, f.dist),
+       kept as (select p.*, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url,
+                       row_number() over (partition by p.library_id order by p.dist) as in_doc
+                from pages p join public.documents d on d.library_id = p.library_id
+                where (ids is null or d.wba_id = any(ids)) and (year_from is null or d.year >= year_from) and (year_to is null or d.year <= year_to)
+                  and (types is null or d.doc_type = any(types)))
+  select null::bigint, (row_number() over (order by x.dist))::int, x.library_id, x.company, x.wba_id, x.year, x.doc_type, x.label, x.url, x.page,
+         (1 - x.dist)::real, left(regexp_replace(x.body, '\s+', ' ', 'g'), 420)
+  from kept x where x.in_doc <= public.pages_a_document() order by x.dist limit need;
+end;
+$$;
+revoke all on function public.meaning_remote_pages(jsonb, text[], int, int, text[], int) from public, anon, authenticated;
+
+-- How the hop to the server behaves, for the owner's measurements and rehearsals (never called by the page): asks
+-- the server `times` times with a kept question vector and returns the milliseconds and what failed. Counts only.
+create or replace function public.meaning_remote_probe(times int default 20)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  v real[];
+  t timestamptz;
+  got jsonb;
+  ms jsonb := '[]'::jsonb;
+  errors jsonb := '{}'::jsonb;
+  rows_seen int := 0;
+begin
+  select q.vec into v from public.query_vectors q where array_length(q.vec, 1) = 384 order by q.at desc limit 1;
+  if v is null then return jsonb_build_object('error', 'no kept question vector'); end if;
+  for i in 1..least(greatest(coalesce(times, 20), 1), 200) loop
+    t := clock_timestamp();
+    got := public.meaning_remote_call(v, null, null, null, null, 400);
+    ms := ms || to_jsonb(round(extract(epoch from clock_timestamp() - t)::numeric * 1000));
+    if got ? 'rows' then rows_seen := rows_seen + jsonb_array_length(got -> 'rows');
+    else errors := jsonb_set(errors, array[got ->> 'error'], to_jsonb(coalesce((errors ->> (got ->> 'error'))::int, 0) + 1)); end if;
+  end loop;
+  return jsonb_build_object('ms', ms, 'errors', errors, 'rows', rows_seen,
+                            'state', (select to_jsonb(s) - 'one' from public.meaning_remote_state s where s.one));
+end;
+$$;
+revoke all on function public.meaning_remote_probe(int) from public, anon, authenticated;
+
 create or replace function public.find_meaning(
   key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null, max_rows int default 50)
@@ -4093,12 +4272,25 @@ declare
   ids text[] := public.companies_matching(company_filter);
   types text[] := public.types_matching(type_filter);
   need int := least(greatest(coalesce(max_rows, 50), 1), 100);
+  remote jsonb;
+  remote_pages int;
 begin
   if k is null then
     raise exception 'not allowed to search' using errcode = '42501';
   end if;
   if qvec is null or coalesce(array_length(qvec, 1), 0) <> 384 then
     raise exception 'the query vector must have 384 numbers' using errcode = '22023';
+  end if;
+  -- Option meaning_remote (off): lanterN's own server is asked first. Its answer is used only when it fills the
+  -- list asked for (or ten pages, whichever is fewer); with nothing, too little or an error, the search below runs
+  -- exactly as it always has.
+  remote := public.meaning_remote_rows(qvec, ids, year_from, year_to, types);
+  if remote is not null and jsonb_array_length(remote) > 0 then
+    select count(*) into remote_pages from public.meaning_remote_pages(remote, ids, year_from, year_to, types, need);
+    if remote_pages >= least(need, 10) then
+      return query select * from public.meaning_remote_pages(remote, ids, year_from, year_to, types, need);
+      return;
+    end if;
   end if;
   if ids is null then
     if to_regclass('public.chunks_embedding') is null then
