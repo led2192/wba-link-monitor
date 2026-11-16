@@ -707,6 +707,26 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(facts["Reason for restatement"]["said"]["m1"]["name"], "Restatement reason"); self.assertIsNone(facts["Reason for restatement"]["said"]["m2"]["role"])
             c.rollback()
 
+    def test_the_owner_sees_what_a_link_searched_and_a_person_asked(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.search_log (key_name, q, typed, company, year_from, n, ms, at) values "
+                        "('luis', 'scope 1', 'nike scope 1 2023', 'Nike', 2023, 24, 310, now() - interval '2 hours'), "
+                        "('luis', 'water', null, null, null, 8, 90, now() - interval '1 hour'), ('team', 'other', 'other', null, null, 1, 5, now()) returning id")
+            first = cur.fetchone()[0]
+            cur.execute("insert into public.search_clicks (log_id, library_id, page, rank) values (%s, 'L', 3, 1)", (first,))
+            cur.execute("insert into public.ask_log (asker, question, answered, error) values ('p@x.org', 'What is Nike scope 1?', true, null), ('p@x.org', 'Broken?', false, 'x'), ('q@x.org', 'Not mine', true, null)")
+            cur.execute("select public.admin_searches('k', 'luis')"); got = cur.fetchone()[0]
+            self.assertEqual([(x["typed"], x["as_typed"], x["clicks"]) for x in got["searches"]], [("water", False, 0), ("nike scope 1 2023", True, 1)])   # newest first; older rows fall back to the words read
+            self.assertEqual((got["searches"][1]["company"], got["searches"][1]["year_from"], got["questions"]), ("Nike", 2023, []))
+            cur.execute("select public.admin_searches('k', null, 'p@x.org')"); got = cur.fetchone()[0]
+            self.assertEqual(got["searches"], [])
+            self.assertEqual(sorted((x["question"], x["answered"], x["failed"]) for x in got["questions"]), [("Broken?", False, True), ("What is Nike scope 1?", True, False)])
+            cur.execute("select has_function_privilege('anon', 'public.admin_searches(text, text, text, int)', 'execute')")
+            self.assertFalse(cur.fetchone()[0])                                 # the owner only: never the open link
+            c.rollback()
+
     def test_the_owners_panel_links_facts_and_cost(self):
         import hashlib, psycopg
         with psycopg.connect(URL) as c:

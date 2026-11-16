@@ -3596,6 +3596,38 @@ $$;
 revoke all on function public.admin_fact_trials(text) from public, anon;
 grant execute on function public.admin_fact_trials(text) to authenticated;
 
+-- The owner's panel: what a link searched, or what a person asked (16 Nov 2026, the owner: with few users, see their
+-- queries and be taken to the same query to see what they saw). Newest first. `typed` is what the person wrote in
+-- the box, before filters were read out of it, so opening the page with it runs the same search; older rows have
+-- only the words the engine read (q) and the filters beside them. The owner only.
+create or replace function public.admin_searches(key text, link text default null, person text default null, max_rows int default 200)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'searches', case when nullif(btrim(coalesce(link, '')), '') is null then '[]'::jsonb else
+      (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
+         select l.at, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.typed is not null as as_typed, l.q, l.company, l.year_from, l.year_to,
+                l.doc_type, l.profile, l.n, l.ms,
+                (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
+         from public.search_log l where l.key_name = link
+         order by l.at desc limit least(greatest(coalesce(max_rows, 200), 1), 1000)) x) end,
+    'questions', case when nullif(btrim(coalesce(person, '')), '') is null then '[]'::jsonb else
+      (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
+         select a.at, a.question, a.answered, a.error is not null as failed,
+                (select count(*) from public.ask_facts f where f.ask_id = a.id) as facts
+         from public.ask_log a where a.asker = person
+         order by a.at desc limit least(greatest(coalesce(max_rows, 200), 1), 1000)) x) end);
+end;
+$$;
+revoke all on function public.admin_searches(text, text, text, int) from public, anon;
+grant execute on function public.admin_searches(text, text, text, int) to authenticated;
+
 -- A link of its own for a person or a group: the searches made with it are logged under its name, and it can be
 -- switched off without touching the others. The key is made here and returned this once; only its hash is kept.
 create or replace function public.admin_link_new(key text, name text)
