@@ -933,6 +933,24 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(sorted((r["value"], r["this"]) for r in g["readings"]), [(66830, True), (66831, False)])
         self.assertIsNone(none)
 
+    def test_one_companys_main_reports_of_the_last_three_years(self):
+        import datetime, psycopg
+        last = datetime.date.today().year - 1
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("create table if not exists public.companies (wba_id text primary key, name text, industry text, country text, region text, website text, lantern_id text)")
+            cur.execute("insert into public.companies (wba_id, name) values ('CG_ONE', 'One Co') on conflict do nothing")
+            for year, kind in [(last, "Sustainability Report"), (last - 1, "Annual Report"), (last - 1, "ESG Report"), (last - 2, "Policy Documents")]:
+                cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year) values (%s, 'CG_ONE', 'One Co', %s, %s)", (f"CG-{year}-{kind}", kind, year))
+            cur.execute("insert into public.gap_notes (wba_id, kind, year, reason) values ('CG_ONE', 'annual', %s, 'not_published')", (last - 2,))
+            cur.execute("select public.company_gaps('k', 'CG_ONE'), public.company_gaps('k', 'CG_ONE;OTHER'), public.company_gaps('k', 'NOBODY'), public.company_gaps('k', null)")
+            got, two, nobody, none = cur.fetchone()
+            self.assertEqual((got["from"], got["to"]), (last - 2, last))
+            self.assertEqual([(y["year"], y["annual"], y["sustainability"], y["annual_note"]) for y in got["years"]],
+                             [(last, False, True, None), (last - 1, True, True, None), (last - 2, False, False, "not_published")])   # newest first; a person's note travels with the year
+            self.assertEqual((two, nobody, none), (None, None, None))                                # one company the library follows, or nothing
+            c.rollback()
+
     def test_a_gap_card_shows_a_company_with_a_main_report_missing(self):
         import datetime, psycopg
         last = datetime.date.today().year - 1

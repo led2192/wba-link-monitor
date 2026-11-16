@@ -2370,6 +2370,48 @@ $$;
 revoke all on function public.gap_card(text, text[]) from public;
 grant execute on function public.gap_card(text, text[]) to anon, authenticated;
 
+-- One company's main reports of the last three years: held or not (16 Nov 2026, the owner: beside an answer, quietly,
+-- the gaps of the last years, so that a reader knows what the answer could not have read). The same cells and the same
+-- excuses as gap_card (a person's note for the year or for every year, then what the company's traits say); the
+-- reading of sustainability statements inside an annual report is not made here, so a year can show as a gap that
+-- gap_card would excuse as a guess.
+create or replace function public.company_gaps(key text, company text)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '5s'
+as $$
+#variable_conflict use_variable
+declare
+  y2 int := extract(year from now())::int - 1;
+  y1 int := y2 - 2;
+  annual_types text[] := array['Annual Report', 'Integrated Report', '10K Form', 'Registration Document', 'Financial Statement'];
+  sustain_types text[] := array['Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Integrated Report', 'Climate Report', 'Environmental Reports', 'Social Reports'];
+  years jsonb;
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if nullif(btrim(coalesce(company, '')), '') is null or position(';' in company) > 0
+     or not exists (select 1 from public.companies c where c.wba_id = company) then
+    return null;                                                 -- one company the library follows, or nothing
+  end if;
+  select jsonb_agg(jsonb_build_object(
+           'year', y.year,
+           'annual', exists (select 1 from public.documents d where d.wba_id = company and d.year = y.year and d.doc_type = any(annual_types)),
+           'sustainability', exists (select 1 from public.documents d where d.wba_id = company and d.year = y.year and d.doc_type = any(sustain_types)),
+           'annual_note', coalesce((select g.reason from public.gap_notes g where g.wba_id = company and g.kind = 'annual' and g.year in (y.year, 0) order by g.year desc limit 1),
+                                   public.company_implied(company, 'annual')),
+           'sustainability_note', coalesce((select g.reason from public.gap_notes g where g.wba_id = company and g.kind = 'sustainability' and g.year in (y.year, 0) order by g.year desc limit 1),
+                                           public.company_implied(company, 'sustainability'))) order by y.year desc)
+    into years
+  from generate_series(y1, y2) as y(year);
+  return jsonb_build_object('from', y1, 'to', y2, 'years', years);
+end;
+$$;
+revoke all on function public.company_gaps(text, text) from public;
+grant execute on function public.company_gaps(text, text) to anon, authenticated;
+
 -- One page of a document, as text, for reading inside lanterN (13 Nov 2026). Some documents have no public address
 -- (the library holds their text, not a link), so a fact or a value read on their page 65 could not be checked by
 -- anyone; and the owner wants to check a fact without leaving the panel. Returns the page's text with the document's
