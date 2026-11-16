@@ -860,6 +860,20 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.survey_read('k', 'q?', 'w', null, 'S6', 'Epsilon', null, null, 6)")           # one reading, as the measurement asks it
             one = cur.fetchone()[0]
             self.assertEqual((one["status"], one["library_id"], one["page"], one["printed"], one["pages"], one["in"]), ("yes", "DS6", 1, True, 6, 4000))
+            # a row checked against its page: right, wrong, or taken back; only a yes or a no; only by the asker or the owner
+            mark = lambda wba, v: (cur.execute("select public.survey_verdict('k', %s, %s, %s)", (made["id"], wba, v)), cur.fetchone()[0])[1]
+            self.assertEqual(mark("S1", "right"), {"marked": 1, "verdict": "right", "right": 1, "wrong": 0})
+            self.assertEqual(mark("S6", " Wrong ")["wrong"], 1)
+            self.assertEqual(mark("S4", "right")["marked"], 0)                                           # "no page found" cannot be checked this way
+            cur.execute("select public.survey_get('k', %s)", (made["id"],)); got = cur.fetchone()[0]
+            self.assertEqual((got["counts"]["right"], got["counts"]["wrong"], next(r for r in got["rows"] if r["company"] == "Alpha")["verdict"]), (1, 1, "right"))
+            self.assertEqual(mark("S1", "")["right"], 0)                                                 # taken back
+            cur.execute("select verdict_by from public.survey_rows where survey_id = %s and wba_id = 'S6'", (made["id"],))
+            self.assertEqual(cur.fetchone()[0], "ana@worldbenchmarkingalliance.org")
+            cur.execute("savepoint bad")
+            with self.assertRaises(psycopg.errors.InvalidParameterValue):
+                cur.execute("select public.survey_verdict('k', %s, 'S1', 'maybe')", (made["id"],))
+            cur.execute("rollback to savepoint bad")
             jwt("someone.else@worldbenchmarkingalliance.org")
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):                              # a survey is read on by its asker alone
                 cur.execute("select public.survey_step('k', %s, 1)", (made["id"],))

@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v90 2026-11-16";
+  const CLIENT = "lantern v91 2026-11-16";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1434,15 +1434,25 @@
       const head = el("div", "text"); head.style.fontWeight = "600"; head.textContent = `At least ${n.yes} of the ${n.companies} companies asked: yes`;
       const rest = el("div", "what", `No ${n.no} · not stated in the pages read ${n.not_stated} · no page found ${n.no_page}` + (n.failed ? ` · not read ${n.failed}` : "") + (n.pending ? ` · waiting ${n.pending}` : ""));
       rest.title = "Not stated and no page found are never counted as a no"; out.append(head, rest);
+      // v91: a row checked against its page, right or wrong (pressing the same mark again takes it back)
+      const marks = x => { const w = el("span"); w.style.cssText = "white-space:nowrap;margin-left:6px";
+        for (const [v, sign, tip] of [["right", "✓", "The page says so"], ["wrong", "✗", "The page does not say so"]]) {
+          const b = el("button", null, sign); b.type = "button"; b.title = tip + (x.verdict === v ? " (marked; press to take it back)" : "");
+          b.style.cssText = `font:inherit;font-size:12px;line-height:1;padding:2px 6px;margin-left:2px;border-radius:999px;cursor:pointer;border:1px solid var(--line);background:${x.verdict === v ? (v === "right" ? "#d7f0dd" : "#f6d9d6") : "var(--box)"};color:var(--fg)`;
+          b.onclick = async () => { const to = x.verdict === v ? "" : v; const r = await authed("survey_verdict", { key, survey: g.id, wba: x.wba_id, verdict: to }); if (!r) return; x.verdict = to || null; n.right = r.right; n.wrong = r.wrong; show(last, running); };
+          w.append(b); }
+        return w; };
+      if (n.right || n.wrong) { const checked = el("div", "what", `Checked against the page: ${n.right} right, ${n.wrong} wrong.`); out.append(checked); }
       const source = x => { if (!(x.library_id && x.page)) return null; const a = link(`${x.doc_year || ""} ${x.doc_type || "document"}, page ${x.page}`.trim(), () => openReader(x.library_id, x.page, x.evidence || "")); a.title = x.evidence || ""; return a; };
       if (all) {
         const t = adminTable(["Company", "Answer", "In short, and the sentence", "Source"], g.rows.map(x => {
           const said = el("span"); said.append(document.createTextNode(x.value || "")); if (x.evidence) { const q = el("div", null, `“${x.evidence}”`); q.style.cssText = "color:var(--muted);font-size:12px;margin-top:2px"; said.append(q); }
-          return [x.company, SURVEY_WORDS[x.status] || x.status, said, source(x) || (x.status === "yes" || x.status === "no" ? "page not named by the reader" : "")]; }));
+          const src = el("span"); src.append(source(x) || (x.status === "yes" || x.status === "no" ? "page not named by the reader" : "")); if (x.status === "yes" || x.status === "no") src.append(marks(x));
+          return [x.company, SURVEY_WORDS[x.status] || x.status, said, src]; }));
         t.style.fontSize = "13px"; t.style.margin = "10px 0 4px"; out.append(t);
       } else if (yes.length) {
         const ul = el("ul"); ul.style.cssText = "margin:10px 0 4px;padding-left:18px;font-size:14px;line-height:1.5";
-        for (const x of yes) { const li = el("li"), b = el("b", null, x.company); li.append(b, document.createTextNode(x.value ? ` · ${x.value} ` : " ")); const a = source(x) || el("span", null, "page not named by the reader"); a.style.fontSize = "12.5px"; if (a.tagName !== "A") a.style.color = "var(--muted)"; li.append(a); ul.append(li); }
+        for (const x of yes) { const li = el("li"), b = el("b", null, x.company); li.append(b, document.createTextNode(x.value ? ` · ${x.value} ` : " ")); const a = source(x) || el("span", null, "page not named by the reader"); a.style.fontSize = "12.5px"; if (a.tagName !== "A") a.style.color = "var(--muted)"; li.append(a, marks(x)); ul.append(li); }
         out.append(ul);
       }
       const foot = el("div", "what"); foot.style.marginTop = "8px";
@@ -2246,9 +2256,9 @@
   // is asked of the database. A cell that a spreadsheet would run as a formula (=, +, -, @ first) is given a leading
   // apostrophe; the file starts with a byte-order mark so that Excel reads the accents.
   const csvCell = v => { let t = v == null ? "" : String(v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
-  const surveyCsv = g => [["Company", "WBA id", "Answer", "In short", "Year", "The sentence", "Document year", "Document type", "Page", "Link", "Question", "Scope"]]
+  const surveyCsv = g => [["Company", "WBA id", "Answer", "In short", "Year", "The sentence", "Document year", "Document type", "Page", "Link", "Question", "Scope", "Checked"]]
     .concat(g.rows.map(x => [x.company, x.wba_id, SURVEY_WORDS[x.status] || x.status, x.value, x.year, x.evidence, x.doc_year, x.doc_type, x.page, x.url && x.page ? pageUrl(x) : (x.url || ""), g.question,
-                             [g.industry, g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}-${g.year_to || ""}` : ""].filter(Boolean).join(", ")]))
+                             [g.industry, g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}-${g.year_to || ""}` : ""].filter(Boolean).join(", "), x.verdict || ""]))
     .map(r => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
   const surveyFile = g => `survey-${g.id}-${String(g.question || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60)}.csv`;
   const saveText = (name, text) => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + text], { type: "text/csv;charset=utf-8" })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
