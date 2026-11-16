@@ -9,9 +9,13 @@ Run ON the server (it reads the server's own secret file), by the workflow "Serv
   --probe N     asks Supabase to call the server N times (public.meaning_remote_probe) and prints the times and what
                 failed. Counts and milliseconds only.
 
-  --storm N     a rehearsal: N searches at once on Supabase with the option on for those sessions only, then the same
-                N one after another with it off, and what each took. For rehearsing a server that is down: do people
+  --storm N     a rehearsal: the same N searches at once on Supabase three times: without the server, with the option
+                on for those sessions only, and without the server again (the first run of the three also warms
+                Supabase's memory, so the third is the fair comparison). For rehearsing a server that is down: do people
                 wait, do searches still answer. Counts and milliseconds only; nothing is kept.
+  --breaker     a rehearsal of the breaker itself: asks for the server's rows six times in a row with the option on
+                for this session, each committed as a real search's would be, and prints what each took and whether
+                the server was asked. With the server down: three short failures, then it is not asked at all.
 
 None switches anything on for anyone else: the search uses the server only when the option meaning_remote is on.
 
@@ -83,7 +87,7 @@ def one_search(url, q, vec, option):
 
 
 def storm(url, n, run=one_search):
-    """n searches at once with the option on, then the same n in turn with it off. Returns the two lists of (ms, pages)."""
+    """The same n searches at once, three times: option off, on, off. Returns the three lists of (ms, pages)."""
     import psycopg
     from concurrent.futures import ThreadPoolExecutor
     with psycopg.connect(url) as c:
@@ -92,17 +96,43 @@ def storm(url, n, run=one_search):
         asked = cur.fetchall()
     if not asked:
         raise SystemExit("no kept question to search with")
-    with ThreadPoolExecutor(max_workers=len(asked)) as pool:
-        on = list(pool.map(lambda a: run(url, a[0], a[1], "on"), asked))
-    off = [run(url, a[0], a[1], "off") for a in asked]
-    return on, off
+    out = []
+    for option in ("off", "on", "off"):
+        with ThreadPoolExecutor(max_workers=len(asked)) as pool:
+            out.append(list(pool.map(lambda a: run(url, a[0], a[1], option), asked)))
+    return out
 
 
-def storm_line(on, off, state):
+def storm_line(first, on, off, state):
     part = lambda rows: (f"{sum(1 for r in rows if r[1] is not None)} of {len(rows)} answered, median {statistics.median([r[0] for r in rows]):.0f} ms, "
                          f"slowest {max(r[0] for r in rows):.0f} ms, pages a search {min([r[1] for r in rows if r[1] is not None] or [0])} to {max([r[1] for r in rows if r[1] is not None] or [0])}")
-    return (f"{len(on)} searches at once with the server asked first: {part(on)}. The same {len(off)} one after another without the server: {part(off)}. "
-            f"Failures in a row on record {state.get('fails', 0)}, paused {'yes' if state.get('skip_until') else 'no'}.")
+    return (f"{len(on)} searches at once. Without the server (first, memory cold): {part(first)}. With the server asked first: {part(on)}. "
+            f"Without the server again: {part(off)}. Failures in a row on record {state.get('fails', 0)}, paused {'yes' if state.get('skip_until') else 'no'}.")
+
+
+def breaker(url, times=6):
+    """The breaker asked `times` times in a row, each committed. Returns [(ms, got rows, fails after, paused after)]."""
+    import psycopg, time
+    out = []
+    with psycopg.connect(url, autocommit=True) as c:
+        cur = c.cursor()
+        cur.execute("select vec from public.query_vectors where array_length(vec, 1) = 384 order by at desc limit 1")
+        vec = cur.fetchone()[0]
+        cur.execute("select set_config('lantern.meaning_remote', 'on', false)")
+        for _ in range(times):
+            t = time.time()
+            cur.execute("select public.meaning_remote_rows(%s::real[], null, null, null, null) is not null", (vec,))
+            got = cur.fetchone()[0]
+            ms = (time.time() - t) * 1000
+            cur.execute("select fails, skip_until is not null and skip_until > now() from public.meaning_remote_state")
+            fails, paused = cur.fetchone()
+            out.append((ms, got, fails, paused))
+    return out
+
+
+def breaker_line(rows):
+    return "the breaker, asked in a row: " + "; ".join(
+        f"{i + 1}) {'rows' if got else 'nothing'} in {ms:.0f} ms, failures on record {fails}, {'paused' if paused else 'asking'}" for i, (ms, got, fails, paused) in enumerate(rows))
 
 
 def main(argv=None):
@@ -110,9 +140,15 @@ def main(argv=None):
     ap.add_argument("--link", default="", metavar="HOST")
     ap.add_argument("--probe", type=int, default=0, metavar="N")
     ap.add_argument("--storm", type=int, default=0, metavar="N")
+    ap.add_argument("--breaker", action="store_true")
     a = ap.parse_args(argv)
     if a.link and not HOST.match(a.link):
         sys.exit("--link takes a host name like api.example.org")
+    if a.breaker:
+        if not os.environ.get("SUPABASE_DB_URL"):
+            sys.exit("Set SUPABASE_DB_URL.")
+        print(breaker_line(breaker(os.environ["SUPABASE_DB_URL"])))
+        return 0
     if not 0 <= a.probe <= 200 or not 0 <= a.storm <= 30 or not (a.link or a.probe or a.storm):
         sys.exit("--link HOST, --probe N (1 to 200) and/or --storm N (1 to 30)")
     if not os.environ.get("SUPABASE_DB_URL"):
@@ -134,12 +170,12 @@ def main(argv=None):
             conn.commit()
             print(probe_line(got if isinstance(got, dict) else json.loads(got)))
     if a.storm:
-        on, off = storm(os.environ["SUPABASE_DB_URL"], a.storm)
+        first, on, off = storm(os.environ["SUPABASE_DB_URL"], a.storm)
         with psycopg.connect(os.environ["SUPABASE_DB_URL"]) as conn:
             cur = conn.cursor()
             cur.execute("select fails, skip_until from public.meaning_remote_state")
             fails, skip = cur.fetchone()
-        print(storm_line(on, off, {"fails": fails, "skip_until": skip}))
+        print(storm_line(first, on, off, {"fails": fails, "skip_until": skip}))
     return 0
 
 
