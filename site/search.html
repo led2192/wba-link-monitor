@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v98 2026-11-17";
+  const CLIENT = "lantern v99 2026-11-17";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -516,6 +516,18 @@
     const years = [];
     q = q.replace(/\s(20[0-3]\d)\s*[-–]\s*(20[0-3]\d)(?=\s)/g, (m, a, b) => { years.push(+a, +b); return " "; });
     q = q.replace(/\s(20[0-3]\d)(?=\s)/g, (m, a) => { years.push(+a); return " "; });
+    // v99 (17 Nov 2026): a year said in words. "last year lukoil has updated its scope 1 or 2 targets" set no year,
+    // and "last" and "year" were searched as words. "last year" is the year before this one and "this year" (or
+    // "current year") this one, also "el año pasado" and "este año"; with "fiscal", "financial" or "reporting" between.
+    // Only when no year is written in figures; the Years chip shows what was read and takes it away.
+    if (!years.length) {
+      const now = new Date().getFullYear();
+      q = q.replace(/\s(?:in |during |en |of |for )?(?:the |el )?(last|previous|this|current|año pasado|este año|ano pasado|este ano)(?: (?:fiscal|financial|reporting))?(?: year)?(?=\s)/i, (m, w) => {
+        const low = w.toLowerCase(), spanish = /a[ñn]o/.test(low);
+        if (!spanish && !/\syear$/i.test(m)) return m;                       // "the last report", "this target": not a year
+        years.push(/last|previous|pasado/.test(low) ? now - 1 : now); return " ";
+      });
+    }
     if (years.length) { found.from = Math.min(...years); found.to = Math.max(...years); }
     // v80 (the owner, 16 Nov 2026): in a question the name of a kind of report is what is asked about, not a filter.
     // "Does Mercadona publish a separate sustainability report?" was searched only inside sustainability reports, found
