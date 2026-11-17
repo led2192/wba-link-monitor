@@ -429,7 +429,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v98 2026-11-17";' in PAGE
+    assert 'const CLIENT = "lantern v99 2026-11-17";' in PAGE
+    assert 'years.push(/last|previous|pasado/.test(low) ? now - 1 : now); return " ";' in PAGE          # v99: "last year", "this year" are years
     # v98: the page reports what the reader finally saw, at once and again when the meaning arrives late
     assert 'if (!more && !wordsFailed) seen(words, rows, vec ? "used" : meaningAsked ? "waiting" : "off");' in PAGE
     assert 'seen(words, words, "none")' in PAGE and 'seen(words, words, "late")' in PAGE and 'seen(words, rows, "used")' in PAGE
