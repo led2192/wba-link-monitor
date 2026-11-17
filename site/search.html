@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v99 2026-11-17";
+  const CLIENT = "lantern v100 2026-11-17";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -655,7 +655,7 @@
       const href = pageLink(r);
       const a = el("a", null, r.label || r.library_id);
       if (href) { a.href = href; a.target = "_blank"; a.rel = "noopener"; }
-      a.addEventListener("click", () => { rpc("find_click", { key, log_id: r.log_id, library_id: r.library_id, page: r.page, rank: r.rank }).catch(() => {}); });
+      a.addEventListener("click", () => { if (trail.length) trail[trail.length - 1].opened = true; rpc("find_click", { key, log_id: r.log_id, library_id: r.library_id, page: r.page, rank: r.rank }).catch(() => {}); });
       h.appendChild(a);
       // the two marks: a verdict from the list, without opening the document (most results are judged that way)
       const marks = el("span", "marks");
@@ -801,6 +801,7 @@
         const d = el("div", "dym"); d.append(document.createTextNode(`Searching the company ${fx.name}: “${fx.word}” is on no page. `), a); $("status").appendChild(d);
       }
       if (!more && state.q && !state.fixed) didYouMean($("q").value.trim());
+      if (!more && !fromChips) offerAsk();
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
     } catch (e) {
@@ -869,6 +870,19 @@
   // shown, and again when the meaning arrives late, the page says how many pages it showed, how many of them only
   // the meaning found, and what became of the meaning: used, off (a phrase in quotes, an industry, country or region
   // filter, no words), none (asked, nothing came), late (it came when the reader was already down the list), waiting.
+  // v100 (17 Nov 2026): the same thing searched again and again. A colleague searched one company eight times in
+  // four minutes for one figure and opened nothing. That is a question: after the third search of one company in a
+  // row (each within three minutes of the one before, nothing opened), a quiet line offers Ask, once a run.
+  const trail = [];
+  function offerAsk() {
+    trail.push({ t: Date.now(), company: state.company, opened: false, words: !!state.q });
+    const last = trail.slice(-3);
+    if (last.length < 3 || !state.company || $("askBtn").hidden || last.some(x => x.offered)) return;
+    if (!last.every((x, i) => x.company === state.company && !x.opened && x.words && (i === 0 || x.t - last[i - 1].t <= 180000))) return;
+    trail[trail.length - 1].offered = true;
+    const a = el("a", null, "Ask it as a question"); a.href = "#"; a.onclick = ev => { ev.preventDefault(); ask(); };
+    const d = el("div", "dym"); d.append(document.createTextNode("Looking for a figure or a fact? "), a, document.createTextNode(": the best pages are read and the answer comes with its source.")); $("status").appendChild(d);
+  }
   function seen(words, rows, how) {
     const w = new Set(words.map(r => r.library_id + "|" + r.page));
     rpc("search_seen", { key, log_id: words.length ? words[0].log_id : null, typed: $("q").value.trim(), shown: rows.length,
@@ -1911,7 +1925,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2059,6 +2073,20 @@
       else box.appendChild(adminTable(["When", "Question", "Answered", "Facts kept", ""], r.questions.map(x => [adminWhen(x.at), x.question, x.failed ? "failed" : x.answered ? "yes" : "no", x.facts || "", adminRun(x.question, "Run its search")])));
     }
     box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  // v100: the searches that went badly in the last seven days (admin_hard_searches), so that they are found without
+  // reading anyone's log: nothing shown, the same company searched three times or more in a row with nothing opened,
+  // few pages shown and none opened, and searches of five seconds or more.
+  async function adminHard(body) {
+    const r = await authed("admin_hard_searches", { key, days: 7 }); if (!r) { body.textContent = "Not available."; return; }
+    body.innerHTML = "";
+    body.append(el("p", null, "Searches of the last seven days that went badly. \"Shown\" is what the reader saw after the words and the meaning were blended (recorded since 17 Nov 2026; before, only the pages found by words)."));
+    const shown = x => x.shown == null ? `${x.n} by words` : `${x.shown}${x.by_meaning ? ` (${x.by_meaning} by meaning)` : ""}${x.meaning && x.meaning !== "used" ? ` · meaning ${x.meaning}` : ""}`;
+    const part = (title, rows, heads, cells) => { body.append(el("h3", null, `${title} (${rows.length}${rows.length >= 100 ? "+" : ""})`)); if (!rows.length) body.append(el("p", null, "None.")); else body.appendChild(adminTable(heads, rows.map(cells))); };
+    part("Searched again and again, nothing opened", r.runs || [], ["When", "Link", "Company", "Searches", "What was typed", ""], x => [adminWhen(x.first_at), x.key_name || "", x.company || "", x.searches, (x.typed || []).join(" · "), adminRun((x.typed || []).slice(-1)[0])]);
+    part("Nothing shown", r.nothing || [], ["When", "Link", "What was typed", "Shown", ""], x => [adminWhen(x.at), x.key_name || "", x.typed || "", shown(x), adminRun(x.typed)]);
+    part("Three pages or fewer, none opened", r.few || [], ["When", "Link", "What was typed", "Shown", ""], x => [adminWhen(x.at), x.key_name || "", x.typed || "", shown(x), adminRun(x.typed)]);
+    part("Five seconds or more", r.slow || [], ["When", "Link", "What was typed", "Seconds", ""], x => [adminWhen(x.at), x.key_name || "", x.typed || "", (x.ms / 1000).toFixed(1), adminRun(x.typed)]);
   }
   // Facts from answers. v58 (the owner): one search box for a word or a company, and the list grouped by company
   // (each company a block that folds, with its counts) or flat, newest first.

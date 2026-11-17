@@ -1023,6 +1023,22 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.search_seen('k', %s, 'x', 9, 9, 'anything')", (mine,)); self.assertEqual(seen(mine), (3, 0, "late"))   # not a state
             cur.execute("select public.search_seen('k', %s, 'x', 9, 9, 'used')", (other,)); self.assertEqual(seen(other), (None, None, None))   # another key's search
             cur.execute("select public.admin_searches('k', %s)", (kn,)); self.assertEqual([(x["shown"], x["by_meaning"], x["meaning"]) for x in cur.fetchone()[0]["searches"]][:1], [(3, 0, "late")])
+            # the searches that went badly: the same company again and again with nothing opened, nothing shown, few pages, slow
+            cur.execute("insert into public.search_log (key_name, q, typed, company, n, shown, by_meaning, meaning, ms, at) values "
+                        "('hard', 'a', 'baseline acme', 'PT_1', 39, 39, 0, 'used', 60, now() - interval '9 minutes'), "
+                        "('hard', 'b', 'base year acme', 'PT_1', 0, 0, 0, 'none', 40, now() - interval '8 minutes'), "
+                        "('hard', 'c', 'base year target acme', 'PT_1', 4, 2, 1, 'used', 6200, now() - interval '7 minutes'), "
+                        "('hard', 'd', 'rebaseline acme', 'PT_1', 0, 5, 5, 'used', 50, now() - interval '6 minutes'), "
+                        "('hard', 'e', 'other company', 'PT_2', 20, 20, 0, 'used', 50, now() - interval '5 minutes'), "
+                        "('hard', 'f', 'old search', null, 0, null, null, null, 50, now() - interval '30 days')")
+            cur.execute("select public.admin_hard_searches('k', 7)"); hard = cur.fetchone()[0]
+            self.assertEqual([(x["key_name"], x["company"], x["searches"], x["typed"][0], x["typed"][-1]) for x in hard["runs"] if x["key_name"] == "hard"], [("hard", "PT_1", 4, "baseline acme", "rebaseline acme")])
+            self.assertIn("base year acme", [x["typed"] for x in hard["nothing"]])
+            self.assertNotIn("rebaseline acme", [x["typed"] for x in hard["nothing"]])              # no page by words, five by meaning: something was shown
+            self.assertNotIn("old search", [x["typed"] for x in hard["nothing"]])                   # outside the days asked
+            self.assertEqual([x["typed"] for x in hard["few"] if x["key_name"] == "hard"], ["base year target acme"])
+            self.assertEqual([(x["typed"], x["ms"]) for x in hard["slow"] if x["key_name"] == "hard"], [("base year target acme", 6200)])
+            cur.execute("select has_function_privilege('anon', 'public.admin_hard_searches(text, int)', 'execute')"); self.assertFalse(cur.fetchone()[0])
             cur.execute("select public.admin_searches('k', null, 'p@x.org')"); got = cur.fetchone()[0]
             self.assertEqual(got["searches"], [])
             self.assertEqual(sorted((x["question"], x["answered"], x["failed"]) for x in got["questions"]), [("Broken?", False, True), ("What is Nike scope 1?", True, False)])
