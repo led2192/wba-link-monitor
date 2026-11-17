@@ -1725,6 +1725,32 @@ begin
   return case when changed and lower(out_q) <> lower(q) then out_q end;
 end;
 $$;
+-- Does the library not know this word? True when it is no word of a title or a company's name (search_vocab) and
+-- fewer than twenty pages hold it. The page asks it before it takes a word for a company's name typed wrong
+-- (17 Nov 2026: "severestal" named no company and the search read every company's pages for 17 to 21 s).
+create or replace function public.word_unknown(key text, word text) returns boolean
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '3s'
+set enable_seqscan = 'off'          -- as in did_you_mean: the word index, not the table
+as $$
+declare
+  w text := lower(btrim(coalesce(word, '')));
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if w !~ '^[[:alpha:]]{4,30}$' then
+    return false;
+  end if;
+  if exists (select 1 from public.search_vocab v where v.word = w) then
+    return false;
+  end if;
+  return (select count(*) from (select 1 from public.pages p where p.words @@ quote_literal(w)::tsquery limit 20) x) < 20;
+end;
+$$;
+revoke all on function public.word_unknown(text, text) from public;
+grant execute on function public.word_unknown(text, text) to anon, authenticated;
 revoke all on function public.did_you_mean(text, text) from public;
 grant execute on function public.did_you_mean(text, text) to anon, authenticated;
 
