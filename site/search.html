@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v94 2026-11-16";
+  const CLIENT = "lantern v95 2026-11-17";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1466,7 +1466,7 @@
         link(`Ask the remaining ${unasked} companies` + (read > 0 && Number(n.usd) > 0 ? ` (about ${(unasked * Number(n.usd) / read).toFixed(2)} USD)` : ""), () => more(g.id)));
       if (!running && o.may) foot.append(document.createTextNode(" · "), link("Ask again", start));
       out.append(foot);
-      const scoped = [(g.industry || "").replace(/;/g, ", "), g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}–${g.year_to || ""}` : ""].filter(Boolean).join(" · ");
+      const scoped = [g.cohort ? g.cohort.replace(/^t/, "T") : "", (g.industry || "").replace(/;/g, ", "), g.region, g.country, g.year_from || g.year_to ? `${g.year_from || ""}–${g.year_to || ""}` : ""].filter(Boolean).join(" · ");
       const what = el("div", "what", `${scoped || "No filter: the companies a search for the words found"}. Each company's reports searched with “${g.words}”, ${g.pages} pages read a company by a model` + (g.in_scope > n.companies ? `; the scope holds ${g.in_scope} companies and the ceiling kept ${n.companies}` : "") + ". A floor, not a count: measured against analysts' validated answers, a survey finds a little over half of the yes, and about one yes in four is doubtful. Check the source before using a row."); what.style.fontSize = "12.5px";
       out.append(what);
     };
@@ -1507,7 +1507,8 @@
       authed("survey_get", { key, survey: o.have.id }).then(g => { if (!document.body.contains(out)) return; note.textContent = g ? `You asked this on ${adminWhen(o.have.at)}; this is that survey, not a new one.` : ""; show(g, false); if (!g && o.may) offer(); });
     } else offer();
     function offer() {
-      const many = o.up_to ? `up to ${o.companies} companies a search finds, of any industry` : `each of the ${o.companies} companies` + (where ? ` in ${where}` : "") + (o.in_scope > o.companies ? ` (the scope holds ${o.in_scope}; the ceiling is ${o.companies})` : "");
+      // v95: a group the question names by a ranking ("the top 10 of the Gender Benchmark") is the scope
+      const many = o.cohort ? `${o.cohort} (${o.companies} companies)` + (where ? `, in ${where}` : "") : o.up_to ? `up to ${o.companies} companies a search finds, of any industry` : `each of the ${o.companies} companies` + (where ? ` in ${where}` : "") + (o.in_scope > o.companies ? ` (the scope holds ${o.in_scope}; the ceiling is ${o.companies})` : "");
       note.textContent = "No company is named, so one answer from eight pages cannot count companies. " + (o.up_to ? "No industry, country or region was recognised in the question either: choose one with the filter beside the box to ask a whole group. " : "");
       const go1 = adminBtn(`Ask ${many}`, start), go2 = adminBtn("A quick answer from the eight best pages", () => ask(false, true));
       const line = el("div"); line.style.cssText = "margin:8px 0 4px;display:flex;gap:6px;flex-wrap:wrap"; line.append(go1, go2);
