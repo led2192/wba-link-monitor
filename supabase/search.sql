@@ -3755,6 +3755,47 @@ begin
          order by a.at desc limit least(greatest(coalesce(max_rows, 200), 1), 1000)) x) end);
 end;
 $$;
+-- The searches that went badly, for the owner (17 Nov 2026: a colleague's eight searches for one figure, a company's
+-- name typed wrong three times and a search of twenty seconds were found only because the owner read that link's log).
+-- runs: one link searched the same company three times or more, each within three minutes of the one before, and
+-- opened nothing. nothing: no page shown (after the blend when the page reported it, by words before). few: one to
+-- three pages shown and none opened. slow: five seconds or more. A hundred of each at most, newest first.
+create or replace function public.admin_hard_searches(key text, days int default 7) returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+declare
+  since timestamptz := now() - make_interval(days => least(greatest(coalesce(days, 7), 1), 90));
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with l as (
+      select l.id, l.at, l.key_name, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.company, l.n, l.shown, l.by_meaning, l.meaning, l.ms,
+             (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
+        from public.search_log l
+       where l.at > since and l.key_name is not null and l.terms is distinct from '(documents only)'),
+    stepped as (
+      select l.*, case when lag(l.at) over w is null or l.at - lag(l.at) over w > interval '3 minutes' or l.company is distinct from lag(l.company) over w then 1 else 0 end as starts
+        from l window w as (partition by l.key_name order by l.at, l.id)),
+    grouped as (select s.*, sum(s.starts) over (partition by s.key_name order by s.at, s.id) as run from stepped s),
+    runs as (
+      select g.key_name, g.company, min(g.at) as first_at, count(*) as searches, (array_agg(g.typed order by g.at, g.id))[1:12] as typed
+        from grouped g where g.company is not null and btrim(g.company) <> ''
+       group by g.key_name, g.run, g.company having count(*) >= 3 and sum(g.clicks) = 0)
+    select jsonb_build_object(
+      'runs', (select coalesce(jsonb_agg(to_jsonb(x) order by x.first_at desc), '[]'::jsonb) from (select * from runs order by first_at desc limit 100) x),
+      'nothing', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
+                    select l.at, l.key_name, l.typed, l.n, l.shown, l.by_meaning, l.meaning from l where coalesce(l.shown, l.n) = 0 order by l.at desc limit 100) x),
+      'few', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
+                select l.at, l.key_name, l.typed, l.n, l.shown, l.by_meaning, l.meaning from l where l.shown between 1 and 3 and l.clicks = 0 order by l.at desc limit 100) x),
+      'slow', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
+                 select l.at, l.key_name, l.typed, l.ms from l where l.ms >= 5000 order by l.at desc limit 100) x)));
+end;
+$$;
+revoke all on function public.admin_hard_searches(text, int) from public, anon;
+grant execute on function public.admin_hard_searches(text, int) to authenticated;
 revoke all on function public.admin_searches(text, text, text, int) from public, anon;
 grant execute on function public.admin_searches(text, text, text, int) to authenticated;
 
