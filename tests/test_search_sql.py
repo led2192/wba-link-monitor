@@ -429,7 +429,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v94 2026-11-16";' in PAGE
+    assert 'const CLIENT = "lantern v95 2026-11-17";' in PAGE
+    assert "const many = o.cohort ? `${o.cohort} (${o.companies} companies)`" in PAGE                                   # v95: a group named by a ranking is the scope
     assert 'surveyMarks(g, x, () => show(g)) : ""];' in PAGE and "const marks = x => surveyMarks(g, x, () => show(last, running));" in PAGE   # v93: the marks in the owner's table too
     assert 'const r = await authed("survey_more", { key, survey: id });' in PAGE and "link(`Ask the remaining ${unasked} companies`" in PAGE   # v92: a survey at the ceiling is carried on
     assert SQL.count("used := public.surveys_used_today(who);") == 2 and "survey_extensions e where e.asker" not in SQL   # carrying a survey on is part of the same survey: not one of the day's
@@ -446,7 +447,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert 'adminBtn("A quick answer from the eight best pages", () => ask(false, true))' in PAGE and "if (!state.company && quick !== true) {" in PAGE
     assert "surveySeed" not in PAGE
     ss = SQL[SQL.index("create or replace function public.survey_step("):SQL.index("revoke all on function public.survey_step(")]
-    assert "said := public.survey_read(key, s.question, s.words, s.qvec, todo.wba_id, todo.company, s.year_from, s.year_to, s.pages);" in ss and "ask_model" not in ss   # one reading, one function: what is measured is what runs
+    assert "said := public.survey_read(key, s.question || case when s.cohort is not null then" in ss and "ask_model" not in ss   # one reading, one function: what is measured is what runs
     assert "public.survey_read('eval', %s, %s, %s::real[], %s, %s, %s, %s, %s)" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "survey_eval.py"), encoding="utf-8").read()
     assert 'adminBtn("Download as CSV", () => saveText(surveyFile(g), surveyCsv(g)))' in PAGE                    # v87: a survey's table as a file, made in the page
     assert """if (/^[=+\\-@\\t\\r]/.test(t)) t = "'" + t;""" in PAGE                                          # a cell is never run as a formula

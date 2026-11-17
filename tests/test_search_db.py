@@ -893,6 +893,31 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual((o["left_today"], o["per_day"]), (0, 1))                                    # the day's count is the surveys started
             cur.execute("select public.survey_step('k', %s, 5)", (made["id"],)); got = cur.fetchone()[0]
             self.assertEqual((got["status"], got["counts"]["not_stated"]), ("done", 1))
+            # a group named in the question by a ranking: the top N of a benchmark is the scope, not what a search finds
+            cur.execute("""create table if not exists public.company_scores (score_id text primary key, wba_id text not null, benchmark_id text, benchmark_name text,
+                             methodology_id text, year int, transformation text, score numeric, category text, source_updated timestamptz, loaded timestamptz not null default now())""")
+            for i, (wba, bench, method, year, score) in enumerate((("S1", "Gender Benchmark", "GEB-2025", 2025, 40), ("S3", "Gender Benchmark", "GEB-2025", 2025, 90), ("S4", "Gender Benchmark", "GEB-2025", 2025, 70),
+                                                                  ("S9", "Gender Benchmark", "GEB-2025", 2025, 80), ("S2", "Gender Benchmark", "GEB-2025", 2025, None), ("S3", "Gender Benchmark", "GEB-2023", 2023, 1),
+                                                                  ("S6", "Gender Assessment", "GEA-2025", 2025, 99), ("S1", "Nature Benchmark", "NAB-2025", 2025, 99))):
+                cur.execute("insert into public.company_scores (score_id, wba_id, benchmark_name, methodology_id, year, score) values (%s, %s, %s, %s, %s, %s)", (f"t{i}", wba, bench, method, year, score))
+            cohort = lambda q, within=None: (cur.execute("select public.question_cohort(%s, %s)", (q, within)), cur.fetchone()[0])[1]
+            got = cohort("How many of the top 3 performers of the WBA Gender Benchmark have a scope 1 emissions target?")
+            self.assertEqual(got, {"label": "the top 3 of the Gender Benchmark 2025", "ids": ["S3", "S9", "S4"], "n": 3})      # by score, the latest year, no score no place
+            self.assertEqual(cohort("top 2 of the gender benchmark?", ["S1", "S4"])["ids"], ["S4", "S1"])                     # within a filter
+            self.assertIsNone(cohort("Which top 10 companies have a gender policy?"))                                          # no benchmark named
+            self.assertIsNone(cohort("Is the gender benchmark mentioned by the companies?"))                                   # no "top N"
+            self.assertIsNone(cohort("the top 5 of the climate benchmark"))                                                    # a benchmark the scores do not hold
+            jwt("e.owner@worldbenchmarkingalliance.org")
+            cur.execute("select public.admin_surveys('k', null, null, null, 'ana@worldbenchmarkingalliance.org', 9)")
+            jwt("ana@worldbenchmarkingalliance.org")
+            asked = "How many of the top 3 performers of the WBA Gender Benchmark have an incentive?"
+            cur.execute("select public.survey_offer('k', %s)", (asked,)); o = cur.fetchone()[0]
+            self.assertEqual((o["cohort"], o["companies"], o["in_scope"], o["up_to"]), ("the top 3 of the Gender Benchmark 2025", 3, 3, False))
+            cur.execute("select public.survey_start('k', %s, null, null, null, null, null, null, 'test')", (asked,)); top = cur.fetchone()[0]
+            self.assertEqual((top["companies"], top["cohort"]), (3, "the top 3 of the Gender Benchmark 2025"))
+            cur.execute("select public.survey_get('k', %s)", (top["id"],)); got = cur.fetchone()[0]
+            self.assertEqual((sorted(r["company"] for r in got["rows"]), got["cohort"]), (["Delta", "Gamma", "S9"], "the top 3 of the Gender Benchmark 2025"))   # a company the library does not know keeps its place
+            cur.execute("select public.survey_more('k', %s)", (top["id"],)); self.assertTrue(cur.fetchone()[0]["none"])        # a ranking has no rest
             jwt("someone.else@worldbenchmarkingalliance.org")
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):                              # a survey is read on by its asker alone
                 cur.execute("select public.survey_step('k', %s, 1)", (made["id"],))
