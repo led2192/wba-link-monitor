@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v95 2026-11-17";
+  const CLIENT = "lantern v96 2026-11-17";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1377,11 +1377,12 @@
     // v88 (the owner, 16 Nov 2026): a question that names no company is about many companies. Before an answer is
     // spent on eight pages, those who may run surveys are offered one (or shown the one they already ran); the quick
     // answer stays one press away. Everyone else is answered as before.
-    state.surveyMay = false;
+    state.surveyMay = false; state.surveyUsed = 0;
     if (!state.company && quick !== true) {
       let o = null; try { o = await authed("survey_offer", surveyScope(text)); } catch (e) { o = null; }
       if (seq !== searchSeq || !document.body.contains(c)) return;
       state.surveyMay = !!(o && o.may);
+      state.surveyUsed = o && !o.may && o.why === "limit" ? (o.per_day || 0) : 0;   // v96: the day's surveys are used: say so under the answer
       if (o && (o.may || o.have)) { surveyCard(c, text, o); return; }
     }
     let vec = null;                                           // the question's vector, when the language model is at hand within 4 s: the answer then reads the one search's pages
@@ -1414,6 +1415,7 @@
     if (!state.company) {
       const more = el("div", "what"); more.append(document.createTextNode("No company is named, so this reads eight pages across companies and cannot count. "));
       if (state.surveyMay) { const a = el("a", null, "Ask every company in the scope instead"); a.href = "#"; a.onclick = ev => { ev.preventDefault(); ask(); }; more.append(a); }
+      else if (state.surveyUsed) more.append(document.createTextNode(`A survey would ask each company, but today's ${state.surveyUsed} surveys for this address are used. They come back at midnight UTC.`));
       c.append(more);
     }
   }
