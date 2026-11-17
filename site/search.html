@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v96 2026-11-17";
+  const CLIENT = "lantern v97 2026-11-17";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -400,6 +400,48 @@
   // What the box says beyond words: every company named (longest names first, so "Nike Inc" wins over "Nike"), every
   // year named (one, a span 2022-2024, or several: the earliest to the latest), a document type.
   const WORD_NAMES = new Set("action apple block bolt canon dole grab liquid mars mosaic next target lumen orange shell visa oracle zoom subway snap vale meta amazon alphabet".split(" "));
+  // The slips between two words: a letter added, dropped, changed, or two neighbours swapped. Stops counting above `max`.
+  function slips(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    let prev2 = null, prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i]; let low = i;
+      for (let j = 1; j <= b.length; j++) {
+        let v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        if (prev2 && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, prev2[j - 2] + 1);
+        cur.push(v); if (v < low) low = v;
+      }
+      if (low > max) return max + 1;
+      prev2 = prev; prev = cur;
+    }
+    return prev[b.length];
+  }
+  // The one company whose name a word of the text nearly is, or null: {word, id, name}. Names of one word, and the
+  // first word of longer names when no other company starts with it. A word that is itself a company's word, or
+  // that is near two companies, names none.
+  let nearNames = null;
+  function nearCompany(text) {
+    if (!companies.length) return null;
+    if (!nearNames) {
+      const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(), firsts = new Map(), all = new Set();
+      for (const c of companies) { const ws = fold(c.name || "").split(/[^a-z0-9]+/).filter(Boolean); ws.forEach(w => all.add(w)); if (ws[0]) firsts.set(ws[0], (firsts.get(ws[0]) || 0) + 1); }
+      nearNames = { all, list: [] };
+      for (const c of companies) { const ws = fold(c.name || "").split(/[^a-z0-9]+/).filter(Boolean); if (ws[0] && ws[0].length >= 6 && /^[a-z]+$/.test(ws[0]) && firsts.get(ws[0]) === 1 && !WORD_NAMES.has(ws[0])) nearNames.list.push({ w: ws[0], c }); }
+    }
+    let best = null, tie = false;
+    for (const word of new Set(text.toLowerCase().split(/[^a-z]+/).filter(w => w.length >= 6))) {
+      if (nearNames.all.has(word)) continue;
+      const max = word.length >= 9 ? 2 : 1;
+      for (const n of nearNames.list) {
+        if (n.w[0] !== word[0]) continue;
+        const d = slips(word, n.w, max);
+        if (d > max) continue;
+        if (!best || d < best.d) { best = { d, word, id: n.c.id, name: n.c.name }; tie = false; }
+        else if (d === best.d && n.c.id !== best.id) tie = true;
+      }
+    }
+    return best && !tie ? { word: best.word, id: best.id, name: best.name } : null;
+  }
   function parse(text) {
     let q = " " + text.trim().replace(/[?¿!¡]+/g, " ").replace(/\s+/g, " ") + " ";      // a question's marks are not words ("in 2024?" is the year 2024)
     const found = { company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null };
@@ -443,6 +485,11 @@
       fq = fq.slice(0, m.index) + " " + fq.slice(m.index + m[0].length);
     }
     if (hits.length) q = q.replace(/\s[;,](?=\s)/g, " ");
+    // v97 (17 Nov 2026): a company's name typed wrong. "base year target severestal" named no company, so 1,300 pages
+    // of every company came back in 17 to 21 s, three times in a row. With no company named, a word of six letters or
+    // more that is one slip away from one company's name (two when it has nine letters or more), with the same first
+    // letter, is kept as `typo`; search() takes it as the company only when the library does not know the word.
+    if (!hits.length) found.typo = nearCompany(fq);
     if (hits.length) { found.company = hits.map(c => c.id).join(";"); found.companyName = hits.map(c => c.name).join(", "); }
     // then the profiles (an industry name like "Oil & Gas" or a country must not be read as words), longest names first.
     // Companies come before them: "Basra Oil Company" is a company, not the Oil & Gas industry and the word "Basra"
@@ -660,6 +707,15 @@
     if (!more) { state.cited = []; state.facts = []; state.confirmed = []; state.earlier = false; state.answered = false; }                                 // the pages an answer cited belong to that question
     if (!fromChips) {
       const parsed = parse($("q").value);
+      state.fixed = null;
+      if (parsed.typo && !$("fCompany").value && state.asTyped !== $("q").value.trim()) {     // v97: a company's name typed wrong, when the library does not know the word
+        let unknown = false; try { unknown = await rpc("word_unknown", { key, word: parsed.typo.word }); } catch (e) { unknown = false; }
+        if (unknown) {
+          parsed.company = parsed.typo.id; parsed.companyName = parsed.typo.name; state.fixed = parsed.typo;
+          parsed.q = (" " + parsed.q + " ").replace(new RegExp("\\s" + parsed.typo.word + "(?:'s)?(?=\\s)", "i"), " ").trim();
+          parsed.industry = parsed.country = parsed.countryName = parsed.region = null;
+        }
+      }
       state.q = parsed.q;
       state.company = parsed.company || ($("fCompany").value ? companyId($("fCompany").value) : null);
       state.companyName = parsed.companyName || ($("fCompany").value || null);
@@ -726,7 +782,12 @@
       render(more ? rows.slice(state.rows - 50) : citedFirst(rows), !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues().then(showFacts, showFacts).then(() => earlierFacts(seq));
-      if (!more && state.q) didYouMean($("q").value.trim());
+      if (state.fixed && !more && !fromChips) {                               // v97: say whose pages these are, and leave the way back
+        const fx = state.fixed, typed = $("q").value.trim(); const a = el("a", null, "Search the words as typed"); a.href = "#";
+        a.onclick = ev => { ev.preventDefault(); state.asTyped = typed; search(false); };
+        const d = el("div", "dym"); d.append(document.createTextNode(`Searching the company ${fx.name}: “${fx.word}” is on no page. `), a); $("status").appendChild(d);
+      }
+      if (!more && state.q && !state.fixed) didYouMean($("q").value.trim());
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
     } catch (e) {
