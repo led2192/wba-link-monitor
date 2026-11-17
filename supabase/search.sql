@@ -3757,9 +3757,12 @@ end;
 $$;
 -- The searches that went badly, for the owner (17 Nov 2026: a colleague's eight searches for one figure, a company's
 -- name typed wrong three times and a search of twenty seconds were found only because the owner read that link's log).
--- runs: one link searched the same company three times or more, each within three minutes of the one before, and
--- opened nothing. nothing: no page shown (after the blend when the page reported it, by words before). few: one to
--- three pages shown and none opened. slow: five seconds or more. A hundred of each at most, newest first.
+-- runs: one link searched the same company three times or more, each within three minutes of the one before.
+-- nothing: no page shown (after the blend when the page reported it, by words before). few: one to three pages
+-- shown. slow: five seconds or more. A hundred of each at most, newest first.
+-- Whether a result was opened decides nothing here (the owner, 17 Nov 2026): the list shows the passage itself, so a
+-- person reads the answer without opening the document, and someone trying the search opens nothing. `opened` is
+-- returned as a count to read, never as a filter.
 create or replace function public.admin_hard_searches(key text, days int default 7) returns jsonb
 language plpgsql stable security definer
 set search_path = public, extensions
@@ -3781,15 +3784,15 @@ begin
         from l window w as (partition by l.key_name order by l.at, l.id)),
     grouped as (select s.*, sum(s.starts) over (partition by s.key_name order by s.at, s.id) as run from stepped s),
     runs as (
-      select g.key_name, g.company, min(g.at) as first_at, count(*) as searches, (array_agg(g.typed order by g.at, g.id))[1:12] as typed
+      select g.key_name, g.company, min(g.at) as first_at, count(*) as searches, sum(g.clicks) as opened, (array_agg(g.typed order by g.at, g.id))[1:12] as typed
         from grouped g where g.company is not null and btrim(g.company) <> ''
-       group by g.key_name, g.run, g.company having count(*) >= 3 and sum(g.clicks) = 0)
+       group by g.key_name, g.run, g.company having count(*) >= 3)
     select jsonb_build_object(
       'runs', (select coalesce(jsonb_agg(to_jsonb(x) order by x.first_at desc), '[]'::jsonb) from (select * from runs order by first_at desc limit 100) x),
       'nothing', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
                     select l.at, l.key_name, l.typed, l.n, l.shown, l.by_meaning, l.meaning from l where coalesce(l.shown, l.n) = 0 order by l.at desc limit 100) x),
       'few', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
-                select l.at, l.key_name, l.typed, l.n, l.shown, l.by_meaning, l.meaning from l where l.shown between 1 and 3 and l.clicks = 0 order by l.at desc limit 100) x),
+                select l.at, l.key_name, l.typed, l.n, l.shown, l.by_meaning, l.meaning from l where l.shown between 1 and 3 order by l.at desc limit 100) x),
       'slow', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
                  select l.at, l.key_name, l.typed, l.ms from l where l.ms >= 5000 order by l.at desc limit 100) x)));
 end;
