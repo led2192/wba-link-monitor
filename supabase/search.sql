@@ -3801,6 +3801,8 @@ create table if not exists public.survey_extensions (
 );
 create index if not exists survey_extensions_asker on public.survey_extensions (asker, at desc);
 alter table public.survey_extensions enable row level security;
+-- A scope named in the question itself ("the top 10 of the Gender Benchmark"): its label, as the person will read it.
+alter table public.surveys add column if not exists cohort text;
 alter table public.survey_rows add column if not exists verdict text;
 alter table public.survey_rows add column if not exists verdict_by text;
 alter table public.survey_rows add column if not exists verdict_at timestamptz;
@@ -3881,6 +3883,49 @@ begin
     'source', substring(j ->> 'source' from '^\s*\[?\s*(\d{1,2})\s*\]?\s*$')::int);      -- 3, "3" and "[3]" are the same page
 end;
 $$;
+
+-- A group of companies named in the question by a ranking (17 Nov 2026: the owner asked how many of the top 10 of
+-- the Gender Benchmark have a target, and the survey went to 51 companies a search found, none of them chosen by
+-- that ranking). Today one ranking is known: the published benchmark scores (company_scores). The question must say
+-- "top N" and "benchmark", and name a benchmark: its name without the words "benchmark", "wba" and "the" stands in
+-- the question; the longest name wins, then the latest year. `within`: the companies a filter left, when there is
+-- one ("the top 10 of the Gender Benchmark in Europe"). Returns {label, ids, n} or null. N is 1 to 200.
+create or replace function public.question_cohort(question text, within text[] default null) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  q text := ' ' || regexp_replace(lower(coalesce(question, '')), '[^[:alnum:]]+', ' ', 'g') || ' ';
+  m text[];
+  n int;
+  b record;
+  ids text[];
+begin
+  if to_regclass('public.company_scores') is null or position(' benchmark' in q) = 0 then
+    return null;
+  end if;
+  m := regexp_match(q, ' top (\d{1,3}) ');
+  if m is null then
+    return null;
+  end if;
+  n := least(greatest(m[1]::int, 1), 200);
+  select x.benchmark_name, x.methodology_id, x.year into b from (
+    select s.benchmark_name, s.methodology_id, s.year, count(*) as scored,
+           btrim(regexp_replace(regexp_replace(' ' || regexp_replace(lower(s.benchmark_name), '[^[:alnum:]]+', ' ', 'g') || ' ', ' (wba|benchmark|the) ', ' ', 'g'), '\s+', ' ', 'g')) as core
+      from public.company_scores s where s.benchmark_name is not null and s.score is not null
+     group by s.benchmark_name, s.methodology_id, s.year) x
+   where length(x.core) >= 4 and position(' ' || x.core || ' ' in q) > 0
+   order by length(x.core) desc, x.year desc nulls last, x.scored desc limit 1;
+  if b.methodology_id is null then
+    return null;
+  end if;
+  ids := array(select s.wba_id from public.company_scores s
+                where s.methodology_id = b.methodology_id and s.score is not null and (within is null or s.wba_id = any(within))
+                order by s.score desc, s.wba_id limit n);
+  return jsonb_build_object('label', format('the top %s of the %s%s', n, b.benchmark_name, coalesce(' ' || b.year::text, '')), 'ids', to_jsonb(ids), 'n', coalesce(array_length(ids, 1), 0));
+end;
+$$;
+revoke all on function public.question_cohort(text, text[]) from public, anon, authenticated;
 
 -- Surveys a person has used today: those started. Carrying a survey on to the rest of its scope is part of the same
 -- survey and is not counted (the owner, 16 Nov 2026).
@@ -4031,6 +4076,7 @@ declare
   got jsonb;
   words text;
   ids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
+  coh jsonb;
   in_scope int := 0;
   new_id bigint;
   made int;
@@ -4054,11 +4100,20 @@ begin
     return jsonb_build_object('limit', true, 'per_day', allowed);
   end if;
   words := public.survey_words(asked);
+  coh := public.question_cohort(asked, ids);
   insert into public.surveys (asker, question, words, qvec, industry, country, region, year_from, year_to, pages, client)
     values (who, asked, words, case when coalesce(array_length(qvec, 1), 0) = 384 then qvec end, nullif(btrim(industry_filter), ''), nullif(btrim(country_filter), ''),
             nullif(btrim(region_filter), ''), year_from, year_to, st.pages_a_company, left(client, 60))
     returning id into new_id;
-  if ids is not null then
+  update public.surveys s set cohort = coh ->> 'label' where s.id = new_id and coh is not null;
+  if coh is not null then
+    -- a group named by a ranking: exactly those companies, with or without documents (one with none says "no page found")
+    insert into public.survey_rows (survey_id, wba_id, company)
+      select new_id, i.wba_id, coalesce(c.name, i.wba_id) from jsonb_array_elements_text(coh -> 'ids') i(wba_id)
+        left join public.companies c on c.wba_id = i.wba_id
+       order by 2 limit st.max_companies;
+    in_scope := (coh ->> 'n')::int;
+  elsif ids is not null then
     -- a filter: every company of the scope that the library holds a document for, by name, up to the ceiling
     select count(*) into in_scope from public.companies c
      where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id);
@@ -4076,7 +4131,7 @@ begin
   select count(*) into made from public.survey_rows r where r.survey_id = new_id;
   update public.surveys s set in_scope = in_scope, status = case when made = 0 then 'done' else 'open' end,
          finished_at = case when made = 0 then now() end where s.id = new_id;
-  return jsonb_build_object('id', new_id, 'companies', made, 'in_scope', in_scope, 'pages', st.pages_a_company, 'words', words,
+  return jsonb_build_object('id', new_id, 'companies', made, 'in_scope', in_scope, 'pages', st.pages_a_company, 'words', words, 'cohort', coh ->> 'label',
     'usd', round(made * (st.pages_a_company * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3), 'left_today', allowed - used - 1);
 end;
 $$;
@@ -4101,7 +4156,7 @@ begin
     return null;
   end if;
   return jsonb_build_object(
-    'id', s.id, 'at', s.at, 'question', s.question, 'words', s.words, 'status', s.status, 'in_scope', s.in_scope, 'pages', s.pages,
+    'id', s.id, 'at', s.at, 'question', s.question, 'words', s.words, 'status', s.status, 'in_scope', s.in_scope, 'cohort', s.cohort, 'pages', s.pages,
     'industry', s.industry, 'country', s.country, 'region', s.region, 'year_from', s.year_from, 'year_to', s.year_to,
     'counts', (select jsonb_build_object('companies', count(*), 'yes', count(*) filter (where r.status = 'yes'), 'no', count(*) filter (where r.status = 'no'),
                         'not_stated', count(*) filter (where r.status = 'not_stated'), 'no_page', count(*) filter (where r.status = 'no_page'),
@@ -4137,6 +4192,7 @@ declare
   allowed int;
   used int;
   ids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
+  coh jsonb;
   in_scope int;
   n int;
   have jsonb;
@@ -4159,9 +4215,13 @@ begin
   if ids is not null then
     select count(*) into in_scope from public.companies c where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id);
   end if;
+  coh := public.question_cohort(asked, ids);
+  if coh is not null then
+    in_scope := (coh ->> 'n')::int;
+  end if;
   n := least(coalesce(in_scope, st.max_companies), st.max_companies);
   return jsonb_build_object('may', used < allowed, 'why', case when used >= allowed then 'limit' end, 'per_day', allowed, 'left_today', greatest(allowed - used, 0),
-    'companies', n, 'in_scope', in_scope, 'up_to', ids is null, 'pages', st.pages_a_company,
+    'companies', n, 'in_scope', in_scope, 'up_to', ids is null and coh is null, 'cohort', coh ->> 'label', 'pages', st.pages_a_company,
     'usd', round(n * (st.pages_a_company * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3), 'have', have);
 end;
 $$;
@@ -4196,7 +4256,7 @@ begin
     raise exception 'not allowed' using errcode = '42501';
   end if;
   ids := public.profile_matching(s.industry, s.country, s.region);
-  if ids is null then
+  if ids is null or s.cohort is not null then                  -- a search, or a group named by a ranking: there is no rest
     return jsonb_build_object('none', true) || public.survey_get(key, survey);
   end if;
   select coalesce((select l.surveys_per_day from public.ask_limits l where l.email = who), 0) into allowed;
@@ -4303,7 +4363,9 @@ begin
     if read_today >= st.readings_a_day then
       return jsonb_build_object('limit', true, 'everyone', true) || public.survey_get(key, survey);
     end if;
-    said := public.survey_read(key, s.question, s.words, s.qvec, todo.wba_id, todo.company, s.year_from, s.year_to, s.pages);
+    -- a group named in the question was fixed when the survey started: the reader is told not to judge it
+    said := public.survey_read(key, s.question || case when s.cohort is not null then format(E'\n(This company was already selected as one of %s. Do not judge that part: answer the rest of the question for this company.)', s.cohort) else '' end,
+                               s.words, s.qvec, todo.wba_id, todo.company, s.year_from, s.year_to, s.pages);
     update public.survey_rows x set status = said ->> 'status', value = said ->> 'value', evidence = said ->> 'evidence', year = (said ->> 'year')::int,
            library_id = said ->> 'library_id', page = (said ->> 'page')::int, doc_year = (said ->> 'doc_year')::int, doc_type = said ->> 'doc_type',
            label = said ->> 'label', url = said ->> 'url', input_tokens = (said ->> 'in')::int, output_tokens = (said ->> 'out')::int,

@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-17: A ranking named in a question fixes who is asked
+"The top 10 of the Gender Benchmark" is a set of companies, not words to search for. Chosen: the database resolves it before anything is read (`question_cohort`), from the published benchmark scores, and the survey asks exactly those companies; one with no document says "no page found" and keeps its place, so the count is out of N. The reader is told the selection is done. Rejected: letting the reader judge whether a company is in the top 10 (it cannot know, and answered "not stated" 51 times of 51); resolving it in the page (the scores are in the database). Not built yet: rankings by revenue or by number of employees, which need a decision on which values to rank by (the robot's proposals or validated answers) and a statement of how many companies hold one (#615).
+
 ### 2026-11-17: The search by meaning is served by lanterN's own server
 Chosen by the owner after three checks: the like-for-like comparison of 16 Nov; the comparison with no company (run 43902018654: of the true first ten, no filter 89.0% to 93.7%, two years 88.0% to 94.0%, a type 80.7% to 94.0%); and the first nightly refresh, which found the copies equal (run 44002613107). What guards it: a search that gets no answer in 1.5 seconds, or fewer pages than it needs, uses Supabase's own index; three failures in a row stop the asking for a minute; the nightly refresh switches the option off when the copies differ. Known limits: the first refresh had nothing to copy, so it showed that "no change" is seen, not that a change is copied; one server with no spare. Rejected for now: dropping Supabase's index (it stays at least four weeks) and a smaller Supabase machine (to be measured after those weeks) (#614).
 
