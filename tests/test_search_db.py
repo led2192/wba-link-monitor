@@ -907,6 +907,18 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertIsNone(cohort("Which top 10 companies have a gender policy?"))                                          # no benchmark named
             self.assertIsNone(cohort("Is the gender benchmark mentioned by the companies?"))                                   # no "top N"
             self.assertIsNone(cohort("the top 5 of the climate benchmark"))                                                    # a benchmark the scores do not hold
+            # a group named by a grade: a benchmark that publishes letters and no number
+            for i, (wba, grade) in enumerate((("S1", "B"), ("S3", "b "), ("S4", "A"), ("S6", "C"), ("S2", None))):
+                cur.execute("insert into public.company_scores (score_id, wba_id, benchmark_name, methodology_id, year, category) values (%s, %s, 'ACT Core', 'ACO-2025', 2025, %s)", (f"g{i}", wba, grade))
+            got = cohort("How many of the companies that got a B in ACT Core benchmark have executive compensation linked to GHG emissions?")
+            self.assertEqual(got, {"label": "the 2 companies with a B in ACT Core 2025", "ids": ["S1", "S3"], "n": 2, "grade": "B"})
+            got = cohort("Do the companies rated B or above in ACT Core disclose scope 3?")
+            self.assertEqual((got["ids"], got["label"]), (["S4", "S1", "S3"], "the 3 companies with a B or above in ACT Core 2025"))
+            self.assertEqual(cohort("Which companies with an A in the ACT Core benchmark have a transition plan?")["ids"], ["S4"])
+            self.assertEqual(cohort("C rated companies of ACT Core: do they have a target?", ["S1", "S6"])["ids"], ["S6"])       # within a filter
+            self.assertIsNone(cohort("Which ACT Core companies have a target?"))                                               # "a" is the article
+            self.assertIsNone(cohort("Which companies got a D in ACT Core?"))                                                  # a letter nobody holds
+            self.assertIsNone(cohort("Which companies got a B in the gender benchmark?"))                                      # a benchmark with no grades
             # a ranking by revenue or by number of employees: the robot's figures, the company's latest year, in US dollars
             import datetime
             y = datetime.date.today().year
@@ -934,6 +946,13 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.survey_get('k', %s)", (top["id"],)); got = cur.fetchone()[0]
             self.assertEqual((sorted(r["company"] for r in got["rows"]), got["cohort"]), (["Delta", "Gamma", "S9"], "the top 3 of the Gender Benchmark 2025"))   # a company the library does not know keeps its place
             cur.execute("select public.survey_more('k', %s)", (top["id"],)); self.assertTrue(cur.fetchone()[0]["none"])        # a ranking has no rest
+            # the model refuses the reader (no credit): the survey stops, and no company is marked "not read"
+            cur.execute("""create or replace function public.ask_model(api_key text, http_schema text, model text, system_text text, user_text text, max_tokens int) returns jsonb language sql as $f$
+                             select jsonb_build_object('error', 'the model answered HTTP 400: Your credit balance is too low to access the API.') $f$""")
+            cur.execute("select public.survey_step('k', %s, 5)", (top["id"],)); got = cur.fetchone()[0]
+            self.assertTrue(got["off"]); self.assertIn("out of credit", got["why"])
+            self.assertEqual((got["counts"]["failed"], got["status"]), (0, "open"))
+            self.assertGreaterEqual(got["counts"]["pending"], 1)
             jwt("someone.else@worldbenchmarkingalliance.org")
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):                              # a survey is read on by its asker alone
                 cur.execute("select public.survey_step('k', %s, 1)", (made["id"],))
