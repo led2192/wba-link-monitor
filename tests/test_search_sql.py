@@ -429,7 +429,12 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v96 2026-11-17";' in PAGE
+    assert 'const CLIENT = "lantern v97 2026-11-17";' in PAGE
+    # v97: a company's name typed wrong is taken as the company only when the library does not know the word, and says so
+    assert 'unknown = await rpc("word_unknown", { key, word: parsed.typo.word })' in PAGE
+    assert "if (!hits.length) found.typo = nearCompany(fq);" in PAGE
+    assert "Search the words as typed" in PAGE and "is on no page. `" in PAGE
+    assert "grant execute on function public.word_unknown(text, text) to anon, authenticated;" in SQL
     assert "surveys for this address are used. They come back at midnight UTC." in PAGE          # v96: no silent quick answer when the day's surveys are used
     assert "const many = o.cohort ? `${o.cohort} (${o.companies} companies)`" in PAGE                                   # v95: a group named by a ranking is the scope
     assert 'surveyMarks(g, x, () => show(g)) : ""];' in PAGE and "const marks = x => surveyMarks(g, x, () => show(last, running));" in PAGE   # v93: the marks in the owner's table too

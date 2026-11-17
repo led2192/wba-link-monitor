@@ -1314,6 +1314,11 @@ class SearchOnPostgres(unittest.TestCase):
         cur = self.conn.cursor()
         cur.execute("select public.did_you_mean('', 'unilver scope 3')"); self.assertEqual(cur.fetchone()[0], "unilever scope 3")
         cur.execute("select public.did_you_mean('', 'living wage')"); self.assertIsNone(cur.fetchone()[0])
+        # the page's question before it takes a word for a company's name typed wrong
+        unknown = lambda w: (cur.execute("select public.word_unknown('', %s)", (w,)), cur.fetchone()[0])[1]
+        self.assertTrue(unknown("unilver")); self.assertTrue(unknown(" Severestal "))
+        self.assertFalse(unknown("unilever"))                                     # a word of a title or a company's name
+        self.assertFalse(unknown("x1")); self.assertFalse(unknown(None))          # not a word
 
     def test_the_review_card_lists_every_reading_and_carries_the_page_when_there_is_no_link(self):
         """12 Nov 2026: the card said "1 give another" and not which figure or where; and a document with no address
