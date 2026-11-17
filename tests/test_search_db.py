@@ -1037,6 +1037,10 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertNotIn("rebaseline acme", [x["typed"] for x in hard["nothing"]])              # no page by words, five by meaning: something was shown
             self.assertNotIn("old search", [x["typed"] for x in hard["nothing"]])                   # outside the days asked
             self.assertEqual([x["typed"] for x in hard["few"] if x["key_name"] == "hard"], ["base year target acme"])
+            cur.execute("insert into public.search_clicks (log_id, library_id, page, rank) select id, 'L', 1, 1 from public.search_log where key_name = 'hard' and typed in ('baseline acme', 'base year target acme')")
+            cur.execute("select public.admin_hard_searches('k', 7)"); again = cur.fetchone()[0]              # a result opened changes nothing: the passage is read in the list
+            self.assertEqual([(x["searches"], x["opened"]) for x in again["runs"] if x["key_name"] == "hard"], [(4, 2)])
+            self.assertEqual([x["typed"] for x in again["few"] if x["key_name"] == "hard"], ["base year target acme"])
             self.assertEqual([(x["typed"], x["ms"]) for x in hard["slow"] if x["key_name"] == "hard"], [("base year target acme", 6200)])
             cur.execute("select has_function_privilege('anon', 'public.admin_hard_searches(text, int)', 'execute')"); self.assertFalse(cur.fetchone()[0])
             cur.execute("select public.admin_searches('k', null, 'p@x.org')"); got = cur.fetchone()[0]
