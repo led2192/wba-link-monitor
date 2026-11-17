@@ -429,7 +429,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v95 2026-11-17";' in PAGE
+    assert 'const CLIENT = "lantern v96 2026-11-17";' in PAGE
+    assert "surveys for this address are used. They come back at midnight UTC." in PAGE          # v96: no silent quick answer when the day's surveys are used
     assert "const many = o.cohort ? `${o.cohort} (${o.companies} companies)`" in PAGE                                   # v95: a group named by a ranking is the scope
     assert 'surveyMarks(g, x, () => show(g)) : ""];' in PAGE and "const marks = x => surveyMarks(g, x, () => show(last, running));" in PAGE   # v93: the marks in the owner's table too
     assert 'const r = await authed("survey_more", { key, survey: id });' in PAGE and "link(`Ask the remaining ${unasked} companies`" in PAGE   # v92: a survey at the ceiling is carried on
