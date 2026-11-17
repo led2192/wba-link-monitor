@@ -3949,6 +3949,61 @@ revoke all on function public.ranking_figures(text) from public, anon, authentic
 --   name wins, then the latest year.
 -- `within`: the companies a filter left, when there is one ("the top 10 by employees in North America").
 -- Returns {label, ids, n} or null. N is 1 to 200.
+-- With no "top N", a group named by a grade (grade_cohort, 17 Nov 2026): "the companies that got a B in ACT Core".
+-- A group named by a grade of a benchmark (17 Nov 2026: the owner asked how many of the companies that got a B in
+-- ACT Core link executive pay to emissions; ACT Core publishes letters and no number, so no group was seen, 63
+-- companies a search found were asked, and the reader was left to judge the grade from pages that do not print it).
+-- The question names a benchmark that holds grades (company_scores.category) and a letter said as a grade: "got a B",
+-- "rated B", "with a C", "grade D", "B rated", "an A"; "B or above" (or higher, better) takes the better letters too.
+-- A bare "a" is the article and never the grade. Returns {label, ids, n, grade} or null (also when no company holds
+-- the letter). `q` is the question as question_cohort cleans it.
+create or replace function public.grade_cohort(q text, within text[] default null) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  m text[];
+  g text;
+  above boolean;
+  b record;
+  ids text[];
+begin
+  if to_regclass('public.company_scores') is null then
+    return null;
+  end if;
+  m := regexp_match(q, ' (?:got|get|gets|getting|have|has|had|having|with|rated|scored|scoring|received|receiving|graded|given|earned|grade|rating|score|category|band)(?: of)?(?: an?)?(?: grade| rating| score)?(?: of)? ([b-g]) ');
+  if m is null then m := regexp_match(q, ' ([b-g]) (?:rated|grade|rating|score|category|band) '); end if;
+  if m is null then m := regexp_match(q, ' (?:an|grade|rating|rated|score|scored|category|band) (a) '); end if;
+  if m is null then
+    return null;
+  end if;
+  g := upper(m[1]);
+  above := q ~ (' ' || m[1] || ' (or|and) (above|higher|better) ');
+  select x.benchmark_name, x.methodology_id, x.year into b from (
+    select s.benchmark_name, s.methodology_id, s.year,
+           btrim(regexp_replace(regexp_replace(' ' || regexp_replace(lower(s.benchmark_name), '[^[:alnum:]]+', ' ', 'g') || ' ', ' (wba|benchmark|the) ', ' ', 'g'), '\s+', ' ', 'g')) as core
+      from public.company_scores s where s.benchmark_name is not null and s.category is not null
+     group by s.benchmark_name, s.methodology_id, s.year) x
+   where length(x.core) >= 4 and position(' ' || x.core || ' ' in q) > 0
+   order by length(x.core) desc, x.year desc nulls last limit 1;
+  if b.methodology_id is null then
+    return null;
+  end if;
+  ids := array(select s.wba_id from public.company_scores s
+                where s.methodology_id = b.methodology_id and upper(btrim(s.category)) ~ '^[A-G]$'
+                  and case when above then upper(btrim(s.category)) <= g else upper(btrim(s.category)) = g end
+                  and (within is null or s.wba_id = any(within))
+                order by upper(btrim(s.category)), s.wba_id);
+  if coalesce(array_length(ids, 1), 0) = 0 then
+    return null;
+  end if;
+  return jsonb_build_object('label', format('the %s companies with %s %s%s in %s%s', array_length(ids, 1), case when g in ('A', 'E', 'F') then 'an' else 'a' end, g,
+                                            case when above then ' or above' else '' end, b.benchmark_name, coalesce(' ' || b.year::text, '')),
+                            'ids', to_jsonb(ids), 'n', array_length(ids, 1), 'grade', g);
+end;
+$$;
+revoke all on function public.grade_cohort(text, text[]) from public, anon, authenticated;
+
 create or replace function public.question_cohort(question text, within text[] default null) returns jsonb
 language plpgsql stable security definer
 set search_path = public
@@ -3964,7 +4019,7 @@ declare
 begin
   m := regexp_match(q, ' (?:top|largest|biggest) (\d{1,3}) ');
   if m is null then
-    return null;
+    return public.grade_cohort(q, within);
   end if;
   n := least(greatest(m[1]::int, 1), 200);
   metric := case when q ~ ' by (total |annual |their )?(revenue|revenues|sales|turnover) ' then 'revenue'
@@ -4438,6 +4493,12 @@ begin
     -- a group named in the question was fixed when the survey started: the reader is told not to judge it
     said := public.survey_read(key, s.question || case when s.cohort is not null then format(E'\n(This company was already selected as one of %s. Do not judge that part: answer the rest of the question for this company.)', s.cohort) else '' end,
                                s.words, s.qvec, todo.wba_id, todo.company, s.year_from, s.year_to, s.pages);
+    -- the model refused the reader itself (no credit, or the key): that is not this company's failure. The row stays
+    -- waiting and the survey stops, to be continued later (17 Nov 2026: 47 rows in a row were marked "not read").
+    if said ->> 'status' = 'failed' and (said ->> 'note' ~* 'credit balance' or said ->> 'note' ~* 'HTTP (401|403)') then
+      return jsonb_build_object('off', true, 'why', 'the reader is out of credit or was refused by the model; the survey is kept and can be continued later')
+             || public.survey_get(key, survey);
+    end if;
     update public.survey_rows x set status = said ->> 'status', value = said ->> 'value', evidence = said ->> 'evidence', year = (said ->> 'year')::int,
            library_id = said ->> 'library_id', page = (said ->> 'page')::int, doc_year = (said ->> 'doc_year')::int, doc_type = said ->> 'doc_type',
            label = said ->> 'label', url = said ->> 'url', input_tokens = (said ->> 'in')::int, output_tokens = (said ->> 'out')::int,
@@ -4453,6 +4514,11 @@ end;
 $$;
 revoke all on function public.survey_step(text, bigint, int) from public, anon;
 grant execute on function public.survey_step(text, bigint, int) to authenticated;
+-- Rows marked "not read" because the model's credit had run out wait again (17 Nov 2026), and their surveys reopen.
+-- Since that day such a refusal stops the survey and marks nothing, so this finds nothing on later installs.
+update public.survey_rows r set status = 'pending', note = null, read_at = null where r.status = 'failed' and r.note ilike '%credit balance%';
+update public.surveys s set status = 'open', finished_at = null
+ where s.status = 'done' and exists (select 1 from public.survey_rows r where r.survey_id = s.id and r.status = 'pending');
 
 -- The owner's side: the settings, who may run surveys and how many a day, and the surveys run (newest first).
 create or replace function public.admin_surveys(key text, pages int default null, max_companies int default null, readings int default null,
