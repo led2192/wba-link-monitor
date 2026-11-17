@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-17: The search by meaning is served by lanterN's own server
+Chosen by the owner after three checks: the like-for-like comparison of 16 Nov; the comparison with no company (run 43902018654: of the true first ten, no filter 89.0% to 93.7%, two years 88.0% to 94.0%, a type 80.7% to 94.0%); and the first nightly refresh, which found the copies equal (run 44002613107). What guards it: a search that gets no answer in 1.5 seconds, or fewer pages than it needs, uses Supabase's own index; three failures in a row stop the asking for a minute; the nightly refresh switches the option off when the copies differ. Known limits: the first refresh had nothing to copy, so it showed that "no change" is seen, not that a change is copied; one server with no spare. Rejected for now: dropping Supabase's index (it stays at least four weeks) and a smaller Supabase machine (to be measured after those weeks) (#614).
+
 ### 2026-11-16: Carrying a survey on does not use one of the day's surveys
 #611 counted each addition as one of the person's surveys of the day. The owner decided the same evening that it is part of the same survey. Chosen: `survey_more` is free of the day's count; spending stays bounded by the ceiling of readings a day for everyone (2,000) and by the ceiling of companies an addition; every addition is still recorded (`survey_extensions`), so a price can be put on it later. The entry below describes the first form (#613).
 
