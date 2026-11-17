@@ -4750,6 +4750,12 @@ create table if not exists public.meaning_remote_state (
 alter table public.meaning_remote_state enable row level security;
 insert into public.meaning_remote_state (one) values (true) on conflict (one) do nothing;
 insert into public.search_options (name, is_on, note) values ('meaning_remote', false, 'Search by meaning asked of lanterN''s own server, with this database''s own index as the fallback') on conflict (name) do nothing;
+-- On since 17 Nov 2026, the owner's decision (step 6 of the move). What it rests on: searches with no company find
+-- more of the true first ten with the server (no filter 89.0% -> 93.7%, two years 88.0% -> 94.0%, a type 80.7% ->
+-- 94.0%; run 43902018654); the first nightly refresh found the two copies equal (4,112,486 passages, 16,476
+-- documents, nothing new, changed or gone; run 44002613107). Once only: if the nightly refresh switches the option
+-- off because the copies differ, an install does not switch it back on.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 17 Nov 2026, runs 43902018654 and 44002613107)' where name = 'meaning_remote' and not is_on and note not like '%on since%';
 
 -- What became of the searches that could ask the server, a day (16 Nov 2026, outside review 3: "too little from the
 -- server" and the pauses were recorded nowhere, so a week of watching had nothing to watch). One row a day; written
