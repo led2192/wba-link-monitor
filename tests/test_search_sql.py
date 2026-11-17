@@ -429,7 +429,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v100 2026-11-17";' in PAGE
+    assert 'const CLIENT = "lantern v101 2026-11-17";' in PAGE
+    assert "!x.opened &&" not in PAGE and "sum(g.clicks) = 0" not in SQL          # v101: opened or not is no sign of a search that went badly
     assert '"Hard searches": adminHard' in PAGE and 'authed("admin_hard_searches", { key, days: 7 })' in PAGE          # v100
     assert "if (!more && !fromChips) offerAsk();" in PAGE and "Looking for a figure or a fact? " in PAGE
     assert 'years.push(/last|previous|pasado/.test(low) ? now - 1 : now); return " ";' in PAGE          # v99: "last year", "this year" are years
