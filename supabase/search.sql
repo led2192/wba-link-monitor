@@ -1157,6 +1157,39 @@ begin
 end;
 $$;
 
+-- What the reader finally saw (17 Nov 2026). search_log.n counts the pages found by words; the list on the screen
+-- is those blended with the pages nearest in meaning, which the database never saw, so a search the meaning rescued
+-- and one that showed nothing looked the same in the log. The page reports after it shows the list: how many pages,
+-- how many of them only the meaning found, and what became of the meaning (used, off, none, late, waiting).
+-- With no page by words the page holds no log id: the row is the key's latest search of the same text, two minutes back.
+alter table public.search_log add column if not exists shown int;            -- pages in the list the reader saw
+alter table public.search_log add column if not exists by_meaning int;       -- of them, found by meaning alone
+alter table public.search_log add column if not exists meaning text;         -- used | off | none | late | waiting
+create or replace function public.search_seen(key text, log_id bigint, typed text, shown int, by_meaning int, meaning text)
+returns void
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  k text := public.search_key_name(key);
+  lid bigint := log_id;
+begin
+  if k is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if meaning is null or meaning not in ('used', 'off', 'none', 'late', 'waiting') then
+    return;
+  end if;
+  if lid is null then
+    select l.id into lid from public.search_log l
+     where l.key_name = k and l.typed = left($3, 500) and l.at > now() - interval '2 minutes' order by l.at desc limit 1;
+  end if;
+  update public.search_log l set shown = greatest(least(coalesce($4, 0), 1000), 0), by_meaning = greatest(least(coalesce($5, 0), 1000), 0), meaning = $6
+   where l.id = lid and l.key_name = k and l.at > now() - interval '10 minutes';
+end;
+$$;
+revoke all on function public.search_seen(text, bigint, text, int, int, text) from public;
+grant execute on function public.search_seen(text, bigint, text, int, int, text) to anon, authenticated;
+
 -- A verdict on a result, given from the list without opening the document (11 Nov 2026, the owner: "I can already
 -- tell whether the result is right or irrelevant" from the list, so three days of searching left three clicks).
 -- kind: 'open' (the document was opened), 'useful' or 'not' (the small marks beside a result). One row a mark;
@@ -3710,7 +3743,7 @@ begin
     'searches', case when nullif(btrim(coalesce(link, '')), '') is null then '[]'::jsonb else
       (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
          select l.at, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.typed is not null as as_typed, l.q, l.company, l.year_from, l.year_to,
-                l.doc_type, l.profile, l.n, l.ms,
+                l.doc_type, l.profile, l.n, l.ms, l.shown, l.by_meaning, l.meaning,
                 (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
          from public.search_log l where l.key_name = link
          order by l.at desc limit least(greatest(coalesce(max_rows, 200), 1), 1000)) x) end,

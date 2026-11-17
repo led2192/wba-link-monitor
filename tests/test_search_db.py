@@ -1011,6 +1011,18 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.admin_searches('k', 'luis')"); got = cur.fetchone()[0]
             self.assertEqual([(x["typed"], x["as_typed"], x["clicks"]) for x in got["searches"]], [("water", False, 0), ("nike scope 1 2023", True, 1)])   # newest first; older rows fall back to the words read
             self.assertEqual((got["searches"][1]["company"], got["searches"][1]["year_from"], got["questions"]), ("Nike", 2023, []))
+            # what the reader finally saw: the page reports it after the list is shown
+            self.assertEqual((got["searches"][1]["shown"], got["searches"][1]["meaning"]), (None, None))
+            cur.execute("select public.search_key_name('k')"); kn = cur.fetchone()[0]
+            cur.execute("insert into public.search_log (key_name, q, typed, n, ms) values (%s, 'rebaseline', 'rebaseline polyus', 0, 40), ('team', 'rebaseline', 'rebaseline polyus', 0, 40) returning id", (kn,))
+            mine, other = [r[0] for r in cur.fetchall()]
+            seen = lambda i: (cur.execute("select shown, by_meaning, meaning from public.search_log where id = %s", (i,)), cur.fetchone())[1]
+            cur.execute("select public.search_seen('k', null, 'rebaseline polyus', 7, 7, 'used')")          # no page by words, so no log id: the key's latest search of that text
+            self.assertEqual((seen(mine), seen(other)), ((7, 7, "used"), (None, None, None)))
+            cur.execute("select public.search_seen('k', %s, 'x', 3, 0, 'late')", (mine,)); self.assertEqual(seen(mine), (3, 0, "late"))
+            cur.execute("select public.search_seen('k', %s, 'x', 9, 9, 'anything')", (mine,)); self.assertEqual(seen(mine), (3, 0, "late"))   # not a state
+            cur.execute("select public.search_seen('k', %s, 'x', 9, 9, 'used')", (other,)); self.assertEqual(seen(other), (None, None, None))   # another key's search
+            cur.execute("select public.admin_searches('k', %s)", (kn,)); self.assertEqual([(x["shown"], x["by_meaning"], x["meaning"]) for x in cur.fetchone()[0]["searches"]][:1], [(3, 0, "late")])
             cur.execute("select public.admin_searches('k', null, 'p@x.org')"); got = cur.fetchone()[0]
             self.assertEqual(got["searches"], [])
             self.assertEqual(sorted((x["question"], x["answered"], x["failed"]) for x in got["questions"]), [("Broken?", False, True), ("What is Nike scope 1?", True, False)])
