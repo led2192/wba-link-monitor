@@ -907,6 +907,22 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertIsNone(cohort("Which top 10 companies have a gender policy?"))                                          # no benchmark named
             self.assertIsNone(cohort("Is the gender benchmark mentioned by the companies?"))                                   # no "top N"
             self.assertIsNone(cohort("the top 5 of the climate benchmark"))                                                    # a benchmark the scores do not hold
+            # a ranking by revenue or by number of employees: the robot's figures, the company's latest year, in US dollars
+            import datetime
+            y = datetime.date.today().year
+            for i, (wba, attr, year, value, unit) in enumerate((("S1", "GMC_00048.1", y, 100, "USD"), ("S1", "GMC_00048.1", y, 300, "US$"), ("S1", "GMC_00048.1", y - 1, 900, "USD"),
+                                                                ("S3", "GMC_00048.1", y - 1, 20000, "JPY"), ("S4", "GMC_00048.1", y, 1e15, "USD"), ("S6", "GMC_00048.1", y, 200, "XYZ"),
+                                                                ("S2", "GMC_00048.1", y - 9, 5000, "USD"), ("S1", "GMC_02526.1", y, 10, "employees"), ("S3", "GMC_02526.1", y, 50, "people"),
+                                                                ("S4", "GMC_02526.1", y, 7, "USD"))):
+                cur.execute("insert into public.value_versions (version_id, wba_id, attribute, year, value, unit, printed, library_id, page, method) values (%s, %s, %s, %s, %s, %s, 'x', 'L', 1, 'm')",
+                            (f"rank{i}", wba, attr, year, value, unit))
+            got = cohort("How many of the top 2 companies by revenue in the world disclose scope 1 emissions?")
+            self.assertEqual((got["ids"], got["held"], got["metric"]), (["S3", "S1"], 2, "revenue"))        # yen to dollars; the middle of this year's two reads; an impossible figure, an unknown currency and an old year are out
+            self.assertEqual(got["label"], "the top 2 by revenue of the 2 companies a figure is held for")
+            got = cohort("How many of the largest 10 companies by employee number disclose scope 1 emissions?", ["S1", "S4"])
+            self.assertEqual((got["ids"], got["held"]), (["S1"], 1))                                         # within a filter; a figure in dollars is not a number of people
+            cur.execute("select public.currency_code(' rmb '), public.currency_code('NT$'), public.currency_code('')")
+            self.assertEqual(cur.fetchone(), ("CNY", "TWD", None))
             jwt("e.owner@worldbenchmarkingalliance.org")
             cur.execute("select public.admin_surveys('k', null, null, null, 'ana@worldbenchmarkingalliance.org', 9)")
             jwt("ana@worldbenchmarkingalliance.org")
