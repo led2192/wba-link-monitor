@@ -429,7 +429,11 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v97 2026-11-17";' in PAGE
+    assert 'const CLIENT = "lantern v98 2026-11-17";' in PAGE
+    # v98: the page reports what the reader finally saw, at once and again when the meaning arrives late
+    assert 'if (!more && !wordsFailed) seen(words, rows, vec ? "used" : meaningAsked ? "waiting" : "off");' in PAGE
+    assert 'seen(words, words, "none")' in PAGE and 'seen(words, words, "late")' in PAGE and 'seen(words, rows, "used")' in PAGE
+    assert '"By words", "Shown", "Opened"' in PAGE
     # v97: a company's name typed wrong is taken as the company only when the library does not know the word, and says so
     assert 'unknown = await rpc("word_unknown", { key, word: parsed.typo.word })' in PAGE
     assert "if (!hits.length) found.typo = nearCompany(fq);" in PAGE
