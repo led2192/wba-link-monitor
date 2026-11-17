@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v97 2026-11-17";
+  const CLIENT = "lantern v98 2026-11-17";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -777,6 +777,7 @@
         st.append(document.createTextNode(" · "), a);
       }
       if (!more && !vec && meaningAsked) blendWhenReady(seq, rows, meaningAsked);
+      if (!more && !wordsFailed) seen(words, rows, vec ? "used" : meaningAsked ? "waiting" : "off");
       if (wordsFailed) setStatus(`${rows.length} pages nearest in meaning. The search by words took too long and was stopped, so pages that only hold the exact words may be missing: try again in a moment.`);
       if (!more) state.lastRows = rows;
       render(more ? rows.slice(state.rows - 50) : citedFirst(rows), !!more);
@@ -851,13 +852,25 @@
     }
     return out;
   }
+  // v98 (17 Nov 2026): what the reader finally saw. The log counted the pages found by words alone, so a search the
+  // meaning rescued and a search that showed nothing looked the same ("rebaseline": 0 pages). After the list is
+  // shown, and again when the meaning arrives late, the page says how many pages it showed, how many of them only
+  // the meaning found, and what became of the meaning: used, off (a phrase in quotes, an industry, country or region
+  // filter, no words), none (asked, nothing came), late (it came when the reader was already down the list), waiting.
+  function seen(words, rows, how) {
+    const w = new Set(words.map(r => r.library_id + "|" + r.page));
+    rpc("search_seen", { key, log_id: words.length ? words[0].log_id : null, typed: $("q").value.trim(), shown: rows.length,
+                         by_meaning: rows.filter(r => !w.has(r.library_id + "|" + r.page)).length, meaning: how }).catch(() => {});
+  }
   async function blendWhenReady(seq, words, meaningAsked) {
     try {
       const meaning = await meaningAsked;
-      if (!meaning || !meaning.length || seq !== searchSeq || window.scrollY > 300) return;          // nothing by meaning, a newer search, or the reader is already down the list
+      if (seq !== searchSeq) return;                                  // a newer search
+      if (!meaning || !meaning.length) { seen(words, words, "none"); return; }
+      if (window.scrollY > 300) { seen(words, words, "late"); return; }          // the reader is already down the list
       const rows = blend(words, meaning, state.rows);
       if (seq !== searchSeq || window.scrollY > 300 || !rows.length) return;
-      state.blended = true; state.lastRows = rows;
+      state.blended = true; state.lastRows = rows; seen(words, rows, "used");
       render(citedFirst(rows), false);
       const st = $("status"), first = st.firstChild;
       if (first && first.nodeType === 3 && /^No /.test(first.nodeValue)) setStatus(`${rows.length} pages that say it in other words: the words as typed are on no page.`);
@@ -2025,9 +2038,9 @@
     if (args.link) {
       box.append(el("h3", null, `Searches of the link "${who}" (${r.searches.length}${r.searches.length >= 200 ? "+" : ""}, newest first)`));
       if (!r.searches.length) box.append(el("p", null, "No searches yet."));
-      else box.appendChild(adminTable(["When", "What was typed", "Filters read", "Pages", "Opened", "ms", ""], r.searches.map(x => [adminWhen(x.at), x.typed || "",
+      else box.appendChild(adminTable(["When", "What was typed", "Filters read", "By words", "Shown", "Opened", "ms", ""], r.searches.map(x => [adminWhen(x.at), x.typed || "",
         [x.company, x.year_from || x.year_to ? `${x.year_from || ""}–${x.year_to || ""}` : "", x.doc_type, x.profile].filter(Boolean).join(" · ") + (x.as_typed ? "" : " (older search: the words the engine read)"),
-        x.n, x.clicks || "", x.ms, adminRun(x.typed)])));
+        x.n, x.shown == null ? "" : `${x.shown}${x.by_meaning ? ` (${x.by_meaning} by meaning)` : ""}${x.meaning && x.meaning !== "used" ? ` · meaning ${x.meaning}` : ""}`, x.clicks || "", x.ms, adminRun(x.typed)])));
     } else {
       box.append(el("h3", null, `Questions of ${who} (${r.questions.length}${r.questions.length >= 200 ? "+" : ""}, newest first)`));
       if (!r.questions.length) box.append(el("p", null, "No questions yet."));
