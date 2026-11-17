@@ -3884,12 +3884,71 @@ begin
 end;
 $$;
 
+-- Currencies to US dollars, to rank companies by revenue (17 Nov 2026). One rate a currency, read on x-rates.com on
+-- 17 Nov 2026 and applied to every year: good enough to say which companies are the largest, not to state a figure.
+-- per_usd: units of the currency for one US dollar. A unit the table does not know leaves the company out.
+create table if not exists public.fx_rates (code text primary key, per_usd double precision not null, as_of date not null);
+alter table public.fx_rates enable row level security;
+insert into public.fx_rates (code, per_usd, as_of) values
+  ('USD', 1, '2026-11-17'), ('EUR', 0.909592, '2026-11-17'), ('JPY', 159.121364, '2026-11-17'), ('CNY', 6.665646, '2026-11-17'), ('INR', 93.466286, '2026-11-17'),
+  ('KRW', 1335.904479, '2026-11-17'), ('AUD', 1.483225, '2026-11-17'), ('BRL', 5.778185, '2026-11-17'), ('ZAR', 16.917721, '2026-11-17'), ('CHF', 0.839493, '2026-11-17'),
+  ('HKD', 7.846222, '2026-11-17'), ('RUB', 82.469648, '2026-11-17'), ('PHP', 63.755336, '2026-11-17'), ('THB', 33.822194, '2026-11-17'), ('MXN', 18.484038, '2026-11-17'),
+  ('IDR', 18255.381659, '2026-11-17'), ('SEK', 10.107203, '2026-11-17'), ('CAD', 1.42989, '2026-11-17'), ('SGD', 1.288494, '2026-11-17'), ('MYR', 4.093657, '2026-11-17'),
+  ('GBP', 0.757988, '2026-11-17'), ('TWD', 32.892031, '2026-11-17'), ('AED', 3.6725, '2026-11-17'), ('SAR', 3.75, '2026-11-17'), ('DKK', 6.799638, '2026-11-17'),
+  ('NOK', 9.636029, '2026-11-17'), ('PLN', 4.003715, '2026-11-17'), ('CZK', 22.185816, '2026-11-17'), ('HUF', 331.620812, '2026-11-17'), ('TRY', 50.412817, '2026-11-17'),
+  ('ILS', 3.245394, '2026-11-17'), ('NZD', 1.818542, '2026-11-17'), ('CLP', 997.860587, '2026-11-17'), ('COP', 3317.175408, '2026-11-17'), ('ARS', 1549.885631, '2026-11-17'),
+  ('QAR', 3.64, '2026-11-17'), ('KWD', 0.311824, '2026-11-17'), ('PKR', 276.896287, '2026-11-17'), ('KZT', 444.254782, '2026-11-17')
+on conflict (code) do update set per_usd = excluded.per_usd, as_of = excluded.as_of;
+
+-- The currency code a printed unit means (RMB is CNY, RM is MYR, NT$ is TWD), or null.
+create or replace function public.currency_code(unit text) returns text
+language sql immutable
+as $$
+  select case upper(btrim(coalesce($1, '')))
+           when 'RMB' then 'CNY' when 'CNH' then 'CNY' when 'RM' then 'MYR' when 'NT$' then 'TWD' when 'NTD' then 'TWD' when 'US$' then 'USD' when '€' then 'EUR'
+           when '£' then 'GBP' when 'HK$' then 'HKD' when 'S$' then 'SGD' when 'A$' then 'AUD' when 'C$' then 'CAD' when 'R$' then 'BRL' when 'KR₩' then 'KRW' when '₩' then 'KRW'
+           when '₹' then 'INR' when 'RS' then 'INR' when 'RS.' then 'INR'
+           else nullif(upper(btrim(coalesce($1, ''))), '') end
+$$;
+
+-- The figure a ranking uses for each company: revenue in US dollars, or the number of employees, as the robot read
+-- them (value_versions; never the validated answers). The company's latest year of the last four, and the middle of
+-- the figures read for that year from its reports, so that one misread scale does not decide. A figure that cannot
+-- be true is left out (revenue above a million million dollars, more than five million employees), and so is a
+-- revenue in a currency the table of rates does not know.
+create or replace function public.ranking_figures(metric text) returns table (wba_id text, year int, figure double precision)
+language sql stable security definer
+set search_path = public
+as $$
+  with rows as (
+    select v.wba_id, v.year,
+           case when $1 = 'revenue' then v.value / f.per_usd else v.value end as figure
+      from public.value_versions v
+      left join public.fx_rates f on $1 = 'revenue' and f.code = public.currency_code(v.unit)
+     where v.attribute = case when $1 = 'revenue' then 'GMC_00048.1' else 'GMC_02526.1' end
+       and v.year between extract(year from now())::int - 3 and extract(year from now())::int
+       and v.value > 0
+       and ($1 <> 'revenue' or f.per_usd is not null)
+       and ($1 <> 'employees' or public.currency_code(v.unit) is distinct from 'USD')),
+  good as (select * from rows r where r.figure <= case when $1 = 'revenue' then 1e12 else 5e6 end),
+  latest as (select g.wba_id, max(g.year) as year from good g group by g.wba_id)
+  select g.wba_id, g.year, percentile_disc(0.5) within group (order by g.figure)
+    from good g join latest l on l.wba_id = g.wba_id and l.year = g.year
+   group by g.wba_id, g.year
+$$;
+revoke all on function public.ranking_figures(text) from public, anon, authenticated;
+
 -- A group of companies named in the question by a ranking (17 Nov 2026: the owner asked how many of the top 10 of
 -- the Gender Benchmark have a target, and the survey went to 51 companies a search found, none of them chosen by
--- that ranking). Today one ranking is known: the published benchmark scores (company_scores). The question must say
--- "top N" and "benchmark", and name a benchmark: its name without the words "benchmark", "wba" and "the" stands in
--- the question; the longest name wins, then the latest year. `within`: the companies a filter left, when there is
--- one ("the top 10 of the Gender Benchmark in Europe"). Returns {label, ids, n} or null. N is 1 to 200.
+-- that ranking). The question must say "top N" (or largest, biggest) and name the ranking:
+--   "by revenue" (sales, turnover) or "by number of employees" (employee number, headcount, workforce): the
+--   robot's figures (ranking_figures); the label says of how many companies a figure is held, because that is the
+--   world the ranking is made in;
+--   a benchmark: the published benchmark scores (company_scores). The question says benchmark, assessment, index,
+--   ranking or performers, and the benchmark's name without "benchmark", "wba" and "the" stands in it; the longest
+--   name wins, then the latest year.
+-- `within`: the companies a filter left, when there is one ("the top 10 by employees in North America").
+-- Returns {label, ids, n} or null. N is 1 to 200.
 create or replace function public.question_cohort(question text, within text[] default null) returns jsonb
 language plpgsql stable security definer
 set search_path = public
@@ -3900,15 +3959,28 @@ declare
   n int;
   b record;
   ids text[];
+  metric text;
+  held int;
 begin
-  if to_regclass('public.company_scores') is null or position(' benchmark' in q) = 0 then
-    return null;
-  end if;
-  m := regexp_match(q, ' top (\d{1,3}) ');
+  m := regexp_match(q, ' (?:top|largest|biggest) (\d{1,3}) ');
   if m is null then
     return null;
   end if;
   n := least(greatest(m[1]::int, 1), 200);
+  metric := case when q ~ ' by (total |annual |their )?(revenue|revenues|sales|turnover) ' then 'revenue'
+                 when q ~ ' by (the |their |total )?(number of employees|employee number|employee numbers|employees|headcount|workforce|staff) ' then 'employees' end;
+  if metric is not null then
+    if to_regclass('public.value_versions') is null then
+      return null;
+    end if;
+    select count(*) into held from public.ranking_figures(metric) r where within is null or r.wba_id = any(within);
+    ids := array(select r.wba_id from public.ranking_figures(metric) r where within is null or r.wba_id = any(within) order by r.figure desc, r.wba_id limit n);
+    return jsonb_build_object('label', format('the top %s by %s of the %s companies a figure is held for', n, case metric when 'revenue' then 'revenue' else 'number of employees' end, to_char(held, 'FM999,999')),
+                              'ids', to_jsonb(ids), 'n', coalesce(array_length(ids, 1), 0), 'metric', metric, 'held', held);
+  end if;
+  if to_regclass('public.company_scores') is null or q !~ ' (benchmark|assessment|index|ranking|performers) ' then
+    return null;
+  end if;
   select x.benchmark_name, x.methodology_id, x.year into b from (
     select s.benchmark_name, s.methodology_id, s.year, count(*) as scored,
            btrim(regexp_replace(regexp_replace(' ' || regexp_replace(lower(s.benchmark_name), '[^[:alnum:]]+', ' ', 'g') || ' ', ' (wba|benchmark|the) ', ' ', 'g'), '\s+', ' ', 'g')) as core
