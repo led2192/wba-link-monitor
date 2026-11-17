@@ -708,7 +708,7 @@ class SearchOnPostgres(unittest.TestCase):
             c.rollback()
 
     def test_the_server_is_asked_only_when_switched_on_and_a_breaker_guards_it(self):
-        """meaning_remote (16 Nov 2026): off by default; three failures in a row and the server is not asked for a minute."""
+        """meaning_remote (16 Nov 2026; on since 17 Nov): switched off, the server is never asked; three failures in a row and it is not asked for a minute."""
         import psycopg
         call = """create or replace function public.meaning_remote_call(qvec real[], ids text[], year_from int, year_to int, types text[], max_rows int default 400)
                   returns jsonb language plpgsql as $f$ begin perform nextval('public.calls_seen'); return current_setting('test.reply')::jsonb; end $f$"""
@@ -721,6 +721,9 @@ class SearchOnPostgres(unittest.TestCase):
             calls = lambda: (cur.execute("select last_value, is_called from public.calls_seen"), (lambda r: r[0] if r[1] else 0)(cur.fetchone()))[1]
             state = lambda: (cur.execute("select fails, skip_until is not null from public.meaning_remote_state"), cur.fetchone())[1]
             cur.execute("select set_config('test.reply', %s, true)", ('{"rows": [["L", 1, 0, 0.1]]}',))
+            cur.execute("select is_on, note like '%%on since 17 Nov 2026%%' from public.search_options where name = 'meaning_remote'")
+            self.assertEqual(cur.fetchone(), (True, True))                       # on since 17 Nov 2026, the owner's decision
+            cur.execute("select set_config('lantern.meaning_remote', 'off', true)")
             self.assertIsNone(rows()); self.assertEqual(calls(), 0)              # the option is off: the server is never asked
             cur.execute("select set_config('lantern.meaning_remote', 'on', true)")
             self.assertEqual(rows(), [["L", 1, 0, 0.1]]); self.assertEqual((calls(), state()), (1, (0, False)))
@@ -740,7 +743,11 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select used from public.meaning_remote_days where day = current_date"); self.assertEqual(cur.fetchone()[0], 1)
             cur.execute("select has_function_privilege('anon', 'public.meaning_remote_call(real[], text[], int, int, text[], int)', 'execute'), "
                         "has_function_privilege('authenticated', 'public.meaning_remote_probe(int)', 'execute'), (select is_on from public.search_options where name = 'meaning_remote')")
-            self.assertEqual(cur.fetchone(), (False, False, False))
+            self.assertEqual(cur.fetchone(), (False, False, True))
+            cur.execute("update public.search_options set is_on = false where name = 'meaning_remote'")      # as the nightly refresh does when the copies differ
+            cur.execute("update public.search_options set is_on = true, changed = now() where name = 'meaning_remote' and not is_on and note not like '%%on since%%'")
+            cur.execute("select is_on from public.search_options where name = 'meaning_remote'")
+            self.assertFalse(cur.fetchone()[0])                                  # and an install does not switch it back on
             c.rollback()
 
     def test_the_servers_keys_become_pages_checked_against_this_database(self):
