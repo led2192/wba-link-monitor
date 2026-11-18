@@ -35,6 +35,7 @@ from urllib.parse import quote, urlsplit, unquote, urlparse
 
 from monitor_core import airtable_request   # retrying Airtable helper (reads, writes, uploads)
 import requests
+import tls_chain
 
 API = "https://api.airtable.com/v0"
 CONTENT_API = "https://content.airtable.com/v0"   # upload endpoint lives on a different host
@@ -146,10 +147,23 @@ def why_failed(e):
 
 
 def download(url):
-    """Return (bytes, 'ok') or (None, reason)."""
+    """Return (bytes, 'ok') or (None, reason). A site that sends its certificate without the one that signed it
+    (error_tls_chain) is read once more with the chain completed as a browser does (tls_chain.py: nothing more is
+    trusted); if that fails too the reason stays error_tls_chain."""
     try:
-        r = requests.get(url, headers={"User-Agent": UA}, timeout=25,
-                         stream=True, allow_redirects=True)
+        try:
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=25,
+                             stream=True, allow_redirects=True)
+        except requests.exceptions.SSLError as e:
+            if tls_kind(str(e)) != "error_tls_chain":
+                raise
+            r = None
+            try:
+                r = tls_chain.get(url, headers={"User-Agent": UA}, timeout=25, stream=True, allow_redirects=True)
+            except Exception:
+                r = None
+            if r is None:
+                return None, "error_tls_chain"
         sc = r.status_code
         if sc in (401, 403): r.close(); return None, "forbidden"
         if sc in (404, 410): r.close(); return None, "not_found"

@@ -5,6 +5,10 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## Facts and their names
 - **A word left out of a name's key changes what the name means.** On 15 Nov 2026 "restated" and "restatement" were both left out of `fact_key` so that a restated figure would find its metric. "Restatement of 2023 Scope 1 emissions" (a yes or no) then had the same key as "Scope 1 emissions" and was filed under the tonnes, on the live page, within the hour. Before a word joins the list of words left out, look for names where it is the subject rather than a qualifier; and a metric that is a number takes figures only.
 
+## Downloads
+- **A site that a browser opens can still fail in Python with "unable to get local issuer certificate".** The server sends its certificate without the intermediate that signed it. Browsers fetch it (the certificate's Authority Information Access field says where); `requests` does not. It is never a reason to switch verification off: `tls_chain.py` completes the chain and checks everything as before. On 18 Nov 2026 this was 693 of 1,592 failed downloads, from 20 sites.
+- **A GitHub schedule is not a clock.** `recover_attach.yml` is set for 19:00 UTC and has started at 01:29 and 02:18. Do not promise a result "after the 19:00 run"; start the workflow by hand when the result is needed.
+
 ## Embeddings
 - A copy that nothing refreshes goes stale without an error. The passages copied to the server on 16 Nov 2026 would have missed every document read afterwards, and a full list of older documents looks like a good answer. Any second store of the library gets its refresh and its daily comparison of counts in the same change that creates it, not later.
 - An evaluation that rolls its searches back also rolls back whatever those searches recorded: the breaker's count and the daily counts of `meaning_remote` showed nothing after ten failed searches at once (16 Nov 2026). What happened during such a run is read from the other side (the service's own log).
