@@ -72,7 +72,7 @@ function collectLinks() {
     const sure = /\.pdf($|[?#])/i.test(href);
     // Documents served with no ".pdf" in their address (the platforms of half the investor sites: /static-files/<id>,
     // /getattachment/, /files/<name>, ?documentId=): known by the address, or by the PDF icon or class on the link.
-    const endpoint = /\/static-files\/|\/getattachment\/|\/files\/[^/.]+\/?$|[?&](document|edition|asset|media|file)[-_]?id=/i.test(href);
+    const endpoint = /\/static-files\/|\/getattachment\/|\/files\/[^/.]+\/?$|[?&](document|edition|asset|media|file)[-_]?id=|(drive|docs)\.google\.com\/(file\/d\/|(uc|open)\?)/i.test(href);   // and a file on Google Drive (0.6.1)
     const marked = /pdf/i.test((a.getAttribute("type") || "") + " " + (a.className || "")) || !!a.querySelector('img[src*="pdf" i], img[alt*="pdf" i], svg[class*="pdf" i], i[class*="pdf" i], span[class*="pdf" i]');
     const maybe = !sure && (endpoint || marked || /pdf|download|descarga|t[eé]l[eé]charg|herunterladen/i.test(href + " " + text) || a.hasAttribute("download")) && !/^(#|javascript:|mailto:)/i.test(href);
     if (sure || maybe) add(href, better(a, text), sure);
@@ -129,12 +129,27 @@ async function lookDeeper() {
   try {
     const [res] = await chrome.scripting.executeScript({ target: { tabId: TAB.id }, func: collectDeeper, args: [40] });
     const j = (res && res.result) || { pages: 0, links: [] }; const have = new Set(docs.map(d => d.url)); let n = 0;
-    const fresh = []; for (const d of j.links) if (!have.has(d.url)) { have.add(d.url); docs.push(d); fresh.push(d); n++; }
+    const fresh = []; for (const d of j.links.map(viaDrive)) if (!have.has(d.url)) { have.add(d.url); docs.push(d); fresh.push(d); n++; }
     await confirmMaybes(fresh); await markHeld();
     $("deeper").textContent = `${n} more document${n === 1 ? "" : "s"} found in ${j.pages} page${j.pages === 1 ? "" : "s"} this page links to` + (j.more > 0 ? ` (${j.more} other links were not opened)` : "") + ". Look again";
   } catch (e) { $("deeper").textContent = "This page could not be read one level deeper. Try again"; }
 }
+// A file kept on Google Drive (0.6.1; Decathlon, 18 Nov 2026: 35 reports linked as drive.google.com/file/d/<id>/view).
+// That address is a viewer page, so the download answered "not a PDF". The file is served by an address built from
+// the same id: the link is offered under that address (the one the library keeps for it, monitor_core.drive_downloads)
+// and the older form is tried when the first does not answer with a PDF. Folders, Docs and Sheets are not files.
+const driveDownloads = url => {
+  const m = /^https?:\/\/(?:drive|docs)\.google\.com\/(?:file\/d\/|(?:uc|open)\?(?:[^#]*&)?id=)([A-Za-z0-9_-]{20,})/i.exec(url || "");
+  return m ? [`https://drive.usercontent.google.com/download?id=${m[1]}&export=download&confirm=t`, `https://drive.google.com/uc?export=download&id=${m[1]}`] : [];
+};
+const viaDrive = d => { const v = driveDownloads(d.url); return v.length ? { ...d, url: v[0], alt: v.slice(1) } : d; };
+const oncePerUrl = list => { const seen = new Set(); return list.filter(d => !seen.has(d.url) && seen.add(d.url)); };
 async function listDocuments() {
+  // the tab is Drive's own viewer of one file: that file is the document
+  if (driveDownloads(TAB.url).length) return [viaDrive({ url: TAB.url.split("#")[0], text: (TAB.title || "").replace(/\s+-\s+Google Drive$/i, "").replace(/\.pdf$/i, ""), sure: false })];
+  return oncePerUrl((await listOfPage()).map(viaDrive));
+}
+async function listOfPage() {
   if (isPdfUrl(TAB.url)) return [{ url: TAB.url.split("#")[0], text: TAB.title, sure: true }];
   try {
     const [res] = await chrome.scripting.executeScript({ target: { tabId: TAB.id }, func: collectLinks });
@@ -193,17 +208,20 @@ function putFile(url, headers, buf, say) {
     x.send(buf);
   });
 }
-async function download(url, say) {
-  // first as the extension (any site, the person's session); if the site says no or sends something else, as the page
+async function download(url, say, alt) {
+  // first as the extension (any site, the person's session); if the site says no or sends something else, as the page.
+  // alt: other addresses of the same file (a Google Drive file has two), tried in turn before the page is asked
   let why = "";
-  try {
-    const r = await fetch(url, { credentials: "include", referrer: TAB.url || undefined });
-    if (r.ok) {
-      const buf = await readAll(r, say);
-      if (looksPdf(buf)) return { buf, disposition: r.headers.get("content-disposition") || "" };
-      why = "not a PDF";
-    } else why = `the site answered ${r.status}`;
-  } catch (e) { why = "could not be reached"; }
+  for (const u of [url, ...(alt || [])]) {
+    try {
+      const r = await fetch(u, { credentials: "include", referrer: TAB.url || undefined });
+      if (r.ok) {
+        const buf = await readAll(r, say);
+        if (looksPdf(buf)) return { buf, disposition: r.headers.get("content-disposition") || "" };
+        why = "not a PDF";
+      } else why = `the site answered ${r.status}`;
+    } catch (e) { why = "could not be reached"; }
+  }
   try {
     const [res] = await chrome.scripting.executeScript({ target: { tabId: TAB.id }, func: fetchInTab, args: [url] });
     const j = res && res.result;
@@ -220,7 +238,7 @@ async function download(url, say) {
 async function sendOne(doc, company) {
   // a PDF chosen from this computer (0.4.0: a site that only downloads after a captcha) is read as it is; it has no address
   const say = t => { if (doc.status) doc.status.textContent = t; }, t0 = Date.now();
-  const { buf, disposition } = doc.file ? { buf: await doc.file.arrayBuffer(), disposition: "" } : await download(doc.url, say);
+  const { buf, disposition } = doc.file ? { buf: await doc.file.arrayBuffer(), disposition: "" } : await download(doc.url, say, doc.alt);
   const got = Date.now();
   if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");
   if (buf.byteLength > MAX_BYTES) throw new Error(`larger than 200 MB (${Math.round(buf.byteLength / 1048576)} MB)`);
