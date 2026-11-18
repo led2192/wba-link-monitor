@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v106 2026-11-18";
+  const CLIENT = "lantern v107 2026-11-18";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -392,6 +392,7 @@
       industries = [...new Set(companies.map(c => c.industry).filter(Boolean))].sort();
       regions = [...new Set(companies.map(c => c.region).filter(Boolean))].sort();
       rpc("find_topics", { key }).then(list => { topics = new Set(list || []); }).catch(() => {});      // v106: the broad topics, for intent()
+      rpc("link_may_ask", { key }).then(v => { linkAsk = v === true; }).catch(() => {});                 // v107: this person's link may ask without a sign-in
       const dl = $("companies"); dl.innerHTML = "";
       for (const c of companies) { const o = document.createElement("option"); o.value = c.name; dl.appendChild(o); }
     } catch (e) { setStatus(`Could not load the company list: ${e.message}`); }
@@ -1548,17 +1549,20 @@
   // Ask: the question goes to the database, which finds the pages (the same search), gives the first lines of the best six
   // to the reader model and returns an answer that cites them. Signed in; twenty answers a day a person (counted there).
   // auto: the box held a question and nobody pressed Ask; then nothing interrupts the search (no sign-in form, a short line instead).
+  // v107 (18 Nov 2026, the owner): a person's own link may ask at once, with no sign-in; the answers are counted under
+  // the link's name. The owner switches it on for each link in the admin page (never for the shared team link).
+  let linkAsk = false;
   async function ask(auto, quick) {
     auto = auto === true;
     const text = $("q").value.trim(), box = $("answer"); box.innerHTML = ""; const c = el("div", "answer"); box.appendChild(c);
     const cap = el("div", "cap"); cap.append(el("span", null, "Ask · an answer written from the pages found"), el("span", null, "")); c.appendChild(cap);
     const note = el("div", "what", ""); c.appendChild(note);
-    if (auto && !(await token())) {
+    if (auto && !(await token()) && !linkAsk) {
       note.textContent = "This reads as a question. "; const a = el("a", null, "Sign in with your WBA address to have it answered from the pages"); a.href = "#"; a.onclick = ev => { ev.preventDefault(); ask(); };
       note.append(a, document.createTextNode(".")); search(false); return; }
     if (text.length < 8) { note.textContent = "Type a question in the box first, for example: What were Unilever’s scope 1 emissions in 2024?"; return; }
     $("head").classList.remove("home"); closeHistory();
-    const t = await token();
+    const t = (await token()) || (linkAsk ? CONFIG.key : null);
     if (!t) { note.textContent = "Ask answers from the pages lanterN finds and shows its sources. Three questions a day; sign in with your WBA address.".replace("Three", "Fifty");
               const hold = el("div", "values"); c.appendChild(hold); signInBox(hold, ask); return; }
     note.textContent = "Reading the pages…";
@@ -2115,8 +2119,10 @@
     // v79 (the owner): a link's name, or a person, opens what they searched or asked, each with a way to run the same search.
     const detail = el("div");
     const opener = (text, args, title) => { const a = el("a", null, text); a.href = "#"; a.title = title; a.onclick = ev => { ev.preventDefault(); adminSearches(detail, args, text); }; return a; };
-    body.appendChild(adminTable(["Link", "State", "Searches, 7 days", "30 days", "Last used", ""], o.links.map(l => [opener(l.name, { link: l.name }, "See what this link searched"), l.active ? "on" : "off", l.searches_7d, l.searches_30d, adminWhen(l.last_used),
-      l.name === "owner" ? "" : adminBtn(l.active ? "Switch off" : "Switch on", async () => { await authed("admin_link_set", { key, name: l.name, active: !l.active }); adminPeople(body); })])));
+    body.append(el("p", null, "A link that may ask gives answers at once, with no sign-in: fifty a day, counted under the link's name. Whoever holds the link asks as that name, so give each person a link of their own. The team link cannot ask."));
+    body.appendChild(adminTable(["Link", "State", "Searches, 7 days", "30 days", "Answers, 7 days", "Last used", "", ""], o.links.map(l => [opener(l.name, { link: l.name }, "See what this link searched"), l.active ? "on" : "off", l.searches_7d, l.searches_30d, l.answers_7d || "", adminWhen(l.last_used),
+      l.name === "owner" ? "" : adminBtn(l.active ? "Switch off" : "Switch on", async () => { await authed("admin_link_set", { key, name: l.name, active: !l.active }); adminPeople(body); }),
+      l.name === "owner" || l.name === "team" ? "" : adminBtn(l.may_ask ? "Stop Ask" : "Allow Ask", async () => { await authed("admin_link_ask", { key, name: l.name, may: !l.may_ask }); adminPeople(body); })])));
     body.append(el("h3", null, "People who signed in"));
     // v82 (the owner): answers today against the person's limit, and the limit set here (50 a day unless changed).
     const limitNote = el("span"); limitNote.style.cssText = "font-size:13px;margin-left:8px";
