@@ -2435,6 +2435,46 @@ $$;
 revoke all on function public.gap_card(text, text[]) from public;
 grant execute on function public.gap_card(text, text[]) to anon, authenticated;
 
+-- What the library holds for one company, from the index (18 Nov 2026). "Reports and source for Gerdau?" was given
+-- to the reader model, which saw eight pages and said "four documents"; the library knew the answer exactly. One row
+-- a title and year, as the company's list shows them (the copy with pages when a document is held twice). A
+-- document is read when its text status is ok and it has pages; the others are an address with no file, or a file
+-- with no text, and no search or answer sees inside them. Returns {company, documents, read, unread, first, last,
+-- types: [{type, n, years_read, years_unread, undated}]}, the main reports first. Nothing is written by a model.
+create or replace function public.company_card(key text, company text) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with d as (
+      select distinct on (d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)))
+             d0.library_id, d0.company, d0.year, coalesce(nullif(btrim(d0.doc_type), ''), 'Untyped document') as doc_type,
+             (coalesce(d0.text_status, 'ok') = 'ok' and coalesce(d0.pages, 0) > 0) as is_read
+        from public.documents d0 where d0.wba_id = $2
+       order by d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)), coalesce(d0.pages, 0) desc, d0.library_id),
+    t as (
+      select d.doc_type, count(*) as n,
+             coalesce(array_agg(distinct d.year order by d.year) filter (where d.is_read and d.year is not null), '{}') as years_read,
+             coalesce(array_agg(distinct d.year order by d.year) filter (where not d.is_read and d.year is not null
+                        and not exists (select 1 from d r where r.doc_type = d.doc_type and r.year = d.year and r.is_read)), '{}') as years_unread,
+             count(*) filter (where d.year is null) as undated
+        from d group by d.doc_type)
+    select case when (select count(*) from d) = 0 then null else jsonb_build_object(
+      'company', (select max(d.company) from d),
+      'documents', (select count(*) from d), 'read', (select count(*) from d where d.is_read), 'unread', (select count(*) from d where not d.is_read),
+      'first', (select min(d.year) from d), 'last', (select max(d.year) from d),
+      'types', (select jsonb_agg(jsonb_build_object('type', t.doc_type, 'n', t.n, 'years_read', to_jsonb(t.years_read), 'years_unread', to_jsonb(t.years_unread), 'undated', t.undated)
+                                 order by coalesce(array_position(array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Climate Report', '10K Form'], t.doc_type), 99), t.n desc, t.doc_type)
+                  from t)) end);
+end;
+$$;
+revoke all on function public.company_card(text, text) from public;
+grant execute on function public.company_card(text, text) to anon, authenticated;
+
 -- One company's main reports of the last three years: held or not (16 Nov 2026, the owner: beside an answer, quietly,
 -- the gaps of the last years, so that a reader knows what the answer could not have read). The same cells and the same
 -- excuses as gap_card (a person's note for the year or for every year, then what the company's traits say); the
