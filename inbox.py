@@ -148,6 +148,13 @@ def what_is(url, sess):
         except requests.RequestException:
             pass                                   # unreachable now: add it, the attach step retries
         return "pdf", url
+    from monitor_core import drive_downloads
+    if drive_downloads(url):
+        # a Google Drive file link (Decathlon, Nov 2026) is a viewer page: the file is served by a
+        # download address built from its id, and that address is the document to add
+        v, target = DP.check(url, sess)
+        if v == "pdf":
+            return "pdf", target or url
     try:
         r = sess.get(url, headers=UA, timeout=25, allow_redirects=True, stream=True)
         code = r.status_code
