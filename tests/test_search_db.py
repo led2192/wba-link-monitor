@@ -246,6 +246,37 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(len(set(first_five)), 5)                                               # the first page of each of the five parts before the second of any
         self.assertTrue(all(e.endswith("/ overview") for _, e in pages)); self.assertEqual(closed, (False, False))
 
+    def test_a_persons_own_link_may_ask_without_a_sign_in_when_the_owner_says_so(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.search_keys (name, key_hash) values ('pers', encode(extensions.digest('secret-1', 'sha256'), 'hex')), ('team', encode(extensions.digest('secret-t', 'sha256'), 'hex')) "
+                        "on conflict (name) do update set key_hash = excluded.key_hash, active = true")
+            may = lambda k: (cur.execute("select public.link_may_ask(%s), public.link_asker(%s)", (k, k)), cur.fetchone())[1]
+            before = may("secret-1")
+            cur.execute("select public.admin_link_ask('k', 'pers', true), public.admin_link_ask('k', 'team', true), public.admin_link_ask('k', 'nobody', true)"); set_on = cur.fetchone()
+            cur.execute("update public.search_keys set may_ask = true where name = 'team'")          # even set by hand, the shared link does not ask
+            on, team, wrong = may("secret-1"), may("secret-t"), may("another")
+            cur.execute("create or replace function auth.jwt() returns jsonb language sql as $f$ select '{}'::jsonb $f$")   # nobody signed in; undone by the rollback
+            cur.execute("savepoint s"); refused = None
+            try:
+                cur.execute("select public.ask('another', 'What were the scope 1 emissions of Acme in 2024?')")
+            except psycopg.errors.InsufficientPrivilege as e:
+                refused = str(e).splitlines()[0]
+            cur.execute("rollback to savepoint s")
+            cur.execute("select public.ask('secret-1', 'What were the scope 1 emissions of Acme in 2024?')"); got = cur.fetchone()[0]
+            cur.execute("update public.search_keys set active = false where name = 'pers'"); off = may("secret-1")
+            cur.execute("select has_function_privilege('anon', 'public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)', 'execute'), "
+                        "has_function_privilege('anon', 'public.link_asker(text)', 'execute'), has_function_privilege('anon', 'public.admin_link_ask(text, text, boolean)', 'execute')")
+            grants = cur.fetchone()
+            c.rollback()
+        self.assertEqual(before, (False, None))                                              # off until the owner turns it on
+        self.assertEqual((set_on[0], set_on[2]), ({"ok": True}, {"ok": False})); self.assertIn("error", set_on[1])
+        self.assertEqual((on, team, wrong, off), ((True, "link:pers"), (False, None), (False, None), (False, None)))
+        self.assertIn("sign in", refused)                                                    # no sign-in and no such link: refused
+        self.assertNotIn("error", got); self.assertIn("per_day", got)                        # the link's own allowance: it got past the door (no model in the tests)
+        self.assertEqual(grants, (True, False, False))
+
     def test_a_search_never_uses_more_than_six_words(self):
         self.find("climate water energy people suppliers workers wage living")
         cur = self.conn.cursor(); cur.execute("select terms from public.search_log order by id desc limit 1")

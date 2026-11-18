@@ -2712,6 +2712,48 @@ drop function if exists public.ask(text, text, text, text, int, int, text, text,
 -- How many answers a day a person may have (16 Nov 2026, the owner: while Ask is being tried, raise a colleague's
 -- limit or his own from the panel). Fifty unless the owner set another number for the address. The ceiling for
 -- everyone together (per_day_all in ask) is not raised by this: it stays the most a day can cost.
+-- Answers for a person's own link (18 Nov 2026, the owner). Ask needed a sign-in by email, and a colleague's first
+-- sign-in failed twice in a morning (the email in junk, its link expired). A link made for one person in the admin
+-- page already names whoever searches with it; with may_ask it may also ask, counted and logged under "link:<name>".
+-- A link is not a proven identity: whoever holds it asks as that name and spends its answers, so the switch is off
+-- for every link until the owner turns it on, and never on for the shared team link. Surveys, marks on values,
+-- added values and the extension still need the sign-in.
+alter table public.search_keys add column if not exists may_ask boolean not null default false;
+create or replace function public.link_asker(key text) returns text
+language sql stable security definer set search_path = public, extensions
+as $$
+  select 'link:' || k.name from public.search_keys k
+   where k.active and k.may_ask and k.name <> 'team' and k.key_hash = encode(extensions.digest(coalesce($1, ''), 'sha256'), 'hex') limit 1
+$$;
+revoke all on function public.link_asker(text) from public, anon, authenticated;
+create or replace function public.link_may_ask(key text) returns boolean
+language sql stable security definer set search_path = public, extensions
+as $$ select public.link_asker($1) is not null $$;
+revoke all on function public.link_may_ask(text) from public;
+grant execute on function public.link_may_ask(text) to anon, authenticated;
+-- The owner's switch for one link.
+create or replace function public.admin_link_ask(key text, name text, may boolean) returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  done int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if name = 'team' and coalesce(may, false) then
+    return jsonb_build_object('error', 'the team link is shared by many: make a link for each person');
+  end if;
+  update public.search_keys k set may_ask = coalesce(may, false) where k.name = name;
+  get diagnostics done = row_count;
+  return jsonb_build_object('ok', done = 1);
+end;
+$$;
+revoke all on function public.admin_link_ask(text, text, boolean) from public, anon;
+grant execute on function public.admin_link_ask(text, text, boolean) to authenticated;
+
 create table if not exists public.ask_limits (
   email   text primary key,
   per_day int not null check (per_day between 0 and 500),
@@ -2904,7 +2946,7 @@ declare
   per_day int := 50;                    -- 13 Nov 2026 (the owner): 20 were used up in a morning of ordinary use, and 20 answers cost under 0.10 USD; since 16 Nov the owner can set a person's own number (ask_limits)
   per_day_all constant int := 1000;     -- every person together: the most Ask can cost in a day is fixed (about 5 USD), however many people come (11 Nov 2026; 300 until 13 Nov)
   model constant text := 'claude-haiku-5-5';
-  who text := lower(auth.jwt() ->> 'email');
+  who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));       -- the person signed in, or the link that may ask ("link:<name>")
   asked text := btrim(coalesce(question, ''));
   used int;
   api_key text;
@@ -2934,7 +2976,7 @@ declare
   fiscal text := '';
   names text := '';
 begin
-  if who is null or not public.email_may_search(who) then
+  if who is null or not (who like 'link:%' or public.email_may_search(who)) then
     raise exception 'sign in with a WBA address to ask' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
@@ -3073,7 +3115,7 @@ begin
 end;
 $$;
 revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) from public, anon;
-grant execute on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) to authenticated;
+grant execute on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) to anon, authenticated;     -- anon: a link that may ask (link_asker); anyone else is refused inside
 
 -- The owner's panel (13 Nov 2026). lanterN is now used by colleagues: the owner needs to tell the people and the
 -- links apart, to see and correct what people confirmed among the facts of answers, and to see what Ask costs.
@@ -3098,7 +3140,8 @@ begin
   end if;
   return jsonb_build_object(
     'links', (select coalesce(jsonb_agg(to_jsonb(x) order by x.name), '[]'::jsonb) from (
-        select k.name, k.active, k.created,
+        select k.name, k.active, k.created, k.may_ask,
+               (select count(*) from public.ask_log a where a.asker = 'link:' || k.name and a.answered and a.at > now() - interval '7 days') as answers_7d,
                (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '7 days') as searches_7d,
                (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '30 days') as searches_30d,
                (select max(l.at) from public.search_log l where l.key_name = k.name) as last_used
