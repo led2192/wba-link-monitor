@@ -1211,8 +1211,9 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute(ask, ("C", 2023, 2023)); off = cur.fetchall()
             c.rollback()
         eight = [(g, 2023, "ask") for g in range(1, 9)]
-        self.assertEqual(default, eight); self.assertEqual(off, eight)                               # the option is off until it is compared
-        self.assertEqual(on, [(g, 2023, "ask") for g in range(1, 6)] + [(200 + g, 2024, "ask later") for g in range(1, 4)])      # the best five of the year asked, then three pages of later reports
+        later = [(g, 2023, "ask") for g in range(1, 6)] + [(200 + g, 2024, "ask later") for g in range(1, 4)]      # the best five of the year asked, then three pages of later reports
+        self.assertEqual(off, eight); self.assertEqual(default, later)                               # on since 18 Nov 2026 (compared on 15 Nov); the session can still set it off
+        self.assertEqual(on, later)
         self.assertEqual([p for p, _, _ in span], [1, 2, 3, 4, 5, 201, 202, 203])                   # a span of years: later than its last year
         self.assertEqual(newest, [(g, 2025, "ask") for g in range(1, 9)])                            # no main report after 2025 (two pages, or statutory, do not count)
         self.assertEqual(no_company, eight)                                                         # no company named: whose later reports?
