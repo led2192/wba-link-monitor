@@ -429,7 +429,9 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v101 2026-11-17";' in PAGE
+    assert 'const CLIENT = "lantern v102 2026-11-18";' in PAGE
+    # v102: a document whose text was never read says so on its row
+    assert "'status', nullif(d.text_status, 'ok')" in SQL and "Not read: ${why}. Searches and answers do not see inside it. " in PAGE
     assert "!x.opened &&" not in PAGE and "sum(g.clicks) = 0" not in SQL          # v101: opened or not is no sign of a search that went badly
     assert '"Hard searches": adminHard' in PAGE and 'authed("admin_hard_searches", { key, days: 7 })' in PAGE          # v100
     assert "if (!more && !fromChips) offerAsk();" in PAGE and "Looking for a figure or a fact? " in PAGE

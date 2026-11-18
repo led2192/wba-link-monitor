@@ -1674,7 +1674,11 @@ begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
   end if;
-  return (select coalesce(jsonb_object_agg(d.library_id, jsonb_build_object('pages', coalesce(d.pages, 0), 'found', to_jsonb(d) ->> 'found')), '{}'::jsonb)
+  -- status (18 Nov 2026): the document's text_status when its text was not read (no_file, download_fail, no_text,
+  -- too_big...). A company's list showed such documents like the others, so six annual reports of one company
+  -- looked held when only their addresses were; the page now says so on the row.
+  return (select coalesce(jsonb_object_agg(d.library_id, jsonb_build_object('pages', coalesce(d.pages, 0), 'found', to_jsonb(d) ->> 'found',
+                                                                            'status', nullif(d.text_status, 'ok'))), '{}'::jsonb)
           from public.documents d where d.library_id = any(ids[1:200]));
 end;
 $$;
