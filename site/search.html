@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v103 2026-11-18";
+  const CLIENT = "lantern v104 2026-11-18";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -570,6 +570,29 @@
     }
     return miss;
   };
+  // v104: what the library holds for one company, said from the index (company_card): how many documents, of which
+  // years, which kinds, and which of them were never read. No model writes it.
+  async function showCard() {
+    const id = state.company, box = $("answer"); if (!id || id.includes(";")) return;
+    let c = null; try { c = await rpc("company_card", { key, company: id }); } catch (e) { c = null; }
+    if (!c || state.company !== id || !state.catalogue) return;
+    box.innerHTML = ""; const card = el("div", "answer");
+    const span = c.first && c.last ? (c.first === c.last ? `, ${c.first}` : `, ${c.first} to ${c.last}`) : "";
+    card.append(el("div", "dym", "From the library's index · no model wrote this"));
+    const head = el("p", null, `${c.company || state.companyName || "This company"}: ${c.documents} document${c.documents === 1 ? "" : "s"} in the library${span}. ${c.read} read` + (c.unread ? `, ${c.unread} held as an address or a file with no text: searches and answers do not see inside those.` : "."));
+    head.style.margin = "6px 0"; card.append(head);
+    const ys = a => (a || []).join(", ");
+    const ul = document.createElement("ul"); ul.style.cssText = "margin:4px 0 6px 18px;padding:0";
+    for (const t of c.types || []) {
+      const bits = []; if ((t.years_read || []).length) bits.push(`read: ${ys(t.years_read)}`); if ((t.years_unread || []).length) bits.push(`not read: ${ys(t.years_unread)}`); if (t.undated) bits.push(`${t.undated} with no year`);
+      ul.append(el("li", null, `${t.type} (${t.n})${bits.length ? " · " + bits.join(" · ") : ""}`));
+    }
+    card.append(ul);
+    const g = gapsSeen.get(id), miss = g ? gapWords(g) : [];
+    if (miss.length) card.append(el("p", null, `Not in the library: ${miss.join(" · ")}.`));
+    card.append(el("p", null, "Every document is listed below, newest first."));
+    box.append(card);
+  }
   async function showGaps() {
     const box = $("gaps"), id = state.company && !state.company.includes(";") ? state.company : null; box.innerHTML = "";
     if (!id) return;
@@ -743,6 +766,8 @@
           parsed.industry = parsed.country = parsed.countryName = parsed.region = null;
         }
       }
+      state.catalogue = intent($("q").value, parsed) === "catalogue";            // v104: the documents themselves, and the company's card above them
+      if (state.catalogue) parsed.q = "";
       state.q = parsed.q;
       state.company = parsed.company || ($("fCompany").value ? companyId($("fCompany").value) : null);
       state.companyName = parsed.companyName || ($("fCompany").value || null);
@@ -819,6 +844,7 @@
       render(more ? rows.slice(state.rows - 50) : citedFirst(rows), !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues().then(showFacts, showFacts).then(() => earlierFacts(seq));
+      if (state.catalogue && !more) showCard();
       if (state.yearsDropped && !more) {
         const y = state.yearsDropped, label = y.from === y.to ? String(y.from) : `${y.from || ""}–${y.to || ""}`;
         const a = el("a", null, `Only documents of ${label}`); a.href = "#";
@@ -1477,7 +1503,25 @@
     return /[?？]\s*$/.test(t) || t.startsWith("¿")
       || /^(does|do|did|is|are|was|were|has|have|had|can|could|will|what|which|who|whom|how|when|where|why|qué|que|cuál|cual|cuáles|cuánto|cuanto|cuánta|cuántos|cuantos|cuántas|cuantas|cómo|como|dónde|donde|cuándo|cuando|quién|quien|tiene|tienen|hay|existe|est-ce|quel|quelle|quels|quelles|combien|comment|pourquoi|où|wie|was|welche|welcher|welches|hat|haben|gibt|wann|wo|warum)\s/.test(t);
   }
-  const go = () => { closeHistory(); $("answer").innerHTML = ""; isQuestion($("q").value) ? ask(true) : search(false); };
+  // v104 (18 Nov 2026): what is asked, before it is searched. Until now a question was answered and everything else
+  // searched, so "reports and source for Gerdau?" was answered by a model from eight pages (it counted "four
+  // documents" of a company with thirty), and "production of Gerdau in 2023" was searched as a topic and offered Ask
+  // only at the third try. Four things are asked of a library, and each has its own way:
+  //   catalogue  what the library holds for a company: the index answers, no model, and the list of documents;
+  //   fact       a company, a year and a few words: a figure or a fact is wanted, so it is asked as a question;
+  //   question   as before;
+  //   search     a topic, or a document by its type and year.
+  const CATALOGUE_NOUNS = new Set("report reports source sources document documents disclosure disclosures publication publications file files library catalogue catalog informe informes documento documentos fuente fuentes publicaciones".split(" "));
+  const CATALOGUE_FILLER = new Set("what which do does did you we have has hold holds held are is there the a an of for and or all list show me available any in on by from your our its their about with que qué cuales cuáles hay tienes tenemos tiene de para y los las el la lista todos todas disponibles sobre".split(" "));
+  function intent(text, p) {
+    const one = !!p.company && !String(p.company).includes(";");
+    const rest = (p.q || "").toLowerCase().replace(/[^a-záéíóúñü\s]/g, " ").split(/\s+/).filter(Boolean);
+    if (one && rest.length && rest.some(w => CATALOGUE_NOUNS.has(w)) && rest.every(w => CATALOGUE_NOUNS.has(w) || CATALOGUE_FILLER.has(w))) return "catalogue";
+    if (isQuestion(text)) return "question";
+    if (one && (p.from || p.to) && !p.type && rest.length >= 1 && rest.length <= 8) return "fact";
+    return "search";
+  }
+  const go = () => { closeHistory(); $("answer").innerHTML = ""; const i = intent($("q").value, parse($("q").value)); (i === "question" || i === "fact") ? ask(true) : search(false); };
   // The pages an answer cites, first in the list: the person reads the answer and its proof together.
   function citedFirst(rows) {
     if (!state.cited.length) return rows;
