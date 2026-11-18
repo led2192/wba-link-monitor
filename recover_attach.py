@@ -17,6 +17,10 @@ no status.
   too_big   a real PDF but over the 5 MB upload limit (and Airtable could not fetch it either)
   not_pdf   200 but the URL serves HTML, not a PDF
 Transient timeouts / connection errors are left with an empty status, so they are retried next run.
+Since 18 Nov 2026 the report says which failure each was (error_dns, error_timeout, error_tls, error_refused,
+error_reset, error_connection, error_redirects, error_bad_url, error_other; http_<code> for another answer of
+the site): 1,362 of 1,563 rows were a bare "error" every night and nobody could say why. Counts only; nothing
+else changes, these rows are still retried.
 
 Selects rows that are in scope, have no file, and have an empty file_status.
 Levers: --types a,b   --year-min YYYY   --limit N (wave)   --commit   --workers N
@@ -83,6 +87,33 @@ def select_missing(base, token, table, attach_field, status_field, types, year_m
     return out
 
 
+def why_failed(e):
+    """The kind of a failed request, from its exception: error_dns (the name does not resolve: the site is gone
+    or moved), error_timeout, error_tls (certificate), error_refused, error_reset, error_connection,
+    error_redirects, error_bad_url, error_other."""
+    ex = requests.exceptions
+    text = str(e).lower()
+    if isinstance(e, ex.SSLError):
+        return "error_tls"
+    if isinstance(e, ex.Timeout):
+        return "error_timeout"
+    if isinstance(e, ex.TooManyRedirects):
+        return "error_redirects"
+    if isinstance(e, (ex.InvalidURL, ex.MissingSchema, ex.InvalidSchema)):
+        return "error_bad_url"
+    if isinstance(e, ex.ConnectionError):
+        if any(w in text for w in ("name or service not known", "nameresolution", "name resolution", "getaddrinfo", "no address associated", "nodename nor servname")):
+            return "error_dns"
+        if "refused" in text:
+            return "error_refused"
+        if "timed out" in text:
+            return "error_timeout"
+        if any(w in text for w in ("reset", "aborted", "remotedisconnected", "incompleteread")):
+            return "error_reset"
+        return "error_connection"
+    return "error_other"
+
+
 def download(url):
     """Return (bytes, 'ok') or (None, reason)."""
     try:
@@ -91,7 +122,7 @@ def download(url):
         sc = r.status_code
         if sc in (401, 403): r.close(); return None, "forbidden"
         if sc in (404, 410): r.close(); return None, "not_found"
-        if sc != 200:        r.close(); return None, "other"
+        if sc != 200:        r.close(); return None, f"http_{sc}"
         buf = b""; toobig = False
         for chunk in r.iter_content(65536):
             buf += chunk
@@ -101,8 +132,8 @@ def download(url):
         if toobig:                       return None, "too_big"
         if not buf.startswith(b"%PDF"):  return None, "not_pdf"
         return buf, "ok"
-    except Exception:
-        return None, "error"
+    except Exception as e:
+        return None, why_failed(e)
 
 
 def upload(base, token, attach_field, rid, filename, data):
@@ -189,10 +220,10 @@ def main():
     write_status(base, token, table, status_field, pending)
 
     print("=" * 50)
-    for k in ["attached", "too_big", "not_found", "forbidden", "not_pdf", "other",
-              "error", "upload_failed"]:
+    first = ["attached", "too_big", "not_found", "forbidden", "not_pdf", "upload_failed"]
+    for k in first + sorted(k for k in counts if k not in first):           # then each kind of failure: error_dns, http_503...
         if counts.get(k):
-            print(f"  {k:14} {counts[k]}")
+            print(f"  {k:18} {counts[k]}")
     print("=" * 50)
     print(f"recovered {counts['attached']} files; "
           f"marked {sum(counts[r] for r in REASON_TO_STATUS)} rows with a terminal status.")
