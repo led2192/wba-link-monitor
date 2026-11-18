@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v101 2026-11-17";
+  const CLIENT = "lantern v102 2026-11-18";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -630,12 +630,27 @@
   // How long each document is and the day the pipeline found it (as a web search shows a page's date): one small
   // question for the documents on screen, answered after the results are shown.
   const factOf = {};
+  const UNREAD = { no_file: "the robot has its address but could not get the file", download_fail: "the file could not be downloaded", timeout: "the download timed out",
+                   no_text: "the file holds no text (a scan or an image)", too_big: "the file is too big", not_pdf: "the address did not give a PDF", encrypted: "the file is locked",
+                   parse_fail: "the file could not be opened", truncated: "the file arrived cut short" };
+  const SENDABLE = new Set(["no_file", "download_fail", "timeout", "not_pdf", "truncated", "too_big"]);
   const dayText = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? `${+m[3]} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][+m[2] - 1]} ${m[1]}` : ""; };
   async function docSizes(rows) {
     const paint = () => document.querySelectorAll("#results .size[data-doc]").forEach(s => {
       const f = factOf[s.dataset.doc]; if (!f || s.textContent) return;
       const bits = []; if (f.pages) bits.push(`${Number(f.pages).toLocaleString("en")} pages in all`); if (dayText(f.found)) bits.push(`found ${dayText(f.found)}`);
       s.textContent = bits.join(" · ");
+      // v102 (18 Nov 2026): a document whose text was never read. The library holds its address and title, not its
+      // pages, so nothing in it can be found or answered from; the row looked like any other and a colleague took six
+      // annual reports for held. The row says it, why, and what a person can do.
+      const row = s.closest(".result");
+      if (f.status && row && !row.querySelector(".unread")) {
+        const why = UNREAD[f.status] || "its text could not be read";
+        const d = el("div", "unread"); d.style.cssText = "font-size:13px;margin:2px 0 0;color:#9a5b00";
+        d.append(document.createTextNode(`Not read: ${why}. Searches and answers do not see inside it. `));
+        if (SENDABLE.has(f.status)) { const a = el("a", null, "Send the file with the extension"); a.href = "send-to-lantern.html"; a.target = "_blank"; a.rel = "noopener"; d.append(a, document.createTextNode(" if you can open it.")); }
+        row.appendChild(d);
+      }
     });
     const ask = [...new Set(rows.map(r => r.library_id))].filter(id => !(id in factOf));
     if (ask.length) { try { const got = await rpc("doc_facts", { key, ids: ask }); for (const id of ask) factOf[id] = (got && got[id]) || {}; } catch (e) { return; } }
