@@ -43,6 +43,9 @@ def priority(url):
         path = urlsplit(url).path
     except ValueError:
         return None
+    from monitor_core import drive_file_id
+    if drive_file_id(url):                 # a Google Drive file link: check() opens its download address
+        return 0
     if path.lower().endswith(".pdf") or NOT_PDF_EXT.search(path):
         return None
     if SERVER.search(path):
@@ -92,8 +95,17 @@ def resolve_viewer(url, session=None, timeout=20):
 
 
 def check(url, session=None):
-    """(verdict, target). target is the URL to harvest when it differs from url (viewer pages)."""
+    """(verdict, target). target is the URL to harvest when it differs from url (viewer pages).
+
+    Google Drive (2026-11-18, Decathlon case): drive.google.com/file/d/<id>/view is a viewer page
+    and the file is served by a download address built from the same id (monitor_core.
+    drive_downloads). When one of them answers with a PDF, that address is the one to harvest."""
     v = is_pdf(url, session)
+    if v != "pdf":
+        from monitor_core import drive_downloads
+        for direct in drive_downloads(url):
+            if is_pdf(direct, session) == "pdf":
+                return "pdf", direct
     if v == "not":
         from monitor_core import is_dam_host
         try:
