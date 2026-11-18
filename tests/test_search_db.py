@@ -215,6 +215,37 @@ class SearchOnPostgres(unittest.TestCase):
                          {"Code of Conduct": ([2023], [], 1), "Policy Documents": ([], [2020], 0)})                                                         # a file with no text is not read
         self.assertIsNone(nobody); self.assertTrue(public)
 
+    def test_a_broad_topic_is_told_and_its_overview_reads_a_page_of_each_part(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            topic = lambda t: (cur.execute("select public.topic_of(%s)", (t,)), cur.fetchone()[0])[1]
+            env = topic("environmental impact"); water = topic("overview of the Water data"); spanish = topic("Impacto ambiental")
+            none = [topic(t) for t in ("biodiversity approach", "steel production", "", "trees plants")]
+            cur.execute("select public.find_topics('k')"); names = cur.fetchone()[0]
+            # each search gives the pages of its words: three a metric, the metric's name in the excerpt
+            cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
+                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null,
+                             region_filter text default null, typed text default null)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$
+                             select null::bigint, g, 'DOC', 'C', company_filter, 2025, 'Sustainability Report', 'l', null::text,
+                                    mod(abs(hashtext(q)), 90) * 10 + g, 0::real, q || ' / ' || client
+                             from generate_series(1, least(max_rows, 3)) g $f$""")
+            cur.execute("select page, excerpt from public.overview_pages('k', 'PT_X', null, null, %s::jsonb)", (psycopg.types.json.Jsonb(env),)); pages = cur.fetchall()
+            cur.execute("select has_function_privilege('authenticated', 'public.overview_pages(text, text, int, int, jsonb)', 'execute'), has_function_privilege('anon', 'public.topic_of(text)', 'execute')")
+            closed = cur.fetchone()
+            c.rollback()
+        self.assertEqual((env["key"], [g["key"] for g in env["groups"]]), ("environment", ["e1", "e3", "e5", "e2", "e4"]))
+        self.assertTrue(all(1 <= len(g["metrics"]) <= 3 for g in env["groups"]))               # five parts: one metric each, so that eight searches cover them
+        self.assertEqual((water["key"], [g["key"] for g in water["groups"]], spanish["key"]), ("e3", ["e3"], "environment"))      # a group is a topic too; no accents, any language held
+        self.assertEqual(none, [None] * 4)                                                      # the text must be the topic and nothing else
+        self.assertIn("environmental impact", names); self.assertIn("water", names); self.assertIn("derechos humanos", names)
+        self.assertEqual(len(pages), 8); self.assertEqual(len({p for p, _ in pages}), 8)        # eight pages, none twice
+        first_five = [e.split(" / ")[0] for _, e in pages[:5]]
+        self.assertEqual(len(set(first_five)), 5)                                               # the first page of each of the five parts before the second of any
+        self.assertTrue(all(e.endswith("/ overview") for _, e in pages)); self.assertEqual(closed, (False, False))
+
     def test_a_search_never_uses_more_than_six_words(self):
         self.find("climate water energy people suppliers workers wage living")
         cur = self.conn.cursor(); cur.execute("select terms from public.search_log order by id desc limit 1")
