@@ -219,6 +219,96 @@
    "from": null,
    "to": null,
    "intent": "search"
+  },
+  {
+   "typed": "nike environmental impact",
+   "company": "PT_6",
+   "from": null,
+   "to": null,
+   "intent": "overview",
+   "seen": "2026-11-18",
+   "was": "the pages holding those two words, not what the impact is"
+  },
+  {
+   "typed": "impacto ambiental de nike",
+   "company": "PT_6",
+   "intent": "overview"
+  },
+  {
+   "typed": "gerdau emissions",
+   "company": "PT_1",
+   "intent": "overview"
+  },
+  {
+   "typed": "overview of nike water",
+   "company": "PT_6",
+   "intent": "overview"
+  },
+  {
+   "typed": "main business at polyus",
+   "company": "PT_2",
+   "intent": "overview",
+   "seen": "2026-11-16"
+  },
+  {
+   "typed": "gerdau emissions 2023",
+   "company": "PT_1",
+   "from": 2023,
+   "to": 2023,
+   "intent": "overview"
+  },
+  {
+   "typed": "Gerdau biodiversity approach",
+   "company": "PT_1",
+   "intent": "search",
+   "q": "biodiversity approach",
+   "seen": "2026-11-18",
+   "was": "a GRI content index ranked first: it names every topic and says nothing of any"
+  },
+  {
+   "typed": "Trees nike plants",
+   "company": "PT_6",
+   "intent": "search",
+   "seen": "2026-11-18",
+   "was": "a page of scanning noise first, a report of 2001 second, plants read as flora and as factories"
+  },
+  {
+   "typed": "Does Nike has a commitment to respecto human rights?",
+   "company": "PT_6",
+   "intent": "question",
+   "seen": "2026-11-18",
+   "was": "the offer of Ask shown under its own answer"
+  },
+  {
+   "typed": "emissions",
+   "company": null,
+   "intent": "search",
+   "note": "a topic with no company is a search"
   }
+ ],
+ "topics": [
+  "environmental impact",
+  "environmental impacts",
+  "environment",
+  "environmental",
+  "impacto ambiental",
+  "medio ambiente",
+  "climate",
+  "climate change",
+  "emissions",
+  "emisiones",
+  "human rights",
+  "governance",
+  "workforce",
+  "employees",
+  "sustainability",
+  "business",
+  "main business",
+  "water",
+  "biodiversity",
+  "pollution",
+  "targets",
+  "policies",
+  "tax"
  ]
 }
