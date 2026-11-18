@@ -171,6 +171,22 @@ class SearchOnPostgres(unittest.TestCase):
         cur = self.conn.cursor(); cur.execute("select count(*) from public.pages")
         self.assertGreater(cur.fetchone()[0], 1000)                    # and the table is still there
 
+    def test_of_the_copies_of_a_document_the_list_shows_the_one_that_was_read(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, label, pages, text_status) values "
+                        "('cp-a', 'PT_COPY', 'Copy Co', 'Annual Report', 2024, '2024 | Copy Co | ANNUAL REPORT 2024', 0, 'no_file'), "
+                        "('cp-m', 'PT_COPY', 'Copy Co', 'Annual Report', 2024, '2024 | Copy Co | Annual Report 2024', 158, 'ok'), "
+                        "('cp-z', 'PT_COPY', 'Copy Co', 'Annual Report', 2024, '2024 | Copy Co | ANNUAL REPORT 2024', 0, 'no_file'), "
+                        "('cp-o', 'PT_COPY', 'Copy Co', 'Annual Report', 2023, '2023 | Copy Co | ANNUAL REPORT 2023', 0, 'no_file')")
+            cur.execute("create or replace function public.find_company_ids(company_filter text) returns text[] language sql as $f$ select array['PT_COPY'] $f$")
+            cur.execute("select library_id from public.find_pages('k', '', 'Copy Co')"); got = [r[0] for r in cur.fetchall()]
+            cur.execute("select public.doc_facts('k', array['cp-m', 'cp-o'])"); facts = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual(got, ["cp-m", "cp-o"])                                    # one row a title and year: the copy with pages; a document nobody read still shows
+        self.assertEqual((facts["cp-m"].get("status"), facts["cp-o"]["status"]), (None, "no_file"))
+
     def test_a_search_never_uses_more_than_six_words(self):
         self.find("climate water energy people suppliers workers wage living")
         cur = self.conn.cursor(); cur.execute("select terms from public.search_log order by id desc limit 1")
