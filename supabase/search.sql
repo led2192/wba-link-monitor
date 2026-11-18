@@ -5677,6 +5677,12 @@ revoke all on function public.page_kinds_state() from public, anon, authenticate
 -- alone it goes after the others. It is never taken out: someone looking for the index still finds it. Off until
 -- the search exam (search_exam.py --option page_kinds) shows that no attribute's figure is found less often.
 insert into public.search_options (name, is_on, note) values ('page_kinds', false, 'pages that are a table of contents or a GRI index go down the list') on conflict (name) do nothing;
+-- On since 18 Nov 2026. Every document with text was read (285,009 documents, 12,068,502 pages: 23,310 contents pages and
+-- 32,077 index pages, 0.46%). Search exam run 44338511050, 224 validated answers of 10 number attributes, option off
+-- and on: the same count in every cell (the number on the 24 pages of the search 139 of 191, on the eight pages an
+-- answer reads 115 of 191). The search that started this ("biodiversity approach" within one company, 25 pages): the
+-- index page that came first comes 20th, and the six index pages of the list are its last six.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 18 Nov 2026, run 44338511050)' where name = 'page_kinds' and not is_on and note not like '%on since%';
 
 -- One search (13 Nov 2026). People do not choose between words and meaning: they type, and the search uses both.
 -- find_blend runs the search by words (find_pages, which also logs the search) and, when the page sends the query's
