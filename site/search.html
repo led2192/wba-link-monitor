@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v102 2026-11-18";
+  const CLIENT = "lantern v103 2026-11-18";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -748,6 +748,7 @@
       state.companyName = parsed.companyName || ($("fCompany").value || null);
       state.from = parsed.from || (+$("fFrom").value || null);
       state.to = parsed.to || (+$("fTo").value || null);
+      state.yearsTyped = !!(parsed.from || parsed.to); state.yearsDropped = null; state.strictYears = false;       // v103: see the search with no page, below
       state.type = parsed.type || ($("fType").value || null); state.typeWords = parsed.type ? parsed.typeWords : null; state.maybe = parsed.maybe || null;
       state.industry = parsed.industry; state.country = parsed.country; state.countryName = parsed.countryName; state.region = parsed.region;
       state.rows = 50;
@@ -785,6 +786,14 @@
       const vec = !!(meaning && meaning.length);
       const rows = vec ? blend(words, meaning, state.rows) : words;
       if (seq !== searchSeq) return;                        // a newer search started meanwhile
+      // v103 (18 Nov 2026): a year typed among the words and no page. "Gerdau production 2025" said "No page holds
+      // those words": the year was read as "documents of 2025 only", and the one report of 2025 held was never read.
+      // A year in a search most often says which year the fact is about, and other years' reports print it. So the
+      // search is made again without the year, and the status line says so and offers the documents of that year alone.
+      if (!more && !rows.length && state.q && state.yearsTyped && (state.from || state.to) && !state.strictYears) {
+        state.yearsDropped = { from: state.from, to: state.to }; state.from = state.to = null; state.yearsTyped = false;
+        return search(true);
+      }
       if (!more) state.blended = !!vec;
       const s = ((performance.now() - t0) / 1000).toFixed(1);
       if (!rows.length) setStatus(state.q ? (state.q.includes('"') ? `No page found with that phrase${anyFilter ? " and these filters" : ""}. A phrase of very common words is checked on a sample of pages: add a company, a year or another word. (${s} s)` : `No page holds those words, even one or two of them${anyFilter ? ", with these filters" : ""}. (${s} s)`) : (state.company && !state.company.includes(";") && !state.type && !state.from && !state.to ? `We hold no document of ${state.companyName || "this company"} yet. If you know one, add its link below. (${s} s)` : `No document matches these filters. (${s} s)`));
@@ -810,6 +819,12 @@
       render(more ? rows.slice(state.rows - 50) : citedFirst(rows), !!more);
       state.logId = rows.length ? rows[0].log_id : null;
       if (!more) loadValues().then(showFacts, showFacts).then(() => earlierFacts(seq));
+      if (state.yearsDropped && !more) {
+        const y = state.yearsDropped, label = y.from === y.to ? String(y.from) : `${y.from || ""}–${y.to || ""}`;
+        const a = el("a", null, `Only documents of ${label}`); a.href = "#";
+        a.onclick = ev => { ev.preventDefault(); state.from = y.from; state.to = y.to; state.yearsDropped = null; state.strictYears = true; search(true); };
+        const d = el("div", "dym"); d.append(document.createTextNode(`No page in the documents of ${label}: these are pages of other years. `), a); $("status").appendChild(d);
+      }
       if (state.fixed && !more && !fromChips) {                               // v97: say whose pages these are, and leave the way back
         const fx = state.fixed, typed = $("q").value.trim(); const a = el("a", null, "Search the words as typed"); a.href = "#";
         a.onclick = ev => { ev.preventDefault(); state.asTyped = typed; search(false); };
