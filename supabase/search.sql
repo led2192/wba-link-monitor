@@ -2770,6 +2770,126 @@ Excerpts:
 ' || context
 $fn$;
 
+-- An overview of a broad topic (18 Nov 2026). The owner searched "nike environmental impact": the pages that hold those
+-- two words came back, when what is wanted is what the company's environmental impact is, and that is printed on the
+-- pages about emissions, energy, water and waste, most of which never say "environmental impact". A broad topic is
+-- named here once and points to groups of the facts' taxonomy (fact_groups); every group is a topic of its own too
+-- ("water", "biodiversity"). Kept as rows the owner can change, not as rules in the code.
+create table if not exists public.topic_concepts (
+  key       text primary key,
+  label     text not null,
+  aliases   text[] not null default '{}',     -- what a person types, in any language held
+  groups    text[] not null,                  -- fact_groups keys, in the order they are read
+  position  int not null default 100
+);
+alter table public.topic_concepts enable row level security;
+insert into public.topic_concepts (key, label, aliases, groups, position) values
+  ('environment', 'environmental impact', '{"environmental impact","environmental impacts","environment","environmental","environmental performance","environmental footprint","impacto ambiental","impacto medioambiental","medio ambiente","medioambiente"}', '{e1,e3,e5,e2,e4}', 10),
+  ('climate', 'climate and emissions', '{"climate","climate change","climate impact","carbon footprint","emissions","ghg emissions","greenhouse gas emissions","carbon emissions","cambio climatico","emisiones","huella de carbono"}', '{e1,targets}', 20),
+  ('social', 'social impact', '{"social impact","social","social performance","people","impacto social"}', '{s1,s2,s3,s4}', 30),
+  ('human_rights', 'human rights', '{"human rights","labour rights","labor rights","derechos humanos","derechos laborales"}', '{s2,s1,s3,policies}', 40),
+  ('governance', 'governance', '{"governance","corporate governance","gobernanza","gobierno corporativo"}', '{g1,people,pay}', 50),
+  ('workforce', 'workforce', '{"workforce","employees","workers","own workforce","staff","plantilla","empleados","trabajadores"}', '{s1,workforce_size}', 60),
+  ('sustainability', 'sustainability', '{"sustainability","esg","sustainability performance","sostenibilidad"}', '{e1,e3,e5,s1,g1,targets}', 70),
+  ('business', 'the business', '{"business","main business","business model","activities","main activities","products","negocio","negocio principal","actividades"}', '{identity,structure,results}', 80),
+  ('finance', 'financial results', '{"financial results","financial performance","financials","finances","finance","resultados financieros","finanzas"}', '{results,balance,investment}', 90)
+on conflict (key) do nothing;
+
+-- The words of a topic as they are compared: lower case, no accents, no punctuation, and without the words that
+-- only frame a request ("overview of", "general", "data on").
+create or replace function public.topic_norm(t text) returns text
+language sql immutable
+as $$
+  select btrim(regexp_replace(regexp_replace(' ' || regexp_replace(translate(lower(coalesce($1, '')), 'áàäâéèëêíìïîóòöôúùüûñç', 'aaaaeeeeiiiioooouuuunc'), '[^a-z0-9]+', ' ', 'g') || ' ',
+    '( (overview|summary|general|overall|about|on|of|the|in|at|for|its|their|data|information|info|profile|key|performance|disclosure|disclosures|reporting|what|is|are|and|resumen|sobre|de|la|el|los|las|datos|del|a|an|company|s))+(?= )', ' ', 'g'), '\s+', ' ', 'g'))
+$$;
+
+-- The topic a text names, or null: a concept by one of its names, else a group of the taxonomy by its label. The text
+-- must be the topic and nothing else ("environmental impact", "overview of water"): "biodiversity approach" is a
+-- search. Returns {key, label, groups: [{key, label, metrics: [labels]}]}; of each group the metrics that hold most
+-- facts, so that eight searches cover the topic (three metrics a group at most, one when the groups are many).
+create or replace function public.topic_of(t text) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  w text := public.topic_norm(t);
+  c record;
+  per int;
+begin
+  if w = '' or length(w) > 60 then
+    return null;
+  end if;
+  select x.key, x.label, x.groups into c from (
+    select tc.key, tc.label, tc.groups, tc.position, 0 as kind from public.topic_concepts tc
+     where exists (select 1 from unnest(tc.aliases) a where public.topic_norm(a) = w) or public.topic_norm(tc.label) = w
+    union all
+    select g.key, lower(g.label), array[g.key], g.position, 1 from public.fact_groups g where public.topic_norm(g.label) = w) x
+   order by x.kind, x.position limit 1;
+  if c.key is null then
+    return null;
+  end if;
+  per := greatest(1, least(3, 8 / greatest(array_length(c.groups, 1), 1)));
+  return jsonb_build_object('key', c.key, 'label', c.label, 'groups', (
+    select coalesce(jsonb_agg(jsonb_build_object('key', g.key, 'label', g.label, 'metrics', coalesce((
+             select jsonb_agg(m.label order by m.facts desc, m.key) from (
+               select fm.key, fm.label, (select count(*) from public.ask_facts f where f.metric = fm.key) as facts
+                 from public.fact_metrics fm where fm.grp = g.key and fm.status = 'active'
+                order by 3 desc, fm.key limit per) m), jsonb_build_array(g.label))) order by u.ord), '[]'::jsonb)
+      from unnest(c.groups) with ordinality u(k, ord) join public.fact_groups g on g.key = u.k));
+end;
+$$;
+revoke all on function public.topic_of(text) from public, anon, authenticated;
+
+-- The names a topic goes by, for the page: it tells a topic from a search before anything is asked (find_topics).
+create or replace function public.find_topics(key text) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(distinct x.name), '[]'::jsonb) from (
+            select public.topic_norm(a) as name from public.topic_concepts tc, unnest(tc.aliases || tc.label) a
+            union select public.topic_norm(g.label) from public.fact_groups g) x where x.name <> '');
+end;
+$$;
+revoke all on function public.find_topics(text) from public;
+grant execute on function public.find_topics(text) to anon, authenticated;
+
+-- The pages an overview reads: one search for each metric of each group of the topic, within the company, and the
+-- best pages taken in turn, a group at a time, so that eight pages cover the topic's parts, where the search by the
+-- topic's own words gave eight pages of one part. A page found twice counts once.
+create or replace function public.overview_pages(key text, company_filter text, year_from int, year_to int, topic jsonb)
+returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text)
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+declare
+  g record;
+  m record;
+  f record;
+  acc jsonb := '[]'::jsonb;
+begin
+  for g in select e.value as grp, e.ordinality as gi from jsonb_array_elements(topic -> 'groups') with ordinality e loop
+    for m in select e.value #>> '{}' as words, e.ordinality as mi from jsonb_array_elements(g.grp -> 'metrics') with ordinality e loop
+      for f in select * from public.find_blend(key, m.words, null, company_filter, year_from, year_to, null, 3, 'overview') loop
+        acc := acc || jsonb_build_object('gi', g.gi, 'mi', m.mi, 'rank', f.rank, 'library_id', f.library_id, 'company', f.company, 'wba_id', f.wba_id, 'year', f.year,
+                                         'doc_type', f.doc_type, 'label', f.label, 'url', f.url, 'page', f.page, 'excerpt', f.excerpt);
+      end loop;
+    end loop;
+  end loop;
+  return query
+    with r as (select * from jsonb_to_recordset(acc) as x(gi int, mi int, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text)),
+         one as (select distinct on (r.library_id, r.page) r.* from r order by r.library_id, r.page, r.rank, r.gi, r.mi),
+         turn as (select one.*, row_number() over (partition by one.gi order by one.rank, one.mi) as nth from one)
+    select t.library_id, t.company, t.wba_id, t.year, t.doc_type, t.label, t.url, t.page, t.excerpt
+      from turn t order by t.nth, t.gi limit 8;
+end;
+$$;
+revoke all on function public.overview_pages(text, text, int, int, jsonb) from public, anon, authenticated;
+
 create or replace function public.ask(
   key text, question text, q text default null, company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null, client text default null, qvec real[] default null,
@@ -2803,6 +2923,7 @@ declare
   got jsonb;
   search_q text;
   keywords text := null;
+  topic jsonb;                          -- a broad topic of one company: an overview, its pages chosen a part at a time (topic_of)
   tok_in int := 0;
   tok_out int := 0;
   parts jsonb;
@@ -2850,7 +2971,21 @@ begin
   -- words a report would print (11 Nov 2026); if that call fails, or its words find nothing, the question itself
   -- is searched.
   search_q := coalesce(nullif(btrim(q), ''), asked);
-  if coalesce(array_length((public.find_terms(search_q)).words, 1), 0) > 4 then
+  if company_filter is not null and position(';' in company_filter) = 0 then
+    topic := public.topic_of(search_q);
+  end if;
+  if topic is not null then
+    -- an overview: the best pages of each part of the topic, where one search by the topic's words gave eight of one part
+    for r in select * from public.overview_pages(key, company_filter, year_from, year_to, topic) loop
+      n := n + 1;
+      select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
+      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
+      sources := sources || jsonb_build_object('n', n, 'company', r.company, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url, 'page', r.page,
+                                               'library_id', r.library_id, 'wba_id', r.wba_id, 'excerpt', left(r.excerpt, 600));
+    end loop;
+    if n = 0 then topic := null; else keywords := topic ->> 'label'; end if;         -- no page of any part: the text is searched as it was typed
+  end if;
+  if topic is null and coalesce(array_length((public.find_terms(search_q)).words, 1), 0) > 4 then
     got := public.ask_model(api_key, http_schema, model,
       'You turn an analyst''s question about a company into the words to search that company''s reports with. Reply with 3 to 5 words, in lower case, '
       || 'separated by spaces: the words most likely to be printed on the page that answers the question. Write abbreviations in full '
@@ -2908,7 +3043,11 @@ begin
       names := '';                                               -- an extra: never costs the answer
     end;
   end if;
-  got := public.ask_model(api_key, http_schema, model, public.ask_instructions(names <> ''), public.ask_message(asked, known, fiscal, names, context), 3500);      -- the answer is short; the room is for the model's reasoning (with 500 a hard question ended before any text) and the facts
+  got := public.ask_model(api_key, http_schema, model, public.ask_instructions(names <> ''),
+           public.ask_message(asked || case when topic is not null then format(E'\n(This asks for an overview of %s for this company. The excerpts were chosen a part of the topic at a time: %s. '
+             || 'Give the key figures and facts of each part the excerpts cover, each with its year and its excerpt number, in a few short lines, the most recent year first. '
+             || 'Then say in one line which of these parts the excerpts do not cover. Do not describe documents or list page titles.)', topic ->> 'label',
+             (select string_agg(e ->> 'label', ', ') from jsonb_array_elements(topic -> 'groups') e)) else '' end, known, fiscal, names, context), 3500);      -- the answer is short; the room is for the model's reasoning (with 500 a hard question ended before any text) and the facts
   parts := public.ask_split(got ->> 'text');
   answer := parts ->> 'answer';
   err := coalesce(got ->> 'error', case when answer is null then format('the model returned no text (stop %s, %s tokens out)', got ->> 'stop', got ->> 'out') end);

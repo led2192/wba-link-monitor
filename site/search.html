@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v105 2026-11-18";
+  const CLIENT = "lantern v106 2026-11-18";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -391,6 +391,7 @@
       companies = await rpc("find_companies", { key });
       industries = [...new Set(companies.map(c => c.industry).filter(Boolean))].sort();
       regions = [...new Set(companies.map(c => c.region).filter(Boolean))].sort();
+      rpc("find_topics", { key }).then(list => { topics = new Set(list || []); }).catch(() => {});      // v106: the broad topics, for intent()
       const dl = $("companies"); dl.innerHTML = "";
       for (const c of companies) { const o = document.createElement("option"); o.value = c.name; dl.appendChild(o); }
     } catch (e) { setStatus(`Could not load the company list: ${e.message}`); }
@@ -1515,18 +1516,27 @@
   //   catalogue  what the library holds for a company: the index answers, no model, and the list of documents;
   //   fact       a company, a year and a few words: a figure or a fact is wanted, so it is asked as a question;
   //   question   as before;
-  //   search     a topic, or a document by its type and year.
+  //   overview   v106: a company and a broad topic ("nike environmental impact", "gerdau emissions", "nike water"):
+  //              what is wanted is what the company's impact is, not the pages that hold those two words. It is asked
+  //              at once, and the answer reads the best page of each part of the topic (the database's topic_of);
+  //   search     a narrower topic, or a document by its type and year.
   const CATALOGUE_NOUNS = new Set("report reports source sources document documents disclosure disclosures publication publications file files library catalogue catalog informe informes documento documentos fuente fuentes publicaciones".split(" "));
   const CATALOGUE_FILLER = new Set("what which do does did you we have has hold holds held are is there the a an of for and or all list show me available any in on by from your our its their about with que qué cuales cuáles hay tienes tenemos tiene de para y los las el la lista todos todas disponibles sobre".split(" "));
+  // The names of the broad topics (find_topics), loaded once. topicNorm is the database's topic_norm: lower case, no
+  // accents, no punctuation, without the words that only frame a request.
+  let topics = new Set();
+  const TOPIC_FILLER = new Set("overview summary general overall about on of the in at for its their data information info profile key performance disclosure disclosures reporting what is are and resumen sobre de la el los las datos del a an company s".split(" "));
+  const topicNorm = t => (t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && !TOPIC_FILLER.has(w)).join(" ");
   function intent(text, p) {
     const one = !!p.company && !String(p.company).includes(";");
     const rest = (p.q || "").toLowerCase().replace(/[^a-záéíóúñü\s]/g, " ").split(/\s+/).filter(Boolean);
     if (one && rest.length && rest.some(w => CATALOGUE_NOUNS.has(w)) && rest.every(w => CATALOGUE_NOUNS.has(w) || CATALOGUE_FILLER.has(w))) return "catalogue";
     if (isQuestion(text)) return "question";
+    if (one && !p.type && topics.has(topicNorm(p.q))) return "overview";
     if (one && (p.from || p.to) && !p.type && rest.length >= 1 && rest.length <= 8) return "fact";
     return "search";
   }
-  const go = () => { closeHistory(); $("answer").innerHTML = ""; const i = intent($("q").value, parse($("q").value)); (i === "question" || i === "fact") ? ask(true) : search(false); };
+  const go = () => { closeHistory(); $("answer").innerHTML = ""; const i = intent($("q").value, parse($("q").value)); (i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false); };
   // The pages an answer cites, first in the list: the person reads the answer and its proof together.
   function citedFirst(rows) {
     if (!state.cited.length) return rows;
