@@ -1,4 +1,4 @@
-import json, os, re, unittest
+import json, os, re, sys, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 read = lambda *p: open(os.path.join(ROOT, *p), encoding="utf-8").read()
@@ -49,7 +49,7 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.6.0"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.6.0", read("extension", "config.js"))
+        self.assertIn('"version": "0.6.1"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.6.1", read("extension", "config.js"))
 
     def test_a_large_file_shows_how_far_it_is(self):
         js = read("extension", "send.js")
@@ -86,6 +86,38 @@ class Extension(unittest.TestCase):
                   ".map(h => (companyOfHost(h) || {}).id || null)))")
         out = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
         self.assertEqual(json.loads(out.stdout), ["A", "J", None, "N", "G2", None, None], out.stderr)
+
+    def test_a_file_on_google_drive_is_sent_from_its_download_address(self):
+        """Decathlon, 18 Nov 2026: 35 reports linked as drive.google.com/file/d/<id>/view, a viewer page. The download
+        answered "not a PDF". The addresses must be the ones monitor_core.drive_downloads builds, so that the library
+        keeps one address for one file. The logic is run in node when it is there."""
+        import shutil, subprocess
+        sys.path.insert(0, ROOT) if ROOT not in sys.path else None
+        import monitor_core as MC
+        js = read("extension", "send.js")
+        self.assertIn("await download(doc.url, say, doc.alt)", js)                        # the older address is the fallback
+        self.assertIn("for (const u of [url, ...(alt || [])])", js)
+        self.assertIn("j.links.map(viaDrive)", js)                                        # one level deeper too
+        self.assertIn("(drive|docs)\\.google\\.com\\/(file\\/d\\/", js)                    # the link is listed on the page
+        if not shutil.which("node"):
+            self.skipTest("node not installed")
+        links = ["https://drive.google.com/file/d/1gZXdnYcWWweIqV5z1mAgppubfazTILxg/view",
+                 "https://drive.google.com/file/d/1ZzGAlw2W1FK5GrOJzzjGvoXsyzAyZkQa/view?usp=sharing",
+                 "https://drive.google.com/uc?export=download&id=1HJKEylzOx3caZgVWQFkUtPrOsnS3oALf",
+                 "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+                 "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/edit",
+                 "https://example.com/reports/annual-report-2025.pdf"]
+        body = js[js.index("const driveDownloads ="):js.index("async function listDocuments()")]
+        script = body + f"const links={json.dumps(links)};" + (
+            "console.log(JSON.stringify({d: links.map(driveDownloads), "
+            "v: oncePerUrl([links[0], links[0] + '?usp=sharing', links[5]].map(u => viaDrive({url: u, text: 't', sure: false})))}))")
+        out = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+        got = json.loads(out.stdout or "null")
+        self.assertEqual(got["d"], [MC.drive_downloads(u) for u in links], out.stderr)   # the same addresses as the robot
+        self.assertEqual([len(x) for x in got["d"]], [2, 2, 2, 0, 0, 0])
+        self.assertEqual(len(got["v"]), 2)                                                # one file linked twice is offered once
+        self.assertEqual(got["v"][0]["url"], MC.drive_downloads(links[0])[0]); self.assertEqual(got["v"][0]["alt"], MC.drive_downloads(links[0])[1:])
+        self.assertEqual(got["v"][1], {"url": links[5], "text": "t", "sure": False})      # other links are left as they are
 
     def test_the_site_builds_and_offers_it(self):
         wf = read(".github", "workflows", "search_page.yml")
