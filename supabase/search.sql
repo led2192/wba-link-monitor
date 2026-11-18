@@ -3295,6 +3295,12 @@ grant execute on function public.admin_taxonomy(text) to authenticated;
 -- names): the reader is shown the names already in use and told to write a data point under one of them when it is
 -- the same thing. Off until it is compared on the answers' own check: it changes what the reader is told.
 insert into public.search_options (name, is_on, note) values ('ask_later', false, 'Ask with a year and a company: read pages of the company''s later reports too (a figure of a year is printed again, sometimes restated, by later reports)') on conflict (name) do nothing;
+-- On since 18 Nov 2026 (the owner's decision). Compared on 15 Nov (ask_eval run 43771314433, 40 questions with a
+-- confirmed page): the eight pages changed in 2, no question gained or lost its confirmed page. The case that
+-- decided it: "What was the steel production of Gerdau in 2023?" read two pages of a code of conduct, the only
+-- documents of 2023 with text, while the annual report of 2024, which prints 2023 beside 2024, was held and read.
+-- A year in a question says which year the fact is about, not which year's documents may answer.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 18 Nov 2026, run 43771314433)' where name = 'ask_later' and not is_on and note not like '%on since%';
 insert into public.search_options (name, is_on, note) values ('ask_doc_pages', false, 'Ask about a company: the search may give up to six pages of one document instead of three') on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('survey_strict', false, 'Surveys: a yes needs the company''s own statement in the question''s terms') on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('survey_again', false, 'Surveys: a second reading of other pages when the first says not stated') on conflict (name) do nothing;

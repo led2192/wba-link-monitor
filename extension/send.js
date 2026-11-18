@@ -393,16 +393,21 @@ async function start() {
   // its reports on one, its website on another)
   hostMemory = (await store.get("hosts")) || {};
   const guess = companyOfHost(hostOf(TAB.url)) || companies.find(c => c.id === hostMemory[hostOf(TAB.url)]); if (guess) $("company").value = guess.name;
-  // a company's own site that no company of lanterN has: say so, and offer to add the company (0.6.0)
-  else if (/^https?:/.test(TAB.url) && !isPdfUrl(TAB.url)) { $("newco").textContent = `No company of lanterN has ${siteOf(hostOf(TAB.url))}. Add the company`; $("newco").style.fontWeight = "600"; }
-  docs = await listDocuments(); await confirmMaybes(docs); await markHeld();
+  docs = await listDocuments();
+  // a company's own site that no company of lanterN has: say so, and offer to add the company (0.6.0). Not when the
+  // tab is itself a document (0.6.2, 18 Nov 2026): a report opened from a company's page is served by a file host
+  // (api.mziq.com/mzfilemanager/..., no ".pdf" in the address), and "No company of lanterN has mziq.com" was shown
+  // beside the right company. The notice also goes once a company of the list is chosen.
+  const tabIsDoc = isPdfUrl(TAB.url) || (docs.length === 1 && docs[0].sure && docs[0].url === TAB.url.split("#")[0]);
+  if (!guess && /^https?:/.test(TAB.url) && !tabIsDoc) { $("newco").textContent = `No company of lanterN has ${siteOf(hostOf(TAB.url))}. Add the company`; $("newco").style.fontWeight = "600"; }
+  await confirmMaybes(docs); await markHeld();
   // PDFs from this computer (0.4.0): a file the site only hands over after a captcha is downloaded by the person and chosen here
   $("files").onchange = () => { for (const f of $("files").files) { if (!docs.some(d => d.file && d.file.name === f.name && d.file.size === f.size)) docs.push({ url: "", text: f.name.replace(/\.pdf$/i, ""), sure: true, file: f, held: false }); } $("files").value = ""; render(); };
-  $("company").onchange = markHeld;
+  $("company").onchange = () => { if (companies.some(c => c.name === $("company").value.trim())) { $("newco").textContent = "Not in the list? Add the company"; $("newco").style.fontWeight = ""; } markHeld(); };
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };
   $("go").onclick = sendAll; $("watch").onclick = scanPage; showScan(false); $("newco").onclick = e => { e.preventDefault(); newCompany(); };
-  $("deeper").hidden = isPdfUrl(TAB.url) || !/^https?:/.test(TAB.url); $("deeper").onclick = e => { e.preventDefault(); lookDeeper(); };
+  $("deeper").hidden = tabIsDoc || !/^https?:/.test(TAB.url); $("deeper").onclick = e => { e.preventDefault(); lookDeeper(); };
 }
 function showSignIn() {
   $("work").hidden = true; $("sign").hidden = false;
