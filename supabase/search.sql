@@ -852,7 +852,9 @@ begin
     -- (within a year and a type, the longest document first: the report itself is long, and a three-page letter, a
     -- newsletter or a shareholders' guide typed as an annual report by mistake is short. 10 Nov 2026)
     -- (a document held twice, the same title for the same company and year, shows once: 10 Nov 2026, the same
-    -- committee charter stood twice under "Nike")
+    -- committee charter stood twice under "Nike"). Of the copies, the one that was read: the most pages (18 Nov 2026:
+    -- an annual report held three times, once read with 158 pages and twice as an address with no file, showed one
+    -- of the empty copies, marked "not read")
     return query
       select lid, (row_number() over (order by d.year desc nulls last, coalesce(array_position(types, d.doc_type), 99), coalesce(d.pages, 0) desc, d.company, d.library_id))::int, d.library_id, d.company, d.wba_id,
              d.year, d.doc_type, d.label, d.url, 1, 0::real, left(regexp_replace(coalesce(p.body, ''), '\s+', ' ', 'g'), 300)
@@ -862,7 +864,7 @@ begin
               and (ids is null or d0.wba_id = any(ids))
               and (types is null or d0.doc_type = any(types))
               and (year_from is null or d0.year >= year_from) and (year_to is null or d0.year <= year_to)
-            order by d0.wba_id, d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)), d0.library_id) d
+            order by d0.wba_id, d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)), coalesce(d0.pages, 0) desc, d0.library_id) d
       left join public.pages p on p.library_id = d.library_id and p.page = 1
       order by d.year desc nulls last, coalesce(array_position(types, d.doc_type), 99), coalesce(d.pages, 0) desc, d.company, d.library_id
       limit need;
