@@ -49,7 +49,9 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.6.1"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.6.1", read("extension", "config.js"))
+        self.assertIn('"version": "0.6.2"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.6.2", read("extension", "config.js"))
+        # 0.6.2: on a document's own tab (a file host, no ".pdf" in the address) no company is said to be missing
+        self.assertIn('if (!guess && /^https?:/.test(TAB.url) && !tabIsDoc) {', js); self.assertIn('$("deeper").hidden = tabIsDoc ||', js)
 
     def test_a_large_file_shows_how_far_it_is(self):
         js = read("extension", "send.js")
