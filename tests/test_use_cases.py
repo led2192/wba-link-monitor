@@ -20,10 +20,10 @@ def run_page(cases):
     asked = PAGE[PAGE.index("  function isQuestion(text) {"):PAGE.index("  const go = () =>")]
     script = ("const RealDate = Date; globalThis.Date = class extends RealDate { getFullYear() { return %d; } };"
               "const document = { createElement: () => ({}), getElementById: () => ({}) }; const $ = () => ({ value: '' });"
-              "let companies = %s; let industries = ['Metals & Mining', 'Oil & Gas'], regions = [];\n%s\n%s\n%s\n"
+              "let companies = %s; let industries = ['Metals & Mining', 'Oil & Gas'], regions = [];\n%s\n%s\n%s\ntopics = new Set(%s);\n"
               "console.log(JSON.stringify(%s.map(t => { const r = parse(t); return { company: r.company || null, from: r.from || null, to: r.to || null, "
               "type: r.type || null, typo: (r.typo && r.typo.name) || null, q: (r.q || '').replace(/\\s+/g, ' ').trim(), intent: intent(t, r) }; })))"
-              % (CASES["this_year"], json.dumps(CASES["companies"]), consts, parser, asked, json.dumps([c["typed"] for c in cases])))
+              % (CASES["this_year"], json.dumps(CASES["companies"]), consts, parser, asked, json.dumps(CASES["topics"]), json.dumps([c["typed"] for c in cases])))
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=60)
     if out.returncode:
         raise AssertionError(out.stderr[-1500:])
@@ -45,7 +45,7 @@ class UseCases(unittest.TestCase):
     def test_the_file_names_no_person_and_every_case_says_its_intent(self):
         self.assertGreaterEqual(len(CASES["cases"]), 20)
         for case in CASES["cases"]:
-            self.assertIn(case["intent"], ("catalogue", "fact", "question", "search"), case["typed"])
+            self.assertIn(case["intent"], ("catalogue", "fact", "question", "overview", "search"), case["typed"])
 
 
 if __name__ == "__main__":
