@@ -429,7 +429,10 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v102 2026-11-18";' in PAGE
+    assert 'const CLIENT = "lantern v103 2026-11-18";' in PAGE
+    # v103: a typed year that leaves no page is dropped, and the status line says so
+    assert "state.yearsDropped = { from: state.from, to: state.to }; state.from = state.to = null; state.yearsTyped = false;" in PAGE
+    assert "these are pages of other years. `" in PAGE and "state.strictYears = true; search(true);" in PAGE
     # v102: a document whose text was never read says so on its row
     assert "'status', nullif(d.text_status, 'ok')" in SQL and "Not read: ${why}. Searches and answers do not see inside it. " in PAGE
     assert "!x.opened &&" not in PAGE and "sum(g.clicks) = 0" not in SQL          # v101: opened or not is no sign of a search that went badly
