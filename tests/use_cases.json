@@ -1,0 +1,224 @@
+{
+ "_about": "Real things people typed, and what the page must make of them (tests/test_use_cases.py runs the page's own parse(), isQuestion() and intent() in node). A search that goes wrong in real use is added here with what should have happened. No person is named.",
+ "companies": [
+  {
+   "id": "PT_1",
+   "name": "Gerdau"
+  },
+  {
+   "id": "PT_2",
+   "name": "Polyus"
+  },
+  {
+   "id": "PT_3",
+   "name": "Target"
+  },
+  {
+   "id": "PT_4",
+   "name": "Severstal"
+  },
+  {
+   "id": "PT_5",
+   "name": "Lukoil"
+  },
+  {
+   "id": "PT_6",
+   "name": "Nike"
+  },
+  {
+   "id": "PT_7",
+   "name": "Generali"
+  },
+  {
+   "id": "PT_8",
+   "name": "Yandex"
+  },
+  {
+   "id": "PT_9",
+   "name": "Rosneft"
+  }
+ ],
+ "this_year": 2026,
+ "cases": [
+  {
+   "typed": "What was the steel production of Gerdau in 2023?",
+   "company": "PT_1",
+   "from": 2023,
+   "to": 2023,
+   "intent": "question",
+   "seen": "2026-11-18",
+   "was": "answered from a code of conduct: the year read as documents of 2023 only"
+  },
+  {
+   "typed": "scope 2 emissions of Gerdau in 2023?",
+   "company": "PT_1",
+   "from": 2023,
+   "to": 2023,
+   "intent": "question",
+   "seen": "2026-11-18",
+   "was": "not stated, with the page among those read: cut at 3,000 characters"
+  },
+  {
+   "typed": "production of Gerdau in 2023",
+   "company": "PT_1",
+   "from": 2023,
+   "to": 2023,
+   "intent": "fact",
+   "seen": "2026-11-18",
+   "was": "searched as a topic: two pages of a code of conduct"
+  },
+  {
+   "typed": "Gerdau production 2025",
+   "company": "PT_1",
+   "from": 2025,
+   "to": 2025,
+   "intent": "fact",
+   "seen": "2026-11-18",
+   "was": "no page at all"
+  },
+  {
+   "typed": "reports and source for Gerdau?",
+   "company": "PT_1",
+   "from": null,
+   "to": null,
+   "intent": "catalogue",
+   "seen": "2026-11-18",
+   "was": "a model counted four documents from eight pages"
+  },
+  {
+   "typed": "which documents do we have for Gerdau",
+   "company": "PT_1",
+   "from": null,
+   "to": null,
+   "intent": "catalogue"
+  },
+  {
+   "typed": "Gerdau reports 2023",
+   "company": "PT_1",
+   "from": 2023,
+   "to": 2023,
+   "intent": "catalogue"
+  },
+  {
+   "typed": "Gerdau",
+   "company": "PT_1",
+   "from": null,
+   "to": null,
+   "intent": "search",
+   "q": ""
+  },
+  {
+   "typed": "nike annual report 2023",
+   "company": "PT_6",
+   "from": 2023,
+   "to": 2023,
+   "intent": "search",
+   "q": "",
+   "typed_type": true
+  },
+  {
+   "typed": "nike human rights policy",
+   "company": "PT_6",
+   "from": null,
+   "to": null,
+   "intent": "search",
+   "typed_type": true
+  },
+  {
+   "typed": "target emissions baseline value polyus",
+   "company": "PT_2",
+   "from": null,
+   "to": null,
+   "intent": "search",
+   "q": "target emissions baseline value",
+   "seen": "2026-11-16",
+   "was": "the word target read as the company Target"
+  },
+  {
+   "typed": "base year target polyus",
+   "company": "PT_2",
+   "from": null,
+   "to": null,
+   "intent": "search"
+  },
+  {
+   "typed": "rebaseline polyus",
+   "company": "PT_2",
+   "from": null,
+   "to": null,
+   "intent": "search",
+   "q": "rebaseline",
+   "seen": "2026-11-16",
+   "was": "0 pages by words"
+  },
+  {
+   "typed": "base year target severestal",
+   "company": null,
+   "typo": "Severstal",
+   "intent": "search",
+   "seen": "2026-11-16",
+   "was": "no company read: 1,300 pages in 17 to 21 s"
+  },
+  {
+   "typed": "base year target sverestal",
+   "company": null,
+   "typo": "Severstal",
+   "intent": "search",
+   "seen": "2026-11-16"
+  },
+  {
+   "typed": "general policy on emissions",
+   "company": null,
+   "typo": "Generali",
+   "intent": "search",
+   "note": "the near name is only a candidate: the database must say the word is unknown before it is taken"
+  },
+  {
+   "typed": "last year lukoil has updated its scope 1 or 2 targets",
+   "company": "PT_5",
+   "from": 2025,
+   "to": 2025,
+   "intent": "fact",
+   "seen": "2026-11-16",
+   "was": "no year read"
+  },
+  {
+   "typed": "scope 3 emissions yandex in 2021",
+   "company": "PT_8",
+   "from": 2021,
+   "to": 2021,
+   "intent": "fact",
+   "seen": "2026-11-16"
+  },
+  {
+   "typed": "Did scope 3 emissions from Rosneft increased between 2024 and 2025?",
+   "company": "PT_9",
+   "from": 2024,
+   "to": 2025,
+   "intent": "question",
+   "seen": "2026-11-13"
+  },
+  {
+   "typed": "remuneration executives incentives ghg emissions at polyus",
+   "company": "PT_2",
+   "from": null,
+   "to": null,
+   "intent": "search",
+   "seen": "2026-11-16"
+  },
+  {
+   "typed": "lukoil year on year growth",
+   "company": "PT_5",
+   "from": null,
+   "to": null,
+   "intent": "search"
+  },
+  {
+   "typed": "emissions targets of banks",
+   "company": null,
+   "from": null,
+   "to": null,
+   "intent": "search"
+  }
+ ]
+}
