@@ -130,6 +130,33 @@ def is_dam_host(host):
     return any(host == s or host.endswith("." + s) for s in DAM_SUFFIXES)
 
 
+# Google Drive (2026-11-18, Decathlon case): sustainability.decathlon.com links every report as
+# drive.google.com/file/d/<id>/view. That address is a viewer page, cross-domain and with no .pdf,
+# so the link was dropped before harvest saw it, and a link added by hand was filed as a page to
+# watch. The file itself is served by a download address built from the same id. A link to one
+# Drive FILE is kept (folders, Docs, Sheets and Slides are not files); doc_probe then opens the
+# download address and only real PDFs are harvested.
+DRIVE_FILE = re.compile(r"^https?://(?:drive|docs)\.google\.com/"
+                        r"(?:file/d/|(?:uc|open)\?(?:[^#]*&)?id=)([A-Za-z0-9_-]{20,})", re.I)
+
+
+def drive_file_id(url):
+    """The id of the Google Drive file a link points at, or ''. The id is case-sensitive."""
+    m = DRIVE_FILE.match((url or "").strip())
+    return m.group(1) if m else ""
+
+
+def drive_downloads(url):
+    """Addresses that serve the file behind a Google Drive file link, best first; [] for any other
+    link. The first skips the "can't scan this file for viruses" page Drive shows for large files;
+    the second is the older form, kept as a fallback."""
+    fid = drive_file_id(url)
+    if not fid:
+        return []
+    return [f"https://drive.usercontent.google.com/download?id={fid}&export=download&confirm=t",
+            f"https://drive.google.com/uc?export=download&id={fid}"]
+
+
 def is_framework_host(host):
     host = (host or "").lower()
     return any(host == s or host.endswith("." + s) for s in FRAMEWORK_SUFFIXES)
@@ -182,7 +209,8 @@ def doc_links(html, base):
     a .pdf: a PDF linked from the company's own monitored page is treated as the company's document
     wherever it is stored (CDNs, IR providers like Q4 or MZiq, group domains, exchange hosts).
     Extensionless platform endpoints (DOC_ENDPOINTS: Q4 /static-files/, Kentico /getattachment/)
-    are documents too, same-domain and cross-domain alike.
+    are documents too, same-domain and cross-domain alike. So is a link to one Google Drive file
+    (drive_file_id): doc_probe confirms it is a PDF before it is harvested.
     Only branded framework/standard-setter/ratings publishers (FRAMEWORK_SUFFIXES) stay excluded,
     and mass-shared documents are additionally filtered at harvest by the SHARED_DOC_MIN
     threshold. Page discovery (DOCISH paths) remains same-domain only: third-party PAGES never
@@ -198,11 +226,12 @@ def doc_links(html, base):
             s = urlsplit(absu)
             path = (s.path or "").lower()
             is_doc_q = bool(DOC_ID_Q.search(s.query or ""))      # /docs?documentId=... CMS endpoint
-            is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q or is_doc_endpoint(path)
+            is_drive = bool(drive_file_id(absu))                 # a file the company keeps on Google Drive
+            is_document = path.endswith(".pdf") or DOCISH.search(path) or is_doc_q or is_doc_endpoint(path) or is_drive
             if not is_document:
                 continue
             xdom_pdf = (path.endswith(".pdf") or is_doc_endpoint(path)) and not is_framework_host(s.hostname)
-            if reg_domain(absu) != rdom and not (is_doc_q or xdom_pdf or is_dam_host(s.hostname)):  # cross-domain: CMS docs, non-framework PDFs, DAM-hosted docs
+            if reg_domain(absu) != rdom and not (is_doc_q or xdom_pdf or is_dam_host(s.hostname) or is_drive):  # cross-domain: CMS docs, non-framework PDFs, DAM-hosted docs, Drive files
                 continue
             n = normalize(absu)
         except ValueError:
