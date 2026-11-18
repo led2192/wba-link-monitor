@@ -286,7 +286,7 @@ def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
     assert "'library_id', r.library_id" in ask and "begin with Yes, No, " in ask
     assert "drop function if exists public.ask(text, text, text, text, int, int, text, text);" in SQL             # one ask, not two the API could confuse
     assert "function isQuestion(text)" in PAGE and "citedFirst(" in PAGE
-    assert "isQuestion($(\"q\").value) ? ask(true) : search(false)" in PAGE                                      # no button to press
+    assert '(i === "question" || i === "fact") ? ask(true) : search(false)' in PAGE and 'if (isQuestion(text)) return "question";' in PAGE                                      # no button to press
 
 
 def test_what_an_answer_finds_is_kept_unconfirmed_and_shown_beside_it():
@@ -429,7 +429,9 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v103 2026-11-18";' in PAGE
+    assert 'const CLIENT = "lantern v104 2026-11-18";' in PAGE
+    # v104: what is asked is told before it is searched; the catalogue is answered from the index
+    assert '(i === "question" || i === "fact") ? ask(true) : search(false); };' in PAGE and 'rpc("company_card", { key, company: id })' in PAGE
     # v103: a typed year that leaves no page is dropped, and the status line says so
     assert "state.yearsDropped = { from: state.from, to: state.to }; state.from = state.to = null; state.yearsTyped = false;" in PAGE
     assert "these are pages of other years. `" in PAGE and "state.strictYears = true; search(true);" in PAGE

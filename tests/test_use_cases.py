@@ -1,0 +1,52 @@
+"""The use-case exam (18 Nov 2026): real things people typed, and what the page must make of them.
+
+In two days of real use a colleague's searches and the owner's found failures the search exam had never shown, because
+that exam asks one thing (is the confirmed page among the pages found). Here the page's own code, parse(), isQuestion()
+and intent(), is run in node on every case of tests/use_cases.json: the company read, the years, a near name, and
+which of the four ways the text takes (catalogue, fact, question, search). A search that goes wrong in real use is
+added to the file with what should have happened. Run in node when it is there (it is on the tests' runner).
+"""
+import json, os, shutil, subprocess, unittest
+
+HERE = os.path.dirname(__file__)
+PAGE = open(os.path.join(HERE, "..", "site", "search.html"), encoding="utf-8").read()
+CASES = json.load(open(os.path.join(HERE, "use_cases.json"), encoding="utf-8"))
+
+
+def run_page(cases):
+    """What the page reads in each text: [{company, from, to, type, typo, q, intent}]."""
+    consts = PAGE[PAGE.index("  const TYPES = ["):PAGE.index("  const $ = id => document.getElementById(id);")]
+    parser = PAGE[PAGE.index("  const WORD_NAMES = new Set("):PAGE.index("  function renderChips() {")]
+    asked = PAGE[PAGE.index("  function isQuestion(text) {"):PAGE.index("  const go = () =>")]
+    script = ("const RealDate = Date; globalThis.Date = class extends RealDate { getFullYear() { return %d; } };"
+              "const document = { createElement: () => ({}), getElementById: () => ({}) }; const $ = () => ({ value: '' });"
+              "let companies = %s; let industries = ['Metals & Mining', 'Oil & Gas'], regions = [];\n%s\n%s\n%s\n"
+              "console.log(JSON.stringify(%s.map(t => { const r = parse(t); return { company: r.company || null, from: r.from || null, to: r.to || null, "
+              "type: r.type || null, typo: (r.typo && r.typo.name) || null, q: (r.q || '').replace(/\\s+/g, ' ').trim(), intent: intent(t, r) }; })))"
+              % (CASES["this_year"], json.dumps(CASES["companies"]), consts, parser, asked, json.dumps([c["typed"] for c in cases])))
+    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=60)
+    if out.returncode:
+        raise AssertionError(out.stderr[-1500:])
+    return json.loads(out.stdout)
+
+
+@unittest.skipUnless(shutil.which("node"), "node not installed")
+class UseCases(unittest.TestCase):
+    def test_every_real_case_is_read_as_it_should_be(self):
+        cases = CASES["cases"]; got = run_page(cases); wrong = []
+        for case, g in zip(cases, got):
+            for field in ("company", "from", "to", "typo", "intent", "q"):
+                if field in case and case[field] != g[field]:
+                    wrong.append(f"{case['typed']!r}: {field} is {g[field]!r}, should be {case[field]!r}")
+            if case.get("typed_type") and not g["type"]:
+                wrong.append(f"{case['typed']!r}: no document type read")
+        self.assertEqual(wrong, [])
+
+    def test_the_file_names_no_person_and_every_case_says_its_intent(self):
+        self.assertGreaterEqual(len(CASES["cases"]), 20)
+        for case in CASES["cases"]:
+            self.assertIn(case["intent"], ("catalogue", "fact", "question", "search"), case["typed"])
+
+
+if __name__ == "__main__":
+    unittest.main()

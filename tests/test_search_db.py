@@ -197,6 +197,24 @@ class SearchOnPostgres(unittest.TestCase):
             c.rollback()
         self.assertEqual((default, on, public), ((3000, False), 8000, False))            # off until its answers are compared
 
+    def test_what_the_library_holds_for_a_company_is_said_from_the_index(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, label, pages, text_status) values "
+                        "('cd-1', 'PT_CARD', 'Card Co', 'Annual Report', 2024, 'AR 2024', 158, 'ok'), ('cd-2', 'PT_CARD', 'Card Co', 'Annual Report', 2024, 'ar 2024', 0, 'no_file'), "
+                        "('cd-3', 'PT_CARD', 'Card Co', 'Annual Report', 2023, 'AR 2023', 0, 'no_file'), ('cd-4', 'PT_CARD', 'Card Co', 'Annual Report', 2025, 'AR 2025', 0, 'no_file'), "
+                        "('cd-5', 'PT_CARD', 'Card Co', 'Code of Conduct', 2023, 'Code', 27, 'ok'), ('cd-6', 'PT_CARD', 'Card Co', 'Code of Conduct', null, 'Code for others', 12, 'ok'), "
+                        "('cd-7', 'PT_CARD', 'Card Co', 'Policy Documents', 2020, 'Privacy', 3, 'no_text')")
+            cur.execute("select public.company_card('k', 'PT_CARD'), public.company_card('k', 'PT_NOBODY')"); card, nobody = cur.fetchone()
+            cur.execute("select has_function_privilege('anon', 'public.company_card(text, text)', 'execute')"); public = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual((card["company"], card["documents"], card["read"], card["unread"], card["first"], card["last"]), ("Card Co", 6, 3, 3, 2020, 2025))   # a document held twice counts once
+        self.assertEqual(card["types"][0], {"type": "Annual Report", "n": 3, "years_read": [2024], "years_unread": [2023, 2025], "undated": 0})          # the main reports first
+        self.assertEqual({t["type"]: (t["years_read"], t["years_unread"], t["undated"]) for t in card["types"][1:]},
+                         {"Code of Conduct": ([2023], [], 1), "Policy Documents": ([], [2020], 0)})                                                         # a file with no text is not read
+        self.assertIsNone(nobody); self.assertTrue(public)
+
     def test_a_search_never_uses_more_than_six_words(self):
         self.find("climate water energy people suppliers workers wage living")
         cur = self.conn.cursor(); cur.execute("select terms from public.search_log order by id desc limit 1")
