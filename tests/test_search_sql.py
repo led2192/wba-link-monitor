@@ -429,7 +429,8 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v104 2026-11-18";' in PAGE
+    assert 'const CLIENT = "lantern v105 2026-11-18";' in PAGE
+    assert 'if (asked !== "search" || $("answer").textContent.trim()) return;' in PAGE          # v105: no offer of Ask under an answer
     # v104: what is asked is told before it is searched; the catalogue is answered from the index
     assert '(i === "question" || i === "fact") ? ask(true) : search(false); };' in PAGE and 'rpc("company_card", { key, company: id })' in PAGE
     # v103: a typed year that leaves no page is dropped, and the status line says so

@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v104 2026-11-18";
+  const CLIENT = "lantern v105 2026-11-18";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -932,6 +932,11 @@
   // opened is no sign of anything, the list shows the passage itself, so it is not looked at.
   const trail = [];
   function offerAsk() {
+    // v105 (18 Nov 2026): not under an answer. The line stood below the answer to a question just asked ("Looking for
+    // a figure or a fact? Ask it as a question"). What is asked as a question, a fact or the catalogue is not a
+    // search made again: it is neither counted in the run nor offered Ask.
+    const asked = intent($("q").value, parse($("q").value));
+    if (asked !== "search" || $("answer").textContent.trim()) return;
     trail.push({ t: Date.now(), company: state.company, opened: false, words: !!state.q });
     const last = trail.slice(-3);
     if (last.length < 3 || !state.company || $("askBtn").hidden || last.some(x => x.offered)) return;
