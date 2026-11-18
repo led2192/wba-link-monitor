@@ -2837,7 +2837,7 @@ begin
                             industry_filter, country_filter, region_filter) f
     loop
       n := n + 1;
-      select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
+      select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
       context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
       sources := sources || jsonb_build_object('n', n, 'company', r.company, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url, 'page', r.page,
                                                'library_id', r.library_id, 'wba_id', r.wba_id, 'excerpt', left(r.excerpt, 600));
@@ -3655,7 +3655,7 @@ begin
   select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
   if api_key is null or http_schema is null then return jsonb_build_object('skipped', 'the reader is not switched on'); end if;
   for src in select e from jsonb_array_elements(a.sources) e order by (e ->> 'n')::int loop
-    select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = src ->> 'library_id' and pg.page = (src ->> 'page')::int;
+    select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = src ->> 'library_id' and pg.page = (src ->> 'page')::int;
     context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', src ->> 'n', src ->> 'company', coalesce(src ->> 'year', 'no year'), coalesce(src ->> 'doc_type', 'document'), src ->> 'page', coalesce(body, ''));
   end loop;
   begin fiscal := public.ask_fiscal_lines(a.sources); exception when others then fiscal := ''; end;
@@ -3954,6 +3954,18 @@ as $$
   select coalesce(current_setting('lantern.' || $1, true), '') = 'on'
       or (coalesce(current_setting('lantern.' || $1, true), '') <> 'off' and exists (select 1 from public.search_options o where o.name = $1 and o.is_on))
 $$;
+
+-- How much of a page the reader is given (18 Nov 2026). An answer and a survey read the first 3,000 characters of
+-- each page. The owner asked for a company's scope 2 emissions of 2023: the page that prints them was among the
+-- eight read, and the answer said "not stated", because the text of that page is 4,535 characters and its table
+-- starts at character 3,642 (the page's left column of prose comes first). About 36% of the library's pages are
+-- longer than 3,000 characters, 4% longer than 6,000. Option reader_whole_page: 8,000 characters. Off until its
+-- answers are compared with today's: it changes what the reader is given.
+insert into public.search_options (name, is_on, note) values ('reader_whole_page', false, 'answers and surveys read up to 8,000 characters of each page instead of the first 3,000 (a table often stands at the end of a page''s text)') on conflict (name) do nothing;
+create or replace function public.reader_page_chars() returns int
+language sql stable security definer set search_path = public
+as $$ select case when public.survey_option('reader_whole_page') then 8000 else 3000 end $$;
+revoke all on function public.reader_page_chars() from public, anon, authenticated;
 revoke all on function public.survey_option(text) from public, anon, authenticated;
 drop function if exists public.survey_instructions();
 create or replace function public.survey_instructions(tight boolean default false) returns text
@@ -4257,7 +4269,7 @@ begin
         limit take
       loop
         n := n + 1; n_round := n_round + 1;
-        select left(regexp_replace(pg.body, '\s+', ' ', 'g'), 3000) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
+        select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
         context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
         sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url,
                                                  'body', lower(coalesce(body, '')));

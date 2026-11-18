@@ -53,7 +53,7 @@ class SurveyEval(unittest.TestCase):
     def test_an_option_is_set_before_every_reading(self):
         cur = Cur({"W1": {"status": "yes"}, "W2": {"status": "no"}})
         S.run_eval(cur, [G("W1", True), G("W2", True)], ATTRS, 8, 1.0, options=("survey_again",))
-        self.assertEqual(cur.settings, [("lantern.survey_strict", "off"), ("lantern.survey_again", "on")] * 2)   # a rollback undoes a setting
+        self.assertEqual(cur.settings, [("lantern.survey_strict", "off"), ("lantern.survey_again", "on"), ("lantern.reader_whole_page", "off")] * 2)   # a rollback undoes a setting
         self.assertEqual(cur.asked[0][-1], 8)
 
     def test_reading_stops_at_the_ceiling_of_spending(self):
