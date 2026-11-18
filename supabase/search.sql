@@ -5571,6 +5571,113 @@ $$;
 revoke all on function public.find_meaning(text, real[], text, int, int, text, int) from public;
 grant execute on function public.find_meaning(text, real[], text, int, int, text, int) to anon, authenticated;
 
+-- Pages that are not content (18 Nov 2026). A search for a company's approach to biodiversity gave first the page of
+-- the report's GRI index that lists "304-1 ... biodiversity ... page 87": the words are there, the answer is not.
+-- Two kinds of page are recognised by their shape alone, whatever the language:
+--   contents  a table of contents: six or more lines of dot leaders that end in a page number and are followed by
+--             the next title (three are enough on a page under 1,500 characters). A financial statement also has
+--             dot leaders, followed by figures ("Gross profit ..... 266,868 200,691"): the number must stand alone
+--             and a letter must follow, so a table of figures is never taken for a contents page.
+--   index     a GRI content index: eight or more disclosure codes of the GRI topic standards (102-x, 103-x, 201-x
+--             to 207-x, 301-x to 308-x, 401-x to 419-x), at least three every 1,000 characters. Codes of other
+--             shapes (street numbers "650-65", CAS numbers "127-91-3", ranges "108-110") are not counted, and a
+--             page of figures that names a few disclosures (a water table under "303-3") stays content.
+-- Measured on a sample of 36,385 pages: 0.2% contents, about 0.3% index. Of 16 pages read by eye, the contents
+-- rule was right on 8 of 8; the index rule before it was narrowed to the GRI codes was right on 6 of 8 (the two
+-- wrong ones were a list of addresses and a staff table, which the narrower rule leaves out).
+-- page_kind_rule(): raised when the rule changes, so page_kinds_step reads again the documents read with an older one.
+create or replace function public.page_kind_rule() returns int language sql immutable as $$ select 1 $$;
+
+create or replace function public.page_kind(body text) returns text
+language sql immutable parallel safe
+as $$
+  select case
+    when x.leaders >= 6 or (x.leaders >= 3 and x.len < 1500) then 'contents'
+    when x.codes >= 8 and x.codes * 1000.0 / greatest(x.len, 1) >= 3 then 'index'
+  end
+  from (select length(coalesce($1, '')) as len,
+               (select count(*) from regexp_matches(coalesce($1, ''), '(\.\s?){5,}\s*\d{1,3}\s+[[:alpha:]]', 'g')) as leaders,
+               (select count(*) from regexp_matches(coalesce($1, ''), '(?<![\d-])(10[23]|20[1-7]|30[1-8]|40[1-9]|41[0-9])-\d{1,2}(?![\d-])', 'g')) as codes) x
+$$;
+
+-- page_kinds holds only the pages that are not content (about one in 200), so the 12 million rows of pages are not
+-- rewritten. page_kind_docs: the documents already read, and with which rule.
+create table if not exists public.page_kinds (
+  library_id text not null,
+  page       int  not null,
+  kind       text not null,
+  primary key (library_id, page)
+);
+alter table public.page_kinds enable row level security;
+create table if not exists public.page_kind_docs (
+  library_id text primary key,
+  rule       int not null,
+  pages      int not null default 0,
+  marked     int not null default 0,
+  done       timestamptz not null default now()
+);
+alter table public.page_kind_docs enable row level security;
+
+-- One step of the reading: the next max_docs documents with text that were not read with today's rule. Rows of
+-- page_kinds are written or corrected, never removed: a page that an older rule marked and today's does not is
+-- set to kind 'content', which the search treats as no mark. Called by page_kinds.py (the owner's connection).
+create or replace function public.page_kinds_step(max_docs int default 200) returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '120s'
+as $$
+declare
+  ids text[];
+  n_pages int := 0;
+  n_marked int := 0;
+  rule_now int := public.page_kind_rule();
+begin
+  select array_agg(t.library_id) into ids from (
+    select d.library_id from public.documents d
+    where d.text_status = 'ok'
+      and not exists (select 1 from public.page_kind_docs k where k.library_id = d.library_id and k.rule >= rule_now)
+    order by d.library_id limit least(greatest(coalesce(max_docs, 200), 1), 2000)) t;
+  if ids is null then
+    return jsonb_build_object('documents', 0, 'pages', 0, 'marked', 0);
+  end if;
+  with r as materialized (select pg.library_id, pg.page, public.page_kind(pg.body) as kind from public.pages pg where pg.library_id = any(ids)),
+       w as (insert into public.page_kinds (library_id, page, kind)
+               select r.library_id, r.page, r.kind from r where r.kind is not null
+               on conflict (library_id, page) do update set kind = excluded.kind
+               returning 1),
+       c as (update public.page_kinds k set kind = 'content' from r
+               where k.library_id = r.library_id and k.page = r.page and r.kind is null and k.kind <> 'content'
+               returning 1),
+       per as (select r.library_id, count(*)::int as pages, count(r.kind)::int as marked from r group by r.library_id),
+       d as (insert into public.page_kind_docs (library_id, rule, pages, marked, done)
+               select i.id, rule_now, coalesce(per.pages, 0), coalesce(per.marked, 0), now()
+               from unnest(ids) as i(id) left join per on per.library_id = i.id
+               on conflict (library_id) do update set rule = excluded.rule, pages = excluded.pages, marked = excluded.marked, done = excluded.done
+               returning pages, marked)
+  select coalesce(sum(d.pages), 0), coalesce(sum(d.marked), 0) into n_pages, n_marked from d;
+  return jsonb_build_object('documents', coalesce(array_length(ids, 1), 0), 'pages', n_pages, 'marked', n_marked);
+end;
+$$;
+revoke all on function public.page_kinds_step(int) from public, anon, authenticated;
+
+-- How far the reading is: documents with text, read with today's rule, pages marked by kind.
+create or replace function public.page_kinds_state() returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  select jsonb_build_object(
+    'documents', (select count(*) from public.documents d where d.text_status = 'ok'),
+    'read', (select count(*) from public.page_kind_docs k where k.rule >= public.page_kind_rule()),
+    'pages', (select coalesce(sum(k.pages), 0) from public.page_kind_docs k where k.rule >= public.page_kind_rule()),
+    'kinds', (select coalesce(jsonb_object_agg(t.kind, t.n), '{}'::jsonb) from (select kind, count(*) as n from public.page_kinds group by kind) t))
+$$;
+revoke all on function public.page_kinds_state() from public, anon, authenticated;
+
+-- Option page_kinds (off): a page marked contents or index goes down the list. With the two lists merged its score
+-- is halved, which puts it after every page that only one list found, unless both lists found it; with the words
+-- alone it goes after the others. It is never taken out: someone looking for the index still finds it. Off until
+-- the search exam (search_exam.py --option page_kinds) shows that no attribute's figure is found less often.
+insert into public.search_options (name, is_on, note) values ('page_kinds', false, 'pages that are a table of contents or a GRI index go down the list') on conflict (name) do nothing;
+
 -- One search (13 Nov 2026). People do not choose between words and meaning: they type, and the search uses both.
 -- find_blend runs the search by words (find_pages, which also logs the search) and, when the page sends the query's
 -- vector, the search by meaning (find_meaning), and merges the two lists by reciprocal rank: a page's score is
@@ -5593,9 +5700,20 @@ as $$
 #variable_conflict use_column
 declare
   need int := least(greatest(coalesce(max_rows, 50), 1), 200);
+  kinds boolean := public.survey_option('page_kinds');           -- contents and index pages go down the list
 begin
   if qvec is null or coalesce(array_length(qvec, 1), 0) <> 384 or position('"' in coalesce(q, '')) > 0
      or industry_filter is not null or country_filter is not null or region_filter is not null then
+    if kinds then
+      return query
+        with w as materialized (select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
+                                                                 industry_filter, country_filter, region_filter, typed))
+        select w.log_id, (row_number() over (order by (pk.kind is not null), w.rank))::int, w.library_id, w.company, w.wba_id, w.year, w.doc_type,
+               w.label, w.url, w.page, w.score, w.excerpt
+        from w left join public.page_kinds pk on pk.library_id = w.library_id and pk.page = w.page and pk.kind <> 'content'
+        order by (pk.kind is not null), w.rank;
+      return;
+    end if;
     return query select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
                                                   industry_filter, country_filter, region_filter, typed);
     return;
@@ -5604,12 +5722,15 @@ begin
     with w as materialized (select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, need, client,
                                                              industry_filter, country_filter, region_filter, typed)),
          m as materialized (select * from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, 60)),
-         u as (select coalesce(w.library_id, m.library_id) as library_id, coalesce(w.page, m.page) as page,
+         u0 as (select coalesce(w.library_id, m.library_id) as library_id, coalesce(w.page, m.page) as page,
                       coalesce(w.company, m.company) as company, coalesce(w.wba_id, m.wba_id) as wba_id, coalesce(w.year, m.year) as year,
                       coalesce(w.doc_type, m.doc_type) as doc_type, coalesce(w.label, m.label) as label, coalesce(w.url, m.url) as url,
                       coalesce(w.excerpt, m.excerpt) as excerpt,
                       (coalesce(1.0 / (60 + w.rank), 0) + coalesce(1.0 / (60 + m.rank), 0)) as s
                from w full join m on m.library_id = w.library_id and m.page = w.page),
+         u as (select u0.library_id, u0.page, u0.company, u0.wba_id, u0.year, u0.doc_type, u0.label, u0.url, u0.excerpt,
+                      (u0.s * case when kinds and pk.kind is not null then 0.5 else 1 end) as s
+               from u0 left join public.page_kinds pk on kinds and pk.library_id = u0.library_id and pk.page = u0.page and pk.kind <> 'content'),
          k as (select u.*, row_number() over (partition by u.library_id order by u.s desc) as in_doc from u)
     select (select max(w.log_id) from w), (row_number() over (order by k.s desc, k.library_id, k.page))::int, k.library_id, k.company, k.wba_id,
            k.year, k.doc_type, k.label, k.url, k.page, k.s::real, k.excerpt

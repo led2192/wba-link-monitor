@@ -419,6 +419,82 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(LS.upsert_documents(conn, many, batch=3, say=lambda *a, **k: None), 0)
         cur.execute("delete from public.documents where library_id = 'PT_00000-loadtest' or library_id like 'PT_00000-batch%'")
 
+    def test_a_contents_page_and_a_gri_index_are_told_from_content_and_from_tables_of_figures(self):
+        cur = self.conn.cursor()
+        kind = lambda body: (cur.execute("select public.page_kind(%s)", (body,)), cur.fetchone()[0])[1]
+        toc = "Contents " + " ".join(f"Chapter {w} {'.' * 40} {n}" for n, w in enumerate(("People", "Planet", "Water", "Waste", "Board", "Tax", "Annex"), 3)) + " End"
+        self.assertEqual(kind(toc), "contents")
+        self.assertEqual(kind("Index Our people . . . . . . . . . . 4 Our planet . . . . . . . . 9 Our board . . . . . . . 12 Annex"), "contents")     # three leaders on a short page
+        statement = " ".join(f"{w} {'.' * 30} {v} {v2}" for w, v, v2 in (("Revenue", "800,864", "711,146"), ("Cost of goods sold", "533,996", "510,455"),
+                             ("Gross profit", "266,868", "200,691"), ("Expenses", "19.5", "19.3"), ("Tax", "(34.4)", "91.8"), ("Net", "$ 12", "$ 9"), ("Units", "14,414", "14,557")))
+        self.assertIsNone(kind(statement))                                   # leaders followed by figures: a statement, never a contents page
+        gri = " ".join(f"GRI {c} Some disclosure title {n}" for n, c in enumerate(("302-1", "302-3", "303-3", "304-1", "304-2", "305-1", "305-2", "305-3", "403-9"), 40))
+        self.assertEqual(kind(gri), "index")
+        self.assertIsNone(kind("Water withdrawals (303-3) by source: sea water 7,885.2 8,869.2 8,743.3; total 10,914.4 13,727.7. " * 3 + "x" * 3000))   # a table that names a disclosure
+        self.assertIsNone(kind(" ".join(f"Seoul district {a} 887 268 788" for a in ("650-65", "164-2", "236-1", "219-43", "209-6", "127-91", "152-3", "131-9", "145-2"))))  # addresses
+        self.assertIsNone(kind("CAS 127-91-3 / 201-291-9 / 204-872-5 beta-pinene " * 6))                       # numbers of three parts
+        self.assertIsNone(kind("See pages 108-110, 203-205 and 301-305 of the report. " * 6))                    # ranges of pages
+        self.assertIsNone(kind("We respect the opinions of others and pay a living wage in every country."))
+        self.assertIsNone(kind(None))
+
+    def test_the_documents_are_read_once_and_marked_pages_go_down_only_with_the_option(self):
+        import psycopg
+        toc = "Contents living wage " + " ".join(f"Living wage chapter {'.' * 40} {n}" for n in range(3, 11)) + " End"
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select library_id, page, rank from public.find_pages('', 'living wage')")
+            words = cur.fetchall()
+            first = words[0]
+            cur.execute("update public.documents set text_status = 'ok'")
+            cur.execute("select body from public.pages where library_id = %s and page = %s", (first[0], first[1]))
+            cur.execute("update public.pages set body = %s || ' ' || body where library_id = %s and page = %s", (toc, first[0], first[1]))
+            cur.execute("select library_id, page from public.find_pages('', 'living wage')")
+            before = cur.fetchall()
+            self.assertGreater(len(before), 1)
+            marked = before[0]
+            cur.execute("select count(*) from public.documents where text_status = 'ok'")
+            docs = cur.fetchone()[0]
+            cur.execute("select public.page_kinds_step(2000)")
+            step = cur.fetchone()[0]
+            self.assertEqual(step["documents"], docs)
+            self.assertGreaterEqual(step["marked"], 1)
+            cur.execute("select kind from public.page_kinds where library_id = %s and page = %s", (first[0], first[1]))
+            self.assertEqual(cur.fetchone()[0], "contents")
+            cur.execute("select public.page_kinds_step(2000)")
+            self.assertEqual(cur.fetchone()[0]["documents"], 0)                # read once
+            cur.execute("select public.page_kinds_state()")
+            state = cur.fetchone()[0]
+            self.assertEqual((state["read"], state["documents"]), (docs, docs))
+            self.assertGreaterEqual(state["kinds"]["contents"], 1)
+            cur.execute("select set_config('lantern.page_kinds', 'off', false)")
+            cur.execute("select library_id, page from public.find_blend('', 'living wage')")
+            self.assertEqual(cur.fetchall(), before)                          # off: nothing moves
+            cur.execute("select set_config('lantern.page_kinds', 'on', false)")
+            cur.execute("select library_id, page, rank from public.find_blend('', 'living wage')")
+            on = cur.fetchall()
+            self.assertEqual({(r[0], r[1]) for r in on}, set(before))         # on: the same pages, none taken out
+            self.assertEqual((on[-1][0], on[-1][1]), (first[0], first[1]))    # the contents page last
+            self.assertEqual([r[2] for r in on], list(range(1, len(on) + 1)))
+            # both lists merged: the marked page, first by words and first by meaning, still goes after a page only the words found
+            cur.execute(psycopg.sql.SQL("""create or replace function public.find_meaning(key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null, type_filter text default null, max_rows int default 50)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$ select null::bigint, 40, {}::text, 'c'::text, 'w'::text, 2024, 't'::text, 'l'::text, null::text, {}::int, 0.9::real, 'nearest passage'::text $f$""").format(
+                               psycopg.sql.Literal(first[0]), psycopg.sql.Literal(first[1])))
+            cur.execute("select library_id, page from public.find_blend('', 'living wage', %s::real[])", ([0.0] * 384,))
+            blended = cur.fetchall()
+            self.assertEqual(set(blended), set(before))
+            self.assertNotEqual(blended[0], (first[0], first[1]))
+            cur.execute("select set_config('lantern.page_kinds', 'off', false)")
+            cur.execute("select library_id, page from public.find_blend('', 'living wage', %s::real[])", ([0.0] * 384,))
+            self.assertEqual(cur.fetchall()[0], (first[0], first[1]))          # off: found by both, it is first
+            # a rule that no longer marks the page: the row stays, as content, and the search treats it as no mark
+            cur.execute("update public.pages set body = 'living wage' where library_id = %s and page = %s", (first[0], first[1]))
+            cur.execute("update public.page_kind_docs set rule = 0")
+            cur.execute("select public.page_kinds_step(2000)")
+            cur.execute("select kind from public.page_kinds where library_id = %s and page = %s", (first[0], first[1]))
+            self.assertEqual(cur.fetchone()[0], "content")
+            c.rollback()
+
     def test_one_search_blends_words_and_meaning(self):
         """find_blend: the words alone without a vector, in quotes or with a place filter; else both lists merged by
         reciprocal rank. The search by meaning is replaced by a stub here (no vector type in the test database)."""
