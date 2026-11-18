@@ -187,6 +187,16 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(got, ["cp-m", "cp-o"])                                    # one row a title and year: the copy with pages; a document nobody read still shows
         self.assertEqual((facts["cp-m"].get("status"), facts["cp-o"]["status"]), (None, "no_file"))
 
+    def test_the_reader_is_given_3000_characters_of_a_page_or_8000_with_the_option(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.reader_page_chars(), (select is_on from public.search_options where name = 'reader_whole_page')"); default = cur.fetchone()
+            cur.execute("select set_config('lantern.reader_whole_page', 'on', true)"); cur.execute("select public.reader_page_chars()"); on = cur.fetchone()[0]
+            cur.execute("select has_function_privilege('anon', 'public.reader_page_chars()', 'execute')"); public = cur.fetchone()[0]
+            c.rollback()
+        self.assertEqual((default, on, public), ((3000, False), 8000, False))            # off until its answers are compared
+
     def test_a_search_never_uses_more_than_six_words(self):
         self.find("climate water energy people suppliers workers wage living")
         cur = self.conn.cursor(); cur.execute("select terms from public.search_log order by id desc limit 1")

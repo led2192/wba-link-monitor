@@ -65,7 +65,7 @@ def cost(stats):
     return stats["in"] * USD_IN + stats["out"] * USD_OUT
 
 
-OPTIONS = ("survey_strict", "survey_again")
+OPTIONS = ("survey_strict", "survey_again", "reader_whole_page")
 
 
 def read_one(cur, g, attr, pages, options=()):

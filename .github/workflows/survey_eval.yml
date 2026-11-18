@@ -19,7 +19,7 @@ on:
         description: "pages read a company (1 to 8)"
         default: "6"
       options:
-        description: "reading options to switch on for this run (survey_strict, survey_again), comma separated"
+        description: "reading options to switch on for this run (survey_strict, survey_again, reader_whole_page), comma separated"
         default: ""
       max_usd:
         description: "stop reading at this cost, in USD"
