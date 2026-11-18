@@ -1,0 +1,476 @@
+{
+ "_about": "Variants of the real cases of use_cases.json: other companies, Spanish, other topics, other wordings, written on 18 Nov 2026 before looking at what the page makes of them, with the way each should take by what the person wants. It is a measure, not a list of promises: intent_exam.py says how many the page reads right, and tests/test_intent_exam.py only forbids going back from the count already reached. The rules of the page are not to be tuned on these texts one by one; a rule that is added must be a general one. No person is named.",
+ "companies": [
+  {
+   "id": "PT_1",
+   "name": "Gerdau"
+  },
+  {
+   "id": "PT_2",
+   "name": "Polyus"
+  },
+  {
+   "id": "PT_3",
+   "name": "Target"
+  },
+  {
+   "id": "PT_4",
+   "name": "Severstal"
+  },
+  {
+   "id": "PT_5",
+   "name": "Lukoil"
+  },
+  {
+   "id": "PT_6",
+   "name": "Nike"
+  },
+  {
+   "id": "PT_7",
+   "name": "Generali"
+  },
+  {
+   "id": "PT_8",
+   "name": "Yandex"
+  },
+  {
+   "id": "PT_9",
+   "name": "Rosneft"
+  }
+ ],
+ "this_year": 2026,
+ "topics": [
+  "activities",
+  "biodiversity",
+  "business",
+  "business model",
+  "cambio climatico",
+  "carbon emissions",
+  "carbon footprint",
+  "climate",
+  "climate change",
+  "corporate governance",
+  "derechos humanos",
+  "emisiones",
+  "emissions",
+  "empleados",
+  "employees",
+  "environment",
+  "environmental",
+  "environmental footprint",
+  "environmental impact",
+  "environmental impacts",
+  "environmental performance",
+  "esg",
+  "finance",
+  "finances",
+  "financial performance",
+  "financial results",
+  "financials",
+  "ghg emissions",
+  "gobernanza",
+  "governance",
+  "greenhouse gas emissions",
+  "huella de carbono",
+  "human rights",
+  "impacto ambiental",
+  "labor rights",
+  "labour rights",
+  "main business",
+  "medio ambiente",
+  "negocio",
+  "own workforce",
+  "people",
+  "policies",
+  "pollution",
+  "products",
+  "social",
+  "social impact",
+  "social performance",
+  "sostenibilidad",
+  "staff",
+  "sustainability",
+  "targets",
+  "tax",
+  "trabajadores",
+  "water",
+  "workers",
+  "workforce"
+ ],
+ "cases": [
+  {
+   "typed": "what do you have on Nike",
+   "intent": "catalogue",
+   "company": "PT_6"
+  },
+  {
+   "typed": "list of Lukoil documents",
+   "intent": "catalogue",
+   "company": "PT_5"
+  },
+  {
+   "typed": "qué informes hay de Gerdau",
+   "intent": "catalogue",
+   "company": "PT_1"
+  },
+  {
+   "typed": "all files for Rosneft",
+   "intent": "catalogue",
+   "company": "PT_9"
+  },
+  {
+   "typed": "show me everything from Yandex",
+   "intent": "catalogue",
+   "company": "PT_8"
+  },
+  {
+   "typed": "do we have anything for Severstal",
+   "intent": "catalogue",
+   "company": "PT_4"
+  },
+  {
+   "typed": "Polyus: which years are covered?",
+   "intent": "catalogue",
+   "company": "PT_2"
+  },
+  {
+   "typed": "sources available for Generali",
+   "intent": "catalogue",
+   "company": "PT_7"
+  },
+  {
+   "typed": "nike number of employees",
+   "intent": "fact",
+   "company": "PT_6"
+  },
+  {
+   "typed": "revenue of Lukoil 2022",
+   "intent": "fact",
+   "company": "PT_5",
+   "from": 2022,
+   "to": 2022
+  },
+  {
+   "typed": "Gerdau capex 2024",
+   "intent": "fact",
+   "company": "PT_1",
+   "from": 2024,
+   "to": 2024
+  },
+  {
+   "typed": "Polyus scope 1",
+   "intent": "fact",
+   "company": "PT_2"
+  },
+  {
+   "typed": "ingresos de Gerdau en 2022",
+   "intent": "fact",
+   "company": "PT_1",
+   "from": 2022,
+   "to": 2022
+  },
+  {
+   "typed": "Severstal employees 2023",
+   "intent": "fact",
+   "company": "PT_4",
+   "from": 2023,
+   "to": 2023
+  },
+  {
+   "typed": "Rosneft CEO",
+   "intent": "fact",
+   "company": "PT_9"
+  },
+  {
+   "typed": "Yandex headquarters",
+   "intent": "fact",
+   "company": "PT_8"
+  },
+  {
+   "typed": "nike net zero target year",
+   "intent": "fact",
+   "company": "PT_6"
+  },
+  {
+   "typed": "Lukoil scope 3 2020",
+   "intent": "fact",
+   "company": "PT_5",
+   "from": 2020,
+   "to": 2020
+  },
+  {
+   "typed": "Generali total assets",
+   "intent": "fact",
+   "company": "PT_7"
+  },
+  {
+   "typed": "Target revenue 2023",
+   "intent": "fact",
+   "company": "PT_3",
+   "from": 2023,
+   "to": 2023
+  },
+  {
+   "typed": "women on the board of Generali",
+   "intent": "fact",
+   "company": "PT_7"
+  },
+  {
+   "typed": "Nike CEO pay 2024",
+   "intent": "fact",
+   "company": "PT_6",
+   "from": 2024,
+   "to": 2024
+  },
+  {
+   "typed": "Lukoil revenue FY2022",
+   "intent": "fact",
+   "company": "PT_5",
+   "from": 2022,
+   "to": 2022
+  },
+  {
+   "typed": "Severstal employees in 2023 and 2024",
+   "intent": "fact",
+   "company": "PT_4",
+   "from": 2023,
+   "to": 2024
+  },
+  {
+   "typed": "Is Polyus aligned with TCFD",
+   "intent": "question",
+   "company": "PT_2"
+  },
+  {
+   "typed": "tiene Gerdau una política de derechos humanos",
+   "intent": "question",
+   "company": "PT_1"
+  },
+  {
+   "typed": "nike, do they audit suppliers?",
+   "intent": "question",
+   "company": "PT_6"
+  },
+  {
+   "typed": "I want to know if Severstal reports methane",
+   "intent": "question",
+   "company": "PT_4"
+  },
+  {
+   "typed": "tell me whether Lukoil has a net zero target",
+   "intent": "question",
+   "company": "PT_5"
+  },
+  {
+   "typed": "explain Nike's living wage approach",
+   "intent": "question",
+   "company": "PT_6"
+  },
+  {
+   "typed": "¿Cuántos empleados tiene Rosneft?",
+   "intent": "question",
+   "company": "PT_9"
+  },
+  {
+   "typed": "Polyus has a biodiversity policy?",
+   "intent": "question",
+   "company": "PT_2"
+  },
+  {
+   "typed": "check if Yandex publishes a tax report",
+   "intent": "question",
+   "company": "PT_8"
+  },
+  {
+   "typed": "who audits Generali",
+   "intent": "question",
+   "company": "PT_7"
+  },
+  {
+   "typed": "how much water did Nike use",
+   "intent": "question",
+   "company": "PT_6"
+  },
+  {
+   "typed": "me gustaría saber si Gerdau usa carbón vegetal",
+   "intent": "question",
+   "company": "PT_1"
+  },
+  {
+   "typed": "Lukoil climate",
+   "intent": "overview",
+   "company": "PT_5"
+  },
+  {
+   "typed": "Severstal human rights",
+   "intent": "overview",
+   "company": "PT_4"
+  },
+  {
+   "typed": "nike workforce",
+   "intent": "overview",
+   "company": "PT_6"
+  },
+  {
+   "typed": "Polyus governance",
+   "intent": "overview",
+   "company": "PT_2"
+  },
+  {
+   "typed": "sostenibilidad de Gerdau",
+   "intent": "overview",
+   "company": "PT_1"
+  },
+  {
+   "typed": "Rosneft and the environment",
+   "intent": "overview",
+   "company": "PT_9"
+  },
+  {
+   "typed": "nike social impact",
+   "intent": "overview",
+   "company": "PT_6"
+  },
+  {
+   "typed": "Yandex tax",
+   "intent": "overview",
+   "company": "PT_8"
+  },
+  {
+   "typed": "tell me about Gerdau's pollution",
+   "intent": "overview",
+   "company": "PT_1"
+  },
+  {
+   "typed": "nike supply chain",
+   "intent": "overview",
+   "company": "PT_6"
+  },
+  {
+   "typed": "Lukoil safety",
+   "intent": "overview",
+   "company": "PT_5"
+  },
+  {
+   "typed": "Severstal waste",
+   "intent": "overview",
+   "company": "PT_4"
+  },
+  {
+   "typed": "Polyus water use",
+   "intent": "overview",
+   "company": "PT_2"
+  },
+  {
+   "typed": "energy at Gerdau",
+   "intent": "overview",
+   "company": "PT_1"
+  },
+  {
+   "typed": "nike diversity",
+   "intent": "overview",
+   "company": "PT_6"
+  },
+  {
+   "typed": "NIKE WATER",
+   "intent": "overview",
+   "company": "PT_6"
+  },
+  {
+   "typed": "Nike's emissions",
+   "intent": "overview",
+   "company": "PT_6"
+  },
+  {
+   "typed": "Gerdau emissions 2021-2023",
+   "intent": "overview",
+   "company": "PT_1",
+   "from": 2021,
+   "to": 2023
+  },
+  {
+   "typed": "living wage",
+   "intent": "search",
+   "company": null
+  },
+  {
+   "typed": "nike code of conduct",
+   "intent": "search",
+   "company": "PT_6"
+  },
+  {
+   "typed": "double materiality assessment Generali",
+   "intent": "search",
+   "company": "PT_7"
+  },
+  {
+   "typed": "\"science based targets\" Polyus",
+   "intent": "search",
+   "company": "PT_2"
+  },
+  {
+   "typed": "Severstal sustainability report 2022",
+   "intent": "search",
+   "company": "PT_4",
+   "from": 2022,
+   "to": 2022
+  },
+  {
+   "typed": "deforestation policy",
+   "intent": "search",
+   "company": null
+  },
+  {
+   "typed": "modern slavery statement nike 2023",
+   "intent": "search",
+   "company": "PT_6",
+   "from": 2023,
+   "to": 2023
+  },
+  {
+   "typed": "banks coal exclusion",
+   "intent": "search",
+   "company": null
+  },
+  {
+   "typed": "Rosneft annual report",
+   "intent": "search",
+   "company": "PT_9"
+  },
+  {
+   "typed": "scope 3 category 11",
+   "intent": "search",
+   "company": null
+  },
+  {
+   "typed": "whistleblowing",
+   "intent": "search",
+   "company": null
+  },
+  {
+   "typed": "Gerdau integrated report 2024",
+   "intent": "search",
+   "company": "PT_1",
+   "from": 2024,
+   "to": 2024
+  },
+  {
+   "typed": "nkie water",
+   "intent": "overview",
+   "company": null,
+   "typo": "Nike"
+  },
+  {
+   "typed": "lukoli emissions 2022",
+   "intent": "overview",
+   "company": null,
+   "typo": "Lukoil"
+  },
+  {
+   "typed": "gerdua",
+   "intent": "search",
+   "company": null,
+   "typo": "Gerdau"
+  }
+ ]
+}
