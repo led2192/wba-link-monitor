@@ -3,7 +3,8 @@
 In two days of real use a colleague's searches and the owner's found failures the search exam had never shown, because
 that exam asks one thing (is the confirmed page among the pages found). Here the page's own code, parse(), isQuestion()
 and intent(), is run in node on every case of tests/use_cases.json: the company read, the years, a near name, and
-which of the four ways the text takes (catalogue, fact, question, search). A search that goes wrong in real use is
+which of the five ways the text takes (catalogue, fact, question, overview, search); a near name is taken as
+the company before the way is decided, as the page does when the library does not know the word. A search that goes wrong in real use is
 added to the file with what should have happened. Run in node when it is there (it is on the tests' runner).
 """
 import json, os, shutil, subprocess, unittest
@@ -17,13 +18,15 @@ def run_page(cases):
     """What the page reads in each text: [{company, from, to, type, typo, q, intent}]."""
     consts = PAGE[PAGE.index("  const TYPES = ["):PAGE.index("  const $ = id => document.getElementById(id);")]
     parser = PAGE[PAGE.index("  const WORD_NAMES = new Set("):PAGE.index("  function renderChips() {")]
-    asked = PAGE[PAGE.index("  function isQuestion(text) {"):PAGE.index("  const go = () =>")]
+    asked = PAGE[PAGE.index("  function isQuestion(text) {"):PAGE.index("  const go = async () =>")]
+    typo = PAGE[PAGE.index("  function applyTypo(parsed) {"):PAGE.index("  const typoWanted = ")]
     script = ("const RealDate = Date; globalThis.Date = class extends RealDate { getFullYear() { return %d; } };"
               "const document = { createElement: () => ({}), getElementById: () => ({}) }; const $ = () => ({ value: '' });"
-              "let companies = %s; let industries = ['Metals & Mining', 'Oil & Gas'], regions = [];\n%s\n%s\n%s\ntopics = new Set(%s);\n"
+              "let companies = %s; let industries = ['Metals & Mining', 'Oil & Gas'], regions = [];\n%s\n%s\n%s\n%s\ntopics = new Set(%s); metricNames = new Set(%s);\n"
               "console.log(JSON.stringify(%s.map(t => { const r = parse(t); return { company: r.company || null, from: r.from || null, to: r.to || null, "
-              "type: r.type || null, typo: (r.typo && r.typo.name) || null, q: (r.q || '').replace(/\\s+/g, ' ').trim(), intent: intent(t, r) }; })))"
-              % (CASES["this_year"], json.dumps(CASES["companies"]), consts, parser, asked, json.dumps(CASES["topics"]), json.dumps([c["typed"] for c in cases])))
+              "type: r.type || null, typo: (r.typo && r.typo.name) || null, q: (r.q || '').replace(/\\s+/g, ' ').trim(), "
+              "intent: intent(t, r.typo ? applyTypo({ ...r }) : r) }; })))"
+              % (CASES["this_year"], json.dumps(CASES["companies"]), consts, parser, asked, typo, json.dumps(CASES["topics"]), json.dumps(CASES.get("metrics", [])), json.dumps([c["typed"] for c in cases])))
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=60)
     if out.returncode:
         raise AssertionError(out.stderr[-1500:])

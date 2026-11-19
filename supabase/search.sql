@@ -2900,6 +2900,26 @@ $$;
 revoke all on function public.find_topics(text) from public;
 grant execute on function public.find_topics(text) to anon, authenticated;
 
+-- The names of the taxonomy's metrics as the page compares them (19 Nov 2026): one company and the name of a metric
+-- ("Rosneft CEO", "nike number of employees", "Generali total assets") is a fact that is wanted, so the page asks it
+-- as a question with no year needed. Labels and other names of the active metrics, in topic_norm's form. Names that
+-- are also a broad topic stay the topic's (the page looks at the topics first).
+create or replace function public.find_metric_names(key text) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(distinct x.name), '[]'::jsonb) from (
+            select public.topic_norm(a) as name from public.fact_metrics m, unnest(m.aliases || m.label) a where m.status = 'active') x
+          where x.name <> '' and length(x.name) >= 3);
+end;
+$$;
+revoke all on function public.find_metric_names(text) from public;
+grant execute on function public.find_metric_names(text) to anon, authenticated;
+
 -- The pages an overview reads: one search for each metric of each group of the topic, within the company, and the
 -- best pages taken in turn, a group at a time, so that eight pages cover the topic's parts, where the search by the
 -- topic's own words gave eight pages of one part. A page found twice counts once.

@@ -495,6 +495,21 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(cur.fetchone()[0], "content")
             c.rollback()
 
+    def test_the_metric_names_the_page_compares_are_the_taxonomy_s_and_the_exams_hold_the_same(self):
+        import json, psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.find_metric_names('k')"); names = cur.fetchone()[0]
+            self.assertTrue({"ceo", "headquarters", "number employees", "scope 1 emissions", "total assets", "revenue"} <= set(names))
+            self.assertFalse(any(len(n) < 3 for n in names))
+            here = os.path.dirname(__file__)
+            for f in ("use_cases.json", "use_case_variants.json"):                # the exams run the page on the names the database gives
+                self.assertEqual(sorted(json.load(open(os.path.join(here, f), encoding="utf-8"))["metrics"]), sorted(names), f)
+            cur.execute("update public.fact_metrics set status = 'retired' where key = 'ceo'")
+            cur.execute("select public.find_metric_names('k')")
+            self.assertNotIn("chief executive officer", cur.fetchone()[0])
+            c.rollback()
+
     def test_one_search_blends_words_and_meaning(self):
         """find_blend: the words alone without a vector, in quotes or with a place filter; else both lists merged by
         reciprocal rank. The search by meaning is replaced by a stub here (no vector type in the test database)."""
