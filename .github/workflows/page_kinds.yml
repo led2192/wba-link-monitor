@@ -9,11 +9,12 @@ on:
         description: "read the documents not read yet (off = only say how far the reading is)"
         type: boolean
         default: false
+      as_scheduled:
+        description: "set by lanterN's clock (server/clock.json, 05:41 UTC, after the night's load): the same as commit"
+        default: "false"
       minutes:
         description: "minutes of reading"
         default: "40"
-  schedule:
-    - cron: "41 5 * * *"          # after the night's load of documents and their pages
 
 concurrency:
   group: page-kinds
@@ -34,7 +35,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Mark
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.commit }}" = "true" ]; then
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.commit }}" = "true" ]; then
             python page_kinds.py --commit --minutes "${MINUTES:-40}"
           else
             python page_kinds.py
@@ -44,4 +45,4 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
-          QA_COMMIT: ${{ (github.event_name == 'schedule' || inputs.commit) && 'true' || 'false' }}
+          QA_COMMIT: ${{ (inputs.as_scheduled == 'true' || inputs.commit) && 'true' || 'false' }}

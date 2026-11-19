@@ -1,0 +1,49 @@
+# Copies the runs of the workflows into the evidence database (job_state.py), for the Admin panel's "Jobs" view:
+# what ran, what failed, which critical job needs a look. Started by lanterN's own clock every three hours
+# (server/clock.json), which is why it has no schedule of its own. Prints counts only.
+name: Job state
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_scheduled:
+        description: "write the runs (off = only count them)"
+        default: "false"
+      days:
+        description: "days of runs to read"
+        default: "3"
+
+concurrency:
+  group: job-state
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Read the runs
+        run: |
+          if [ "${{ inputs.as_scheduled }}" = "true" ]; then
+            python job_state.py --commit --days "${DAYS:-3}"
+          else
+            python job_state.py --days "${DAYS:-3}"
+          fi
+        env:
+          DAYS: ${{ inputs.days }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: ${{ inputs.as_scheduled == 'true' && 'true' || 'false' }}

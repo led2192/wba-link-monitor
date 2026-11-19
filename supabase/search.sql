@@ -4014,6 +4014,78 @@ $$;
 -- runs: one link searched the same company three times or more, each within three minutes of the one before.
 -- nothing: no page shown (after the blend when the page reported it, by words before). few: one to three pages
 -- shown. slow: five seconds or more. A hundred of each at most, newest first.
+-- The jobs, seen from the Admin panel (19 Nov 2026). Whether last night's load ran was known only by opening GitHub,
+-- and a load skipped two nights was found by chance. job_state.py copies the runs of the workflows here every few
+-- hours; admin_jobs says, a workflow: its last run, how many runs failed in a row, and when it last went well.
+-- A job in job_critical raises a mark when it failed twice in a row, or when it has not gone well for longer than
+-- its `every_hours` allows (a job that silently does not start fails nobody's check). Runs are never removed.
+create table if not exists public.job_runs (
+  run_id     bigint primary key,
+  workflow   text not null,                 -- the file: load_supabase.yml
+  name       text not null default '',
+  event      text not null default '',
+  status     text not null default '',      -- queued, in_progress, completed
+  conclusion text,                          -- success, failure, cancelled, timed_out, skipped
+  started    timestamptz not null,
+  updated    timestamptz not null default now()
+);
+create index if not exists job_runs_workflow on public.job_runs (workflow, started desc);
+alter table public.job_runs enable row level security;
+
+create table if not exists public.job_critical (
+  workflow    text primary key,
+  every_hours int not null default 36,      -- with no good run for longer than this, the job is late
+  note        text not null default ''
+);
+alter table public.job_critical enable row level security;
+insert into public.job_critical (workflow, every_hours, note) values
+  ('load_supabase.yml', 30, 'documents and pages reach the search'),
+  ('propose_values.yml', 36, 'the nightly reading of values'),
+  ('library_mirror.yml', 36, 'the copy of the library'),
+  ('server_meaning.yml', 36, 'the passages searched by meaning'),
+  ('clock.yml', 12, 'starts every other job at its time'),
+  ('scan_now.yml', 12, 'watches the companies'' pages'),
+  ('fast_lane.yml', 12, 'reads the documents people send'),
+  ('page_kinds.yml', 60, 'marks contents and index pages'),
+  ('search_page.yml', 24 * 30, 'publishes the page'),
+  ('tests.yml', 24 * 30, 'the tests of every pull request')
+on conflict (workflow) do nothing;
+
+create or replace function public.admin_jobs(key text) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with done as (select r.*, row_number() over (partition by r.workflow order by r.started desc) as i
+                    from public.job_runs r where r.status = 'completed' and r.conclusion in ('success', 'failure', 'timed_out', 'startup_failure')),
+         j as (select r.workflow,
+                      (array_agg(r.name order by r.started desc))[1] as name,
+                      max(r.started) as last_started,
+                      (array_agg(coalesce(r.conclusion, r.status) order by r.started desc))[1] as last_result,
+                      max(r.started) filter (where r.conclusion = 'success') as last_success,
+                      count(*) filter (where r.started > now() - interval '7 days') as runs_7d,
+                      count(*) filter (where r.started > now() - interval '7 days' and r.conclusion in ('failure', 'timed_out', 'startup_failure')) as failed_7d
+                 from public.job_runs r group by r.workflow),
+         f as (select d.workflow, coalesce(min(d.i) filter (where d.conclusion = 'success') - 1, count(*)) as in_a_row from done d group by d.workflow),
+         x as (select coalesce(j.workflow, c.workflow) as workflow, coalesce(j.name, c.workflow) as name, j.last_started, j.last_result, j.last_success,
+                      coalesce(j.runs_7d, 0) as runs_7d, coalesce(j.failed_7d, 0) as failed_7d, coalesce(f.in_a_row, 0) as in_a_row,
+                      (c.workflow is not null) as critical, c.every_hours, c.note,
+                      (c.workflow is not null and coalesce(f.in_a_row, 0) >= 2) as failing,
+                      (c.workflow is not null and (j.last_success is null or j.last_success < now() - make_interval(hours => c.every_hours))) as late
+                 from j full join public.job_critical c on c.workflow = j.workflow left join f on f.workflow = j.workflow)
+    select jsonb_build_object(
+      'read', (select max(updated) from public.job_runs),
+      'alerts', (select count(*) from x where x.failing or x.late),
+      'jobs', coalesce((select jsonb_agg(to_jsonb(x) order by (x.failing or x.late) desc, x.critical desc, (x.in_a_row > 0) desc, x.last_started desc nulls last) from x), '[]'::jsonb)));
+end;
+$$;
+revoke all on function public.admin_jobs(text) from public, anon;
+grant execute on function public.admin_jobs(text) to authenticated;
+
 -- Whether a result was opened decides nothing here (the owner, 17 Nov 2026): the list shows the passage itself, so a
 -- person reads the answer without opening the document, and someone trying the search opens nothing. `opened` is
 -- returned as a count to read, never as a filter.

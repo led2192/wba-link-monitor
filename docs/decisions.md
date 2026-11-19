@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-19: The state of the jobs is copied into the database and judged there
+A nightly load skipped two nights running was noticed by chance. Chosen: copy the runs from GitHub into `job_runs` every three hours and let `admin_jobs` judge them: a critical job (table `job_critical`) is marked when it failed twice in a row (one failure is often the network) or when its last good run is older than the hours it is allowed, which also catches a job that never started. Rejected: the page asking GitHub directly (it stops working the day the repository goes private, and needs a token in the browser); an email on every failure (too many, soon ignored); reading the Pipeline QA base (it holds what scripts logged, not the jobs that never ran).
+
 ### 2026-11-19: What is typed is read by general rules that use the taxonomy's own names; a model comes after, for what the rules do not know
 The intent exam gave 58%. Chosen: five rules that each cover a kind of text, not a text (a request phrase is a question; a company and a metric's name is a fact; a company and nothing else is the catalogue; the near name is corrected before the decision; a colon and "FY" are read). The metric names come from `fact_metrics` (415 with their other names), so a metric added to the taxonomy is recognised with no change to the page. Result 86%, with every real case still right. Left as they are: a company with a topic outside the nine broad topics ("supply chain", "safety", "diversity") is still a plain search, because answering every such search costs a model call and one of the person's daily answers each time, which is the owner's decision; a near name under six letters ("nkie"). Not done: a rule a miss. The exam is now seen, and says so in its file.
 

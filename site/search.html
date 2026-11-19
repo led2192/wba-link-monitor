@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v108 2026-11-19";
+  const CLIENT = "lantern v109 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2048,7 +2048,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Jobs": adminJobs, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2057,7 +2057,7 @@
       nav.appendChild(b);
     }
     (nav.querySelector(`[data-view="${first || "Companies"}"]`) || nav.firstChild).click();
-    adminWaiting(nav);
+    adminWaiting(nav); adminJobsMark(nav);
   }
   function closeAdmin() { const d = $("admin"); if (d) d.hidden = true; document.body.style.overflow = ""; }
   // the number of companies not looked at yet, beside the section's name
@@ -2198,6 +2198,30 @@
       else box.appendChild(adminTable(["When", "Question", "Answered", "Facts kept", ""], r.questions.map(x => [adminWhen(x.at), x.question, x.failed ? "failed" : x.answered ? "yes" : "no", x.facts || "", adminRun(x.question, "Run its search")])));
     }
     box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  // v109: the jobs (admin_jobs): what ran, what failed, and a mark for a critical job that failed twice in a row or has
+  // not gone well for longer than it should. The runs are copied from GitHub every few hours by job_state.py.
+  async function adminJobs(body) {
+    const r = await authed("admin_jobs", { key }); if (!r) { body.textContent = "Not available."; return; }
+    body.innerHTML = "";
+    const jobs = r.jobs || [], bad = jobs.filter(j => j.failing || j.late);
+    body.append(el("p", null, `The scheduled jobs and every other workflow that ran, as last read from GitHub ${r.read ? adminWhen(r.read) : "never (the first reading has not run yet)"}. A critical job is marked when it failed twice in a row, or has not gone well for longer than it should.`));
+    const note = el("p", null, bad.length ? `${bad.length} critical job${bad.length === 1 ? "" : "s"} need${bad.length === 1 ? "s" : ""} a look: ${bad.map(j => j.name).join(", ")}.` : "Every critical job is well.");
+    note.style.cssText = `padding:10px 14px;border-radius:10px;border:1px solid ${bad.length ? "#c0392b" : "var(--line)"};${bad.length ? "color:#c0392b;font-weight:600" : ""}`; body.append(note);
+    const ago = t => { if (!t) return "never"; const h = (Date.now() - new Date(t)) / 3600000; return h < 1 ? "under an hour ago" : h < 48 ? `${Math.round(h)} h ago` : `${Math.round(h / 24)} days ago`; };
+    const state = j => j.in_a_row > 1 ? `failed ${j.in_a_row} times in a row` : j.late ? (j.last_success ? `no good run for ${ago(j.last_success).replace(" ago", "")}` : "no good run seen") : j.in_a_row ? "failed once" : "";
+    const row = j => { const a = el("a", null, j.name); a.href = `https://github.com/led2192/wba-link-monitor/actions/workflows/${j.workflow}`; a.target = "_blank"; a.rel = "noopener";
+      const s = el("span", null, state(j)); if (j.failing || j.late) s.style.cssText = "color:#c0392b;font-weight:600";
+      return [a, j.last_started ? `${adminWhen(j.last_started)} · ${j.last_result || ""}` : "no run seen", s, ago(j.last_success), `${j.runs_7d} run${j.runs_7d === 1 ? "" : "s"}${j.failed_7d ? `, ${j.failed_7d} failed` : ""}`]; };
+    const heads = ["Job", "Last run", "", "Last good run", "Seven days"];
+    body.append(el("h3", null, "Critical jobs")); body.appendChild(adminTable(heads, jobs.filter(j => j.critical).map(row)));
+    const rest = jobs.filter(j => !j.critical), failed = rest.filter(j => j.in_a_row > 0);
+    body.append(el("h3", null, `Other workflows that failed last time (${failed.length})`)); if (failed.length) body.appendChild(adminTable(heads, failed.map(row))); else body.append(el("p", null, "None."));
+    const fold = el("details"), sum = el("summary", null, `Every other workflow seen (${rest.length - failed.length})`); sum.style.cursor = "pointer"; fold.append(sum, adminTable(heads, rest.filter(j => !j.in_a_row).map(row))); body.append(fold);
+  }
+  // the mark beside "Jobs" in the list of sections, so a failing job is seen on opening the panel
+  async function adminJobsMark(nav) {
+    try { const r = await authed("admin_jobs", { key }), b = nav.querySelector('[data-view="Jobs"]'); if (r && b && r.alerts > 0) { const m = el("span", null, ` ● ${r.alerts}`); m.style.cssText = "color:#c0392b;font-weight:700"; m.title = "critical jobs that need a look"; b.appendChild(m); } } catch (e) {}
   }
   // v100: the searches that went badly in the last seven days (admin_hard_searches), so that they are found without
   // reading anyone's log: nothing shown, the same company searched three times or more in a row, few pages shown,
