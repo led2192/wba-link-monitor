@@ -1,4 +1,4 @@
-// Send to lanterN: the sending window. It lists the PDF links of the tab it was opened for, downloads the ticked
+// Send to lantrNa: the sending window. It lists the PDF links of the tab it was opened for, downloads the ticked
 // ones with this browser (the site sees an ordinary visit, with the person's own session) and stores each in the
 // evidence database's private bucket, registered first with public.upload_begin (who, company, where from, size,
 // SHA-256). browser_uploads.py turns them into rows of the library. Nothing is sent anywhere else.
@@ -37,7 +37,7 @@ async function rpc(fn, body) {
     try { return await rpcOnce(fn, body); }
     catch (e) { last = e; if (!/Failed to fetch|timeout|HTTP 5\d\d|NetworkError/i.test(e.message)) throw e; await pause(2000 * (i + 1)); }
   }
-  throw new Error(/Failed to fetch/.test(last.message) ? "lanterN's database did not answer (busy): try again in a few minutes" : last.message);
+  throw new Error(/Failed to fetch/.test(last.message) ? "lantrNa's database did not answer (busy): try again in a few minutes" : last.message);
 }
 async function rpcOnce(fn, body) {
   const t = await token(); if (!t) throw new Error("sign in again");
@@ -249,18 +249,18 @@ async function sendOne(doc, company) {
   const j = await rpc("upload_begin", { company: company.id, filename: name, bytes: buf.byteLength, sha256: sha, source_url: doc.file ? null : doc.url,
                                          page_url: doc.file ? page : (doc.url === TAB.url.split("#")[0] ? null : TAB.url), client: CLIENT,
                                          sent_type: doc.kind && doc.kind.value || null, sent_year: year });
-  if (j.known) return "already in lanterN";
+  if (j.known) return "already in lantrNa";
   if (j.again) return "already sent";
   const t = await token(); let r;
   for (let i = 0; ; i++) {
     try { r = await putFile(`${conf.url}/storage/v1/object/uploads/${j.path}`, { apikey: conf.key, Authorization: `Bearer ${t}`, "Content-Type": "application/pdf" }, buf, say);
       if (r.status < 500 || i >= 2) break; }
-    catch (e) { if (i >= 2) throw new Error("lanterN's storage did not answer (busy): try again in a few minutes"); }
+    catch (e) { if (i >= 2) throw new Error("lantrNa's storage did not answer (busy): try again in a few minutes"); }
     await pause(2000 * (i + 1));
   }
   if (!(r.status >= 200 && r.status < 300)) {
     let e = {}; try { e = JSON.parse(r.body); } catch (x) {}
-    if (r.status === 413 || /maximum allowed size|too large/i.test(e.message || e.error || "")) throw new Error(`not stored: lanterN's storage takes smaller files than this one (${Math.round(buf.byteLength / 1048576)} MB); tell the owner`);
+    if (r.status === 413 || /maximum allowed size|too large/i.test(e.message || e.error || "")) throw new Error(`not stored: lantrNa's storage takes smaller files than this one (${Math.round(buf.byteLength / 1048576)} MB); tell the owner`);
     if (!(r.status === 409 || /exists|duplicate/i.test(e.message || e.error || ""))) throw new Error(`not stored: ${e.message || e.error || "HTTP " + r.status}`);
   }
   await rpc("upload_done", { upload_id: j.id });
@@ -332,14 +332,14 @@ function newCompany() {
     try {
       $("coask").disabled = true;
       const j = await rpc("request_company", { name, website: $("cosite").value.trim(), lei: $("colei").value.trim(), note: isin ? `ISIN ${isin}` : null, client: CLIENT });
-      if (j.held) { $("company").value = j.name; $("msg").textContent = `${j.name} is already a company of lanterN: chosen.`; }
+      if (j.held) { $("company").value = j.name; $("msg").textContent = `${j.name} is already a company of lantrNa: chosen.`; }
       else if (j.again && j.review === "rejected") { $("comsg").textContent = `${j.name} was added before and not accepted${j.why ? `: ${j.why}` : ""}.`; return; }
       else if (j.id) {
         const made = { id: j.id, name: j.name, website: j.website || "" };
         if (!companies.some(c => c.id === made.id)) { companies.push(made); const o = el("option"); o.value = made.name; $("companies").append(o); }
         $("company").value = made.name; $("newco").textContent = "Not in the list? Add the company";
         const doubts = (j.doubts || []).filter(d => !/^no website/.test(d));
-        $("msg").textContent = `${j.name} is a company of lanterN now. Send its documents.` + (doubts.length ? ` Noted for the owner: ${doubts[0]}.` : "");
+        $("msg").textContent = `${j.name} is a company of lantrNa now. Send its documents.` + (doubts.length ? ` Noted for the owner: ${doubts[0]}.` : "");
       }
       else { asked = { id: `REQ_${j.request}`, name: j.name }; $("company").value = j.name; $("msg").textContent = `${j.name} is asked for. You can send its documents now.`; }
       $("cobox").hidden = true; await markHeld();
@@ -355,13 +355,13 @@ function render() {
     row.append(box, el("span", "t", d.text || d.url.split("/").pop()), el("span", "u", d.file ? "from this computer" : d.url)); const s = el("span", "s", ""); row.append(s); d.status = s; d.box = box;
     // optional: what the sender knows of the document. Kept across repaints; nothing is asked of anyone who leaves it closed.
     const more = el("span", "more"); const open = el("a", null, "type and year (optional)"); open.href = "#";
-    const kind = el("select"); const none = el("option", null, "type: let lanterN decide"); none.value = ""; kind.append(none); for (const t of TYPES) { const o = el("option", null, t); o.value = t; kind.append(o); }
+    const kind = el("select"); const none = el("option", null, "type: let lantrNa decide"); none.value = ""; kind.append(none); for (const t of TYPES) { const o = el("option", null, t); o.value = t; kind.append(o); }
     const year = el("input"); year.placeholder = "year on the report"; year.maxLength = 4; year.inputMode = "numeric"; year.size = 14;
     kind.value = d.kindValue || ""; year.value = d.yearValue || ""; kind.hidden = year.hidden = !(d.kindValue || d.yearValue); open.hidden = !kind.hidden;
     kind.onchange = () => { d.kindValue = kind.value; }; year.oninput = () => { d.yearValue = year.value.trim(); };
     open.onclick = e => { e.preventDefault(); kind.hidden = year.hidden = false; open.hidden = true; };
     more.append(open, kind, year); row.append(more); d.kind = kind; d.year = year;
-    if (d.held) { box.disabled = true; s.textContent = "already in lanterN"; s.className = "s ok"; }
+    if (d.held) { box.disabled = true; s.textContent = "already in lantrNa"; s.className = "s ok"; }
     list.append(row);
   });
   count();
@@ -373,16 +373,16 @@ const REPORT = /annual|report|informe|memoria|rapport|bericht|relat[oó]rio|bila
 const NOT_REPORT = /privacy|privacidad|datos personales|data protection|protecci[oó]n de datos|cookie|terms (and|&) conditions|general terms|gtcs?\b|condiciones (generales|de venta|de uso)|job applicant|fair processing|brochure|folleto|catalog/i;
 const pathWords = u => { try { return decodeURIComponent(new URL(u).pathname).replace(/[-_+./]/g, " "); } catch (e) { return ""; } };
 const looksReport = d => { const t = d.text + " " + pathWords(d.url); return REPORT.test(t) && !NOT_REPORT.test(t); };
-// Before anything is downloaded: the links lanterN already holds for the chosen company are shown as held, not offered.
+// Before anything is downloaded: the links lantrNa already holds for the chosen company are shown as held, not offered.
 async function markHeld() {
   const company = chosenCompany(); docs.forEach(d => { d.held = false; });
   if (company && docs.length) { try { const held = new Set(await rpc("upload_known", { company: company.id, urls: docs.filter(d => !d.file).map(d => d.url) })); docs.forEach(d => { d.held = !d.file && held.has(d.url); }); } catch (e) {} }
   render();
 }
-function count() { const n = docs.filter(d => d.box && d.box.checked).length; const h = docs.filter(d => d.held).length; $("count").textContent = `${docs.length} document link${docs.length === 1 ? "" : "s"} on this page, ${n} ticked${h ? `, ${h} already in lanterN` : ""}`; $("go").disabled = !n; }
+function count() { const n = docs.filter(d => d.box && d.box.checked).length; const h = docs.filter(d => d.held).length; $("count").textContent = `${docs.length} document link${docs.length === 1 ? "" : "s"} on this page, ${n} ticked${h ? `, ${h} already in lantrNa` : ""}`; $("go").disabled = !n; }
 async function start() {
   const over = await store.get("config"); if (over && over.url) conf = over;          // a test database, set by hand
-  if (/__SUPABASE_/.test(conf.url)) { document.querySelector("main").textContent = "This copy of the extension was not built by the site: download it from the lanterN page."; return; }
+  if (/__SUPABASE_/.test(conf.url)) { document.querySelector("main").textContent = "This copy of the extension was not built by the site: download it from the lantrNa page."; return; }
   $("out").onclick = async e => { e.preventDefault(); await store.set("session", null); location.reload(); };
   if (!(await token())) { showSignIn(); return; }
   $("sign").hidden = true; $("work").hidden = false; $("out").hidden = false;
@@ -394,12 +394,12 @@ async function start() {
   hostMemory = (await store.get("hosts")) || {};
   const guess = companyOfHost(hostOf(TAB.url)) || companies.find(c => c.id === hostMemory[hostOf(TAB.url)]); if (guess) $("company").value = guess.name;
   docs = await listDocuments();
-  // a company's own site that no company of lanterN has: say so, and offer to add the company (0.6.0). Not when the
+  // a company's own site that no company of lantrNa has: say so, and offer to add the company (0.6.0). Not when the
   // tab is itself a document (0.6.2, 18 Nov 2026): a report opened from a company's page is served by a file host
-  // (api.mziq.com/mzfilemanager/..., no ".pdf" in the address), and "No company of lanterN has mziq.com" was shown
+  // (api.mziq.com/mzfilemanager/..., no ".pdf" in the address), and "No company of lantrNa has mziq.com" was shown
   // beside the right company. The notice also goes once a company of the list is chosen.
   const tabIsDoc = isPdfUrl(TAB.url) || (docs.length === 1 && docs[0].sure && docs[0].url === TAB.url.split("#")[0]);
-  if (!guess && /^https?:/.test(TAB.url) && !tabIsDoc) { $("newco").textContent = `No company of lanterN has ${siteOf(hostOf(TAB.url))}. Add the company`; $("newco").style.fontWeight = "600"; }
+  if (!guess && /^https?:/.test(TAB.url) && !tabIsDoc) { $("newco").textContent = `No company of lantrNa has ${siteOf(hostOf(TAB.url))}. Add the company`; $("newco").style.fontWeight = "600"; }
   await confirmMaybes(docs); await markHeld();
   // PDFs from this computer (0.4.0): a file the site only hands over after a captcha is downloaded by the person and chosen here
   $("files").onchange = () => { for (const f of $("files").files) { if (!docs.some(d => d.file && d.file.name === f.name && d.file.size === f.size)) docs.push({ url: "", text: f.name.replace(/\.pdf$/i, ""), sure: true, file: f, held: false }); } $("files").value = ""; render(); };
@@ -441,7 +441,7 @@ async function sendAll() {
     : "They appear in the library within the half hour, and in the search after the night's load.");
   count();
 }
-// "Scan this page" (0.5.0): lanterN reads this page now. A page it already watches is scanned again; one it does
+// "Scan this page" (0.5.0): lantrNa reads this page now. A page it already watches is scanned again; one it does
 // not watch is added for the company and then read. The request waits in the database for the watch (a few
 // minutes); the line under the buttons says what became of it, here and the next time the window opens on the page.
 const pageUrl = () => TAB.url.split("#")[0];
@@ -450,7 +450,7 @@ function scanLine(j) {
   if (!j) return "";
   if (j.status === "done") return `Scanned ${ago(j.done_at || j.at)}. ${j.result || ""}`;
   if (j.status === "failed") return `The scan asked ${ago(j.at)} gave no result. Ask again, or send the documents from this window.`;
-  if (j.status === "added") return `Asked ${ago(j.at)}: a new page for lanterN, on its way in. It is read within the half hour.`;
+  if (j.status === "added") return `Asked ${ago(j.at)}: a new page for lantrNa, on its way in. It is read within the half hour.`;
   return `Asked ${ago(j.at)}: waiting for the scan (a few minutes).`;
 }
 let scanTimer = null;
@@ -467,7 +467,7 @@ async function scanPage() {
   if (!/^https?:/.test(TAB.url) || isPdfUrl(TAB.url)) { $("msg").textContent = "This is a document, not a page that lists documents."; return; }
   try { const j = await rpc("scan_page", { company: company.id, url: pageUrl(), client: CLIENT });
     await rememberHost(company);
-    $("msg").textContent = j.asked ? `Asked: lanterN reads this page for ${company.name} now.` : "A scan of this page is already waiting.";
+    $("msg").textContent = j.asked ? `Asked: lantrNa reads this page for ${company.name} now.` : "A scan of this page is already waiting.";
     showScan(true); }
   catch (e) { $("msg").textContent = `Not asked: ${e.message}`; }
 }

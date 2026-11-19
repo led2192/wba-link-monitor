@@ -574,6 +574,18 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(cur.fetchall(), [(first[0], first[1], 1), (other[0], other[1], 2)])
             c.rollback()
 
+    def test_the_search_words_of_an_answer_are_words_not_the_models_talk(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            clean = lambda t: (cur.execute("select public.ask_keywords_clean(%s)", (t,)), cur.fetchone()[0])[1]
+            self.assertEqual(clean("Scope 3 use of sold products"), "scope 3 use of sold products")
+            self.assertEqual(clean("scope 3 category 11 use of sold products wait the rule says write abbreviations in full scope 3 cat 11 should be c"), "scope 3 category 11 use of sold products")   # the owner's screenshot
+            self.assertEqual(clean("The question is about emissions of the products sold by the company.\nscope 3 use of sold products"), "scope 3 use of sold products")   # thinking first, the words last
+            self.assertEqual(clean("one two three four five six seven eight nine ten"), "one two three four five six seven eight")
+            self.assertIsNone(clean("")); self.assertIsNone(clean("  \n ")); self.assertEqual(clean("living-wage, suppliers!"), "living wage suppliers")
+            c.rollback()
+
     def test_the_documents_to_fetch_by_hand_are_listed_by_company_main_reports_first(self):
         import psycopg
         with psycopg.connect(URL) as c:

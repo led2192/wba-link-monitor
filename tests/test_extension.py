@@ -46,7 +46,7 @@ class Extension(unittest.TestCase):
     def test_the_sender_can_say_type_and_year_and_send_a_file_from_the_computer(self):
         js, html = read("extension", "send.js"), read("extension", "send.html")
         self.assertIn('sent_type: doc.kind && doc.kind.value || null, sent_year: year', js)
-        self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
+        self.assertIn('"type: let lantrNa decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
         self.assertIn('"version": "0.6.2"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.6.2", read("extension", "config.js"))
