@@ -48,6 +48,15 @@ def library_id(wba, source_url, filename, size):
     return f"{wba}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
 
 
+def real_files(cell):
+    """The attachments of a row that are files. Airtable keeps an attachment it was given by address and never
+    managed to fetch: it has an id and the address it was asked to fetch, and no size. Such a row "has a file" in
+    name only: the text job asks the company's site for it again and fails, and until 19 Nov 2026 a document a
+    person sent for that row was called known and dropped (three reports of one company, sent from the list of
+    documents to fetch). Only an attachment with a size is a file."""
+    return [x for x in (cell or []) if isinstance(x, dict) and x.get("size")]
+
+
 AGAIN_KNOWN_SQL = ("update public.browser_uploads set status = 'stored', result = null "
                    "where status = 'known' and result like 'the library already holds this document%%' and at > now() - make_interval(days => %s)")
 
@@ -283,9 +292,9 @@ def main():
             lst = rows.setdefault(wba, [])
             for rec in sweep("report_library", ["library_id", "document_url", "file", "discard"], "{wba_id}='%s'" % wba.replace("'", "")):
                 f = rec.get("fields", {})
-                lst.append((rec["id"], f.get("library_id"), f.get("document_url") or "", bool(f.get("file")), bool(f.get("discard")),
-                            tuple(x.get("size") for x in (f.get("file") or []) if isinstance(x, dict) and x.get("size")),
-                            tuple(x.get("id") for x in (f.get("file") or []) if isinstance(x, dict) and x.get("id"))))
+                files = real_files(f.get("file"))               # an attachment Airtable never fetched is not a file
+                lst.append((rec["id"], f.get("library_id"), f.get("document_url") or "", bool(files), bool(f.get("discard")),
+                            tuple(x["size"] for x in files), tuple(x.get("id") for x in files if x.get("id"))))
         file_ids = {r[0]: r[6] for lst in rows.values() for r in lst}
         todo = plan(uploads, companies, rows)
         # Room in the base (12 Nov 2026): the Disclosure Library holds 500,000 records at most, and files sent by

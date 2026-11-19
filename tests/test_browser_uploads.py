@@ -57,6 +57,14 @@ class Plan(unittest.TestCase):
         rows = {"PT_1": [("recA", "PT_1-h1", url, True, False)]}                                                        # the sizes of its files are not known: left alone
         self.assertEqual(B.plan([up(1, size=4000000)], {"PT_1": "Co"}, rows)[0][1], "known")
 
+    def test_an_attachment_airtable_never_fetched_is_not_a_file(self):
+        ghost = {"id": "attG", "url": "https://example.com/doc/annual-report-2024.pdf", "filename": ""}
+        real = {"id": "attR", "url": "https://v5.airtableusercontent.com/x", "filename": "a.pdf", "size": 51234, "type": "application/pdf"}
+        self.assertEqual(B.real_files([ghost]), []); self.assertEqual(B.real_files([ghost, real]), [real]); self.assertEqual(B.real_files(None), [])
+        # the row as the script now sees it: no file, so what the person sends fills it
+        rows = {"PT_1": [("recA", "PT_1-h1", "https://example.com/doc/annual-report-2024.pdf", bool(B.real_files([ghost])), False, (), ())]}
+        self.assertEqual(B.plan([up(1, size=4000000)], {"PT_1": "Co"}, rows)[0][1:], ("fill", "PT_1-h1", "recA"))
+
     def test_only_files_dropped_as_known_are_looked_at_again(self):
         sql = B.AGAIN_KNOWN_SQL
         self.assertIn("status = 'known'", sql); self.assertIn("like 'the library already holds this document%%'", sql)   # not orphans, not failures
