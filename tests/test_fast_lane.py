@@ -21,6 +21,7 @@ class Lane(unittest.TestCase):
         sql = cur.sql[-1]
         self.assertIn("b.status = 'taken'", sql); self.assertIn("b.library_id is not null", sql)
         self.assertIn("d.text_status is not null", sql); self.assertIn("interval '3 days'", sql)
+        self.assertIn("and (d.text_status = 'ok' or d.loaded_at >= b.at))", sql)             # a row known and unread whose file was sent since: read now, once
 
     def test_three_steps_in_order_for_those_documents_only(self):
         got = F.steps(["A", "B"], 77, py="py")
