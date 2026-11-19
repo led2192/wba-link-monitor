@@ -4162,6 +4162,19 @@ $$;
 -- opens them, and the extension sends the file. The list is the owner's working list, by company: the main reports
 -- first (annual, integrated, sustainability and the like), newest first. A search narrows it to a company or a
 -- word of the title; only_main keeps the main reports; from_year the documents of that year on.
+-- The documents label_docs.py has looked at (19 Nov 2026): one line a document, so that none is read by a model twice.
+-- What the model said, and which fields of the library's row were written (none when the row already held them).
+create table if not exists public.doc_labels (
+  library_id text primary key,
+  at         timestamptz not null default now(),
+  model      text not null,
+  type       text,
+  language   text,
+  title      text,
+  written    text
+);
+alter table public.doc_labels enable row level security;
+
 -- What the owner corrects from the list of documents to fetch (19 Nov 2026): a row that is not what it says, or that
 -- should not be in the library. One line a correction; doc_fixes.py applies the lines to the library (discard with
 -- its reason, never a deletion; the type and the year) and writes back when and what. A discarded document leaves
