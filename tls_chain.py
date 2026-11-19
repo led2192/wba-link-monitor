@@ -133,6 +133,25 @@ def session_for(host, port=443):
         return _sessions.setdefault(key, new)
 
 
+def is_chain_failure(e):
+    text = str(e).lower()
+    return isinstance(e, requests.exceptions.SSLError) and any(n in text for n in ("unable to get local issuer", "unable to get issuer", "unable to verify the first"))
+
+
+def requests_get(url, **kw):
+    """requests.get; when it fails only because the site's chain is incomplete, once more with the chain completed.
+    Any other failure, and a chain that cannot be completed, is raised as it was."""
+    try:
+        return requests.get(url, **kw)
+    except requests.exceptions.SSLError as e:
+        if not is_chain_failure(e):
+            raise
+        r = get(url, **kw)
+        if r is None:
+            raise
+        return r
+
+
 def get(url, **kw):
     """requests.get with the site's chain completed; None when nothing could be fetched for that site."""
     from urllib.parse import urlparse

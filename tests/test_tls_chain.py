@@ -115,6 +115,24 @@ class Chain(unittest.TestCase):
             self.assertEqual(R.download("https://x.example/a.pdf"), (None, "error_tls_expired"))
             again.assert_not_called()
 
+    def test_any_reader_can_ask_for_the_completed_chain_and_other_failures_pass_through(self):
+        ex = requests.exceptions
+        chain = ex.SSLError("certificate verify failed: unable to get local issuer certificate")
+        ok = mock.Mock(status_code=200)
+        with mock.patch.object(T.requests, "get", side_effect=chain), mock.patch.object(T, "get", return_value=ok) as again:
+            self.assertIs(T.requests_get("https://x.example/a.pdf", timeout=5), ok)
+            again.assert_called_once_with("https://x.example/a.pdf", timeout=5)
+        with mock.patch.object(T.requests, "get", side_effect=chain), mock.patch.object(T, "get", return_value=None):
+            with self.assertRaises(ex.SSLError):
+                T.requests_get("https://x.example/a.pdf")
+        for other in (ex.SSLError("certificate has expired"), ex.ConnectTimeout("slow"), ex.ConnectionError("down")):
+            with mock.patch.object(T.requests, "get", side_effect=other), mock.patch.object(T, "get") as again:
+                with self.assertRaises(type(other)):
+                    T.requests_get("https://x.example/a.pdf")
+                again.assert_not_called()
+        with mock.patch.object(T.requests, "get", return_value=ok), mock.patch.object(T, "get") as again:
+            self.assertIs(T.requests_get("https://x.example/a.pdf"), ok); again.assert_not_called()
+
     def test_a_whole_request_through_the_session_of_a_site(self):
         T._sessions.clear()
         with mock.patch.object(T, "intermediates", return_value=[PEM(self.mid)]), mock.patch.object(T, "context", lambda pems: T.__dict__["_ctx_for_test"](pems)):
