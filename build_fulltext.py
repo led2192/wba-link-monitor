@@ -62,6 +62,7 @@ from concurrent.futures.process import BrokenProcessPool
 from urllib.parse import quote
 
 import requests
+import tls_chain
 
 import text_core as tc
 from text_core import clean_page_text, TERMINAL, MAX_ATTEMPTS
@@ -260,7 +261,7 @@ def fetch_pdf(url, max_bytes):
     last = "download_fail"; delay = 1.0
     for _ in range(DL_TRIES):
         try:
-            with requests.get(url, headers=UA, timeout=DL_TIMEOUT, stream=True) as resp:
+            with tls_chain.requests_get(url, headers=UA, timeout=DL_TIMEOUT, stream=True) as resp:     # a site with an incomplete certificate chain is read as a browser reads it
                 resp.raise_for_status()
                 clen = resp.headers.get("Content-Length")
                 if clen and clen.isdigit() and int(clen) > max_bytes:
