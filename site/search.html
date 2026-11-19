@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v109 2026-11-19";
+  const CLIENT = "lantern v110 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -820,7 +820,7 @@
                      typed: $("q").value.trim() };
       // The words can fail on their own (a timeout when the database is busy): the meaning then answers alone, and says so.
       let words = [], wordsFailed = null;
-      try { words = await rpc("find_pages", args); }
+      try { words = await rpc("find_pages_ranked", args); }      // v110: the words, the pages that are not content last
       catch (e) { if (e.message.includes("not allowed") || !meaningAsked || more) throw e; wordsFailed = e; }
       if (wordsFailed) { meaning = await meaningAsked; if (!meaning || !meaning.length) throw wordsFailed; }
       else if (meaningAsked) meaning = more ? await meaningAsked : await Promise.race([meaningAsked, new Promise(r => setTimeout(() => r(null), 1500))]);
@@ -922,7 +922,7 @@
     return asked;
   }
   // The pages nearest in meaning; an error there (a timeout, the model) leaves the words' answer alone.
-  const askMeaning = vec => rpc("find_meaning", { key, qvec: vec, company_filter: state.company, year_from: state.from, year_to: state.to,
+  const askMeaning = vec => rpc("find_meaning_ranked", { key, qvec: vec, company_filter: state.company, year_from: state.from, year_to: state.to,
                                                   type_filter: state.type, max_rows: 60 }).catch(() => []);
   // Reciprocal rank fusion, as find_blend does in the database: a page's score is 1/(60 + place by words) +
   // 1/(60 + place by meaning). At most three pages a document; the words' excerpt (with its highlights) is kept.

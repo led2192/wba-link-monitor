@@ -6009,6 +6009,66 @@ revoke all on function public.find_word_query(text) from public, anon, authentic
 revoke all on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text, text) from public;
 grant execute on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text, text) to anon, authenticated;
 revoke all on function public.profile_matching(text, text, text) from public, anon, authenticated;
+
+-- The two lists the page asks for, with the pages that are not content last (19 Nov 2026). The option page_kinds
+-- was switched on the day before inside find_blend, and the search that started it still showed the GRI index
+-- first: the page does not call find_blend. It asks for the words (find_pages) and for the meaning (find_meaning)
+-- apart and merges them itself, so neither list knew of the marks. These two are what the page calls now: the same
+-- rows as find_pages and find_meaning, a marked page moved after the others in its own list, so the merge of the
+-- two puts it down whoever does the merge. With the option off they return exactly what the two functions return.
+create or replace function public.find_pages_ranked(
+  key text, q text, company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 50, client text default null,
+  industry_filter text default null, country_filter text default null, region_filter text default null,
+  typed text default null)
+returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
+               label text, url text, page int, score real, excerpt text)
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_column
+begin
+  if not public.survey_option('page_kinds') then
+    return query select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
+                                                  industry_filter, country_filter, region_filter, typed);
+    return;
+  end if;
+  return query
+    with w as materialized (select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
+                                                             industry_filter, country_filter, region_filter, typed))
+    select w.log_id, (row_number() over (order by (pk.kind is not null), w.rank))::int, w.library_id, w.company, w.wba_id, w.year, w.doc_type,
+           w.label, w.url, w.page, w.score, w.excerpt
+    from w left join public.page_kinds pk on pk.library_id = w.library_id and pk.page = w.page and pk.kind <> 'content'
+    order by (pk.kind is not null), w.rank;
+end;
+$$;
+revoke all on function public.find_pages_ranked(text, text, text, int, int, text, int, text, text, text, text, text) from public;
+grant execute on function public.find_pages_ranked(text, text, text, int, int, text, int, text, text, text, text, text) to anon, authenticated;
+
+create or replace function public.find_meaning_ranked(
+  key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 50)
+returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
+               label text, url text, page int, score real, excerpt text)
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_column
+begin
+  if not public.survey_option('page_kinds') then
+    return query select * from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, max_rows);
+    return;
+  end if;
+  return query
+    with m as materialized (select * from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, max_rows))
+    select m.log_id, (row_number() over (order by (pk.kind is not null), m.rank))::int, m.library_id, m.company, m.wba_id, m.year, m.doc_type,
+           m.label, m.url, m.page, m.score, m.excerpt
+    from m left join public.page_kinds pk on pk.library_id = m.library_id and pk.page = m.page and pk.kind <> 'content'
+    order by (pk.kind is not null), m.rank;
+end;
+$$;
+revoke all on function public.find_meaning_ranked(text, real[], text, int, int, text, int) from public;
+grant execute on function public.find_meaning_ranked(text, real[], text, int, int, text, int) to anon, authenticated;
 revoke all on function public.find_click(text, bigint, text, int, int) from public;
 grant execute on function public.find_click(text, bigint, text, int, int) to anon, authenticated;
 revoke all on function public.find_companies(text) from public;

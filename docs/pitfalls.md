@@ -5,6 +5,9 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## Facts and their names
 - **A word left out of a name's key changes what the name means.** On 15 Nov 2026 "restated" and "restatement" were both left out of `fact_key` so that a restated figure would find its metric. "Restatement of 2023 Scope 1 emissions" (a yes or no) then had the same key as "Scope 1 emissions" and was filed under the tonnes, on the live page, within the hour. Before a word joins the list of words left out, look for names where it is the subject rather than a qualifier; and a metric that is a number takes figures only.
 
+## Checking a change where it is not used
+- **A ranking change checked in the database is not checked in the page.** The option `page_kinds` was verified by calling `find_blend` in SQL (the index page went from first to 20th) and reported as working. The page never calls `find_blend`: it calls `find_pages` and `find_meaning` and merges the lists in the browser, so nothing changed for a person searching (18 Nov 2026, found by the owner the next morning). Before saying a search change works, find which function the page calls (`grep 'rpc("find_' site/search.html`) and check through that one.
+
 ## Downloads
 - **A site that a browser opens can still fail in Python with "unable to get local issuer certificate".** The server sends its certificate without the intermediate that signed it. Browsers fetch it (the certificate's Authority Information Access field says where); `requests` does not. It is never a reason to switch verification off: `tls_chain.py` completes the chain and checks everything as before. On 18 Nov 2026 this was 693 of 1,592 failed downloads, from 20 sites.
 - **A GitHub schedule is not a clock.** `recover_attach.yml` is set for 19:00 UTC and has started at 01:29 and 02:18. Do not promise a result "after the 19:00 run"; start the workflow by hand when the result is needed.
