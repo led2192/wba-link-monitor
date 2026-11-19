@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v122 2026-11-19";
+  const CLIENT = "lantern v123 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -332,6 +332,9 @@
     "código de comportamiento": "Code of Conduct", "codigo de comportamiento": "Code of Conduct", "código ético": "Code of Conduct", "código de ética": "Code of Conduct", "code de conduite": "Code of Conduct",
     "human rights policy": "Human Rights Policy", "política de derechos humanos": "Human Rights Policy",
     "policy": "Policy Documents", "política": "Policy Documents", "presentation": "Company Presentations", "presentación": "Company Presentations" };
+  // words that say nothing of a subject when they stand next to the name of a kind of document ("the latest annual report of")
+  const TYPE_GLUE = new Set("on of for about in the and an its their from with by to de del la el los las sobre en para su sus du le les sur latest last new newest recent most current full pdf file report reports document documents doc docs ultimo último ultima última nuevo nueva informe informes documento documentos".split(" "));
+  const TYPE_VAGUE = new Set(["Policy Documents"]);         // a kind whose word is also said of any document: no preference
   // Headquarters countries as the profiles hold them (ISO 3-letter), with the names people type (English and Spanish).
   const COUNTRIES = { AGO: ["Angola"], ARE: ["United Arab Emirates", "UAE", "Emiratos Árabes Unidos"], ARG: ["Argentina"], AUS: ["Australia"], AUT: ["Austria"],
     AZE: ["Azerbaijan", "Azerbaiyán"], BEL: ["Belgium", "Bélgica"], BGD: ["Bangladesh"], BMU: ["Bermuda", "Bermudas"], BRA: ["Brazil", "Brasil"], CAN: ["Canada", "Canadá"],
@@ -538,7 +541,18 @@
     // nothing and could not be answered. The words stay words; the Type filter of the panel still filters a question.
     if (!isQuestion(text)) for (const [w, t] of Object.entries(TYPE_WORDS)) {
       const re = new RegExp("\\s" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "s?\\s", "i");
-      if (re.test(q)) { found.type = t; found.typeWords = w; q = q.replace(re, " "); break; }
+      if (re.test(q)) {
+        // v123 (the owner, 19 Nov 2026): "microsoft's policy on living wage" was searched only inside Policy Documents
+        // and showed a children's rights paper of 2012; the supplier code of conduct that states the living wage rule
+        // was left out. A kind of document named next to a subject is a preference, not a filter: every type is
+        // searched for the subject and the pages of that kind come first. The word "policy" alone names no kind
+        // ("their policy on X" is said of any document), so it prefers nothing. With no subject left ("nike annual
+        // report 2024", "latest shell code of conduct") the kind is the whole request and stays a filter.
+        q = q.replace(re, " "); found.typeWords = w;
+        const subject = q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(x => x.length > 1 && !TYPE_GLUE.has(x));
+        if (subject.length) found.typeHint = t; else found.type = t;
+        break;
+      }
     }
     const alone = q.trim().toLowerCase();
     if (!found.type && found.company && TYPE_ALONE[alone]) { found.type = TYPE_ALONE[alone]; found.typeWords = alone; q = " "; }
@@ -792,7 +806,7 @@
       state.from = parsed.from || (+$("fFrom").value || null);
       state.to = parsed.to || (+$("fTo").value || null);
       state.yearsTyped = !!(parsed.from || parsed.to); state.yearsDropped = null; state.strictYears = false;       // v103: see the search with no page, below
-      state.type = parsed.type || ($("fType").value || null); state.typeWords = parsed.type ? parsed.typeWords : null; state.maybe = parsed.maybe || null;
+      state.type = parsed.type || ($("fType").value || null); state.typeWords = parsed.type ? parsed.typeWords : null; state.typeHint = parsed.typeHint || null; state.maybe = parsed.maybe || null;
       state.industry = parsed.industry; state.country = parsed.country; state.countryName = parsed.countryName; state.region = parsed.region;
       state.rows = 50;
     } else if (!more) { state.rows = 50; }
@@ -827,7 +841,7 @@
       if (wordsFailed) { meaning = await meaningAsked; if (!meaning || !meaning.length) throw wordsFailed; }
       else if (meaningAsked) meaning = more ? await meaningAsked : await Promise.race([meaningAsked, new Promise(r => setTimeout(() => r(null), 1500))]);
       const vec = !!(meaning && meaning.length);
-      const rows = vec ? blend(words, meaning, state.rows) : words;
+      const rows = preferType(vec ? blend(words, meaning, state.rows) : words);
       if (seq !== searchSeq) return;                        // a newer search started meanwhile
       // v103 (18 Nov 2026): a year typed among the words and no page. "Gerdau production 2025" said "No page holds
       // those words": the year was read as "documents of 2025 only", and the one report of 2025 held was never read.
@@ -849,6 +863,12 @@
                              $("q").value = re.test($("q").value) ? $("q").value.replace(re, m => `"${m}"`) : ($("q").value + ` "${w}"`).trim();
                              $("fType").value = ""; search(); };
         st.append(document.createTextNode(" · "), a);
+      }
+      if (state.typeHint && !state.type && !more) {         // v123: the kind was read as a preference: say so, offer the filter
+        const st = $("status"), kind = TYPE_LABEL[state.typeHint] || state.typeHint, vague = TYPE_VAGUE.has(state.typeHint);
+        const a = el("a", null, `Only ${kind}`); a.href = "#";
+        a.onclick = ev => { ev.preventDefault(); state.type = state.typeHint; state.typeHint = state.typeWords = null; search(true); };
+        st.append(document.createTextNode(vague ? " · Every type of document searched · " : ` · Every type of document searched, ${kind} first · `), a);
       }
       if (state.maybe && !state.company && !more && !fromChips) {             // a word that is also a company's name was read as the word: offer the company
         const st = $("status"), mb = state.maybe; const a = el("a", null, `Search the company ${mb.name} instead`); a.href = "#";
@@ -928,6 +948,13 @@
                                                   type_filter: state.type, max_rows: 60 }).catch(() => []);
   // Reciprocal rank fusion, as find_blend does in the database: a page's score is 1/(60 + place by words) +
   // 1/(60 + place by meaning). At most three pages a document; the words' excerpt (with its highlights) is kept.
+  // v123: the kind of document named next to a subject. Its pages first, in the order they had; the others after.
+  function preferType(rows) {
+    if (!state.typeHint || state.type || TYPE_VAGUE.has(state.typeHint)) return rows;
+    const kinds = new Set(state.typeHint.split(";")), is = r => kinds.has(r.doc_type);
+    return rows.filter(is).concat(rows.filter(r => !is(r)));
+  }
+
   function blend(words, meaning, need) {
     const by = new Map(), id = r => r.library_id + "|" + r.page, logId = words.length ? words[0].log_id : null;
     for (const r of words) by.set(id(r), { ...r, s: 1 / (60 + r.rank) });
@@ -974,7 +1001,7 @@
       if (seq !== searchSeq) return;                                  // a newer search
       if (!meaning || !meaning.length) { seen(words, words, "none"); return; }
       if (window.scrollY > 300) { seen(words, words, "late"); return; }          // the reader is already down the list
-      const rows = blend(words, meaning, state.rows);
+      const rows = preferType(blend(words, meaning, state.rows));
       if (seq !== searchSeq || window.scrollY > 300 || !rows.length) return;
       state.blended = true; state.lastRows = rows; seen(words, rows, "used");
       render(citedFirst(rows), false);
@@ -1559,14 +1586,14 @@
     if (one && rest.length && rest.some(w => CATALOGUE_NOUNS.has(w)) && rest.every(w => CATALOGUE_NOUNS.has(w) || CATALOGUE_FILLER.has(w))) return "catalogue";
     if (one && rest.length >= 2 && rest.every(w => CATALOGUE_FILLER.has(w))) return "catalogue";       // v108: "what do you have on Nike": nothing is asked but the company
     if (isQuestion(text)) return "question";
-    if (one && !p.type && topics.has(topicNorm(p.q))) return "overview";
-    if (one && !p.type && metricNames.has(topicNorm(p.q))) return "fact";
-    if (one && (p.from || p.to) && !p.type && rest.length >= 1 && rest.length <= 8) return "fact";
+    if (one && !p.type && !p.typeHint && topics.has(topicNorm(p.q))) return "overview";
+    if (one && !p.type && !p.typeHint && metricNames.has(topicNorm(p.q))) return "fact";
+    if (one && (p.from || p.to) && !p.type && !p.typeHint && rest.length >= 1 && rest.length <= 8) return "fact";
     // v112 (the owner, 19 Nov 2026): one company and a few words of a topic ("nike supply chain", "Lukoil safety",
     // "Gerdau biodiversity approach") are answered at once, with the pages below: the person wants to know how the
     // company stands on it, and must not have to work out whether to press Ask. Not when a kind of report is
     // named or a phrase is in quotes: those ask for pages. The answer kept for the same question costs nothing.
-    if (flags.answer_topics && one && !p.type && !/["“”]/.test(text) && rest.length >= 1 && rest.length <= 6) return "overview";
+    if (flags.answer_topics && one && !p.type && !p.typeHint && !/["“”]/.test(text) && rest.length >= 1 && rest.length <= 6) return "overview";
     return "search";
   }
   const go = async () => {
