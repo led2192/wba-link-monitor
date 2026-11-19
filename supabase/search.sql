@@ -6202,6 +6202,13 @@ $$;
 revoke all on function public.find_pages_ranked(text, text, text, int, int, text, int, text, text, text, text, text) from public;
 grant execute on function public.find_pages_ranked(text, text, text, int, int, text, int, text, text, text, text, text) to anon, authenticated;
 
+-- Option recent_meaning (off, 19 Nov 2026). The words' list already weighs the year (a quarter less for each year of
+-- age, find_pages); the meaning's list does not: it is ordered by nearness alone, so a 2001 report can stand second
+-- in a search that names no year. With the option on and no year asked, a page of the meaning's list goes down a
+-- place and a half for each year its document is older than the newest in the list (twelve years at most; a
+-- document with no year counts as three years old, as in find_pages). With a year asked nothing changes.
+insert into public.search_options (name, is_on, note) values ('recent_meaning', false, 'in the list by meaning, older documents go down when no year is asked') on conflict (name) do nothing;
+
 create or replace function public.find_meaning_ranked(
   key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null, max_rows int default 50)
@@ -6211,17 +6218,24 @@ language plpgsql security definer
 set search_path = public, extensions
 as $$
 #variable_conflict use_column
+declare
+  kinds boolean := public.survey_option('page_kinds');
+  recent boolean := public.survey_option('recent_meaning') and year_from is null and year_to is null;
+  this_year int := extract(year from now())::int;
 begin
-  if not public.survey_option('page_kinds') then
+  if not kinds and not recent then
     return query select * from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, max_rows);
     return;
   end if;
   return query
-    with m as materialized (select * from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, max_rows))
-    select m.log_id, (row_number() over (order by (pk.kind is not null), m.rank))::int, m.library_id, m.company, m.wba_id, m.year, m.doc_type,
-           m.label, m.url, m.page, m.score, m.excerpt
-    from m left join public.page_kinds pk on pk.library_id = m.library_id and pk.page = m.page and pk.kind <> 'content'
-    order by (pk.kind is not null), m.rank;
+    with m as materialized (select f.*, least(greatest(this_year - coalesce(nullif(f.year, 0), this_year - 3), 0), 12) as age
+                            from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, max_rows) f),
+         a as (select m.*, (kinds and pk.kind is not null) as marked,
+                      m.rank + case when recent then 1.5 * (m.age - (select min(x.age) from m x)) else 0 end as place
+               from m left join public.page_kinds pk on pk.library_id = m.library_id and pk.page = m.page and pk.kind <> 'content')
+    select a.log_id, (row_number() over (order by a.marked, a.place, a.rank))::int, a.library_id, a.company, a.wba_id, a.year, a.doc_type,
+           a.label, a.url, a.page, a.score, a.excerpt
+    from a order by a.marked, a.place, a.rank;
 end;
 $$;
 revoke all on function public.find_meaning_ranked(text, real[], text, int, int, text, int) from public;
