@@ -6800,8 +6800,14 @@ begin
   perform public.company_overlap_note(co, urls);          -- a company added by a person: which of these another company holds
   return (select coalesce(jsonb_agg(x.u), '[]'::jsonb) from unnest(coalesce(urls, '{}')) as x(u)
           where exists (select 1 from public.documents d where d.url = x.u and coalesce(d.pages, 0) > 0)
-             or exists (select 1 from public.browser_uploads b where b.wba_id = co and b.source_url = x.u and b.status in ('stored', 'taken', 'known'))
-             or exists (select 1 from public.browser_upload_urls a where a.wba_id = co and a.url = x.u));
+             -- sent before: held, unless the document it became is still not read two days later (19 Nov 2026: the
+             -- owner could not send again a report whose first sending had left a row with no text)
+             or exists (select 1 from public.browser_uploads b where b.wba_id = co and b.source_url = x.u and b.status in ('stored', 'taken', 'known')
+                        and (b.at > now() - interval '2 days'
+                             or not exists (select 1 from public.documents d where d.library_id = b.library_id and coalesce(d.pages, 0) = 0)))
+             or exists (select 1 from public.browser_upload_urls a join public.browser_uploads b on b.id = a.upload_id where a.wba_id = co and a.url = x.u
+                        and (b.at > now() - interval '2 days'
+                             or not exists (select 1 from public.documents d where d.library_id = b.library_id and coalesce(d.pages, 0) = 0))));
 end;
 $$;
 revoke all on function public.upload_known(text, text[]) from public, anon;
