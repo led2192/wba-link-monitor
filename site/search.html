@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v116 2026-11-19";
+  const CLIENT = "lantern v117 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2330,7 +2330,11 @@
     const wrap = el("div"); wrap.style.cssText = "margin:0 0 6px;font-size:13px";
     const draw = () => {
       wrap.innerHTML = "";
-      if (d.note) { const t = el("span", null, d.note + " "); t.style.color = "var(--muted, #667)"; wrap.append(t); }
+      // v117: the ticked answers are what the pipeline acts on (a company that publishes no sustainability report has no
+      // gap there); the words are for people. Both are shown, and both are written here.
+      const ticked = (d.traits || []).map(t => COMPANY_TRAITS[t] || t);
+      if (ticked.length) { const t = el("span", null, ticked.join(" · ") + " "); t.style.cssText = "color:#2E8B1F"; t.title = "Ticked answers: the gap counts and Contribute act on these"; wrap.append(t); }
+      if (d.note) { const t = el("span", null, d.note + " "); t.style.color = "var(--muted, #667)"; t.title = "A note in words: read by people, not by the pipeline"; wrap.append(t); }
       const b = el("a", null, d.note ? "edit the note" : "add a note"); b.href = "#"; b.title = "A note about this company, shared with Contribute: where its reports are, why a file cannot be fetched, what was tried";
       b.onclick = ev => { ev.preventDefault(); edit(); }; wrap.append(b);
     };
@@ -2338,11 +2342,15 @@
       wrap.innerHTML = "";
       const ta = document.createElement("textarea"); ta.value = d.note || ""; ta.maxLength = 400; ta.rows = 2; ta.style.cssText = "font:inherit;width:min(640px,100%);padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);display:block;margin-bottom:4px";
       const say = el("span"); say.style.cssText = "margin-left:8px;color:#c0392b";
+      const list = el("div"), boxes = {}, have = new Set(d.traits || []); list.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 6px";
+      for (const [v, label] of Object.entries(COMPANY_TRAITS)) { const l = el("label"), cb = el("input"); cb.type = "checkbox"; cb.checked = have.has(v); boxes[v] = cb; l.append(cb, document.createTextNode(" " + label)); list.appendChild(l); }
+      const hint = el("div", null, "Tick what is true of the company: the ticks are what stops a missing report being counted as a gap. The words are for the people who read them."); hint.style.cssText = "color:var(--muted, #667);margin:0 0 4px";
       const save = adminBtn("Save", async () => {
-        let r = null; try { r = await authed("company_note_set", { key, wba_id: d.wba_id, traits: d.traits || [], note: ta.value }); } catch (e) { r = null; }
-        if (r && r.ok) { d.note = ta.value.replace(/\s+/g, " ").trim(); draw(); } else say.textContent = "Not saved: sign in again and retry.";
+        const traits = Object.keys(boxes).filter(k => boxes[k].checked);
+        let r = null; try { r = await authed("company_note_set", { key, wba_id: d.wba_id, traits, note: ta.value }); } catch (e) { r = null; }
+        if (r && r.ok) { d.note = ta.value.replace(/\s+/g, " ").trim(); d.traits = traits; draw(); } else say.textContent = "Not saved: sign in again and retry.";
       });
-      wrap.append(ta, save, adminBtn("Cancel", draw), say); ta.focus();
+      wrap.append(hint, list, ta, save, adminBtn("Cancel", draw), say); ta.focus();
     };
     draw(); return wrap;
   }

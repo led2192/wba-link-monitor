@@ -73,7 +73,8 @@ class ReaderLayout(unittest.TestCase):
 
     def test_documents_to_fetch_shows_and_saves_the_company_note(self):
         self.assertIn('body.append(unreadNote(d));', PAGE)
-        self.assertIn('authed("company_note_set", { key, wba_id: d.wba_id, traits: d.traits || [], note: ta.value })', PAGE)   # the ticked answers are kept
+        self.assertIn('authed("company_note_set", { key, wba_id: d.wba_id, traits, note: ta.value })', PAGE)
+        self.assertIn("for (const [v, label] of Object.entries(COMPANY_TRAITS)) { const l = el(\"label\"), cb = el(\"input\"); cb.type = \"checkbox\"; cb.checked = have.has(v);", PAGE)   # the ticks, as in Contribute
 
 if __name__ == "__main__":
     unittest.main()

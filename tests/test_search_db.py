@@ -607,6 +607,9 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual((seen[0], seen[-1]), ("WD", "WC"))                                                 # nothing read and in two benchmarks first; nothing missing last
             first = r3["rows"][0]; self.assertEqual((first["benchmarks"], first["missing"]), (2, f"no main report read for {y} or {y - 1}"))
             self.assertIsNone([d for d in r3["rows"] if d["wba_id"] == "WC"][0]["missing"])
+            cur.execute("insert into public.company_notes (wba_id, traits, by) values ('WD', '{in_parent}', 'a@x.org')")
+            cur.execute("select public.admin_unread_docs('k')"); r4 = cur.fetchone()[0]
+            self.assertNotEqual(r4["rows"][0]["wba_id"], "WD")                                                  # ticked as reporting inside its parent: not first any more
             cur.execute("delete from public.documents where library_id in ('U8', 'U9', 'U10', 'U11')")           # (rows of this test only; rolled back at the end)
             cur.execute("select public.admin_unread_docs('k', null, false, null)"); r = cur.fetchone()[0]
             self.assertEqual(r["documents"], 5)                                                                 # every kind, every year
