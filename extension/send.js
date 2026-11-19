@@ -74,6 +74,10 @@ function collectLinks() {
     // /getattachment/, /files/<name>, ?documentId=): known by the address, or by the PDF icon or class on the link.
     const endpoint = /\/static-files\/|\/getattachment\/|\/files\/[^/.]+\/?$|[?&](document|edition|asset|media|file)[-_]?id=|(drive|docs)\.google\.com\/(file\/d\/|(uc|open)\?)/i.test(href);   // and a file on Google Drive (0.6.1)
     const marked = /pdf/i.test((a.getAttribute("type") || "") + " " + (a.className || "")) || !!a.querySelector('img[src*="pdf" i], img[alt*="pdf" i], svg[class*="pdf" i], i[class*="pdf" i], span[class*="pdf" i]');
+    // 0.6.4: a link to this same page with other choices of its filters is not a document. A documents archive whose
+    // address holds "downloads" offered its own topic filters ("Climate (124)") as sixty documents.
+    let samePage = false; try { const u = new URL(href, location.href); samePage = u.origin === location.origin && u.pathname === location.pathname && !endpoint && !marked && !a.hasAttribute("download"); } catch (e) {}
+    if (samePage && !sure) continue;
     const maybe = !sure && (endpoint || marked || /pdf|download|descarga|t[eé]l[eé]charg|herunterladen/i.test(href + " " + text) || a.hasAttribute("download")) && !/^(#|javascript:|mailto:)/i.test(href);
     if (sure || maybe) add(href, better(a, text), sure);
   }
@@ -361,7 +365,9 @@ function render() {
     kind.onchange = () => { d.kindValue = kind.value; }; year.oninput = () => { d.yearValue = year.value.trim(); };
     open.onclick = e => { e.preventDefault(); kind.hidden = year.hidden = false; open.hidden = true; };
     more.append(open, kind, year); row.append(more); d.kind = kind; d.year = year;
-    if (d.held) { box.disabled = true; s.textContent = "already in lantrNa"; s.className = "s ok"; }
+    // 0.6.4: what is held is not ticked, and can still be ticked (the owner could not send again a document whose
+    // file lantrNa had never read; the database decides what it does with a file it already holds)
+    if (d.held) { s.textContent = "already in lantrNa (tick to send it again)"; s.className = "s ok"; }
     list.append(row);
   });
   count();
