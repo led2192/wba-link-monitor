@@ -4176,9 +4176,12 @@ begin
          held as (select h.wba_id, bool_or(h.year = y1) as has1, bool_or(h.year = y1 - 1) as has2
                   from public.documents h where h.text_status = 'ok' and h.doc_type = any(main) and h.year in (y1, y1 - 1) group by h.wba_id),
          c0 as (select d.wba_id, max(d.company) as company, count(*) as n, count(*) filter (where d.is_main) as n_main from d group by d.wba_id),
-         c as (select c0.*, case when not coalesce(held.has1, false) and not coalesce(held.has2, false) then 0
+         -- (a company a person ticked as publishing almost nothing, or as reporting inside its parent, is not put first for it)
+         c as (select c0.*, case when exists (select 1 from public.company_notes n where n.wba_id = c0.wba_id and n.traits && array['no_reports', 'in_parent']) then 2
+                                 when not coalesce(held.has1, false) and not coalesce(held.has2, false) then 0
                                  when not (coalesce(held.has1, false) and coalesce(held.has2, false)) then 1 else 2 end as gap,
-                      case when not coalesce(held.has1, false) and not coalesce(held.has2, false) then format('no main report read for %s or %s', y1, y1 - 1)
+                      case when exists (select 1 from public.company_notes n where n.wba_id = c0.wba_id and n.traits && array['no_reports', 'in_parent']) then null
+                           when not coalesce(held.has1, false) and not coalesce(held.has2, false) then format('no main report read for %s or %s', y1, y1 - 1)
                            when not coalesce(held.has1, false) then format('no main report read for %s', y1)
                            when not coalesce(held.has2, false) then format('no main report read for %s', y1 - 1) end as missing,
                       (select count(distinct s.benchmark_name) from public.company_scores s where s.wba_id = c0.wba_id) as benchmarks,
