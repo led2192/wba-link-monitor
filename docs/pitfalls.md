@@ -5,6 +5,9 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## Facts and their names
 - **A word left out of a name's key changes what the name means.** On 15 Nov 2026 "restated" and "restatement" were both left out of `fact_key` so that a restated figure would find its metric. "Restatement of 2023 Scope 1 emissions" (a yes or no) then had the same key as "Scope 1 emissions" and was filed under the tonnes, on the live page, within the hour. Before a word joins the list of words left out, look for names where it is the subject rather than a qualifier; and a metric that is a number takes figures only.
 
+## SQL
+- **A parameter of an SQL-language function named like a column is read as the column.** `ask_reusable(company text, ...)` with `where c.company = company` compared the column with itself: every company's kept answer would have been given for any company. The function's own test caught it before it was installed (19 Nov 2026). Name such parameters apart (`for_company`) or use `$1`.
+
 ## Checking a change where it is not used
 - **A ranking change checked in the database is not checked in the page.** The option `page_kinds` was verified by calling `find_blend` in SQL (the index page went from first to 20th) and reported as working. The page never calls `find_blend`: it calls `find_pages` and `find_meaning` and merges the lists in the browser, so nothing changed for a person searching (18 Nov 2026, found by the owner the next morning). Before saying a search change works, find which function the page calls (`grep 'rpc("find_' site/search.html`) and check through that one.
 

@@ -22,7 +22,7 @@ def run_page(cases):
     typo = PAGE[PAGE.index("  function applyTypo(parsed) {"):PAGE.index("  const typoWanted = ")]
     script = ("const RealDate = Date; globalThis.Date = class extends RealDate { getFullYear() { return %d; } };"
               "const document = { createElement: () => ({}), getElementById: () => ({}) }; const $ = () => ({ value: '' });"
-              "let companies = %s; let industries = ['Metals & Mining', 'Oil & Gas'], regions = [];\n%s\n%s\n%s\n%s\ntopics = new Set(%s); metricNames = new Set(%s);\n"
+              "let companies = %s; let industries = ['Metals & Mining', 'Oil & Gas'], regions = [];\n%s\n%s\n%s\n%s\ntopics = new Set(%s); metricNames = new Set(%s); flags = { answer_topics: true };\n"
               "console.log(JSON.stringify(%s.map(t => { const r = parse(t); return { company: r.company || null, from: r.from || null, to: r.to || null, "
               "type: r.type || null, typo: (r.typo && r.typo.name) || null, q: (r.q || '').replace(/\\s+/g, ' ').trim(), "
               "intent: intent(t, r.typo ? applyTypo({ ...r }) : r) }; })))"

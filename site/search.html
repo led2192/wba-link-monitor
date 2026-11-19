@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v111 2026-11-19";
+  const CLIENT = "lantern v112 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -393,6 +393,7 @@
       regions = [...new Set(companies.map(c => c.region).filter(Boolean))].sort();
       rpc("find_topics", { key }).then(list => { topics = new Set(list || []); }).catch(() => {});      // v106: the broad topics, for intent()
       rpc("find_metric_names", { key }).then(list => { metricNames = new Set(list || []); }).catch(() => {});   // v108: the metrics' names, for intent()
+      rpc("search_flags", { key }).then(f => { flags = f || {}; }).catch(() => {});                              // v112: what is switched on (answer_topics)
       rpc("link_may_ask", { key }).then(v => { linkAsk = v === true; }).catch(() => {});                 // v107: this person's link may ask without a sign-in
       const dl = $("companies"); dl.innerHTML = "";
       for (const c of companies) { const o = document.createElement("option"); o.value = c.name; dl.appendChild(o); }
@@ -1546,7 +1547,7 @@
   // accents, no punctuation, without the words that only frame a request.
   // v108: the names of the taxonomy's metrics too (find_metric_names: "CEO", "headquarters", "number of employees",
   // "scope 1 emissions"...). One company and the name of a metric is a fact that is wanted, with or without a year.
-  let topics = new Set(), metricNames = new Set();
+  let topics = new Set(), metricNames = new Set(), flags = {};
   const TOPIC_FILLER = new Set("tell me us give show overview summary general overall about on of the in at for its their data information info profile key performance disclosure disclosures reporting what is are and resumen sobre de la el los las datos del a an company s".split(" "));
   const topicNorm = t => (t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && !TOPIC_FILLER.has(w)).join(" ");
   function intent(text, p) {
@@ -1558,6 +1559,11 @@
     if (one && !p.type && topics.has(topicNorm(p.q))) return "overview";
     if (one && !p.type && metricNames.has(topicNorm(p.q))) return "fact";
     if (one && (p.from || p.to) && !p.type && rest.length >= 1 && rest.length <= 8) return "fact";
+    // v112 (the owner, 19 Nov 2026): one company and a few words of a topic ("nike supply chain", "Lukoil safety",
+    // "Gerdau biodiversity approach") are answered at once, with the pages below: the person wants to know how the
+    // company stands on it, and must not have to work out whether to press Ask. Not when a kind of report is
+    // named or a phrase is in quotes: those ask for pages. The answer kept for the same question costs nothing.
+    if (flags.answer_topics && one && !p.type && !/["“”]/.test(text) && rest.length >= 1 && rest.length <= 6) return "overview";
     return "search";
   }
   const go = async () => {
@@ -1581,7 +1587,7 @@
   // v107 (18 Nov 2026, the owner): a person's own link may ask at once, with no sign-in; the answers are counted under
   // the link's name. The owner switches it on for each link in the admin page (never for the shared team link).
   let linkAsk = false;
-  async function ask(auto, quick) {
+  async function ask(auto, quick, fresh) {
     auto = auto === true;
     const text = $("q").value.trim(), box = $("answer"); box.innerHTML = ""; const c = el("div", "answer"); box.appendChild(c);
     const cap = el("div", "cap"); cap.append(el("span", null, "Ask · an answer written from the pages found"), el("span", null, "")); c.appendChild(cap);
@@ -1589,6 +1595,7 @@
     if (auto && !(await token()) && !linkAsk) {
       note.textContent = "This reads as a question. "; const a = el("a", null, "Sign in with your WBA address to have it answered from the pages"); a.href = "#"; a.onclick = ev => { ev.preventDefault(); ask(); };
       note.append(a, document.createTextNode(".")); search(false); return; }
+    if (auto && text.length < 8) { box.innerHTML = ""; search(false); return; }                    // v112: too short to be asked ("BP gas"): the search alone
     if (text.length < 8) { note.textContent = "Type a question in the box first, for example: What were Unilever’s scope 1 emissions in 2024?"; return; }
     $("head").classList.remove("home"); closeHistory();
     const t = (await token()) || (linkAsk ? CONFIG.key : null);
@@ -1614,7 +1621,7 @@
     try {
       const r = await fetch(`${CONFIG.url}/rest/v1/rpc/ask`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
         body: JSON.stringify({ key, question: text, q: state.q || null, company_filter: state.company || null, year_from: state.from || null, year_to: state.to || null, type_filter: state.type || null, client: CLIENT + (auto ? " auto" : ""), qvec: vec,
-                               industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null }) });   // v86: the answer reads the industry the box filters by
+                               industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null, fresh: fresh === true }) });   // v86: the answer reads the industry the box filters by
       j = await r.json().catch(() => ({})); if (!r.ok) j = { error: j.message || `HTTP ${r.status}` };
     } catch (e) { j = { error: e.message }; }
     const left = typeof j.left === "number" ? `${j.left} of ${j.per_day || 50} answers left today` : ""; cap.lastChild.textContent = left;
@@ -1624,6 +1631,13 @@
     if (j.none) { note.textContent = "No page was found for this question" + (j.keywords ? ` (searched “${j.keywords}”)` : "") + ". Try other words, or name the company and the year." + (j.why ? ` [${j.why}]` : ""); return; }
     if (j.error || !j.answer) { note.textContent = `No answer: ${j.error || "the model returned nothing"}. This one does not count.`; return; }
     note.remove(); const src = j.sources || [];
+    if (j.reused) {                                           // v112: an answer kept from an earlier question (ask_cache): say so, and offer a new one
+      cap.firstChild.textContent = "Ask · an answer given earlier, kept";
+      const when = new Date(j.reused.at).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+      const line = el("div", "what", j.reused.same ? `Answered on ${when} for the same question. ` : `Answered on ${when} for “${j.reused.words}”, which reads as the same question. `);
+      const again = el("a", null, "Ask again"); again.href = "#"; again.title = "A new answer from today's pages; it counts as one of today's answers"; again.onclick = ev => { ev.preventDefault(); ask(false, quick, true); };
+      line.append(again, document.createTextNode(".")); c.appendChild(line);
+    }
     if (seq === searchSeq) {                                  // the pages the answer cites go first in the list under it
       const nums = [...new Set([...j.answer.matchAll(/\[(\d+)\]/g)].map(m => m[1]))];
       state.cited = nums.map(n => src.find(x => String(x.n) === n)).filter(x => x && x.library_id).map(x => ({ log_id: state.logId, rank: 0, library_id: x.library_id, company: x.company, wba_id: x.wba_id, year: x.year, doc_type: x.doc_type, label: x.label, url: x.url, page: x.page, score: 0, excerpt: x.excerpt || "" }));
