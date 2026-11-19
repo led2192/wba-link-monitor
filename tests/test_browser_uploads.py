@@ -46,6 +46,17 @@ class Plan(unittest.TestCase):
         self.assertEqual(B.plan([up(1, url=url)], {"PT_1": "Co"}, {"PT_1": [("recD", lid, url, False, True)]})[0][1], "known")          # same id, discarded: not made again
         self.assertEqual(B.plan([up(1, url=url)], {"PT_1": "Co"}, {"PT_1": [("recD", "PT_1-other", url, False, True)]})[0][1], "create")  # the person sent it: a new row
 
+    def test_a_file_sent_for_a_row_that_holds_another_file_is_taken_again(self):
+        # 19 Nov 2026: a row whose file could not be read; the person opens the address and sends the document
+        url = "https://example.com/doc/annual-report-2024.pdf"
+        rows = {"PT_1": [("recA", "PT_1-h1", url, True, False, (51234,), ("attOLD",))]}
+        self.assertEqual(B.plan([up(1, size=4000000)], {"PT_1": "Co"}, rows)[0][1:], ("again", "PT_1-h1", "recA"))
+        self.assertEqual(B.plan([up(1, size=51234)], {"PT_1": "Co"}, rows)[0][1], "known")                              # the very file the row holds
+        self.assertEqual(B.plan([up(1, size=900)], {"PT_1": "Co"}, rows)[0][1], "known")                                # a stub is not put on a row
+        self.assertEqual([a for _, a, _, _ in B.plan([up(1, size=4000000), up(2, size=4000001)], {"PT_1": "Co"}, rows)], ["again", "known"])   # once a batch
+        rows = {"PT_1": [("recA", "PT_1-h1", url, True, False)]}                                                        # the sizes of its files are not known: left alone
+        self.assertEqual(B.plan([up(1, size=4000000)], {"PT_1": "Co"}, rows)[0][1], "known")
+
     def test_the_same_file_put_there_by_hand_is_not_made_again(self):
         rows = {"PT_1": [("recH", "PT_1-hand", "", True, False, (11492709,)), ("recS", "PT_1-small", "", True, False, (900,))]}
         u = up(1, url="https://example.com/annual-report-2025.pdf", size=11492709)
