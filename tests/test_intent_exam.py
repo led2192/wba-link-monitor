@@ -6,7 +6,7 @@ import os, shutil, sys, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import intent_exam as E
 
-FLOOR = {"intent": 59, "company": 68, "years": 13}          # 19 Nov 2026 (v108); 40, 67, 12 the day before
+FLOOR = {"intent": 62, "company": 68, "years": 13}          # 19 Nov 2026 (v112, a company and a topic answered); 59 with v108; 40, 67, 12 the day before
 
 
 class Scoring(unittest.TestCase):

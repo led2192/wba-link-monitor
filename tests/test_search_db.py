@@ -266,7 +266,7 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("rollback to savepoint s")
             cur.execute("select public.ask('secret-1', 'What were the scope 1 emissions of Acme in 2024?')"); got = cur.fetchone()[0]
             cur.execute("update public.search_keys set active = false where name = 'pers'"); off = may("secret-1")
-            cur.execute("select has_function_privilege('anon', 'public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)', 'execute'), "
+            cur.execute("select has_function_privilege('anon', 'public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)', 'execute'), "
                         "has_function_privilege('anon', 'public.link_asker(text)', 'execute'), has_function_privilege('anon', 'public.admin_link_ask(text, text, boolean)', 'execute')")
             grants = cur.fetchone()
             c.rollback()
@@ -591,6 +591,47 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.admin_unread_docs('k', 'integrated')"); r = cur.fetchone()[0]
             self.assertEqual([d["library_id"] for d in r["rows"]], ["U5"])
             cur.execute("select public.admin_unread_docs('k', 'alph', true, 2020)"); self.assertEqual(cur.fetchone()[0]["documents"], 3)
+            c.rollback()
+
+    def test_an_answer_is_kept_and_given_again_only_for_the_same_question_of_the_same_company(self):
+        import psycopg, math
+        vec = lambda *head: [float(x) for x in head] + [0.0] * (384 - len(head))
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.cosine(%s::real[], %s::real[]), public.cosine(%s::real[], %s::real[]), public.cosine(%s::real[], %s::real[])",
+                        ([1, 0], [1, 0], [1, 0], [0, 1], [0, 0], [1, 0]))
+            same, apart, none = cur.fetchone()
+            self.assertAlmostEqual(same, 1.0); self.assertAlmostEqual(apart, 0.0); self.assertIsNone(none)
+            cur.execute("select public.ask_words_norm('  Scope 1  emissions?! '), public.ask_nums('scope 2 and scope 1, 2 again'), public.ask_nums('water')")
+            self.assertEqual(cur.fetchone(), ("scope 1 emissions", "1 2", ""))
+            reply = {"answer": "Scope 1 was 10 [1].", "sources": [{"n": 1}], "facts": []}
+            cur.execute("select public.ask_keep(7, 'W1', 2023, 2023, null, 'Scope 1 emissions', %s::real[], %s::jsonb)", (vec(1, 0.1), psycopg.types.json.Jsonb(reply)))
+            ask = lambda company, y0, y1, kind, q, v: (cur.execute("select public.ask_reusable(%s, %s, %s, %s, %s, %s::real[])", (company, y0, y1, kind, q, v)), cur.fetchone()[0])[1]
+            hit = ask("W1", 2023, 2023, None, "scope 1 EMISSIONS", None)
+            self.assertEqual((hit["ask_id"], hit["reply"]["answer"], hit["same"]), (7, "Scope 1 was 10 [1].", True))         # the same words, no vector needed
+            near = ask("W1", 2023, 2023, None, "what are the scope 1 emissions", vec(1, 0.12))
+            self.assertEqual((near["ask_id"], near["same"], near["words"]), (7, False, "scope 1 emissions"))                    # other words that mean the same
+            self.assertIsNone(ask("W1", 2023, 2023, None, "scope 2 emissions", vec(1, 0.1)))                                    # the same vector, another number
+            self.assertIsNone(ask("W1", 2023, 2023, None, "what are the scope 1 targets", vec(1, 0.9)))                          # the meaning is not near enough
+            self.assertIsNone(ask("W1", 2023, 2023, None, "what are the scope 1 emissions", None))                               # other words and no vector
+            self.assertIsNone(ask("W2", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))                                    # another company
+            self.assertIsNone(ask("W1", 2024, 2024, None, "scope 1 emissions", vec(1, 0.1)))                                    # other years
+            self.assertIsNone(ask("W1", None, None, None, "scope 1 emissions", vec(1, 0.1)))
+            self.assertIsNone(ask("W1", 2023, 2023, "Annual Report", "scope 1 emissions", vec(1, 0.1)))                         # another kind of report
+            cur.execute("update public.ask_cache set at = now() - interval '15 days'")
+            self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))                                    # too old: documents arrive
+            cur.execute("update public.ask_cache set at = now()")
+            # through ask itself: given again before anything is counted or paid, logged as reused, never as an answer
+            cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023)"); got = cur.fetchone()[0]
+            self.assertEqual((got["answer"], got["reused"]["same"], got["left"], got["per_day"]), ("Scope 1 was 10 [1].", True, got["per_day"], got["per_day"]))
+            cur.execute("select answered, reused from public.ask_log order by id desc limit 1"); self.assertEqual(cur.fetchone(), (False, 7))
+            cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023, null, null, null, null, null, null, true)")
+            self.assertNotIn("reused", cur.fetchone()[0])                                                                         # asked again: a new answer is sought
+            cur.execute("select set_config('lantern.ask_reuse', 'off', false)")
+            cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023)"); self.assertNotIn("reused", cur.fetchone()[0])
+            cur.execute("select set_config('lantern.ask_reuse', 'on', false)")
+            cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1;W2', 2023, 2023)"); self.assertNotIn("reused", cur.fetchone()[0])   # two companies: never
+            cur.execute("select public.search_flags('k')"); self.assertEqual(cur.fetchone()[0], {"answer_topics": True, "ask_reuse": True})
             c.rollback()
 
     def test_one_search_blends_words_and_meaning(self):

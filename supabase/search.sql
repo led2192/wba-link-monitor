@@ -2952,10 +2952,98 @@ end;
 $$;
 revoke all on function public.overview_pages(text, text, int, int, jsonb) from public, anon, authenticated;
 
+-- An answer given once is not paid for twice (19 Nov 2026, option ask_reuse). Since page v112 a company with a
+-- few words of a topic is answered without anyone pressing Ask, so the same question comes back often: from the same
+-- person looking again, and from the next person. Every answer about one company is kept whole (ask_cache: what ask
+-- returned) with what it was asked for: the company, the years, the kind of report, the words searched and their
+-- vector. A later question is given the kept answer when all of this holds:
+--   the same company, years and kind of report; the kept answer is under 14 days old (documents arrive);
+--   the same numbers in the words ("scope 1" is never "scope 2", measured below);
+--   the same words, or words that mean the same: cosine of the two vectors 0.96 or more.
+-- The threshold was read off the 122 searches of the log on 19 Nov 2026 (7,381 pairs): pairs that ask the same
+-- stand at 0.957 to 0.996 ("who is the CEO" and "who was the CEO" 0.990; "scope 1 emissions" and "what are the scope
+-- 1 emissions" 0.958); pairs that do not reach 0.966 only when a number differs ("scope 1" and "scope 1 or scope
+-- 2" 0.966, "scope 1" and "scope 3" 0.955), which the rule of the numbers refuses; without a number the highest
+-- different pair seen was 0.936. The page says that the answer was given earlier and for which words, and offers
+-- to ask again (fresh => true), which is counted and paid like any answer. A kept answer costs nothing and is not
+-- counted in the person's day.
+create table if not exists public.ask_cache (
+  ask_id    bigint primary key,
+  company   text not null,
+  year_from int,
+  year_to   int,
+  type      text,
+  words     text not null,          -- ask_words_norm of the words searched
+  nums      text not null,          -- ask_nums of the same
+  vec       real[],
+  reply     jsonb not null,
+  at        timestamptz not null default now()
+);
+create index if not exists ask_cache_company on public.ask_cache (company, at desc);
+alter table public.ask_cache enable row level security;
+alter table public.ask_log add column if not exists reused bigint;       -- the answer (ask_log.id) this question was given again, at no cost
+
+create or replace function public.ask_words_norm(t text) returns text language sql immutable
+  as $$ select btrim(regexp_replace(regexp_replace(lower(coalesce($1, '')), '[^[:alnum:][:space:]]', ' ', 'g'), '\s+', ' ', 'g')) $$;
+create or replace function public.ask_nums(t text) returns text language sql immutable
+  as $$ select coalesce((select string_agg(x.n, ' ' order by x.n) from (select distinct m[1] as n from regexp_matches(coalesce($1, ''), '\d+', 'g') m) x), '') $$;
+
+-- The cosine of two vectors, in plain SQL: asked of the few kept answers of one company, where no index is needed.
+create or replace function public.cosine(a real[], b real[]) returns double precision language sql immutable parallel safe
+  as $$ select case when sum(x * x) > 0 and sum(y * y) > 0 then sum(x * y) / (sqrt(sum(x * x)) * sqrt(sum(y * y))) end
+        from unnest($1::double precision[], $2::double precision[]) as t(x, y) $$;
+
+create or replace function public.ask_keep(id bigint, for_company text, y0 int, y1 int, kind text, q text, qvec real[], whole jsonb) returns void
+language sql security definer set search_path = public
+as $$
+  insert into public.ask_cache (ask_id, company, year_from, year_to, type, words, nums, vec, reply)
+    values (id, for_company, y0, y1, kind, public.ask_words_norm(q), public.ask_nums(q), case when coalesce(array_length(qvec, 1), 0) = 384 then qvec end, whole)
+    on conflict (ask_id) do nothing
+$$;
+revoke all on function public.ask_keep(bigint, text, int, int, text, text, real[], jsonb) from public, anon, authenticated;
+
+-- (the company is named for_company: a parameter called "company" is read as the column, and every company's
+-- kept answer would be given for any company; the test of this function caught it before it was installed)
+create or replace function public.ask_reusable(for_company text, y0 int, y1 int, kind text, q text, qvec real[]) returns jsonb
+language sql stable security definer set search_path = public, extensions
+as $$
+  select jsonb_build_object('ask_id', c.ask_id, 'reply', c.reply, 'at', c.at, 'words', c.words, 'same', c.words = public.ask_words_norm(q))
+  from public.ask_cache c
+  where c.company = for_company and c.year_from is not distinct from y0 and c.year_to is not distinct from y1 and c.type is not distinct from kind
+    and c.at > now() - interval '14 days'
+    and c.nums = public.ask_nums(q)
+    and (c.words = public.ask_words_norm(q)
+         or (qvec is not null and c.vec is not null and array_length(qvec, 1) = 384 and array_length(c.vec, 1) = 384
+             and public.cosine(c.vec, qvec) >= 0.96))
+  order by (c.words = public.ask_words_norm(q)) desc, c.at desc
+  limit 1
+$$;
+revoke all on function public.ask_reusable(text, int, int, text, text, real[]) from public, anon, authenticated;
+
+insert into public.search_options (name, is_on, note) values ('ask_reuse', true, 'a question already answered for the same company and words (or words that mean the same) is given the kept answer, at no cost') on conflict (name) do nothing;
+-- Option answer_topics (page v112): one company and a few words that are neither a kind of report nor a quoted
+-- phrase are answered at once, the pages below (the owner, 19 Nov 2026: the person must not have to work out
+-- whether to press Ask). The page reads it with search_flags, so it can be switched off without a new page.
+insert into public.search_options (name, is_on, note) values ('answer_topics', true, 'one company and a few words of a topic are answered at once, the pages below') on conflict (name) do nothing;
+
+create or replace function public.search_flags(key text) returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object('answer_topics', public.survey_option('answer_topics'), 'ask_reuse', public.survey_option('ask_reuse'));
+end;
+$$;
+revoke all on function public.search_flags(text) from public;
+grant execute on function public.search_flags(text) to anon, authenticated;
+
+drop function if exists public.ask(text, text, text, text, int, int, text, text, real[], text, text, text);
 create or replace function public.ask(
   key text, question text, q text default null, company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null, client text default null, qvec real[] default null,
-  industry_filter text default null, country_filter text default null, region_filter text default null)
+  industry_filter text default null, country_filter text default null, region_filter text default null, fresh boolean default false)
 returns jsonb
 language plpgsql security definer
 set search_path = public, extensions
@@ -2995,6 +3083,9 @@ declare
   known text := '';
   fiscal text := '';
   names text := '';
+  kept jsonb;
+  one_company boolean;
+  whole jsonb;
 begin
   if who is null or not (who like 'link:%' or public.email_may_search(who)) then
     raise exception 'sign in with a WBA address to ask' using errcode = '42501';
@@ -3007,6 +3098,22 @@ begin
   end if;
   per_day := public.ask_per_day(who);
   select count(*) into used from public.ask_log a where a.asker = who and a.answered and a.at >= date_trunc('day', now());
+  -- the answer kept for the same company and the same question, before anything is counted or paid (ask_reusable)
+  one_company := company_filter is not null and position(';' in company_filter) = 0
+                 and industry_filter is null and country_filter is null and region_filter is null;
+  if one_company and not coalesce(fresh, false) and public.survey_option('ask_reuse') then
+    begin
+      kept := public.ask_reusable(company_filter, year_from, year_to, type_filter, coalesce(nullif(btrim(q), ''), asked), qvec);
+    exception when others then
+      kept := null;                                              -- an extra: never costs the answer
+    end;
+    if kept is not null then
+      insert into public.ask_log (asker, question, answered, ms, client, reused)
+        values (who, asked, false, extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60), (kept ->> 'ask_id')::bigint);
+      return (kept -> 'reply') || jsonb_build_object('left', per_day - used, 'per_day', per_day,
+                'reused', jsonb_build_object('at', kept -> 'at', 'words', kept -> 'words', 'same', kept -> 'same'));
+    end if;
+  end if;
   if used >= per_day then
     return jsonb_build_object('limit', true, 'left', 0, 'per_day', per_day);
   end if;
@@ -3129,13 +3236,20 @@ begin
   if answer is null then
     return jsonb_build_object('error', coalesce(err, 'no answer'), 'left', per_day - used, 'per_day', per_day);
   end if;
-  return jsonb_build_object('answer', answer, 'sources', sources, 'left', per_day - used - 1, 'per_day', per_day, 'keywords', keywords, 'facts', facts,
-                            'facts_stated', parts -> 'stated', 'facts_tail', parts -> 'tail',
-                            'confirmed', confirmed);   -- for telling apart: no list written, a list not readable, facts with no page
+  whole := jsonb_build_object('answer', answer, 'sources', sources, 'keywords', keywords, 'facts', facts,
+                              'facts_stated', parts -> 'stated', 'facts_tail', parts -> 'tail', 'confirmed', confirmed);
+  if one_company then
+    begin
+      perform public.ask_keep(ask_id, company_filter, year_from, year_to, type_filter, search_q, qvec, whole);
+    exception when others then
+      null;                                                      -- keeping the answer is an extra: never costs the answer
+    end;
+  end if;
+  return whole || jsonb_build_object('left', per_day - used - 1, 'per_day', per_day);   -- for telling apart: no list written, a list not readable, facts with no page
 end;
 $$;
-revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) from public, anon;
-grant execute on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) to anon, authenticated;     -- anon: a link that may ask (link_asker); anyone else is refused inside
+revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean) from public, anon;
+grant execute on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean) to anon, authenticated;     -- anon: a link that may ask (link_asker); anyone else is refused inside
 
 -- The owner's panel (13 Nov 2026). lanterN is now used by colleagues: the owner needs to tell the people and the
 -- links apart, to see and correct what people confirmed among the facts of answers, and to see what Ask costs.

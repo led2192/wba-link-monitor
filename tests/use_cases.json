@@ -129,7 +129,7 @@
    "company": "PT_2",
    "from": null,
    "to": null,
-   "intent": "search",
+   "intent": "overview",
    "q": "target emissions baseline value",
    "seen": "2026-11-16",
    "was": "the word target read as the company Target"
@@ -139,14 +139,14 @@
    "company": "PT_2",
    "from": null,
    "to": null,
-   "intent": "search"
+   "intent": "overview"
   },
   {
    "typed": "rebaseline polyus",
    "company": "PT_2",
    "from": null,
    "to": null,
-   "intent": "search",
+   "intent": "overview",
    "q": "rebaseline",
    "seen": "2026-11-16",
    "was": "0 pages by words"
@@ -155,7 +155,7 @@
    "typed": "base year target severestal",
    "company": null,
    "typo": "Severstal",
-   "intent": "search",
+   "intent": "overview",
    "seen": "2026-11-16",
    "was": "no company read: 1,300 pages in 17 to 21 s"
   },
@@ -163,7 +163,7 @@
    "typed": "base year target sverestal",
    "company": null,
    "typo": "Severstal",
-   "intent": "search",
+   "intent": "overview",
    "seen": "2026-11-16"
   },
   {
@@ -203,7 +203,7 @@
    "company": "PT_2",
    "from": null,
    "to": null,
-   "intent": "search",
+   "intent": "overview",
    "seen": "2026-11-16"
   },
   {
@@ -211,7 +211,7 @@
    "company": "PT_5",
    "from": null,
    "to": null,
-   "intent": "search"
+   "intent": "overview"
   },
   {
    "typed": "emissions targets of banks",
@@ -260,7 +260,7 @@
   {
    "typed": "Gerdau biodiversity approach",
    "company": "PT_1",
-   "intent": "search",
+   "intent": "overview",
    "q": "biodiversity approach",
    "seen": "2026-11-18",
    "was": "a GRI content index ranked first: it names every topic and says nothing of any"
@@ -268,7 +268,7 @@
   {
    "typed": "Trees nike plants",
    "company": "PT_6",
-   "intent": "search",
+   "intent": "overview",
    "seen": "2026-11-18",
    "was": "a page of scanning noise first, a report of 2001 second, plants read as flora and as factories"
   },
