@@ -2,5 +2,7 @@
   {"workflow": "load_supabase.yml", "name": "Evidence database load", "at": ["01:41", "19:41"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "propose_values.yml", "name": "Propose values (the nightly pass)", "at": ["03:30"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "library_mirror.yml", "name": "Library mirror", "at": ["04:43"], "inputs": {"as_scheduled": "true"}},
-  {"workflow": "server_meaning.yml", "name": "Server meaning (the nightly refresh of the passages)", "at": ["02:23"], "inputs": {"as_scheduled": "true"}}
+  {"workflow": "server_meaning.yml", "name": "Server meaning (the nightly refresh of the passages)", "at": ["02:23"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "job_state.yml", "name": "Job state (the runs, for the Admin panel)", "at": ["00:20", "03:20", "06:20", "09:20", "12:20", "15:20", "18:20", "21:20"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "page_kinds.yml", "name": "Page kinds (contents and index pages of the new documents)", "at": ["05:41"], "inputs": {"as_scheduled": "true"}}
 ]

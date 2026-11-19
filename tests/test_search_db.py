@@ -510,6 +510,32 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertNotIn("chief executive officer", cur.fetchone()[0])
             c.rollback()
 
+    def test_the_jobs_view_marks_a_critical_job_that_failed_twice_in_a_row_or_is_late(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            put = lambda i, wf, concl, hours, status="completed": cur.execute(
+                "insert into public.job_runs (run_id, workflow, name, event, status, conclusion, started) values (%s, %s, %s, 'schedule', %s, %s, now() - make_interval(hours => %s))",
+                (i, wf, wf.split(".")[0], status, concl, hours))
+            put(1, "load_supabase.yml", "success", 50); put(2, "load_supabase.yml", "failure", 20); put(3, "load_supabase.yml", "failure", 5)     # twice in a row
+            put(4, "load_supabase.yml", "cancelled", 3); put(5, "load_supabase.yml", None, 1, "in_progress")                                  # neither counts
+            put(10, "propose_values.yml", "failure", 30); put(11, "propose_values.yml", "success", 6)                                         # failed once, then well
+            put(20, "clock.yml", "success", 40)                                                                                                # late: 12 hours allowed
+            put(30, "server_meaning.yml", "success", 30); put(31, "server_meaning.yml", "failure", 4)                                         # failed once: no mark yet
+            put(40, "some_trial.yml", "failure", 9); put(41, "some_trial.yml", "failure", 8)                                                  # not critical: listed, no mark
+            cur.execute("select public.admin_jobs('k')"); r = cur.fetchone()[0]
+            jobs = {j["workflow"]: j for j in r["jobs"]}
+            self.assertEqual((jobs["load_supabase.yml"]["in_a_row"], jobs["load_supabase.yml"]["failing"], jobs["load_supabase.yml"]["last_result"]), (2, True, "in_progress"))
+            self.assertEqual((jobs["propose_values.yml"]["in_a_row"], jobs["propose_values.yml"]["failing"], jobs["propose_values.yml"]["late"]), (0, False, False))
+            self.assertEqual((jobs["clock.yml"]["failing"], jobs["clock.yml"]["late"]), (False, True))
+            self.assertEqual((jobs["server_meaning.yml"]["in_a_row"], jobs["server_meaning.yml"]["failing"], jobs["server_meaning.yml"]["late"]), (1, False, False))
+            self.assertEqual((jobs["some_trial.yml"]["in_a_row"], jobs["some_trial.yml"]["critical"], jobs["some_trial.yml"]["failing"]), (2, False, False))
+            self.assertTrue(jobs["library_mirror.yml"]["late"] and jobs["library_mirror.yml"]["last_started"] is None)                         # critical and never seen
+            self.assertEqual(r["alerts"], sum(1 for j in r["jobs"] if j["failing"] or j["late"]))
+            self.assertTrue(r["jobs"][0]["failing"] or r["jobs"][0]["late"])                                                                   # what needs a look comes first
+            self.assertEqual((jobs["load_supabase.yml"]["runs_7d"], jobs["load_supabase.yml"]["failed_7d"]), (5, 2))
+            c.rollback()
+
     def test_one_search_blends_words_and_meaning(self):
         """find_blend: the words alone without a vector, in quotes or with a place filter; else both lists merged by
         reciprocal rank. The search by meaning is replaced by a stub here (no vector type in the test database)."""
