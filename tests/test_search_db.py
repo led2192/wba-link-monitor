@@ -596,6 +596,18 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.admin_unread_docs('k')"); r2 = cur.fetchone()[0]
             self.assertEqual((r2["rows"][0]["note"], r2["rows"][0]["traits"], r2["rows"][0]["sent"]["status"]), ("reports sit behind a form", ["no_annual"], "stored"))
             self.assertIsNone(r2["rows"][2]["sent"])                                                            # another company, same address: not its sending
+            # which company first: one that lacks the main reports of both last years, then the one in more benchmarks
+            import datetime; y = datetime.date.today().year - 1
+            put("U8", "WC", "Gamma", y, "Annual Report", "no_file"); put("U9", "WC", "Gamma", y, "Annual Report", "ok", url=""); put("U10", "WC", "Gamma", y - 1, "Annual Report", "ok", url="")
+            put("U11", "WD", "Delta", y, "Annual Report", "no_file")
+            cur.execute("insert into public.company_scores (score_id, wba_id, benchmark_name) values ('s1', 'WD', 'Bench one'), ('s2', 'WD', 'Bench two')")
+            cur.execute("select public.admin_unread_docs('k')"); r3 = cur.fetchone()[0]; seen = []
+            for d in r3["rows"]:
+                if d["wba_id"] not in seen: seen.append(d["wba_id"])
+            self.assertEqual((seen[0], seen[-1]), ("WD", "WC"))                                                 # nothing read and in two benchmarks first; nothing missing last
+            first = r3["rows"][0]; self.assertEqual((first["benchmarks"], first["missing"]), (2, f"no main report read for {y} or {y - 1}"))
+            self.assertIsNone([d for d in r3["rows"] if d["wba_id"] == "WC"][0]["missing"])
+            cur.execute("delete from public.documents where library_id in ('U8', 'U9', 'U10', 'U11')")           # (rows of this test only; rolled back at the end)
             cur.execute("select public.admin_unread_docs('k', null, false, null)"); r = cur.fetchone()[0]
             self.assertEqual(r["documents"], 5)                                                                 # every kind, every year
             self.assertEqual([d["library_id"] for d in r["rows"]][:4], ["U1", "U2", "U4", "U3"])                # main reports before the rest

@@ -4155,6 +4155,7 @@ declare
   main text[] := array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', '10K Form', 'Registration Document'];
   s text := nullif(btrim(coalesce(search, '')), '');
   need int := least(greatest(coalesce(max_rows, 300), 1), 2000);
+  y1 int := extract(year from now())::int - 1;        -- the latest reporting year a company has published by now
 begin
   if not public.admin_ok(key) then
     raise exception 'not allowed' using errcode = '42501';
@@ -4168,23 +4169,38 @@ begin
                  and (not coalesce(only_main, true) or d.doc_type = any(main))
                  and (from_year is null or d.year >= from_year)
                  and (s is null or d.company ilike '%' || s || '%' or d.label ilike '%' || s || '%')),
-         c as (select d.wba_id, max(d.company) as company, count(*) as n, count(*) filter (where d.is_main) as n_main, max(d.year) as newest
-               from d group by d.wba_id),
-         top as (select d.*, c.n as company_n from d join c on c.wba_id = d.wba_id
-                 order by c.n_main desc, c.n desc, d.company, d.is_main desc, d.year desc nulls last, d.doc_type, d.library_id limit need)
+         -- Which company first (19 Nov 2026, the owner: those that lack an important report, then size or importance).
+         -- gap: 0 when no main report of either of the last two reporting years is read, 1 when one of the two is
+         -- missing, 2 otherwise. Then the number of WBA benchmarks the company is in (known for every company, also
+         -- for one we hold nothing of), then its revenue as the robot read it (unknown for many of exactly these).
+         held as (select h.wba_id, bool_or(h.year = y1) as has1, bool_or(h.year = y1 - 1) as has2
+                  from public.documents h where h.text_status = 'ok' and h.doc_type = any(main) and h.year in (y1, y1 - 1) group by h.wba_id),
+         c0 as (select d.wba_id, max(d.company) as company, count(*) as n, count(*) filter (where d.is_main) as n_main from d group by d.wba_id),
+         c as (select c0.*, case when not coalesce(held.has1, false) and not coalesce(held.has2, false) then 0
+                                 when not (coalesce(held.has1, false) and coalesce(held.has2, false)) then 1 else 2 end as gap,
+                      case when not coalesce(held.has1, false) and not coalesce(held.has2, false) then format('no main report read for %s or %s', y1, y1 - 1)
+                           when not coalesce(held.has1, false) then format('no main report read for %s', y1)
+                           when not coalesce(held.has2, false) then format('no main report read for %s', y1 - 1) end as missing,
+                      (select count(distinct s.benchmark_name) from public.company_scores s where s.wba_id = c0.wba_id) as benchmarks,
+                      rf.figure as revenue
+               from c0 left join held on held.wba_id = c0.wba_id left join public.ranking_figures('revenue') rf on rf.wba_id = c0.wba_id),
+         co as (select c.*, row_number() over (order by c.gap, c.benchmarks desc, c.revenue desc nulls last, c.n_main desc, c.n desc, c.company, c.wba_id) as place from c),
+         top as (select d.*, co.n as company_n, co.place, co.missing, co.benchmarks, co.revenue from d join co on co.wba_id = d.wba_id
+                 order by co.place, d.is_main desc, d.year desc nulls last, d.doc_type, d.library_id limit need)
     select jsonb_build_object(
       'documents', (select count(*) from d),
       'companies', (select count(*) from c),
       'by_status', (select coalesce(jsonb_object_agg(t.text_status, t.n), '{}'::jsonb) from (select text_status, count(*) as n from d group by 1) t),
       'rows', coalesce((select jsonb_agg(jsonb_build_object('library_id', t.library_id, 'company', t.company, 'wba_id', t.wba_id, 'year', t.year, 'doc_type', t.doc_type,
                                                             'label', t.label, 'url', t.url, 'status', t.text_status, 'found', t.found, 'company_n', t.company_n,
+                                                            'missing', t.missing, 'benchmarks', t.benchmarks, 'revenue_usd', t.revenue,
                                                             'note', (select n.note from public.company_notes n where n.wba_id = t.wba_id),          -- the company's note, as in Contribute
                                                             'traits', coalesce((select to_jsonb(n.traits) from public.company_notes n where n.wba_id = t.wba_id), '[]'::jsonb),
                                                             -- sent with the extension since (the owner: "how do I follow what I have sent?"): the last sending of this
                                                             -- document, by the row it became or by its address. The row leaves the list by itself once its text is read.
                                                             'sent', (select jsonb_build_object('at', u.at, 'status', u.status, 'result', u.result) from public.browser_uploads u
                                                                      where u.library_id = t.library_id or (u.wba_id = t.wba_id and u.source_url = t.url) order by u.at desc limit 1))
-                                         order by t.company_n desc, t.company, t.is_main desc, t.year desc nulls last, t.doc_type, t.library_id) from top t), '[]'::jsonb)));
+                                         order by t.place, t.is_main desc, t.year desc nulls last, t.doc_type, t.library_id) from top t), '[]'::jsonb)));
 end;
 $$;
 revoke all on function public.admin_unread_docs(text, text, boolean, int, int) from public, anon;
