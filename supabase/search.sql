@@ -4050,6 +4050,9 @@ insert into public.job_critical (workflow, every_hours, note) values
   ('search_page.yml', 24 * 30, 'publishes the page'),
   ('tests.yml', 24 * 30, 'the tests of every pull request')
 on conflict (workflow) do nothing;
+-- The fast lane runs only when someone has sent a document: hours without a run say nothing. It is still marked when
+-- it fails twice in a row. (The first reading showed it "late" 18 hours after its last run, with nothing waiting.)
+update public.job_critical set every_hours = 24 * 30, note = 'reads the documents people send (runs only when one is waiting)' where workflow = 'fast_lane.yml' and every_hours = 12;
 
 create or replace function public.admin_jobs(key text) returns jsonb
 language plpgsql stable security definer
