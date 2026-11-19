@@ -5,6 +5,9 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## Facts and their names
 - **A word left out of a name's key changes what the name means.** On 15 Nov 2026 "restated" and "restatement" were both left out of `fact_key` so that a restated figure would find its metric. "Restatement of 2023 Scope 1 emissions" (a yes or no) then had the same key as "Scope 1 emissions" and was filed under the tonnes, on the live page, within the hour. Before a word joins the list of words left out, look for names where it is the subject rather than a qualifier; and a metric that is a number takes figures only.
 
+## The page
+- **A link with `href="#"` and `target="_blank"` opens the page itself in a new tab.** The answer's sources and a result's title did that for every document with no public address: to the person, clicking a source reloaded lanterN (19 Nov 2026). A link that has nowhere to go must do something on click (`docLink` opens the reader) or not be a link.
+
 ## SQL
 - **A parameter of an SQL-language function named like a column is read as the column.** `ask_reusable(company text, ...)` with `where c.company = company` compared the column with itself: every company's kept answer would have been given for any company. The function's own test caught it before it was installed (19 Nov 2026). Name such parameters apart (`for_company`) or use `$1`.
 

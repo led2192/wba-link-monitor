@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v112 2026-11-19";
+  const CLIENT = "lantern v113 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -697,6 +697,7 @@
       const href = pageLink(r);
       const a = el("a", null, r.label || r.library_id);
       if (href) { a.href = href; a.target = "_blank"; a.rel = "noopener"; }
+      else { a.href = "#"; a.title = "No public link for this document: the page is shown here"; a.addEventListener("click", ev => { ev.preventDefault(); openReader(r.library_id, r.page, ""); }); }
       a.addEventListener("click", () => { if (trail.length) trail[trail.length - 1].opened = true; rpc("find_click", { key, log_id: r.log_id, library_id: r.library_id, page: r.page, rank: r.rank }).catch(() => {}); });
       h.appendChild(a);
       // the two marks: a verdict from the list, without opening the document (most results are judged that way)
@@ -1186,8 +1187,9 @@
       f.append(head, lab("Attribute"), sel, lab("Reporting year"), yr, lab("Value, as the document prints it"), field, lab("Link to the document that prints it, and the page"), two, lab("A note for the team"), why, msg, acts); wrap.after(f); yr.value ? field.querySelector("input, select").focus() : yr.focus();
     };
   }
+  let heldValues = [];                                       // the robot's values now in the panel (v113): a figure of an answer that is one of them is not listed twice
   async function loadValues() {
-    const panel = $("values"); panel.hidden = true; panel.innerHTML = "";
+    const panel = $("values"); panel.hidden = true; panel.innerHTML = ""; heldValues = [];
     if (!state.company) return;
     const attrs = attrsIn($("q").value);
     // every value we hold for a company only when the search is the company alone (years allowed); otherwise only the attributes named
@@ -1195,6 +1197,7 @@
     let vals;
     try { vals = await rpc("find_values", { key, company_filter: state.company, year_from: state.from, year_to: state.to, attribute_filter: attrs.length ? attrs.join(";") : null }); }
     catch (e) { return; }                                    // the panel is an extra: a failure never touches the search
+    heldValues = (vals || []).slice(0, 40);
     const single = state.company && !state.company.includes(";");
     // what people have added for these companies: shown under the robot's values, so nobody adds the same figure twice unknowingly
     let subs = []; const sbody = { key, company_filter: state.company, year_from: state.from, year_to: state.to, attribute_filter: attrs.length ? attrs.join(";") : null };
@@ -1644,9 +1647,10 @@
       if (state.cited.length) { render(citedFirst(state.lastRows), false); window.scrollTo(0, 0); }
       state.facts = Array.isArray(j.facts) ? j.facts : []; state.confirmed = Array.isArray(j.confirmed) ? j.confirmed : []; state.earlier = false; state.answered = true; showFacts();
     }
-    const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : m; });
+    const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : (s && s.library_id ? `<a href="#" data-cite="${n}" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page + " (shown here: no public link)")}">[${n}]</a>` : m); });
+    body.addEventListener("click", ev => { const a = ev.target.closest && ev.target.closest("a[data-cite]"); if (!a) return; ev.preventDefault(); const s = src.find(x => String(x.n) === a.dataset.cite); if (s) openReader(s.library_id, s.page, ""); });
     c.appendChild(body);
-    const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; li.appendChild(a); ol.appendChild(li); }
+    const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); docLink(a, s); li.appendChild(a); ol.appendChild(li); }
     c.append(ol, el("div", "what", (j.keywords ? `Pages found by searching “${j.keywords.replace(/\s+/g, " ")}”. ` : "") + "Written by a model from these pages only. Check the source before using a figure."));
     // v86, v88: with no company named, say what this answer is and, for those who may, offer the survey in its place.
     if (!state.company) {
@@ -1789,7 +1793,13 @@
     const tag = (text, colour) => { const t = el("span", null, text); t.style.cssText = `display:inline-block;font-size:11px;line-height:1;padding:3px 7px;border-radius:999px;margin-bottom:4px;color:${colour};border:1px solid color-mix(in srgb, ${colour} 45%, transparent)`; return t; };
     const rule = row => { row.style.borderTop = "1px solid var(--line)"; row.style.paddingTop = "10px"; row.style.marginTop = "10px"; return row; };
     const same = (a, b) => a.kind === "number" && b.kind === "number" && Math.abs(Number(a.value)) === Math.abs(Number(b.value)) && (!a.period || !b.period || periodKey(a.period) === periodKey(b.period));
-    const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));
+    // v113 (the owner: "why are these repeated?"): the same figure for the same year stood twice, once from the answer and
+    // once among the robot's values below. The robot's card stays (it has the reviews and the details); the answer's is
+    // not listed, and one line says so. A figure of the answer with no year is never taken for one of the robot's.
+    const yearOf = f => [f.wba_year, f.year].map(Number).filter(Boolean).concat((String(f.period || "").match(/(?:19|20)\d{2}/g) || []).map(Number));
+    const held = f => f.kind === "number" && heldValues.some(v => Math.abs(Number(v.value)) === Math.abs(Number(f.value)) && yearOf(f).includes(Number(v.year)));
+    const repeats = state.facts.filter(f => !state.confirmed.some(c => same(f, c)) && held(f)).length;
+    const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)) && !held(f));
     const factLine = f => {
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
       const left = el("div"); left.append(f.verdict_at ? tag("confirmed", "#2E8B1F") : tag(state.earlier ? "from an answer" : "from this answer", "var(--accent)"));
@@ -1820,7 +1830,8 @@
       box._known = known;
     }
     if (fresh.length) box.append(el("div", "subhead", `${state.earlier ? "Found in earlier answers" : "Found in this answer"} · ${fresh.length} · yours to confirm`));
-    if (!fresh.length && !state.confirmed.length) return;
+    if (!fresh.length && !state.confirmed.length && !repeats) return;
+    if (repeats) { const n = el("div", "ev", `${repeats} figure${repeats > 1 ? "s" : ""} of ${state.earlier ? "earlier answers" : "this answer"} ${repeats > 1 ? "are" : "is"} already among the values below, and not listed twice.`); n.style.margin = "6px 0"; box.appendChild(n); }
     fresh.forEach((f, at) => {
       const row = el("div", "v"), left = factLine(f); if (at) rule(row);
       const marks = el("div"); marks.style.cssText = "display:flex;gap:4px;align-items:start";
@@ -1856,6 +1867,76 @@
   $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lanterN</a>';
   $("share").onclick = async ev => { ev.preventDefault(); const link = location.origin + location.pathname + "#k=" + key;       // the same key on another device or for a colleague: searching needs only the link; reviews, Ask and adding need a WBA sign-in
     try { await navigator.clipboard.writeText(link); ev.target.textContent = "Link copied: paste it to a colleague or open it on your other device"; } catch (e) { ev.target.textContent = link; } };
+  // A link to a page of a document (v113): its public address when it has one, else the page shown here. Before, a
+  // document with no address (sent by hand or with the extension) got href "#" in a new tab: lanterN opened again.
+  function docLink(a, s, find) {
+    if (/^https?:\/\//i.test(s.url || "")) { a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; return a; }
+    a.href = "#"; a.title = "No public link for this document: the page is shown here";
+    a.addEventListener("click", ev => { ev.preventDefault(); if (s.library_id) openReader(s.library_id, s.page, find || ""); });
+    return a;
+  }
+  // The text of a page laid out to be read (v113). The library holds a page as the lines taken out of the file: a table
+  // is a run of lines that end in figures, a paragraph is cut where the file's column ended. Here: three or more lines
+  // ending in figures, close together, become a table (the label, then the figures in columns counted from the right);
+  // lines cut by the column are joined into a paragraph; a short line ending in ":" or in capitals is a heading.
+  // Nothing is added or dropped, and "plain text" shows the lines as held.
+  const NUM_CELL = /^[(\-–−]?[$€£¥]?\d[\d.,]*%?\)?$|^(?:n\/a|n\.a\.|nm|[-–—])$/i;
+  function readerParts(text) {
+    const lines = String(text || "").split(/\r?\n/).map(s => s.replace(/\s+/g, " ").trim());
+    const rowOf = s => { if (!s || s.length > 100 || /[.!?] [A-Z]/.test(s)) return null;      // a sentence that happens to end in a figure is not a row
+      const w = s.split(" "); let k = w.length; while (k > 0 && NUM_CELL.test(w[k - 1])) k--;
+      const cells = w.slice(k); return !cells.length || cells.length > 8 || !cells.some(c => /\d/.test(c)) ? null : { label: w.slice(0, k).join(" "), cells }; };
+    const rows = lines.map(rowOf), parts = []; let para = [], longest = 0;
+    const flush = () => { if (para.length) parts.push({ t: "p", s: para.join(" ") }); para = []; longest = 0; };
+    for (let i = 0; i < lines.length; i++) {
+      const s = lines[i];
+      if (!s) { flush(); continue; }
+      if (rows[i]) {
+        let j = i, n = 0, last = i;
+        while (j < lines.length && lines[j] && (rows[j] || (lines[j].length <= 100 && j - last <= 2))) { if (rows[j]) { n++; last = j; } j++; }
+        if (n >= 3 && n * 2 >= last - i + 1) {
+          const trs = lines.slice(i, last + 1).map((x, k) => rows[i + k] ? { label: rows[i + k].label, cells: rows[i + k].cells.slice() } : { label: x, cells: [] });
+          // the table has as many columns as most of its rows: a label that ends in a number ("... Scope 1 or Scope 2  20,487") keeps it
+          const count = {}; for (const r of trs) if (r.cells.length) count[r.cells.length] = (count[r.cells.length] || 0) + 1;
+          const usual = Number(Object.keys(count).sort((a, b) => count[b] - count[a] || a - b)[0]);
+          for (const r of trs) if (r.cells.length > usual) { const extra = r.cells.splice(0, r.cells.length - usual); r.label = (r.label + " " + extra.join(" ")).trim(); }
+          flush(); parts.push({ t: "table", rows: trs }); i = last; continue;
+        }
+      }
+      const bullet = /^[•▪●○◦■‣·*–-]\s+\S/.test(s);
+      if (para.length && !bullet) { para.push(s); const ended = s.length < 70 || (/[.!?]$/.test(s) && s.length < 0.85 * longest); longest = Math.max(longest, s.length); if (ended) flush(); continue; }
+      flush();
+      if (bullet) parts.push({ t: "li", s: s.replace(/^\S\s+/, "") });
+      else if (s.length >= 70) { para.push(s); longest = s.length; }
+      else if (s.length <= 80 && /[A-Za-zÀ-ÿ]/.test(s) && (/:$/.test(s) || (s === s.toUpperCase() && s.replace(/[^A-ZÀ-Ý]/g, "").length >= 4))) parts.push({ t: "h", s });
+      else parts.push({ t: "l", s });
+    }
+    flush(); return parts;
+  }
+  // Draws the parts into the reader; returns the mark put on the words looked for, if they were found.
+  function readerShow(body, text, needle) {
+    let marked = null; const low = needle.toLowerCase();
+    const put = (node, s) => { const i = !marked && needle.length >= 2 ? s.toLowerCase().indexOf(low) : -1; if (i < 0) { node.append(document.createTextNode(s)); return node; }
+      marked = el("mark", null, s.slice(i, i + needle.length)); node.append(document.createTextNode(s.slice(0, i)), marked, document.createTextNode(s.slice(i + needle.length))); return node; };
+    const block = (tag, css, s) => { const e = el(tag); e.style.cssText = css; body.appendChild(put(e, s)); };
+    for (const part of readerParts(text)) {
+      if (part.t === "p") block("p", "margin:0 0 12px;max-width:72ch", part.s);
+      else if (part.t === "h") block("div", "font-weight:600;margin:16px 0 4px", part.s);
+      else if (part.t === "li") block("div", "margin:0 0 4px 18px;max-width:70ch;display:list-item;list-style:disc", part.s);
+      else if (part.t === "l") block("div", "margin:0;max-width:72ch", part.s);
+      else {
+        const wide = Math.max(...part.rows.map(r => r.cells.length)), t = el("table"); t.style.cssText = "border-collapse:collapse;margin:10px 0 14px;font-variant-numeric:tabular-nums;max-width:100%";
+        for (const r of part.rows) { const tr = el("tr"); tr.style.cssText = "border-bottom:1px solid var(--line)";
+          const th = el("td"); th.style.cssText = "padding:4px 0;text-align:left" + (r.cells.length ? "" : ";color:var(--muted)"); put(th, r.label); tr.appendChild(th);
+          if (!r.cells.length) th.colSpan = wide + 1;
+          else for (let k = 0; k < wide; k++) { const c = r.cells[k - (wide - r.cells.length)], td = el("td"); td.style.cssText = "padding:4px 0 4px 22px;text-align:right;white-space:nowrap"; if (c != null) put(td, c); tr.appendChild(td); }
+          t.appendChild(tr); }
+        body.appendChild(t);
+      }
+    }
+    return marked;
+  }
+  let readerPlain = false;                                    // the person's choice in the reader, kept while the page is open
   // A page of a document read inside lanterN (v60): for documents with no public address, and to check a fact
   // without leaving the page. The text as the library holds it; previous and next page; the document's link when it has one.
   async function openReader(libraryId, page, find) {
@@ -1876,12 +1957,19 @@
     const at = Number(got.page || page) || 1; nav.append(step("‹ previous page", at - 1), step("next page ›", at + 1));
     if (/^https?:\/\//i.test(got.url || "")) { const a = el("a", null, "open the document"); a.href = pageUrl({ url: got.url, page: at }); a.target = "_blank"; a.rel = "noopener"; a.style.fontSize = "13px"; nav.appendChild(a); }
     else { const n = el("span", null, "no public link for this document"); n.style.cssText = "font-size:12px;color:var(--muted)"; nav.appendChild(n); }
+    const how = el("button", null, readerPlain ? "laid out" : "plain text"); how.type = "button"; how.title = "The text laid out to be read, or the lines exactly as lanterN holds them"; how.style.cssText = "font:inherit;font-size:13px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer"; how.onclick = () => { readerPlain = !readerPlain; openReader(libraryId, at, find); }; nav.appendChild(how);
     const x = el("button", null, "Close"); x.type = "button"; x.style.cssText = "font:inherit;font-size:13px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer"; x.onclick = () => d.close(); nav.appendChild(x);
     head.appendChild(nav);
     if (got.label) { const sub = el("div", null, got.label); sub.style.cssText = "width:100%;font-size:12.5px;color:var(--muted)"; head.appendChild(sub); }
     const text = got.body || "(the library holds no text for this page)";
     const needle = String(find || "").trim();                 // the figure or the words looked for, marked where the page prints them
     const i = needle.length >= 2 ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1;
+    if (!readerPlain && got.body) {                           // laid out; if the words looked for fell across two parts and could not be marked, the plain lines below
+      body.style.whiteSpace = "normal"; const m = readerShow(body, text, needle);
+      if (m || i < 0) { const note = el("div", null, "The text of the page as lanterN holds it, laid out to be read: tables are rebuilt from its lines and a column can be off. “plain text” shows the lines as held."); note.style.cssText = "margin-top:18px;font-size:12px;color:var(--muted)"; body.appendChild(note); if (m) m.scrollIntoView({ block: "center" }); return; }
+      body.innerHTML = "";
+    }
+    body.style.whiteSpace = "pre-wrap";
     if (i < 0) { body.textContent = text; return; }
     const mark = el("mark", null, text.slice(i, i + needle.length)); body.append(document.createTextNode(text.slice(0, i)), mark, document.createTextNode(text.slice(i + needle.length)));
     mark.scrollIntoView({ block: "center" });
