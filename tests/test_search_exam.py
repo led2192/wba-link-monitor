@@ -61,6 +61,16 @@ class SearchExam(unittest.TestCase):
         for secret in ("W1", "L1", "513"):
             self.assertNotIn(secret, text)                                          # the log is public
 
+    def test_what_the_reader_is_given_of_a_page_is_counted_at_both_cuts(self):
+        g = lambda wba: {"wba": wba, "attribute": "A1", "year": 2023, "value": 513727.0}
+        early, middle, late = "Scope 1 513,727", "x" * 2990 + "   \n\n   " + "y" * 2000 + " 513,727", "z" * 9000 + " 513,727"
+        cur = Cur(docs={"W1": ["L1"], "W2": ["L2"], "W3": ["L3"]}, pages={"L1|1": early, "L2|1": middle, "L3|1": late},
+                  eight={"W1": ["L1|1"], "W2": ["L2|1"], "W3": ["L3|1"]}, wide={})
+        s = X.run_exam(cur, [g("W1"), g("W2"), g("W3")], ATTR)["A1"]
+        self.assertEqual((s["in_eight"], s["in_view_3000"], s["in_view_8000"]), (3, 1, 2))     # spaces are squeezed before the cut, as the database does
+        text = "\n".join(X.table({"A1": s}, ATTR, "t"))
+        self.assertIn("1 of 3 (33%) with pages cut at 3,000 characters", text); self.assertIn("2 of 3 (67%) cut at 8,000", text)
+
     def test_an_option_is_set_before_every_answer(self):
         cur = Cur(docs={"W1": ["L1"]}, pages={"L1|4": "513,727"}, eight={"W1": ["L1|4"]}, wide={})
         g = {"wba": "W1", "attribute": "A1", "year": "2023", "value": 513727.0}

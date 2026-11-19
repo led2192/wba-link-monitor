@@ -42,6 +42,9 @@ MIN_DIGITS = 3            # a printed form of fewer significant digits is not lo
 KEYS = ("answers", "no_documents", "in_library", "in_search", "in_eight", "with_vector", "failed")
 
 
+READER_CUTS = (3000, 8000)          # characters of a page the reader is given: today, and with the option reader_whole_page
+
+
 def words_of(attr):
     """What a person would type for this attribute: its name, without punctuation."""
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s+&-]", " ", attr.get("name") or "")).strip()
@@ -71,7 +74,7 @@ def examine(cur, g, attr, option=None):
     forms = forms_of(g["value"], attr)
     if not forms:
         return None
-    r = dict(documents=False, in_library=False, in_search=False, in_eight=False, vector=False)
+    r = dict(documents=False, in_library=False, in_search=False, in_eight=False, vector=False, **{f"in_view_{c}": False for c in READER_CUTS})
     y0, y1 = int(g["year"]), int(g["year"]) + 1
     if option:
         cur.execute("select set_config(%s, %s, false)", (f"lantern.{option[0]}", option[1]))
@@ -89,7 +92,12 @@ def examine(cur, g, attr, option=None):
     r["vector"] = bool(vec)
     cur.execute("select library_id || '|' || page::text from public.ask_pages('eval', %s, %s::real[], %s, %s, %s, null, %s)",
                 (words, vec, g["wba"], y0, y1, "exam"))
-    r["in_eight"] = holds(bodies_of(cur, [x[0] for x in cur.fetchall()]), forms)
+    eight = bodies_of(cur, [x[0] for x in cur.fetchall()])
+    r["in_eight"] = holds(eight, forms)
+    # What the reader is given of each of the eight pages: its first 3,000 characters, or 8,000 with the option
+    # reader_whole_page (supabase/search.sql, reader_page_chars), spaces squeezed as the database squeezes them.
+    for chars in READER_CUTS:
+        r[f"in_view_{chars}"] = holds([re.sub(r"\s+", " ", b or "")[:chars] for b in eight], forms)
     cur.execute("select library_id || '|' || page::text from public.find_blend('eval', %s, %s::real[], %s, %s, %s, null, 24, 'eval', null, null, null, %s)",
                 (words, vec, g["wba"], y0, y1, "exam"))
     r["in_search"] = r["in_eight"] or holds(bodies_of(cur, [x[0] for x in cur.fetchall()]), forms)
@@ -116,6 +124,8 @@ def run_exam(cur, todo, attrs, option=None, out=print):
         s["in_library"] += 1 if r["in_library"] else 0
         s["in_search"] += 1 if r["in_library"] and r["in_search"] else 0
         s["in_eight"] += 1 if r["in_library"] and r["in_eight"] else 0
+        for chars in READER_CUTS:
+            s[f"in_view_{chars}"] += 1 if r["in_library"] and r["in_eight"] and r[f"in_view_{chars}"] else 0
         s["with_vector"] += 1 if r["vector"] else 0
     return stats
 
@@ -134,14 +144,16 @@ def share(a, b):
 def table(stats, attrs, title):
     """The report as markdown lines: one row an attribute, then all."""
     md = [f"### {title}", "",
-          "| Attribute | Answers | No document for the years | Number in the library | On the 24 pages of the search | On the eight pages an answer reads |",
-          "|---|---|---|---|---|---|"]
+          "| Attribute | Answers | No document for the years | Number in the library | On the 24 pages of the search | On the eight pages an answer reads | In the first 3,000 characters of those pages (what the reader is given) | In the first 8,000 |",
+          "|---|---|---|---|---|---|---|---|"]
     for code in sorted(stats):
         s = stats[code]
-        md.append(f"| {code} {attrs[code].get('name', '')} | {s['answers']} | {s['no_documents']} | {s['in_library']} | {share(s['in_search'], s['in_library'])} | {share(s['in_eight'], s['in_library'])} |")
+        md.append(f"| {code} {attrs[code].get('name', '')} | {s['answers']} | {s['no_documents']} | {s['in_library']} | {share(s['in_search'], s['in_library'])} | {share(s['in_eight'], s['in_library'])} | {share(s['in_view_3000'], s['in_eight'])} | {share(s['in_view_8000'], s['in_eight'])} |")
     t = total(stats)
-    md.append(f"| **All** | {t['answers']} | {t['no_documents']} | {t['in_library']} | {share(t['in_search'], t['in_library'])} | {share(t['in_eight'], t['in_library'])} |")
-    md += ["", f"The search finds the validated number, where the library holds it: {share(t['in_eight'], t['in_library'])} on the eight pages an answer reads, "
+    md.append(f"| **All** | {t['answers']} | {t['no_documents']} | {t['in_library']} | {share(t['in_search'], t['in_library'])} | {share(t['in_eight'], t['in_library'])} | {share(t['in_view_3000'], t['in_eight'])} | {share(t['in_view_8000'], t['in_eight'])} |")
+    md += ["", f"Of the answers whose number is on the eight pages, the reader is given it in {share(t['in_view_3000'], t['in_eight'])} with pages cut at 3,000 characters and in "
+               f"{share(t['in_view_8000'], t['in_eight'])} cut at 8,000 (option reader_whole_page): the difference is what the cut hides from the reader.",
+           "", f"The search finds the validated number, where the library holds it: {share(t['in_eight'], t['in_library'])} on the eight pages an answer reads, "
                f"{share(t['in_search'], t['in_library'])} on the 24 pages of the search. The library holds it for {share(t['in_library'], t['answers'])} of the answers. "
                f"Searched with the question's vector too: {t['with_vector']}; not examined: {t['failed']}."]
     return md
