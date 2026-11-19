@@ -4237,21 +4237,29 @@ begin
                     from public.job_runs r where r.status = 'completed' and r.conclusion in ('success', 'failure', 'timed_out', 'startup_failure')),
          j as (select r.workflow,
                       (array_agg(r.name order by r.started desc))[1] as name,
-                      max(r.started) as last_started,
-                      (array_agg(coalesce(r.conclusion, r.status) order by r.started desc))[1] as last_result,
+                      -- A watch (Scan now, Clock) is one run of five and a half hours after another, with the next one queued
+                      -- behind it and cancelled when the chain goes on. The first days showed "pending" as the last run and
+                      -- "no good run for 13 h" while a watch was running: a run waiting its turn, or cancelled in the queue,
+                      -- is not the last run when another one ran, and a run in progress counts as the job being alive.
+                      coalesce(max(r.started) filter (where r.status = 'in_progress' or r.conclusion in ('success', 'failure', 'timed_out', 'startup_failure')), max(r.started)) as last_started,
+                      coalesce((array_agg(coalesce(r.conclusion, r.status) order by r.started desc) filter (where r.status = 'in_progress' or r.conclusion in ('success', 'failure', 'timed_out', 'startup_failure')))[1],
+                               (array_agg(coalesce(r.conclusion, r.status) order by r.started desc))[1]) as last_result,
                       max(r.started) filter (where r.conclusion = 'success') as last_success,
+                      max(r.started) filter (where r.status = 'in_progress') as running_since,
                       count(*) filter (where r.started > now() - interval '7 days') as runs_7d,
                       count(*) filter (where r.started > now() - interval '7 days' and r.conclusion in ('failure', 'timed_out', 'startup_failure')) as failed_7d
                  from public.job_runs r group by r.workflow),
          f as (select d.workflow, coalesce(min(d.i) filter (where d.conclusion = 'success') - 1, count(*)) as in_a_row from done d group by d.workflow),
-         x as (select coalesce(j.workflow, c.workflow) as workflow, coalesce(j.name, c.workflow) as name, j.last_started, j.last_result, j.last_success,
+         x as (select coalesce(j.workflow, c.workflow) as workflow, coalesce(j.name, c.workflow) as name, j.last_started, j.last_result, j.last_success, j.running_since,
                       coalesce(j.runs_7d, 0) as runs_7d, coalesce(j.failed_7d, 0) as failed_7d, coalesce(f.in_a_row, 0) as in_a_row,
                       (c.workflow is not null) as critical, c.every_hours, c.note,
                       (c.workflow is not null and coalesce(f.in_a_row, 0) >= 2) as failing,
-                      (c.workflow is not null and (j.last_success is null or j.last_success < now() - make_interval(hours => c.every_hours))) as late
+                      (c.workflow is not null and (j.last_success is null or j.last_success < now() - make_interval(hours => c.every_hours))
+                         and (j.running_since is null or j.running_since < now() - make_interval(hours => c.every_hours))) as late
                  from j full join public.job_critical c on c.workflow = j.workflow left join f on f.workflow = j.workflow)
     select jsonb_build_object(
       'read', (select max(updated) from public.job_runs),
+      'stale', coalesce((select max(updated) from public.job_runs) < now() - interval '5 hours', false),
       'alerts', (select count(*) from x where x.failing or x.late),
       'jobs', coalesce((select jsonb_agg(to_jsonb(x) order by (x.failing or x.late) desc, x.critical desc, (x.in_a_row > 0) desc, x.last_started desc nulls last) from x), '[]'::jsonb)));
 end;

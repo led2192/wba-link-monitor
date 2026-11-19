@@ -31,6 +31,36 @@ class Filings(unittest.TestCase):
         self.assertEqual(sent, [{"id": "rec1", "fields": {"file_status": "web_document"}}])
 
 
+class DroppedCalls(unittest.TestCase):
+    """2 and 16 Nov 2026: one connection closed by filings.xbrl.org ended the whole run with nothing written."""
+    class Flaky:
+        def __init__(self, fails): self.fails = fails; self.n = 0
+        def get(self, url, **kw):
+            self.n += 1
+            if self.n <= self.fails:
+                raise R.requests.ConnectionError("Remote end closed connection without response")
+            return type("Reply", (), {"ok": True, "status_code": 200, "json": lambda s: {"data": [{"attributes": {"period_end": "2024-12-31", "report_url": "/x/report.xhtml", "date_added": "2025-03-01"}}]}})()
+
+    def test_a_dropped_connection_is_tried_again(self):
+        waits = []; sess = R.Calls(self.Flaky(2), sleep=waits.append); real = R.time.sleep; R.time.sleep = lambda s: None
+        try:
+            got = R.esef_filings("LEI1", sess)
+        finally:
+            R.time.sleep = real
+        self.assertEqual((got[0][0], waits, sess.dropped), (2024, [2, 6], 0))
+
+    def test_after_three_tries_the_company_is_skipped_and_counted_not_the_run_ended(self):
+        sess = R.Calls(self.Flaky(99), sleep=lambda s: None); real = R.time.sleep; R.time.sleep = lambda s: None
+        try:
+            self.assertEqual(R.esef_filings("LEI1", sess), [])
+            self.assertEqual(R.sec_filings("123", sess), [])
+        finally:
+            R.time.sleep = real
+        self.assertEqual(sess.dropped, 2)
+        with self.assertRaises(R.requests.ConnectionError):
+            R.NoReply().raise_for_status()
+
+
 class Asia(unittest.TestCase):
     def test_codes_from_openfigi(self):
         data = [{"exchCode": "HK", "ticker": "700"}, {"exchCode": "US", "ticker": "TCEHY"}]

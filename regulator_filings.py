@@ -156,6 +156,47 @@ def sec_filings(cik, sess):
     return out
 
 
+# ------------------------------------------------------------------------------- calls that survive
+class NoReply:
+    """What a call gives back when the other end never answered: not ok, nothing in it."""
+    ok = False; status_code = 0; text = ""
+
+    def json(self):
+        return {}
+
+    def raise_for_status(self):
+        raise requests.ConnectionError("no reply after every try")
+
+
+class Calls:
+    """A session whose get and post try again, and never throw for a dropped connection.
+
+    The Monday runs of 2 and 16 Nov 2026 died 25 and 35 minutes in, with nothing written, because one call of some
+    hundreds to filings.xbrl.org was closed by the other end. A call is now tried three times (2 s, then 6 s apart);
+    after that the company is skipped for this run (every caller already treats a reply that is not ok as "nothing
+    found") and the call is counted in `dropped`, which the run prints."""
+    WAITS = (2, 6)
+
+    def __init__(self, session=None, sleep=time.sleep):
+        self.session = session or requests.Session(); self.sleep = sleep; self.dropped = 0
+
+    def _call(self, how, url, **kw):
+        for wait in self.WAITS + (None,):
+            try:
+                return getattr(self.session, how)(url, **kw)
+            except requests.RequestException:
+                if wait is None:
+                    self.dropped += 1
+                    return NoReply()
+                self.sleep(wait)
+
+    def get(self, url, **kw):
+        return self._call("get", url, **kw)
+
+    def post(self, url, **kw):
+        return self._call("post", url, **kw)
+
+
 # --------------------------------------------------------------------------------------------- ESEF
 def esef_filings(lei, sess):
     """[(fiscal_year, label, url, published)] from filings.xbrl.org for this LEI."""
@@ -372,7 +413,7 @@ def main():
         comps = comps[:a.max]
     print(f">>> {len(comps)} companies; reading what the library holds ...", flush=True)
     have_years, have_docs = held(wbas)
-    sess = requests.Session()
+    sess = Calls()
     stats = collections.Counter(); new_rows = []; comp_upd = {}; found_lines = []
 
     if a.source in ("sec", "all"):
@@ -451,6 +492,8 @@ def main():
                     comp_upd.setdefault(c["id"], {}).setdefault("_notes", []).append(f"{src}: " + ", ".join(notes))
                     have_years[w] |= {int(r["doc_year"]) for r in rows}
 
+    if sess.dropped:
+        stats["calls with no reply after three tries"] = sess.dropped
     print(f">>> {dict(stats)}; {len(new_rows)} annual filings to add.", flush=True)
     for r in new_rows[:8]:
         print(f"    {r['wba_id']} {r['doc_year']} {r['auto_title']} {r['document_url']}", flush=True)
