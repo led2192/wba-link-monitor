@@ -192,10 +192,11 @@ class SearchOnPostgres(unittest.TestCase):
         with psycopg.connect(URL) as c:
             cur = c.cursor()
             cur.execute("select public.reader_page_chars(), (select is_on from public.search_options where name = 'reader_whole_page')"); default = cur.fetchone()
+            cur.execute("select set_config('lantern.reader_whole_page', 'off', true)"); cur.execute("select public.reader_page_chars()"); off = cur.fetchone()[0]
             cur.execute("select set_config('lantern.reader_whole_page', 'on', true)"); cur.execute("select public.reader_page_chars()"); on = cur.fetchone()[0]
             cur.execute("select has_function_privilege('anon', 'public.reader_page_chars()', 'execute')"); public = cur.fetchone()[0]
             c.rollback()
-        self.assertEqual((default, on, public), ((3000, False), 8000, False))            # off until its answers are compared
+        self.assertEqual((default, off, on, public), ((8000, True), 3000, 8000, False))   # on since 19 Nov 2026; a comparison can still read 3,000
 
     def test_what_the_library_holds_for_a_company_is_said_from_the_index(self):
         import psycopg
