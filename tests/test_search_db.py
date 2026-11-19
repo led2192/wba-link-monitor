@@ -634,6 +634,29 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.search_flags('k')"); self.assertEqual(cur.fetchone()[0], {"answer_topics": True, "ask_reuse": True})
             c.rollback()
 
+    def test_in_the_list_by_meaning_older_documents_go_down_only_with_the_option_and_no_year(self):
+        import psycopg, datetime
+        y = datetime.date.today().year
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            rows = ", ".join(f"({r}, 'L{r}'::text, {yr}, {r})" for r, yr in ((1, 2001), (2, y - 4), (3, 0), (4, y - 1), (5, y - 1), (6, y - 2)))
+            cur.execute(f"""create or replace function public.find_meaning(key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null, type_filter text default null, max_rows int default 50)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$ select null::bigint, v.r, v.l, 'c'::text, 'w'::text, v.y, 't'::text, 'l'::text, null::text, v.p, 0.9::real, 'passage'::text from (values {rows}) v(r, l, y, p) $f$""")
+            ask = lambda *years: (cur.execute("select library_id from public.find_meaning_ranked('', %s::real[], null, %s, %s)", ([0.0] * 384, *years)), [r[0] for r in cur.fetchall()])[1]
+            cur.execute("select set_config('lantern.page_kinds', 'off', false), set_config('lantern.recent_meaning', 'off', false)")
+            self.assertEqual(ask(None, None), ["L1", "L2", "L3", "L4", "L5", "L6"])                    # off: nearness alone
+            cur.execute("select set_config('lantern.recent_meaning', 'on', false)")
+            # ages over the newest (a year old): 2001 capped at twelve -> +16.5; four years -> +4.5; no year (three) -> +3; two years -> +1.5
+            self.assertEqual(ask(None, None), ["L4", "L5", "L3", "L2", "L6", "L1"])
+            self.assertEqual(ask(2001, y), ["L1", "L2", "L3", "L4", "L5", "L6"])                       # a year asked: nothing moves
+            cur.execute("insert into public.page_kinds (library_id, page, kind) values ('L4', 4, 'index')")
+            cur.execute("select set_config('lantern.page_kinds', 'on', false)")
+            self.assertEqual(ask(None, None), ["L5", "L3", "L2", "L6", "L1", "L4"])                    # a marked page still goes last
+            cur.execute("select library_id, rank from public.find_meaning_ranked('', %s::real[])", ([0.0] * 384,))
+            self.assertEqual([r[1] for r in cur.fetchall()], [1, 2, 3, 4, 5, 6])
+            c.rollback()
+
     def test_one_search_blends_words_and_meaning(self):
         """find_blend: the words alone without a vector, in quotes or with a place filter; else both lists merged by
         reciprocal rank. The search by meaning is replaced by a stub here (no vector type in the test database)."""

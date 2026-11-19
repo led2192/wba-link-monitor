@@ -13,7 +13,7 @@ on:
         description: "attribute codes, comma separated (empty = every number attribute of attributes.json)"
         default: ""
       option:
-        description: "a search option to run off and then on (ask_later, ask_latest, ask_doc_pages, company_first, pairs, page_kinds)"
+        description: "a search option to run off and then on (ask_later, ask_latest, ask_doc_pages, company_first, pairs, page_kinds, recent_meaning)"
         default: ""
       commit:
         description: "record the run's counters in Pipeline QA"
