@@ -75,6 +75,19 @@ class ReaderLayout(unittest.TestCase):
         self.assertIn('body.append(unreadNote(d));', PAGE)
         self.assertIn('authed("company_note_set", { key, wba_id: d.wba_id, traits, note: ta.value })', PAGE)
         self.assertIn("for (const [v, label] of Object.entries(COMPANY_TRAITS)) { const l = el(\"label\"), cb = el(\"input\"); cb.type = \"checkbox\"; cb.checked = have.has(v);", PAGE)   # the ticks, as in Contribute
+    def test_the_reporting_year_is_shown_without_an_organisation_name(self):
+        code = PAGE[PAGE.index("  const plainYear = "):PAGE.index("  const periodShown = ")]
+        ask = "console.log(JSON.stringify(['fiscal 2025 (WBA reporting year 2025)', \"WBA's reporting year 2022\", 'FY24 (WBA year 2023)', 'WBA benchmarks'].map(plainYear)))"
+        out = subprocess.run(["node", "-e", code + "\n" + ask], capture_output=True, text=True, timeout=30)
+        self.assertEqual(json.loads(out.stdout), ["fiscal 2025 (reporting year 2025)", "reporting year 2022", "FY24 (reporting year 2023)", "WBA benchmarks"])
+        self.assertIn("escH(plainYear(j.answer))", PAGE)
+
+    def test_a_figure_through_three_years_or_more_is_a_series(self):
+        code = "const periodKey = p => String(p).toLowerCase().replace(/\\s+/g, '');\n" + PAGE[PAGE.index("  function figureSeries(facts) {"):PAGE.index("  const periodShown = ")]
+        facts = [{"kind": "number", "what": "Net sales", "unit": "USD", "period": f"fiscal {y}", "value": v} for y, v in ((2023, 3), (2021, 1), (2022, 2), (2022, 2))]
+        facts += [{"kind": "number", "what": "Employees", "unit": "", "period": "2023", "value": 9}, {"kind": "text", "what": "Net sales", "period": "2020"}]
+        out = subprocess.run(["node", "-e", code + "\nconsole.log(JSON.stringify(figureSeries(%s).map(s => [s.what, s.rows.map(r => r.value)])))" % json.dumps(facts)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(json.loads(out.stdout), [["Net sales", [1, 2, 3]]])                # oldest first, a period once; two figures are not a series
 
 if __name__ == "__main__":
     unittest.main()
