@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v107 2026-11-18";
+  const CLIENT = "lantern v108 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -392,6 +392,7 @@
       industries = [...new Set(companies.map(c => c.industry).filter(Boolean))].sort();
       regions = [...new Set(companies.map(c => c.region).filter(Boolean))].sort();
       rpc("find_topics", { key }).then(list => { topics = new Set(list || []); }).catch(() => {});      // v106: the broad topics, for intent()
+      rpc("find_metric_names", { key }).then(list => { metricNames = new Set(list || []); }).catch(() => {});   // v108: the metrics' names, for intent()
       rpc("link_may_ask", { key }).then(v => { linkAsk = v === true; }).catch(() => {});                 // v107: this person's link may ask without a sign-in
       const dl = $("companies"); dl.innerHTML = "";
       for (const c of companies) { const o = document.createElement("option"); o.value = c.name; dl.appendChild(o); }
@@ -461,7 +462,7 @@
       const name = fold(c.name).toLowerCase();
       if (!fq.toLowerCase().includes(name)) continue;      // the cheap test first: 2,000 names a keystroke
       const short = c.name.length < 4;
-      const m = short ? new RegExp("\\s" + esc(fold(c.name)) + "(?:'s)?[;,]?(?=\\s)").exec(fq) : new RegExp("\\s" + esc(name) + "(?:'s)?[;,]?(?=\\s)", "i").exec(fq);
+      const m = short ? new RegExp("\\s" + esc(fold(c.name)) + "(?:'s)?[;,:.]?(?=\\s)").exec(fq) : new RegExp("\\s" + esc(name) + "(?:'s)?[;,:.]?(?=\\s)", "i").exec(fq);
       if (!m) continue;
       // A company whose name is an everyday word ("target", "shell", "orange"): the company when it is written as a
       // name (a capital, or first in the box, or before a comma or semicolon), the word otherwise. 11 Nov 2026:
@@ -517,7 +518,7 @@
     }
     const years = [];
     q = q.replace(/\s(20[0-3]\d)\s*[-–]\s*(20[0-3]\d)(?=\s)/g, (m, a, b) => { years.push(+a, +b); return " "; });
-    q = q.replace(/\s(20[0-3]\d)(?=\s)/g, (m, a) => { years.push(+a); return " "; });
+    q = q.replace(/\s(?:fy|fiscal year |financial year )?(20[0-3]\d)(?=\s)/gi, (m, a) => { years.push(+a); return " "; });     // v108: "FY2022" is the year 2022
     // v99 (17 Nov 2026): a year said in words. "last year lukoil has updated its scope 1 or 2 targets" set no year,
     // and "last" and "year" were searched as words. "last year" is the year before this one and "this year" (or
     // "current year") this one, also "el año pasado" and "este año"; with "fiscal", "financial" or "reporting" between.
@@ -753,6 +754,23 @@
     box.insertBefore(w, before);
   }
 
+  // v108: a near name ("lukoli emissions 2022") is taken as the company in one place, for the search and for the
+  // decision of what is asked: until now the decision was made before the name was corrected, so the text was
+  // searched where the same words with the name typed right were answered. What the database said of a word is kept.
+  const unknownWords = new Map();
+  function applyTypo(parsed) {
+    parsed.company = parsed.typo.id; parsed.companyName = parsed.typo.name;
+    parsed.q = (" " + parsed.q + " ").replace(new RegExp("\\s" + parsed.typo.word + "(?:'s)?(?=\\s)", "i"), " ").trim();
+    parsed.industry = parsed.country = parsed.countryName = parsed.region = null;
+    return parsed;
+  }
+  const typoWanted = parsed => !!parsed.typo && !$("fCompany").value && state.asTyped !== $("q").value.trim();
+  async function wordUnknown(word) {
+    if (unknownWords.has(word)) return unknownWords.get(word);
+    let unknown = false; try { unknown = (await rpc("word_unknown", { key, word })) === true; } catch (e) { return false; }
+    unknownWords.set(word, unknown); return unknown;
+  }
+
   async function search(fromChips, more) {
     document.body.classList.remove("playing");                    // a search ends the card game
     if (typeof closeHistory === "function") closeHistory();          // and the suggestions step aside for the results (they stayed open over them when the page opened on a search)
@@ -760,13 +778,9 @@
     if (!fromChips) {
       const parsed = parse($("q").value);
       state.fixed = null;
-      if (parsed.typo && !$("fCompany").value && state.asTyped !== $("q").value.trim()) {     // v97: a company's name typed wrong, when the library does not know the word
-        let unknown = false; try { unknown = await rpc("word_unknown", { key, word: parsed.typo.word }); } catch (e) { unknown = false; }
-        if (unknown) {
-          parsed.company = parsed.typo.id; parsed.companyName = parsed.typo.name; state.fixed = parsed.typo;
-          parsed.q = (" " + parsed.q + " ").replace(new RegExp("\\s" + parsed.typo.word + "(?:'s)?(?=\\s)", "i"), " ").trim();
-          parsed.industry = parsed.country = parsed.countryName = parsed.region = null;
-        }
+      if (typoWanted(parsed)) {     // v97: a company's name typed wrong, when the library does not know the word
+        const unknown = unknownWords.has(parsed.typo.word) ? unknownWords.get(parsed.typo.word) : await wordUnknown(parsed.typo.word);   // v108: known already, nothing is awaited
+        if (unknown) { state.fixed = parsed.typo; applyTypo(parsed); }
       }
       state.catalogue = intent($("q").value, parsed) === "catalogue";            // v104: the documents themselves, and the company's card above them
       if (state.catalogue) parsed.q = "";
@@ -1507,6 +1521,9 @@
   function isQuestion(text) {
     const t = (text || "").trim().toLowerCase();
     if (t.length < 8 || t.split(/\s+/).length < 3) return false;
+    // v108: a request is a question though it has neither a question's first word nor its mark ("tell me whether
+    // Lukoil has a net zero target", "I want to know if ...", "check if ...", "explain ...", "me gustaría saber si ...").
+    if (/^(please |por favor )?(tell me|let me know|i want to know|i would like to know|i'd like to know|i need to know|i wonder|check|find out|confirm|verify|explain|describe|dime|quiero saber|me gustar[ií]a saber|necesito saber|comprueba|confirma|explica|expl[ií]came|describe)\s+(?!about\s)/.test(t)) return true;
     return /[?？]\s*$/.test(t) || t.startsWith("¿")
       || /^(does|do|did|is|are|was|were|has|have|had|can|could|will|what|which|who|whom|how|when|where|why|qué|que|cuál|cual|cuáles|cuánto|cuanto|cuánta|cuántos|cuantos|cuántas|cuantas|cómo|como|dónde|donde|cuándo|cuando|quién|quien|tiene|tienen|hay|existe|est-ce|quel|quelle|quels|quelles|combien|comment|pourquoi|où|wie|was|welche|welcher|welches|hat|haben|gibt|wann|wo|warum)\s/.test(t);
   }
@@ -1521,23 +1538,35 @@
   //              what is wanted is what the company's impact is, not the pages that hold those two words. It is asked
   //              at once, and the answer reads the best page of each part of the topic (the database's topic_of);
   //   search     a narrower topic, or a document by its type and year.
-  const CATALOGUE_NOUNS = new Set("report reports source sources document documents disclosure disclosures publication publications file files library catalogue catalog informe informes documento documentos fuente fuentes publicaciones".split(" "));
-  const CATALOGUE_FILLER = new Set("what which do does did you we have has hold holds held are is there the a an of for and or all list show me available any in on by from your our its their about with que qué cuales cuáles hay tienes tenemos tiene de para y los las el la lista todos todas disponibles sobre".split(" "));
+  // v108: "what do you have on Nike", "show me everything from Yandex", "which years are covered": the documents are
+  // meant though no word for them is said (anything, everything, all of it, the years covered).
+  const CATALOGUE_NOUNS = new Set("report reports source sources document documents disclosure disclosures publication publications file files library catalogue catalog informe informes documento documentos fuente fuentes publicaciones anything everything something coverage covered algo todo".split(" "));
+  const CATALOGUE_FILLER = new Set("what which do does did you we have has hold holds held are is there the a an of for and or all list show me available any in on by from your our its their about with years year got can i see find get que qué cuales cuáles hay tienes tenemos tiene de para y los las el la lista todos todas disponibles sobre".split(" "));
   // The names of the broad topics (find_topics), loaded once. topicNorm is the database's topic_norm: lower case, no
   // accents, no punctuation, without the words that only frame a request.
-  let topics = new Set();
-  const TOPIC_FILLER = new Set("overview summary general overall about on of the in at for its their data information info profile key performance disclosure disclosures reporting what is are and resumen sobre de la el los las datos del a an company s".split(" "));
+  // v108: the names of the taxonomy's metrics too (find_metric_names: "CEO", "headquarters", "number of employees",
+  // "scope 1 emissions"...). One company and the name of a metric is a fact that is wanted, with or without a year.
+  let topics = new Set(), metricNames = new Set();
+  const TOPIC_FILLER = new Set("tell me us give show overview summary general overall about on of the in at for its their data information info profile key performance disclosure disclosures reporting what is are and resumen sobre de la el los las datos del a an company s".split(" "));
   const topicNorm = t => (t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && !TOPIC_FILLER.has(w)).join(" ");
   function intent(text, p) {
     const one = !!p.company && !String(p.company).includes(";");
     const rest = (p.q || "").toLowerCase().replace(/[^a-záéíóúñü\s]/g, " ").split(/\s+/).filter(Boolean);
     if (one && rest.length && rest.some(w => CATALOGUE_NOUNS.has(w)) && rest.every(w => CATALOGUE_NOUNS.has(w) || CATALOGUE_FILLER.has(w))) return "catalogue";
+    if (one && rest.length >= 2 && rest.every(w => CATALOGUE_FILLER.has(w))) return "catalogue";       // v108: "what do you have on Nike": nothing is asked but the company
     if (isQuestion(text)) return "question";
     if (one && !p.type && topics.has(topicNorm(p.q))) return "overview";
+    if (one && !p.type && metricNames.has(topicNorm(p.q))) return "fact";
     if (one && (p.from || p.to) && !p.type && rest.length >= 1 && rest.length <= 8) return "fact";
     return "search";
   }
-  const go = () => { closeHistory(); $("answer").innerHTML = ""; const i = intent($("q").value, parse($("q").value)); (i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false); };
+  const go = async () => {
+    closeHistory(); $("answer").innerHTML = "";
+    const text = $("q").value, parsed = parse(text);
+    if (typoWanted(parsed) && await wordUnknown(parsed.typo.word)) applyTypo(parsed);          // v108: the near name first, then what is asked
+    if ($("q").value !== text) return;                                                            // the box changed while the word was looked up
+    const i = intent(text, parsed); (i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false);
+  };
   // The pages an answer cites, first in the list: the person reads the answer and its proof together.
   function citedFirst(rows) {
     if (!state.cited.length) return rows;

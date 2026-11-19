@@ -429,14 +429,14 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v107 2026-11-18";' in PAGE
+    assert 'const CLIENT = "lantern v108 2026-11-19";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
     assert 'if (one && !p.type && topics.has(topicNorm(p.q))) return "overview";' in PAGE and 'rpc("find_topics", { key })' in PAGE          # v106
     assert 'if (asked !== "search" || $("answer").textContent.trim()) return;' in PAGE          # v105: no offer of Ask under an answer
     # v104: what is asked is told before it is searched; the catalogue is answered from the index
-    assert '(i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false); };' in PAGE and 'rpc("company_card", { key, company: id })' in PAGE
+    assert '(i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false);' in PAGE and "if (typoWanted(parsed) && await wordUnknown(parsed.typo.word)) applyTypo(parsed);" in PAGE and 'rpc("company_card", { key, company: id })' in PAGE
     # v103: a typed year that leaves no page is dropped, and the status line says so
     assert "state.yearsDropped = { from: state.from, to: state.to }; state.from = state.to = null; state.yearsTyped = false;" in PAGE
     assert "these are pages of other years. `" in PAGE and "state.strictYears = true; search(true);" in PAGE
@@ -451,7 +451,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert 'seen(words, words, "none")' in PAGE and 'seen(words, words, "late")' in PAGE and 'seen(words, rows, "used")' in PAGE
     assert '"By words", "Shown", "Opened"' in PAGE
     # v97: a company's name typed wrong is taken as the company only when the library does not know the word, and says so
-    assert 'unknown = await rpc("word_unknown", { key, word: parsed.typo.word })' in PAGE
+    assert 'unknown = (await rpc("word_unknown", { key, word })) === true' in PAGE
     assert "if (!hits.length) found.typo = nearCompany(fq);" in PAGE
     assert "Search the words as typed" in PAGE and "is on no page. `" in PAGE
     assert "grant execute on function public.word_unknown(text, text) to anon, authenticated;" in SQL
