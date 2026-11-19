@@ -257,7 +257,7 @@
 <body>
 <div class="wrap">
   <header id="head" class="home">
-    <a class="brand" href="search.html" aria-label="Lantern, home">
+    <a class="brand" href="search.html" aria-label="lantrNa, home">
       <svg viewBox="0 0 300 64" aria-hidden="true">
         <defs><linearGradient id="beam" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="#FAC300" stop-opacity=".22"/><stop offset="1" stop-color="#FAC300" stop-opacity="0"/></linearGradient></defs>
         <path d="M44 27 L262 10 L262 54 L44 39 Z" fill="url(#beam)"/>
@@ -266,7 +266,7 @@
         <path d="M17.3 15.5h29.5l0.31 2.9H17.6z" fill="#FF3C23"/><path d="M17.6 18.9h28.8l0.31 2.9H17.9z" fill="#FAC300"/><path d="M18.0 22.3h28.0l0.31 2.9H18.3z" fill="#4BB42D"/><path d="M18.3 25.7h27.3l0.31 2.9H18.6z" fill="#2378FF"/><path d="M18.7 29.1h26.6l0.31 2.9H19.0z" fill="#0FC8BE"/><path d="M19.1 32.5h25.9l0.31 2.9H19.4z" fill="#FF3C23"/><path d="M19.4 35.9h25.2l0.31 2.9H19.7z" fill="#FAC300"/><path d="M19.8 39.3h24.5l0.31 2.9H20.1z" fill="#4BB42D"/><path d="M20.1 42.7h23.7l0.31 2.9H20.4z" fill="#2378FF"/><path d="M20.5 46.1h23.0l0.31 2.9H20.8z" fill="#0FC8BE"/><path d="M20.8 49.5h22.3l0.31 2.9H21.1z" fill="#FF3C23"/>
         <rect class="glass" x="26" y="19" width="12" height="20" rx="2"/><rect class="flame" x="29" y="24" width="6" height="2"/><rect class="flame" x="29" y="29" width="6" height="2"/>
         <rect class="lamp" x="14" y="52" width="36" height="6" rx="3"/>
-        <text x="70" y="47" font-family="Inter, system-ui, sans-serif" font-size="42" font-weight="600" letter-spacing="-0.8"><tspan class="l1">l</tspan><tspan class="l2" fill="#2378FF">a</tspan><tspan fill="#0FC8BE">n</tspan><tspan fill="#4BB42D">t</tspan><tspan fill="#FAC300">e</tspan><tspan fill="#FF3C23">r</tspan><tspan class="l7">N</tspan></text>
+        <text x="70" y="47" font-family="Inter, system-ui, sans-serif" font-size="42" font-weight="600" letter-spacing="-0.8"><tspan class="l1">l</tspan><tspan class="l2" fill="#2378FF">a</tspan><tspan fill="#0FC8BE">n</tspan><tspan fill="#4BB42D">t</tspan><tspan fill="#FAC300">r</tspan><tspan fill="#FF3C23">N</tspan><tspan class="l7">a</tspan></text>
       </svg>
     </a>
   </header>
@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v118 2026-11-19";
+  const CLIENT = "lantern v119 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1250,7 +1250,7 @@
       const left = el("div");
       left.append(el("div", "what", `${v.company} · ${ATTR_NAME[v.attribute] || v.attribute} · ${v.year}`));
       const fy = fiscalNote(v.year, v.fy_end_month, v.column_label);         // which fiscal year this reporting year is, when it is not the calendar year
-      if (fy) { const n = el("div", "ev", fy); n.title = "WBA counts a fiscal year in the calendar year where at least six months of it fall: a year ending January to May (or before 30 June) is the reporting year before."; n.style.cssText = "grid-column:1;margin:0 0 2px"; left.appendChild(n); }
+      if (fy) { const n = el("div", "ev", fy); n.title = "A fiscal year is counted in the calendar year where at least six months of it fall: a year ending January to May (or before 30 June) is the reporting year before."; n.style.cssText = "grid-column:1;margin:0 0 2px"; left.appendChild(n); }
       const num = el("div", "num", fmt(v.value) + " "); num.append(el("small", null, [v.unit, v.basis].filter(Boolean).join(", "))); left.appendChild(num);
       const btns = el("div", "btns"); const yes = el("button", "yes", "✓"); yes.title = "This value is right"; const no = el("button", "no", "✗"); no.title = "This value is wrong";
       btns.append(yes, no);
@@ -1647,9 +1647,20 @@
       if (state.cited.length) { render(citedFirst(state.lastRows), false); window.scrollTo(0, 0); }
       state.facts = Array.isArray(j.facts) ? j.facts : []; state.confirmed = Array.isArray(j.confirmed) ? j.confirmed : []; state.earlier = false; state.answered = true; showFacts();
     }
-    const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : (s && s.library_id ? `<a href="#" data-cite="${n}" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page + " (shown here: no public link)")}">[${n}]</a>` : m); });
+    const body = el("div", "text"); body.innerHTML = escH(plainYear(j.answer)).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : (s && s.library_id ? `<a href="#" data-cite="${n}" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page + " (shown here: no public link)")}">[${n}]</a>` : m); });
     body.addEventListener("click", ev => { const a = ev.target.closest && ev.target.closest("a[data-cite]"); if (!a) return; ev.preventDefault(); const s = src.find(x => String(x.n) === a.dataset.cite); if (s) openReader(s.library_id, s.page, pageNeedles(s)); });
     c.appendChild(body);
+    for (const sr of figureSeries(state.facts)) {
+      const t = el("table"); t.style.cssText = "border-collapse:collapse;margin:10px 0 4px;font-variant-numeric:tabular-nums;font-size:14px";
+      const cap = el("caption", null, [sr.what, sr.unit].filter(Boolean).join(" · ")); cap.style.cssText = "text-align:left;font-weight:600;padding-bottom:4px;caption-side:top"; t.appendChild(cap);
+      for (const f of sr.rows) {
+        const tr = el("tr"); tr.style.borderBottom = "1px solid var(--line)";
+        const a = el("td", null, String(periodShown(f))), b = el("td", null, fmt(Number(f.value))), w = el("td"); a.style.padding = "3px 0"; b.style.cssText = "padding:3px 0 3px 28px;text-align:right"; w.style.cssText = "padding:3px 0 3px 18px;font-size:12px";
+        if (f.library_id && f.page) { const l = el("a", null, `page ${f.page}`); docLink(l, f, factNeedle(f)); w.appendChild(l); }
+        tr.append(a, b, w); t.appendChild(tr);
+      }
+      c.appendChild(t);
+    }
     const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); docLink(a, s); li.appendChild(a); ol.appendChild(li); }
     c.append(ol, el("div", "what", (j.keywords ? `Pages found by searching “${j.keywords.replace(/\s+/g, " ")}”. ` : "") + "Written by a model from these pages only. Check the source before using a figure."));
     // v86, v88: with no company named, say what this answer is and, for those who may, offer the survey in its place.
@@ -1873,7 +1884,7 @@
   $("goLucky").onclick = () => $("lucky").click();
   $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; contribute(); window.scrollTo(0, 0); };
   $("foot").style.cssText = "margin-top:8px;padding-top:0"; showMine(false);
-  $("foot").innerHTML = 'Every page of every report WBA holds, in any language · Powered by <a href="https://www.worldbenchmarkingalliance.org/" target="_blank" rel="noopener">World Benchmarking Alliance</a> · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lanterN</a>';
+  $("foot").innerHTML = 'Every page of every report in the library, in any language · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lanterN</a>';
   $("share").onclick = async ev => { ev.preventDefault(); const link = location.origin + location.pathname + "#k=" + key;       // the same key on another device or for a colleague: searching needs only the link; reviews, Ask and adding need a WBA sign-in
     try { await navigator.clipboard.writeText(link); ev.target.textContent = "Link copied: paste it to a colleague or open it on your other device"; } catch (e) { ev.target.textContent = link; } };
   // A link to a page of a document (v113): its public address when it has one, else the page shown here. Before, a
@@ -1997,7 +2008,29 @@
   // "FY23", "fy 2023" and "FISCAL 2023" are one period (period_key in the database).
   const periodKey = p => { const t = String(p || "").trim().toLowerCase(), m = t.match(/^(?:fy|fiscal(?:\s+year)?)\s*'?(\d{4}|\d{2})$/); return m ? "fy" + (m[1].length === 2 ? 2000 + Number(m[1]) : Number(m[1])) : t.replace(/\s+/g, ""); };
   // The period as printed, with WBA's reporting year when it is another year ("FY24 (WBA year 2023)").
-  const periodShown = f => { const p = f.period || f.year; return p && f.wba_year && !String(p).includes(String(f.wba_year)) ? `${p} (WBA year ${f.wba_year})` : p; };
+  // v119 (the owner): the year a fiscal year is counted in is called the reporting year, with no organisation's name.
+  // The reader still writes "WBA reporting year" (its instructions are not changed without a comparison), and answers
+  // kept earlier hold those words: they are taken out where the text is shown.
+  const plainYear = s => String(s == null ? "" : s).replace(/\bWBA(?:['’]s)?\s+reporting year/gi, "reporting year").replace(/\bWBA year\b/g, "reporting year").replace(/\bWBA (?=(?:19|20)\d{2}\b)/g, "reporting year ");
+  // One figure through several years, as a small table under the answer (v119, the owner: several figures in a
+  // sentence are hard to read). facts: the facts of the answer. A series is three or more figures with the same
+  // name and unit and different periods; returned oldest first.
+  function figureSeries(facts) {
+    const groups = new Map();
+    for (const f of facts || []) {
+      if (f.kind !== "number" || !(f.period || f.year)) continue;
+      const k = String(f.what || "").trim().toLowerCase() + "|" + String(f.unit || "").trim().toLowerCase();
+      if (!groups.has(k)) groups.set(k, []); groups.get(k).push(f);
+    }
+    const when = f => { const m = String(f.period || f.year).match(/(?:19|20)\d{2}/); return m ? Number(m[0]) : 0; };
+    const out = [];
+    for (const g of groups.values()) {
+      const seen = new Set(), rows = g.filter(f => { const p = periodKey(f.period || f.year); if (seen.has(p)) return false; seen.add(p); return true; }).sort((a, b) => when(a) - when(b));
+      if (rows.length >= 3) out.push({ what: g[0].what, unit: g[0].unit || "", rows });
+    }
+    return out;
+  }
+  const periodShown = f => { const p = f.period || f.year; return p && f.wba_year && !String(p).includes(String(f.wba_year)) ? `${plainYear(p)} (reporting year ${f.wba_year})` : (typeof p === "string" ? plainYear(p) : p); };
   const factNeedle = f => f.kind === "number" ? Math.abs(Number(f.value)).toLocaleString("en-US") : "";
   // What to look for on the page: the figure as printed when the reader kept it, else the stored figure with separators.
   // The reader often keeps "60836.0" as printed: that is the number, not the page's "60,836", so it is written the way pages print it.
@@ -2022,9 +2055,9 @@
     const row = (name, value) => { if (value === null || value === undefined || value === "") return; const r = el("div"); r.style.cssText = "display:grid;grid-template-columns:190px 1fr;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"; const k = el("div", null, name); k.style.color = "var(--muted)"; const val = el("div"); if (value instanceof Node) val.appendChild(value); else val.textContent = String(value); r.append(k, val); body.appendChild(r); };
     row("As printed on the page", g.printed ? `${asPrinted(g)}` + (g.scale && Number(g.scale) !== 1 ? `  (× ${Number(g.scale).toLocaleString("en-US")})` : "") : null);
     row("Column or row heading", g.column_label);
-    row("WBA reporting year", g.year);
+    row("Reporting year", g.year);
     const fy = fiscalNote(g.year, g.fy_end_month, g.column_label);
-    row("Fiscal year", fy ? fy + ". WBA counts a fiscal year in the calendar year where at least six months of it fall, so a year ending January to May is the reporting year before." : (g.fy_end_month === 12 ? "ends in December: the calendar year" : "the month this company's fiscal year ends is not known yet"));
+    row("Fiscal year", fy ? fy + ". A fiscal year is counted in the calendar year where at least six months of it fall, so a year ending January to May is the reporting year before." : (g.fy_end_month === 12 ? "ends in December: the calendar year" : "the month this company's fiscal year ends is not known yet"));
     const src = el("span"); src.append(document.createTextNode([g.doc_year, g.doc_type].filter(Boolean).join(" · ") + (g.label ? ` · ${g.label}` : "") + ` · page ${g.page || "?"}` + (g.pages ? ` of ${g.pages}` : "") + " · "));
     if (g.library_id && g.page) { const r = el("a", null, "read here"); r.href = "#"; r.onclick = e => { e.preventDefault(); openReader(g.library_id, g.page, printedNeedle(g)); }; src.appendChild(r); }
     if (/^https?:\/\//i.test(g.url || "")) { const a = el("a", null, "open the document"); a.href = pageUrl({ url: g.url, page: g.page }); a.target = "_blank"; a.rel = "noopener"; src.append(document.createTextNode(" · "), a); } else src.append(document.createTextNode(" · no public link"));
