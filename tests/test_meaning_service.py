@@ -115,6 +115,13 @@ class Service(unittest.TestCase):
         self.assertIn("method POST", INSTALL)
         self.assertNotIn("path /health", INSTALL)                                                 # the health route is not passed on by the web server
         self.assertIn("caddy validate", INSTALL)
+        site = INSTALL.split("\nsite() {")[1].split("\n}\n")[0]                                  # the page under the owner's name (19 Nov 2026)
+        self.assertIn("Caddyfile.before-site", site); self.assertIn("Put back as it was.", site)   # an invalid configuration never stays
+        self.assertIn('points_here "$HOST" ||', site); self.assertIn("run the workflow Search page first", site)
+        self.assertIn("rewrite @home /search.html", INSTALL); self.assertIn("respond 405", INSTALL)
+        wf = open(os.path.join(HERE, ".github", "workflows", "search_page.yml"), encoding="utf-8").read()
+        self.assertIn("runs-on: [self-hosted, lantern]", wf); self.assertNotIn("pull_request", wf)
+        self.assertEqual(wf.count("placeholders left in the extension"), 2)                        # both copies are built the same way
         self.assertIn("Nothing opened.", INSTALL)                                                 # the name must point here before a certificate is asked for
         for guard in ("IPAddressDeny=any", "TasksMax=200", "CapabilityBoundingSet=", "connection limit 6"):
             self.assertIn(guard, INSTALL)
