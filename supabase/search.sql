@@ -4449,6 +4449,12 @@ $$;
 -- longer than 3,000 characters, 4% longer than 6,000. Option reader_whole_page: 8,000 characters. Off until its
 -- answers are compared with today's: it changes what the reader is given.
 insert into public.search_options (name, is_on, note) values ('reader_whole_page', false, 'answers and surveys read up to 8,000 characters of each page instead of the first 3,000 (a table often stands at the end of a page''s text)') on conflict (name) do nothing;
+-- On since 19 Nov 2026 (the owner's decision). Search exam run 44487795275, 224 validated figures of ten number
+-- attributes: of the 115 whose number is on the eight pages an answer reads, the reader was given it in 102 with the
+-- pages cut at 3,000 characters and in all 115 cut at 8,000. One figure in nine was found by the search and then cut
+-- off before the reader. On 120 validated yes-or-no answers (18 Nov) the longer pages found 39 of 60 against 38 of
+-- 60: no difference. The cost is about a third more text read an answer, a few ten-thousandths of a dollar.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 19 Nov 2026, run 44487795275)' where name = 'reader_whole_page' and not is_on and note not like '%on since%';
 create or replace function public.reader_page_chars() returns int
 language sql stable security definer set search_path = public
 as $$ select case when public.survey_option('reader_whole_page') then 8000 else 3000 end $$;
