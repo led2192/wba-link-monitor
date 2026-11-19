@@ -4435,6 +4435,64 @@ $$;
 revoke all on function public.admin_unread_docs(text, text, boolean, int, int) from public, anon;
 grant execute on function public.admin_unread_docs(text, text, boolean, int, int) to authenticated;
 
+-- "Do we hold the latest?" (19 Nov 2026, the owner: the aim moves from holding everything of a company to holding its
+-- latest report). The list above shows documents whose address is held and whose file is not. This one shows the
+-- companies for which no main report of the latest year due is held at all, not even as an address: the robot did
+-- not find it, and the company most likely published it. Which year is due: the latest reporting year whose fiscal
+-- year ended seven months ago or more (the month from company_fiscal, December when unknown; a year ending January
+-- to May is the reporting year before, as wba_year). Seven months, because an annual report comes within four and a
+-- sustainability report within six or seven. The day the library found last year's report was the other candidate
+-- and is not used: most documents were found in the first weeks of the pipeline, so that day says nothing of when
+-- the company published. A company ticked as publishing almost nothing, or as reporting inside its parent, is last.
+create or replace function public.report_year_due(fy_end_month int, today date default current_date) returns int
+language sql immutable
+as $$
+  select max(y)::int from generate_series(extract(year from today)::int - 4, extract(year from today)::int) y
+  where (make_date(case when coalesce(fy_end_month, 12) between 1 and 5 then y + 1 else y end, coalesce(fy_end_month, 12), 1) + interval '8 months')::date <= today
+$$;
+
+create or replace function public.admin_latest_missing(key text, search text default null, max_rows int default 300)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  main text[] := array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', '10K Form', 'Registration Document'];
+  s text := nullif(btrim(coalesce(search, '')), '');
+  need int := least(greatest(coalesce(max_rows, 300), 1), 2000);
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with held as (select d.wba_id, max(d.year) as latest from public.documents d
+                  where d.doc_type = any(main) and d.year is not null and d.year <= extract(year from now())::int + 1
+                    and not exists (select 1 from public.doc_fixes f where f.library_id = d.library_id and f.action = 'discard')
+                  group by d.wba_id),
+         c as (select co.wba_id, co.name, co.website, cf.fy_end_month, public.report_year_due(cf.fy_end_month) as due, h.latest,
+                      exists (select 1 from public.company_notes n where n.wba_id = co.wba_id and n.traits && array['no_reports', 'in_parent']) as excused
+               from public.companies co left join held h on h.wba_id = co.wba_id left join public.company_fiscal cf on cf.wba_id = co.wba_id
+               where co.name is not null and (s is null or co.name ilike '%' || s || '%')),
+         m as (select c.*, rf.figure as revenue from c left join public.ranking_figures('revenue') rf on rf.wba_id = c.wba_id
+               where c.latest is null or c.latest < c.due),
+         top as (select m.*, row_number() over (order by m.excused, m.revenue desc nulls last, m.name, m.wba_id) as place from m)
+    select jsonb_build_object(
+      'companies', (select count(*) from m),
+      'with_none', (select count(*) from m where latest is null),
+      'rows', coalesce((select jsonb_agg(jsonb_build_object('wba_id', t.wba_id, 'company', t.name, 'website', t.website, 'due', t.due, 'latest', t.latest,
+                 'fy_end_month', t.fy_end_month, 'revenue_usd', t.revenue,
+                 -- the latest main report held: where last year's was is where this year's most likely is
+                 'last', (select jsonb_build_object('doc_type', d.doc_type, 'label', d.label, 'url', d.url) from public.documents d
+                          where d.wba_id = t.wba_id and d.year = t.latest and d.doc_type = any(main) and coalesce(d.url, '') <> ''
+                          order by array_position(main, d.doc_type), d.library_id limit 1),
+                 'note', (select n.note from public.company_notes n where n.wba_id = t.wba_id),
+                 'traits', coalesce((select to_jsonb(n.traits) from public.company_notes n where n.wba_id = t.wba_id), '[]'::jsonb))
+               order by t.place) from top t where t.place <= need), '[]'::jsonb)));
+end;
+$$;
+revoke all on function public.admin_latest_missing(text, text, int) from public, anon;
+grant execute on function public.admin_latest_missing(text, text, int) to authenticated;
+
 -- The jobs, seen from the Admin panel (19 Nov 2026). Whether last night's load ran was known only by opening GitHub,
 -- and a load skipped two nights was found by chance. job_state.py copies the runs of the workflows here every few
 -- hours; admin_jobs says, a workflow: its last run, how many runs failed in a row, and when it last went well.
