@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v120 2026-11-19";
+  const CLIENT = "lantern v121 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2401,8 +2401,14 @@
     bar.append(box, adminBtn("Search", again), mainB, yearB); body.appendChild(bar);
     const why = Object.entries(r.by_status || {}).map(([k, n]) => `${n} ${UNREAD[k] ? k.replace(/_/g, " ") : k}`).join(", ");
     body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.`));
-    let company = null, table = null;
-    for (const d of r.rows || []) {
+    // v121 (the owner's screenshot: one company, sixteen rows with the same title): rows of a company with the same
+    // year, type and title are one document held under several addresses. The first is shown, the others fold under
+    // "+N more addresses"; a row already sent is put first, so that the group shows it.
+    let company = null, table = null, groups = new Map();
+    const same = d => `${d.year}|${d.doc_type}|${String(d.label || "").trim().toLowerCase()}`;
+    const order = []; { const byCo = new Map(); for (const d of r.rows || []) { if (!byCo.has(d.wba_id)) { byCo.set(d.wba_id, new Map()); } const g = byCo.get(d.wba_id), k = d.label ? same(d) : d.library_id; if (!g.has(k)) { g.set(k, []); order.push(g.get(k)); } g.get(k).push(d); } }
+    for (const grp of order) { grp.sort((x, y) => (y.sent ? 1 : 0) - (x.sent ? 1 : 0)); grp[0]._more = grp.slice(1); }
+    for (const d of order.flatMap(g => g)) {
       if (d.wba_id !== company) {
         company = d.wba_id;
         const h = el("h3", null, `${d.company || d.wba_id} (${d.company_n})`); h.style.cssText = "margin:18px 0 4px;font-size:15px";
@@ -2417,7 +2423,12 @@
       const meta = el("span", null, `${d.year || "no year"} · ${d.doc_type || "untyped"}`); meta.style.cssText = "flex:none;width:230px;color:var(--muted, #667)";
       const stt = el("span", null, UNREAD[d.status] || d.status); stt.style.cssText = "flex:none;width:330px;color:var(--muted, #667);font-size:13px";
       if (d.sent) { stt.textContent = `sent ${adminWhen(d.sent.at)} · ${d.sent.status}${d.sent.result ? ": " + d.sent.result : ""}`; stt.title = "Sent with the extension. The row leaves this list once the file is read (minutes for the reading, then the next load of the database)."; stt.style.color = "#2E8B1F"; a.style.opacity = "0.55"; }
-      row.append(meta, a, stt); table.append(row);
+      row.append(meta, a, stt);
+      if (d._more) { groups.set(d, { rows: [], open: false }); table.append(row);
+        if (d._more.length) { const more = el("a", null, `+${d._more.length} more address${d._more.length === 1 ? "" : "es"}`); more.href = "#"; more.title = "The same year, type and title under other addresses: most likely the same document"; more.style.cssText = "flex:none;font-size:12px;margin-left:8px";
+          const g = groups.get(d); more.onclick = ev => { ev.preventDefault(); g.open = !g.open; for (const x of g.rows) x.style.display = g.open ? "flex" : "none"; more.textContent = g.open ? "fewer" : `+${d._more.length} more address${d._more.length === 1 ? "" : "es"}`; };
+          a.after(more); for (const x of d._more) x._of = g; } }
+      else { row.style.display = "none"; row.style.paddingLeft = "18px"; d._of.rows.push(row); table.append(row); }
     }
     if (!(r.rows || []).length) body.append(el("p", null, "None."));
   }

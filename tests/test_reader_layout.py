@@ -71,6 +71,10 @@ class ReaderLayout(unittest.TestCase):
         self.assertIn('"alsoanswer"', PAGE)                                            # and the robot's card says the answer read it too
         self.assertIn("ev.dataset.held = `${Math.abs(Number(v.value))}|${v.year}`;", PAGE)
 
+    def test_documents_to_fetch_folds_the_same_document_under_several_addresses(self):
+        self.assertIn("const same = d => `${d.year}|${d.doc_type}|${String(d.label || \"\").trim().toLowerCase()}`;", PAGE)
+        self.assertIn("more address", PAGE)
+
     def test_documents_to_fetch_shows_and_saves_the_company_note(self):
         self.assertIn('body.append(unreadNote(d));', PAGE)
         self.assertIn('authed("company_note_set", { key, wba_id: d.wba_id, traits, note: ta.value })', PAGE)
