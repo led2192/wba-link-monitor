@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v115 2026-11-19";
+  const CLIENT = "lantern v116 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2350,7 +2350,7 @@
     const st = adminUnreadView;
     const r = await authed("admin_unread_docs", { key, search: st.search || null, only_main: st.main, from_year: st.from, max_rows: 400 }); if (!r) { body.textContent = "Not available."; return; }
     body.innerHTML = "";
-    body.append(el("p", null, "Documents whose address lanterN holds but whose file the robot could not get: the site refuses it, the address no longer answers, or the download fails. Open the address in your browser; if the document opens, send it with the extension: the row is marked \"sent\" here and leaves the list once the file is read. Companies with the most main reports missing come first."));
+    body.append(el("p", null, "Documents whose address lanterN holds but whose file the robot could not get: the site refuses it, the address no longer answers, or the download fails. Open the address in your browser; if the document opens, send it with the extension: the row is marked \"sent\" here and leaves the list once the file is read. First the companies with no main report read for the last two years, then those missing one of the two; among them, the companies in most WBA benchmarks and with the largest revenue first. The search looks in every document of the list, not only in the rows shown."));
     const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin:0 0 12px;flex-wrap:wrap";
     const box = document.createElement("input"); box.placeholder = "a company or a word of the title"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--bg);color:var(--fg)";
     const again = () => { st.search = box.value.trim(); adminUnread(body); };
@@ -2365,7 +2365,11 @@
       if (d.wba_id !== company) {
         company = d.wba_id;
         const h = el("h3", null, `${d.company || d.wba_id} (${d.company_n})`); h.style.cssText = "margin:18px 0 4px;font-size:15px";
-        body.append(h); body.append(unreadNote(d)); table = el("div"); body.append(table);
+        body.append(h);
+        const usd = v => v >= 1e9 ? `${(v / 1e9).toFixed(v >= 1e10 ? 0 : 1)} bn USD` : `${Math.round(v / 1e6)} m USD`;
+        const why = [d.missing, d.benchmarks ? `in ${d.benchmarks} WBA benchmark${d.benchmarks === 1 ? "" : "s"}` : "", d.revenue_usd ? `revenue about ${usd(Number(d.revenue_usd))} (as the robot read it)` : ""].filter(Boolean).join(" · ");
+        if (why) { const w = el("div", null, why); w.style.cssText = "font-size:13px;margin:0 0 4px;color:" + (d.missing ? "#B4540A" : "var(--muted, #667)"); body.append(w); }
+        body.append(unreadNote(d)); table = el("div"); body.append(table);
       }
       const row = el("div"); row.style.cssText = "display:flex;gap:10px;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--line)";
       const a = el("a", null, d.label || d.url); a.href = d.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; a.title = d.url;
