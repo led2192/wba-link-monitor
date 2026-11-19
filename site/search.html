@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v114 2026-11-19";
+  const CLIENT = "lantern v115 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -697,7 +697,7 @@
       const href = pageLink(r);
       const a = el("a", null, r.label || r.library_id);
       if (href) { a.href = href; a.target = "_blank"; a.rel = "noopener"; }
-      else { a.href = "#"; a.title = "No public link for this document: the page is shown here"; a.addEventListener("click", ev => { ev.preventDefault(); openReader(r.library_id, r.page, ""); }); }
+      else { a.href = "#"; a.title = "No public link for this document: the page is shown here"; a.addEventListener("click", ev => { ev.preventDefault(); openReader(r.library_id, r.page, pageNeedles(r)); }); }
       a.addEventListener("click", () => { if (trail.length) trail[trail.length - 1].opened = true; rpc("find_click", { key, log_id: r.log_id, library_id: r.library_id, page: r.page, rank: r.rank }).catch(() => {}); });
       h.appendChild(a);
       // the two marks: a verdict from the list, without opening the document (most results are judged that way)
@@ -1254,7 +1254,7 @@
       const num = el("div", "num", fmt(v.value) + " "); num.append(el("small", null, [v.unit, v.basis].filter(Boolean).join(", "))); left.appendChild(num);
       const btns = el("div", "btns"); const yes = el("button", "yes", "✓"); yes.title = "This value is right"; const no = el("button", "no", "✗"); no.title = "This value is wrong";
       btns.append(yes, no);
-      const ev = el("div", "ev");
+      const ev = el("div", "ev"); ev.dataset.held = `${Math.abs(Number(v.value))}|${v.year}`;
       const evidence = v.readings > 1 ? `${v.agree} of ${v.readings} documents read give this figure` + (v.variants > 1 ? `, ${v.variants} different figures in all` : "") : "read in one document";
       ev.append(document.createTextNode(evidence + " · "));
       if (v.url) { const a = el("a", null, `source, page ${v.page || "?"}`); a.href = /\.pdf(\?|$)/i.test(v.url) || !/#/.test(v.url) ? `${v.url}#page=${v.page || 1}` : v.url; a.target = "_blank"; a.rel = "noopener"; ev.appendChild(a); }
@@ -1648,7 +1648,7 @@
       state.facts = Array.isArray(j.facts) ? j.facts : []; state.confirmed = Array.isArray(j.confirmed) ? j.confirmed : []; state.earlier = false; state.answered = true; showFacts();
     }
     const body = el("div", "text"); body.innerHTML = escH(j.answer).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : (s && s.library_id ? `<a href="#" data-cite="${n}" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page + " (shown here: no public link)")}">[${n}]</a>` : m); });
-    body.addEventListener("click", ev => { const a = ev.target.closest && ev.target.closest("a[data-cite]"); if (!a) return; ev.preventDefault(); const s = src.find(x => String(x.n) === a.dataset.cite); if (s) openReader(s.library_id, s.page, ""); });
+    body.addEventListener("click", ev => { const a = ev.target.closest && ev.target.closest("a[data-cite]"); if (!a) return; ev.preventDefault(); const s = src.find(x => String(x.n) === a.dataset.cite); if (s) openReader(s.library_id, s.page, pageNeedles(s)); });
     c.appendChild(body);
     const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); docLink(a, s); li.appendChild(a); ol.appendChild(li); }
     c.append(ol, el("div", "what", (j.keywords ? `Pages found by searching “${j.keywords.replace(/\s+/g, " ")}”. ` : "") + "Written by a model from these pages only. Check the source before using a figure."));
@@ -1782,7 +1782,7 @@
     state.confirmed = got.confirmed || []; state.facts = got.open || []; state.earlier = true; showFacts();
   }
   function showFacts() {
-    const panel = $("values"); for (const old of panel.querySelectorAll(".fromanswer")) old.remove();
+    const panel = $("values"); for (const old of panel.querySelectorAll(".fromanswer, .alsoanswer")) old.remove();
     if (!state.facts.length && !state.confirmed.length) return;
     // v51: the block is set apart quietly (a line of the accent colour down its side), and under the new facts come the
     // facts of earlier answers about the same companies that a colleague marked right.
@@ -1798,7 +1798,16 @@
     // not listed, and one line says so. A figure of the answer with no year is never taken for one of the robot's.
     const yearOf = f => [f.wba_year, f.year].map(Number).filter(Boolean).concat((String(f.period || "").match(/(?:19|20)\d{2}/g) || []).map(Number));
     const held = f => f.kind === "number" && heldValues.some(v => Math.abs(Number(v.value)) === Math.abs(Number(f.value)) && yearOf(f).includes(Number(v.year)));
-    const repeats = state.facts.filter(f => !state.confirmed.some(c => same(f, c)) && held(f)).length;
+    // v115 (the owner: shown together, not hidden): the robot's card says the answer read the figure too.
+    const unitShown = u => /^(metric\s+)?(tons?|tonnes?)\s+(of\s+)?co2[\s-]?e(q|quivalents?)?$/i.test(String(u || "").trim()) ? "tCO2e" : u;   // one name for one unit: "metric tons CO2e" beside "tCO2e" read as two things
+    let repeats = 0;
+    for (const f of state.facts) {
+      if (state.confirmed.some(c => same(f, c)) || !held(f)) continue;
+      const v = heldValues.find(v => Math.abs(Number(v.value)) === Math.abs(Number(f.value)) && yearOf(f).includes(Number(v.year)));
+      const ev = v && panel.querySelector(`[data-held="${Math.abs(Number(v.value))}|${v.year}"]`); if (!ev) continue;
+      const also = el("div", "alsoanswer", `Also read in ${state.earlier ? "an earlier answer" : "this answer"}${f.doc_year ? `, in the ${f.doc_year} ${f.doc_type || "report"}` : ""}${f.page ? `, page ${f.page}` : ""}: the same figure.`);
+      also.style.cssText = "margin-top:3px;color:var(--accent)"; ev.appendChild(also); repeats++;
+    }
     const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)) && !held(f));
     const factLine = f => {
       const isYear = f.kind === "number" && Number.isInteger(Number(f.value)) && Number(f.value) >= 1900 && Number(f.value) <= 2100 && /year|date/i.test((f.unit || "") + " " + f.what);
@@ -1808,7 +1817,7 @@
         const n = el("div", "ev", "year not stated on the page" + (f.doc_year ? `; printed in the ${f.doc_year} ${f.doc_type || "report"}` : "")); n.style.cssText = "margin:0 0 2px;color:#B4540A"; left.appendChild(n);
       }
       const words = f.kind === "text";                                   // a sentence is read, not displayed like a figure
-      const num = el("div", words ? null : "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, f.unit));   // a unit belongs to a figure ("month not stated text" showed the model's "text")
+      const num = el("div", words ? null : "num", (f.kind === "number" ? (isYear ? String(f.value) : fmt(Number(f.value))) : f.answer) + " "); if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, unitShown(f.unit)));   // a unit belongs to a figure ("month not stated text" showed the model's "text")
       if (words) num.style.cssText = "font-size:14px;line-height:1.4;margin:2px 0";
       left.appendChild(num);
       return left;
@@ -1831,7 +1840,7 @@
     }
     if (fresh.length) box.append(el("div", "subhead", `${state.earlier ? "Found in earlier answers" : "Found in this answer"} · ${fresh.length} · yours to confirm`));
     if (!fresh.length && !state.confirmed.length && !repeats) return;
-    if (repeats) { const n = el("div", "ev", `${repeats} figure${repeats > 1 ? "s" : ""} of ${state.earlier ? "earlier answers" : "this answer"} ${repeats > 1 ? "are" : "is"} already among the values below, and not listed twice.`); n.style.margin = "6px 0"; box.appendChild(n); }
+    if (repeats) { const n = el("div", "ev", `${repeats} figure${repeats > 1 ? "s" : ""} of ${state.earlier ? "earlier answers" : "this answer"} ${repeats > 1 ? "are" : "is"} among the values below: shown there once, marked as read here too.`); n.style.margin = "6px 0"; box.appendChild(n); }
     fresh.forEach((f, at) => {
       const row = el("div", "v"), left = factLine(f); if (at) rule(row);
       const marks = el("div"); marks.style.cssText = "display:flex;gap:4px;align-items:start";
@@ -1872,8 +1881,14 @@
   function docLink(a, s, find) {
     if (/^https?:\/\//i.test(s.url || "")) { a.href = pageUrl(s); a.target = "_blank"; a.rel = "noopener"; return a; }
     a.href = "#"; a.title = "No public link for this document: the page is shown here";
-    a.addEventListener("click", ev => { ev.preventDefault(); if (s.library_id) openReader(s.library_id, s.page, find || ""); });
+    a.addEventListener("click", ev => { ev.preventDefault(); if (s.library_id) openReader(s.library_id, s.page, find || pageNeedles(s)); });
     return a;
+  }
+  // The figures to mark on a page opened from a source or a result (v115; v113 opened the page with nothing marked):
+  // those the answer read on that page and those the robot holds from it.
+  function pageNeedles(s) {
+    const here = x => x.library_id === s.library_id && Number(x.page) === Number(s.page);
+    return [...new Set(state.facts.concat(state.confirmed).filter(here).map(factNeedle).concat(heldValues.filter(here).map(printedNeedle)).filter(Boolean))];
   }
   // The text of a page laid out to be read (v113). The library holds a page as the lines taken out of the file: a table
   // is a run of lines that end in figures, a paragraph is cut where the file's column ended. Here: three or more lines
@@ -1914,10 +1929,14 @@
     flush(); return parts;
   }
   // Draws the parts into the reader; returns the mark put on the words looked for, if they were found.
-  function readerShow(body, text, needle) {
-    let marked = null; const low = needle.toLowerCase();
-    const put = (node, s) => { const i = !marked && needle.length >= 2 ? s.toLowerCase().indexOf(low) : -1; if (i < 0) { node.append(document.createTextNode(s)); return node; }
-      marked = el("mark", null, s.slice(i, i + needle.length)); node.append(document.createTextNode(s.slice(0, i)), marked, document.createTextNode(s.slice(i + needle.length))); return node; };
+  function readerShow(body, text, needles) {
+    let marked = null; const left = needles.map(n => n.toLowerCase());       // each is marked once, where the page first prints it
+    const put = (node, s) => {
+      let at = -1, which = -1; const low = s.toLowerCase();
+      left.forEach((n, k) => { const i = low.indexOf(n); if (i >= 0 && (at < 0 || i < at)) { at = i; which = k; } });
+      if (at < 0) { node.append(document.createTextNode(s)); return node; }
+      const n = left.splice(which, 1)[0], m = el("mark", null, s.slice(at, at + n.length)); if (!marked) marked = m;
+      node.append(document.createTextNode(s.slice(0, at)), m); return put(node, s.slice(at + n.length)); };
     const block = (tag, css, s) => { const e = el(tag); e.style.cssText = css; body.appendChild(put(e, s)); };
     for (const part of readerParts(text)) {
       if (part.t === "p") block("p", "margin:0 0 12px;max-width:72ch", part.s);
@@ -1962,10 +1981,11 @@
     head.appendChild(nav);
     if (got.label) { const sub = el("div", null, got.label); sub.style.cssText = "width:100%;font-size:12.5px;color:var(--muted)"; head.appendChild(sub); }
     const text = got.body || "(the library holds no text for this page)";
-    const needle = String(find || "").trim();                 // the figure or the words looked for, marked where the page prints them
+    const needles = (Array.isArray(find) ? find : [find]).map(x => String(x || "").trim()).filter(x => x.length >= 2);
+    const needle = needles[0] || "";                          // the figure or the words looked for, marked where the page prints them
     const i = needle.length >= 2 ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1;
     if (!readerPlain && got.body) {                           // laid out; if the words looked for fell across two parts and could not be marked, the plain lines below
-      body.style.whiteSpace = "normal"; const m = readerShow(body, text, needle);
+      body.style.whiteSpace = "normal"; const m = readerShow(body, text, needles);
       if (m || i < 0) { const note = el("div", null, "The text of the page as lanterN holds it, laid out to be read: tables are rebuilt from its lines and a column can be off. “plain text” shows the lines as held."); note.style.cssText = "margin-top:18px;font-size:12px;color:var(--muted)"; body.appendChild(note); if (m) m.scrollIntoView({ block: "center" }); return; }
       body.innerHTML = "";
     }
@@ -2304,11 +2324,33 @@
   // v111: the documents the robot could not get (admin_unread_docs), as the owner's working list: by company, the
   // main reports first, each with its address to open in the browser and send with the extension.
   const adminUnreadView = { search: "", main: true, from: 2023 };
+  // The note of a company in "Documents to fetch" (v115): the same note Contribute shows (company_notes), written here
+  // without leaving the list. The answers ticked in Contribute are kept as they are.
+  function unreadNote(d) {
+    const wrap = el("div"); wrap.style.cssText = "margin:0 0 6px;font-size:13px";
+    const draw = () => {
+      wrap.innerHTML = "";
+      if (d.note) { const t = el("span", null, d.note + " "); t.style.color = "var(--muted, #667)"; wrap.append(t); }
+      const b = el("a", null, d.note ? "edit the note" : "add a note"); b.href = "#"; b.title = "A note about this company, shared with Contribute: where its reports are, why a file cannot be fetched, what was tried";
+      b.onclick = ev => { ev.preventDefault(); edit(); }; wrap.append(b);
+    };
+    const edit = () => {
+      wrap.innerHTML = "";
+      const ta = document.createElement("textarea"); ta.value = d.note || ""; ta.maxLength = 400; ta.rows = 2; ta.style.cssText = "font:inherit;width:min(640px,100%);padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);display:block;margin-bottom:4px";
+      const say = el("span"); say.style.cssText = "margin-left:8px;color:#c0392b";
+      const save = adminBtn("Save", async () => {
+        let r = null; try { r = await authed("company_note_set", { key, wba_id: d.wba_id, traits: d.traits || [], note: ta.value }); } catch (e) { r = null; }
+        if (r && r.ok) { d.note = ta.value.replace(/\s+/g, " ").trim(); draw(); } else say.textContent = "Not saved: sign in again and retry.";
+      });
+      wrap.append(ta, save, adminBtn("Cancel", draw), say); ta.focus();
+    };
+    draw(); return wrap;
+  }
   async function adminUnread(body) {
     const st = adminUnreadView;
     const r = await authed("admin_unread_docs", { key, search: st.search || null, only_main: st.main, from_year: st.from, max_rows: 400 }); if (!r) { body.textContent = "Not available."; return; }
     body.innerHTML = "";
-    body.append(el("p", null, "Documents whose address lanterN holds but whose file the robot could not get: the site refuses it, the address no longer answers, or the download fails. Open the address in your browser; if the document opens, send it with the extension and it is read within minutes. Companies with the most main reports missing come first."));
+    body.append(el("p", null, "Documents whose address lanterN holds but whose file the robot could not get: the site refuses it, the address no longer answers, or the download fails. Open the address in your browser; if the document opens, send it with the extension: the row is marked \"sent\" here and leaves the list once the file is read. Companies with the most main reports missing come first."));
     const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin:0 0 12px;flex-wrap:wrap";
     const box = document.createElement("input"); box.placeholder = "a company or a word of the title"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--bg);color:var(--fg)";
     const again = () => { st.search = box.value.trim(); adminUnread(body); };
@@ -2323,12 +2365,13 @@
       if (d.wba_id !== company) {
         company = d.wba_id;
         const h = el("h3", null, `${d.company || d.wba_id} (${d.company_n})`); h.style.cssText = "margin:18px 0 4px;font-size:15px";
-        body.append(h); table = el("div"); body.append(table);
+        body.append(h); body.append(unreadNote(d)); table = el("div"); body.append(table);
       }
       const row = el("div"); row.style.cssText = "display:flex;gap:10px;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--line)";
       const a = el("a", null, d.label || d.url); a.href = d.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; a.title = d.url;
       const meta = el("span", null, `${d.year || "no year"} · ${d.doc_type || "untyped"}`); meta.style.cssText = "flex:none;width:230px;color:var(--muted, #667)";
       const stt = el("span", null, UNREAD[d.status] || d.status); stt.style.cssText = "flex:none;width:330px;color:var(--muted, #667);font-size:13px";
+      if (d.sent) { stt.textContent = `sent ${adminWhen(d.sent.at)} · ${d.sent.status}${d.sent.result ? ": " + d.sent.result : ""}`; stt.title = "Sent with the extension. The row leaves this list once the file is read (minutes for the reading, then the next load of the database)."; stt.style.color = "#2E8B1F"; a.style.opacity = "0.55"; }
       row.append(meta, a, stt); table.append(row);
     }
     if (!(r.rows || []).length) body.append(el("p", null, "None."));

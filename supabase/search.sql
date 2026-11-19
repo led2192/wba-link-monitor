@@ -4177,7 +4177,13 @@ begin
       'companies', (select count(*) from c),
       'by_status', (select coalesce(jsonb_object_agg(t.text_status, t.n), '{}'::jsonb) from (select text_status, count(*) as n from d group by 1) t),
       'rows', coalesce((select jsonb_agg(jsonb_build_object('library_id', t.library_id, 'company', t.company, 'wba_id', t.wba_id, 'year', t.year, 'doc_type', t.doc_type,
-                                                            'label', t.label, 'url', t.url, 'status', t.text_status, 'found', t.found, 'company_n', t.company_n)
+                                                            'label', t.label, 'url', t.url, 'status', t.text_status, 'found', t.found, 'company_n', t.company_n,
+                                                            'note', (select n.note from public.company_notes n where n.wba_id = t.wba_id),          -- the company's note, as in Contribute
+                                                            'traits', coalesce((select to_jsonb(n.traits) from public.company_notes n where n.wba_id = t.wba_id), '[]'::jsonb),
+                                                            -- sent with the extension since (the owner: "how do I follow what I have sent?"): the last sending of this
+                                                            -- document, by the row it became or by its address. The row leaves the list by itself once its text is read.
+                                                            'sent', (select jsonb_build_object('at', u.at, 'status', u.status, 'result', u.result) from public.browser_uploads u
+                                                                     where u.library_id = t.library_id or (u.wba_id = t.wba_id and u.source_url = t.url) order by u.at desc limit 1))
                                          order by t.company_n desc, t.company, t.is_main desc, t.year desc nulls last, t.doc_type, t.library_id) from top t), '[]'::jsonb)));
 end;
 $$;

@@ -62,11 +62,18 @@ class ReaderLayout(unittest.TestCase):
         self.assertIn("function docLink(a, s, find) {", PAGE)
         self.assertIn("docLink(a, s); li.appendChild(a);", PAGE)                       # the answer's list of sources
         self.assertIn('data-cite="${n}"', PAGE)                                        # its [n] citations
-        self.assertIn('ev.preventDefault(); openReader(r.library_id, r.page, "");', PAGE)   # a result's title
+        self.assertIn('ev.preventDefault(); openReader(r.library_id, r.page, pageNeedles(r));', PAGE)   # a result's title, with the answer's figures marked
+        self.assertIn("function pageNeedles(s) {", PAGE)
 
     def test_a_figure_of_the_answer_that_the_robot_holds_is_not_listed_twice(self):
         self.assertIn("heldValues.some(v => Math.abs(Number(v.value)) === Math.abs(Number(f.value)) && yearOf(f).includes(Number(v.year)))", PAGE)
         self.assertIn("&& !held(f));", PAGE)
+        self.assertIn('"alsoanswer"', PAGE)                                            # and the robot's card says the answer read it too
+        self.assertIn("ev.dataset.held = `${Math.abs(Number(v.value))}|${v.year}`;", PAGE)
+
+    def test_documents_to_fetch_shows_and_saves_the_company_note(self):
+        self.assertIn('body.append(unreadNote(d));', PAGE)
+        self.assertIn('authed("company_note_set", { key, wba_id: d.wba_id, traits: d.traits || [], note: ta.value })', PAGE)   # the ticked answers are kept
 
 if __name__ == "__main__":
     unittest.main()
