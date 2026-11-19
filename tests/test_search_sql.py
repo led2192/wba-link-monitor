@@ -429,11 +429,11 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v122 2026-11-19";' in PAGE
+    assert 'const CLIENT = "lantern v123 2026-11-19";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
-    assert 'if (one && !p.type && topics.has(topicNorm(p.q))) return "overview";' in PAGE and 'rpc("find_topics", { key })' in PAGE          # v106
+    assert 'if (one && !p.type && !p.typeHint && topics.has(topicNorm(p.q))) return "overview";' in PAGE and 'rpc("find_topics", { key })' in PAGE          # v106
     assert 'if (asked !== "search" || $("answer").textContent.trim()) return;' in PAGE          # v105: no offer of Ask under an answer
     # v104: what is asked is told before it is searched; the catalogue is answered from the index
     assert '(i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false);' in PAGE and "if (typoWanted(parsed) && await wordUnknown(parsed.typo.word)) applyTypo(parsed);" in PAGE and 'rpc("company_card", { key, company: id })' in PAGE
