@@ -590,6 +590,12 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual([d["library_id"] for d in r["rows"]], ["U1", "U2", "U5"])                          # the company with most first, newest first
             self.assertEqual(r["rows"][0]["company_n"], 2); self.assertEqual(r["by_status"], {"no_file": 2, "download_fail": 1})
             self.assertEqual(r["rows"][0]["url"], "https://x.example/a.pdf")
+            self.assertEqual((r["rows"][0]["note"], r["rows"][0]["traits"], r["rows"][0]["sent"]), (None, [], None))
+            cur.execute("insert into public.company_notes (wba_id, traits, note, by) values ('WA', '{no_annual}', 'reports sit behind a form', 'a@x.org')")
+            cur.execute("insert into public.browser_uploads (uploader, wba_id, source_url, filename, bytes, sha256, path, status) values ('a@x.org', 'WA', 'https://x.example/a.pdf', 'a.pdf', 10, 'h', 'WA/h.pdf', 'stored')")
+            cur.execute("select public.admin_unread_docs('k')"); r2 = cur.fetchone()[0]
+            self.assertEqual((r2["rows"][0]["note"], r2["rows"][0]["traits"], r2["rows"][0]["sent"]["status"]), ("reports sit behind a form", ["no_annual"], "stored"))
+            self.assertIsNone(r2["rows"][2]["sent"])                                                            # another company, same address: not its sending
             cur.execute("select public.admin_unread_docs('k', null, false, null)"); r = cur.fetchone()[0]
             self.assertEqual(r["documents"], 5)                                                                 # every kind, every year
             self.assertEqual([d["library_id"] for d in r["rows"]][:4], ["U1", "U2", "U4", "U3"])                # main reports before the rest

@@ -369,7 +369,7 @@ def test_the_owner_groups_the_facts_by_company_and_searches_them():
 
 def test_a_fact_is_something_stated_and_a_text_has_no_unit():
     assert "never an item saying that something is not stated or could not be found" in SQL
-    assert 'if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, f.unit));' in PAGE
+    assert 'if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, unitShown(f.unit)));' in PAGE
 
 
 def test_a_page_without_a_link_can_still_be_read():
@@ -429,7 +429,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v114 2026-11-19";' in PAGE
+    assert 'const CLIENT = "lantern v115 2026-11-19";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
