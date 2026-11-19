@@ -2993,29 +2993,42 @@ create or replace function public.cosine(a real[], b real[]) returns double prec
   as $$ select case when sum(x * x) > 0 and sum(y * y) > 0 then sum(x * y) / (sqrt(sum(x * x)) * sqrt(sum(y * y))) end
         from unnest($1::double precision[], $2::double precision[]) as t(x, y) $$;
 
+-- The vector of some words, when the page did not send one. The page waits four seconds for the question's vector
+-- and asks without it when it is late; the vector is still made and kept in query_vectors a moment after. The
+-- owner's first trial (19 Nov 2026): "supply chain" was answered without its vector, so "supply chains" asked a
+-- minute later (cosine 0.993 with it) had nothing to be compared with and was paid for again.
+create or replace function public.ask_vector(q text, sent real[]) returns real[] language sql stable security definer set search_path = public
+as $$
+  select case when coalesce(array_length(sent, 1), 0) = 384 then sent
+              else (select v.vec from public.query_vectors v where public.ask_words_norm(v.q) = public.ask_words_norm($1) and array_length(v.vec, 1) = 384 order by v.at desc limit 1) end
+$$;
+revoke all on function public.ask_vector(text, real[]) from public, anon, authenticated;
+
 create or replace function public.ask_keep(id bigint, for_company text, y0 int, y1 int, kind text, q text, qvec real[], whole jsonb) returns void
 language sql security definer set search_path = public
 as $$
   insert into public.ask_cache (ask_id, company, year_from, year_to, type, words, nums, vec, reply)
-    values (id, for_company, y0, y1, kind, public.ask_words_norm(q), public.ask_nums(q), case when coalesce(array_length(qvec, 1), 0) = 384 then qvec end, whole)
+    values (id, for_company, y0, y1, kind, public.ask_words_norm(q), public.ask_nums(q), public.ask_vector(q, qvec), whole)
     on conflict (ask_id) do nothing
 $$;
 revoke all on function public.ask_keep(bigint, text, int, int, text, text, real[], jsonb) from public, anon, authenticated;
 
 -- (the company is named for_company: a parameter called "company" is read as the column, and every company's
 -- kept answer would be given for any company; the test of this function caught it before it was installed)
+-- The same words: also with the spaces taken out ("supply chai n" is "supply chain"). The same meaning: the vector
+-- sent, or the one kept for these words; for a kept answer that has none, the one made since for its words.
 create or replace function public.ask_reusable(for_company text, y0 int, y1 int, kind text, q text, qvec real[]) returns jsonb
 language sql stable security definer set search_path = public, extensions
 as $$
-  select jsonb_build_object('ask_id', c.ask_id, 'reply', c.reply, 'at', c.at, 'words', c.words, 'same', c.words = public.ask_words_norm(q))
-  from public.ask_cache c
+  with asked as (select public.ask_words_norm(q) as words, public.ask_nums(q) as nums, public.ask_vector(q, qvec) as vec)
+  select jsonb_build_object('ask_id', c.ask_id, 'reply', c.reply, 'at', c.at, 'words', c.words, 'same', c.words = a.words)
+  from public.ask_cache c, asked a
   where c.company = for_company and c.year_from is not distinct from y0 and c.year_to is not distinct from y1 and c.type is not distinct from kind
     and c.at > now() - interval '14 days'
-    and c.nums = public.ask_nums(q)
-    and (c.words = public.ask_words_norm(q)
-         or (qvec is not null and c.vec is not null and array_length(qvec, 1) = 384 and array_length(c.vec, 1) = 384
-             and public.cosine(c.vec, qvec) >= 0.96))
-  order by (c.words = public.ask_words_norm(q)) desc, c.at desc
+    and c.nums = a.nums
+    and (replace(c.words, ' ', '') = replace(a.words, ' ', '')
+         or public.cosine(coalesce(c.vec, public.ask_vector(c.words, null)), a.vec) >= 0.96)
+  order by (c.words = a.words) desc, c.at desc
   limit 1
 $$;
 revoke all on function public.ask_reusable(text, int, int, text, text, real[]) from public, anon, authenticated;
