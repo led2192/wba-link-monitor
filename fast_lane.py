@@ -16,6 +16,11 @@ The documents are found, not passed: the files sent in the last three days that 
 cut is simply done again by the next one; a document whose file Airtable has not finished storing is left for
 the next run; one that cannot be read gets its status from step 1 and is not tried again here.
 
+Since 20 Nov 2026 also the documents the search knew and could not read (no file, a timeout, a failed download)
+when a person has sent their file since the search last loaded the row: 61 of the 322 files sent in three days
+were of that kind, and each waited for the night. Once the lane's load has written the row again it is not taken
+a second time, whatever the reading gave.
+
     python fast_lane.py --dispatch        the watch's side job: if documents wait, start the Fast lane workflow
     python fast_lane.py [--commit]        the workflow: do the three steps (dry run: say what waits)
 
@@ -28,7 +33,8 @@ MAX_DOCS = 200          # a run; the rest wait for the next one, minutes later
 WAITING_SQL = """
 select b.library_id, min(b.at) from public.browser_uploads b
 where b.library_id is not null and b.status = 'taken' and b.at > now() - interval '3 days'
-  and not exists (select 1 from public.documents d where d.library_id = b.library_id and d.text_status is not null)
+  and not exists (select 1 from public.documents d where d.library_id = b.library_id and d.text_status is not null
+                  and (d.text_status = 'ok' or d.loaded_at >= b.at))
 group by b.library_id order by min(b.at) limit %s"""
 
 
