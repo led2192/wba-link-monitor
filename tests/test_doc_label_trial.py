@@ -26,6 +26,9 @@ class Told(unittest.TestCase):
         self.assertEqual((s["seconds"], s["slowest"]), (25.0, 40.0))
         self.assertIn("1 of 2 (50%)", T.line("m", "english", s))
 
+    def test_a_reply_with_words_around_the_json_is_still_read(self):
+        self.assertEqual(T.parse_reply('Here it is:\n```json\n{"type": "CSR Report", "language": "English", "title": "CSR 2016"}\n```'), ("CSR Report", "English", "CSR 2016"))
+
     def test_the_three_groups_are_asked_for_apart_and_always_the_same_documents(self):
         self.assertEqual(set(T.WHERE), set(T.GROUPS)); self.assertIn("order by md5(d.library_id)", T.SAMPLE_SQL)
 

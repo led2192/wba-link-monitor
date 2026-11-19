@@ -23,6 +23,10 @@ It is a trial: nothing it writes is read by the search, the library or the cover
 prints counts, shares and seconds only, never a title, an address or a company.
 
     python doc_label_trial.py [--models qwen3-4b,qwen3-8b] [--each 15] [--threads 8] [--commit]
+    python doc_label_trial.py --models paid --max-usd 0.20 [--each 12] [--commit]
+
+"paid" is the reader's own paid model (model_reader.call), shown the same documents and the same question, to set
+beside the open models before either is given the backlog. It stops at --max-usd and prints what it spent.
 
 Env: SUPABASE_DB_URL; HF_HOME. Needs llama-cpp-python and huggingface_hub (/srv/lantern/venv-llm on the server).
 """
@@ -103,14 +107,13 @@ def main():
     ap.add_argument("--each", type=int, default=15, help="documents of each of the three groups")
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--commit", action="store_true", help="write each answer to public.doc_label_trials")
+    ap.add_argument("--max-usd", type=float, default=0.20, help="the paid model stops at this cost")
     a = ap.parse_args()
     names = [m.strip() for m in a.models.split(",") if m.strip()]
-    unknown = [m for m in names if m not in MODELS]
+    unknown = [m for m in names if m not in MODELS and m != "paid"]
     if unknown:
-        sys.exit(f"unknown model(s): {', '.join(unknown)}; known: {', '.join(MODELS)}")
+        sys.exit(f"unknown model(s): {', '.join(unknown)}; known: paid, {', '.join(MODELS)}")
     import psycopg
-    from huggingface_hub import hf_hub_download
-    from llama_cpp import Llama
     run = os.environ.get("GITHUB_RUN_ID", "local")
     docs = []                                                       # (group, library_id, stored type, stored language, cover)
     with psycopg.connect(os.environ["SUPABASE_DB_URL"]) as conn:
@@ -126,26 +129,41 @@ def main():
           "| model | group | documents | answered as asked | same type as stored | given a type | same language as stored | given a title | time a document (median) |", "|---|---|---|---|---|---|---|---|---|"]
     sch = schema()
     for name in names:
-        repo, file, suffix = MODELS[name]
-        try:
-            llm = Llama(model_path=hf_hub_download(repo, file), n_ctx=8192, n_threads=a.threads, verbose=False)
-        except Exception as e:
-            md.append(f"| {name} | not loaded: {type(e).__name__} | | | | | | | |"); print(f">>> {name}: not loaded ({type(e).__name__})", flush=True)
-            continue
+        if name == "paid":
+            import collections
+            import model_reader
+            usage = collections.Counter()
+            name = os.environ.get("READER_MODEL") or model_reader.DEFAULT_MODEL
+            ask = lambda text: model_reader.call([{"role": "user", "content": text}], usage, max_tokens=400)
+            spent = lambda: model_reader.cost(usage)
+        else:
+            from huggingface_hub import hf_hub_download
+            from llama_cpp import Llama
+            repo, file, suffix = MODELS[name]
+            try:
+                llm = Llama(model_path=hf_hub_download(repo, file), n_ctx=8192, n_threads=a.threads, verbose=False)
+            except Exception as e:
+                md.append(f"| {name} | not loaded: {type(e).__name__} | | | | | | | |"); print(f">>> {name}: not loaded ({type(e).__name__})", flush=True)
+                continue
+            ask = lambda text, llm=llm, suffix=suffix: llm.create_chat_completion(
+                messages=[{"role": "user", "content": text + suffix}], response_format={"type": "json_object", "schema": sch}, temperature=0, max_tokens=160)["choices"][0]["message"]["content"] or ""
+            spent = lambda: 0.0
         by, out = {g: [] for g in GROUPS}, []
         for n, (g, lid, stored, lang, cover) in enumerate(docs, 1):
+            if spent() >= a.max_usd:
+                print(f">>> {name}: stopped at {spent():.4f} USD after {n - 1} documents", flush=True); break
             t = time.time()
             try:
-                got = llm.create_chat_completion(messages=[{"role": "user", "content": told(cover) + suffix}],
-                                                 response_format={"type": "json_object", "schema": sch}, temperature=0, max_tokens=160)
-                typ, language, title = parse_reply(got["choices"][0]["message"]["content"] or "")
+                typ, language, title = parse_reply(ask(told(cover)) or "")
             except Exception:
                 typ, language, title = None, None, None
             secs = time.time() - t
             by[g].append((stored, lang, typ, language, title, secs)); out.append((name, lid, g, typ, language, title, secs, run))
             if n % 5 == 0:
                 print(f"  {name}: {n} of {len(docs)}", flush=True)
-        del llm
+        if spent():
+            md.append(""); md.append(f"Paid model {name}: {usage['calls']} calls, {usage['input_tokens']:,} tokens in, {usage['output_tokens']:,} out, {spent():.4f} USD (stops at {a.max_usd}).")
+            print(">>> " + md[-1], flush=True)
         for g in GROUPS:
             md.append(line(name, g, summarise(by[g]))); print(">>> " + md[-1], flush=True)
         if a.commit and out:
