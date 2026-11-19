@@ -5,6 +5,9 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## Facts and their names
 - **A word left out of a name's key changes what the name means.** On 15 Nov 2026 "restated" and "restatement" were both left out of `fact_key` so that a restated figure would find its metric. "Restatement of 2023 Scope 1 emissions" (a yes or no) then had the same key as "Scope 1 emissions" and was filed under the tonnes, on the live page, within the hour. Before a word joins the list of words left out, look for names where it is the subject rather than a qualifier; and a metric that is a number takes figures only.
 
+## The reader
+- **A model given room to think may hand back its thinking as the answer.** The step that chooses an answer's search words has 800 tokens so the model can reason first; one reply was a single line of words followed by its own doubts, and all of it was searched and shown to the person (19 Nov 2026). Whatever a model returns for use as data is cut to the shape asked for (`ask_keywords_clean`) before it is used.
+
 ## Jobs
 - **One dropped connection must not end a run of hundreds of calls.** `regulator_filings.py` called filings.xbrl.org once per company with no retry; twice in three Mondays the other end closed one connection and 25 to 35 minutes of lookups were lost, nothing written (2 and 16 Nov 2026). A loop over an outside service retries each call and skips the item, never the run.
 - **A watch job is judged by whether one is running, not by when one last ended.** Scan now and the Clock are runs of five and a half hours in a chain; "last success" is the start of the last finished watch, so it is always hours old, and the run queued behind shows as "pending". The Jobs view called a healthy Scan now late (19 Nov 2026).

@@ -2997,6 +2997,23 @@ create or replace function public.cosine(a real[], b real[]) returns double prec
 -- and asks without it when it is late; the vector is still made and kept in query_vectors a moment after. The
 -- owner's first trial (19 Nov 2026): "supply chain" was answered without its vector, so "supply chains" asked a
 -- minute later (cosine 0.993 with it) had nothing to be compared with and was paid for again.
+-- The search words the model chose, cleaned (19 Nov 2026). The model is asked for 3 to 5 words and has room to
+-- think first; one answer came back as "scope 3 category 11 use of sold products wait the rule says write
+-- abbreviations in full scope 3 cat 11 should be c", and that whole line was searched (and shown to the person as
+-- "Pages found by searching ..."). Now: the last line of eight words or fewer is the answer; when there is none,
+-- the first line up to where the talk begins (wait, the rule, should, actually ...), eight words at most.
+create or replace function public.ask_keywords_clean(raw text) returns text language sql immutable
+as $$
+  with lines as (select btrim(regexp_replace(regexp_replace(lower(t.l), '[^[:alnum:][:space:]]', ' ', 'g'), '\s+', ' ', 'g')) as l, t.ord
+                 from regexp_split_to_table(coalesce(raw, ''), E'\n') with ordinality t(l, ord)),
+       good as (select l, ord, array_length(string_to_array(l, ' '), 1) as n from lines where l <> ''),
+       cut as (select btrim(regexp_replace((select g.l from good g order by g.ord limit 1),
+                                           '\m(wait|rule|rules|says|should|hmm|actually|let|note|sorry|because|but|so|i|we)\M.*$', '')) as l)
+  select nullif(btrim(left(coalesce((select g.l from good g where g.n <= 8 order by g.ord desc limit 1),
+                                    (select string_agg(w.w, ' ' order by w.i) from cut, regexp_split_to_table(cut.l, ' ') with ordinality w(w, i) where w.w <> '' and w.i <= 8)), 120)), '')
+$$;
+revoke all on function public.ask_keywords_clean(text) from public, anon, authenticated;
+
 create or replace function public.ask_vector(q text, sent real[]) returns real[] language sql stable security definer set search_path = public
 as $$
   select case when coalesce(array_length(sent, 1), 0) = 384 then sent
@@ -3174,10 +3191,9 @@ begin
       || '(S1 is scope 1, S3 Cat 11 is scope 3 use of sold products, RY is reporting year). No company names, no years, no punctuation, nothing else.',
       left(search_q, 400), 800);      -- room for the model's own reasoning before the words (with 40, then 150, it stopped before writing any)
     if got ? 'text' then
-      keywords := btrim(left(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
+      keywords := public.ask_keywords_clean(got ->> 'text');
       tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
-      if keywords = '' then
-        keywords := null;
+      if keywords is null then
         err := format('search words not chosen: the model returned no text (stop %s, content %s, %s tokens out)', got ->> 'stop', coalesce(got ->> 'kinds', 'none'), got ->> 'out');
       end if;
     else
@@ -5476,7 +5492,7 @@ begin
     raise exception 'choose the company the page belongs to' using errcode = '22023';
   end if;
   if u !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(u) > 1000 or u ~* '\.pdf([?].*)?$' then
-    raise exception 'that is not a page lanterN can read' using errcode = '22023';
+    raise exception 'that is not a page lantrNa can read' using errcode = '22023';
   end if;
   select * into open_one from public.page_scans p
    where p.url = u and p.status in ('new', 'queued', 'added') and p.at > now() - interval '3 hours'
@@ -6694,7 +6710,7 @@ begin
     raise exception 'not allowed' using errcode = '42501';
   end if;
   if co not like 'LN\_%' or not exists (select 1 from public.companies c where c.wba_id = co) then
-    raise exception 'only a company added in lanterN can be edited here' using errcode = '22023';
+    raise exception 'only a company added in lantrNa can be edited here' using errcode = '22023';
   end if;
   for k, v in select e.key, nullif(btrim(regexp_replace(e.value, '\s+', ' ', 'g')), '') from jsonb_each_text(coalesce(fields, '{}')) e loop
     if k not in ('name', 'website', 'lei', 'isin', 'industry', 'country', 'region') then
