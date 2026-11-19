@@ -325,7 +325,7 @@ def test_confirmed_facts_come_back_with_the_next_answer():
 
 
 def test_the_facts_panel_stays_readable():
-    assert "const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));" in PAGE     # a confirmed figure is not offered again
+    assert "const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)) && !held(f));" in PAGE     # a confirmed figure is not offered again
     assert 'const known = el("details")' in PAGE                                                          # folded: the robot's values stay in sight
     assert 'const words = f.kind === "text";' in PAGE                                                     # a sentence is not set like a figure
 
@@ -429,7 +429,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v112 2026-11-19";' in PAGE
+    assert 'const CLIENT = "lantern v113 2026-11-19";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
