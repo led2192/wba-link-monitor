@@ -412,7 +412,7 @@ async function start() {
   $("company").onchange = () => { if (companies.some(c => c.name === $("company").value.trim())) { $("newco").textContent = "Not in the list? Add the company"; $("newco").style.fontWeight = ""; } markHeld(); };
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };
-  $("go").onclick = sendAll; $("watch").onclick = scanPage; showScan(false); $("newco").onclick = e => { e.preventDefault(); newCompany(); };
+  $("go").onclick = sendAll; $("watch").onclick = scanPage; $("capture").onclick = capturePage; showScan(false); $("newco").onclick = e => { e.preventDefault(); newCompany(); };
   $("deeper").hidden = tabIsDoc || !/^https?:/.test(TAB.url); $("deeper").onclick = e => { e.preventDefault(); lookDeeper(); };
 }
 function showSignIn() {
@@ -466,6 +466,28 @@ async function showScan(follow) {
   $("scanmsg").textContent = scanLine(j);
   clearTimeout(scanTimer);
   if (follow && j && (j.status === "new" || j.status === "queued" || j.status === "added")) scanTimer = setTimeout(() => showScan(true), 20000);
+}
+// "Send this page" (0.7.0): the text of the page as the person sees it becomes a document of type "Web page" for the
+// company (page_capture), searchable at once. For what a company says on its site and in no PDF. Runs inside the tab,
+// free of outer variables: the main part of the page when it has one with enough text, else the whole of it.
+function pageText() {
+  const main = document.querySelector("main, [role=main], article");
+  const from = main && (main.innerText || "").trim().length > 800 ? main : document.body;
+  return { title: document.title || "", text: ((from && from.innerText) || "").slice(0, 400000) };
+}
+async function capturePage() {
+  const company = chosenCompany(); if (!company) { $("msg").textContent = "Choose the company from the list first."; $("company").focus(); return; }
+  if (/^REQ_/.test(company.id)) { $("msg").textContent = "A page can be sent a quarter of an hour after the company is approved."; return; }
+  if (!/^https?:/.test(TAB.url) || isPdfUrl(TAB.url)) { $("msg").textContent = "This is a document, not a page: send it with the first button."; return; }
+  $("capture").disabled = true; $("msg").textContent = "Reading the page…";
+  try {
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: TAB.id }, func: pageText });
+    const got = (res && res.result) || { title: "", text: "" };
+    if (got.text.trim().length < 300) { $("msg").textContent = "There is too little text on this page to keep (under 300 characters)."; return; }
+    const j = await rpc("page_capture", { company: company.id, url: pageUrl(), title: got.title, body: got.text, client: CLIENT });
+    $("msg").textContent = j.same ? "lantrNa already holds this page as it is now." : `The text of this page is in lantrNa for ${company.name}: ${j.pages} page${j.pages === 1 ? "" : "s"}, type "Web page", in the search now${j.again ? " (it replaces the page as sent before)" : ""}. Only what is on screen is sent: a list in several pages is sent a page at a time.`;
+  } catch (e) { $("msg").textContent = "Not sent: " + (e.message || e); }
+  finally { $("capture").disabled = false; }
 }
 async function scanPage() {
   const company = chosenCompany(); if (!company) { $("msg").textContent = "Choose the company from the list first."; $("company").focus(); return; }

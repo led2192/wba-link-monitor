@@ -384,6 +384,21 @@ class SearchOnPostgres(unittest.TestCase):
             with self.assertRaises(Exception):
                 cur.execute("select public.upload_begin(%s, %s, %s, %s, %s)", bad)
         cur.execute("select jsonb_array_length(public.upload_companies()) > 0"); self.assertTrue(cur.fetchone()[0])
+        # "Send this page" (extension 0.7.0): the page's text becomes a document of type Web page, searchable at once
+        text = "\n\n".join(f"Paragraph {i} about our living wage commitment for suppliers. " * 12 for i in range(12)) + "\n\n" + "x" * 7000
+        cur.execute("select public.page_capture('PT_00000', 'https://example.com/policies/wages#top', '  Wages  policy ', %s)", (text,)); cap = cur.fetchone()[0]
+        self.assertTrue(cap["ok"]); self.assertFalse(cap["again"]); self.assertGreater(cap["pages"], 3)
+        cur.execute("select doc_type, url, text_status, pages, label like 'Wages policy (web page, %%' from public.documents where library_id = %s", (cap["library_id"],))
+        self.assertEqual(cur.fetchone(), ("Web page", "https://example.com/policies/wages", "ok", cap["pages"], True))
+        cur.execute("select count(*), max(length(body)), bool_and(words is not null and doc_type = 'Web page' and wba_id = 'PT_00000') from public.pages where library_id = %s", (cap["library_id"],))
+        n, longest, indexed = cur.fetchone(); self.assertEqual(n, cap["pages"]); self.assertLessEqual(longest, 6000); self.assertTrue(indexed)
+        cur.execute("select public.page_capture('PT_00000', 'https://example.com/policies/wages', 'Wages policy', %s)", (text,)); self.assertTrue(cur.fetchone()[0]["same"])
+        cur.execute("select public.page_capture('PT_00000', 'https://example.com/policies/wages', 'Wages policy', %s)", (text + "\n\nA new paragraph.",)); again = cur.fetchone()[0]
+        self.assertTrue(again["again"]); self.assertEqual(again["library_id"], cap["library_id"])
+        cur.execute("select count(*) from public.documents where url = 'https://example.com/policies/wages'"); self.assertEqual(cur.fetchone()[0], 1)   # one document an address
+        for bad in (("PT_nope", "https://example.com/p", "t", text), ("PT_00000", "https://example.com/a.pdf", "t", text), ("PT_00000", "https://example.com/p", "t", "too short"), ("PT_00000", "ftp://example.com/p", "t", text)):
+            with self.assertRaises(psycopg.Error): cur.execute("select public.page_capture(%s, %s, %s, %s)", bad)
+        cur.execute("delete from public.pages where library_id = %s", (cap["library_id"],)); cur.execute("delete from public.documents where library_id = %s", (cap["library_id"],)); cur.execute("delete from public.web_captures")
         cur.execute("select public.upload_known('PT_00000', %s)", (["https://example.com/ar-2024.pdf", "https://example.com/never.pdf"],))
         self.assertEqual(cur.fetchone()[0], ["https://example.com/ar-2024.pdf"])                                    # sent before: not offered again
 
