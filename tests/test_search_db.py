@@ -618,6 +618,16 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertIsNone(ask("W1", 2024, 2024, None, "scope 1 emissions", vec(1, 0.1)))                                    # other years
             self.assertIsNone(ask("W1", None, None, None, "scope 1 emissions", vec(1, 0.1)))
             self.assertIsNone(ask("W1", 2023, 2023, "Annual Report", "scope 1 emissions", vec(1, 0.1)))                         # another kind of report
+            # the page asked before the vector was ready: the one made since for the same words is used, on both sides
+            self.assertEqual(ask("W1", 2023, 2023, None, "scope 1 emissio ns", None)["ask_id"], 7)                             # a stray space: the same words
+            cur.execute("select public.ask_keep(8, 'W1', null, null, null, 'supply chain', null, %s::jsonb)", (psycopg.types.json.Jsonb(reply),))
+            self.assertIsNone(ask("W1", None, None, None, "supply chains", vec(0.2, 1)))                                        # nothing to compare with yet
+            cur.execute("insert into public.query_vectors (q, vec) values ('Supply chain', %s::real[]), ('supply chains', %s::real[])", (vec(0.21, 1), vec(0.2, 1)))
+            self.assertEqual(ask("W1", None, None, None, "supply chains", vec(0.2, 1))["ask_id"], 8)                            # the kept answer's vector, made since
+            self.assertEqual(ask("W1", None, None, None, "supply chains", None)["ask_id"], 8)                                   # and the question's own, when the page sent none
+            cur.execute("select public.ask_keep(9, 'W3', null, null, null, 'Supply chain', null, %s::jsonb)", (psycopg.types.json.Jsonb(reply),))
+            cur.execute("select vec is not null from public.ask_cache where ask_id = 9"); self.assertTrue(cur.fetchone()[0])     # kept with the vector already made
+            cur.execute("delete from public.ask_cache where ask_id in (8, 9)")
             cur.execute("update public.ask_cache set at = now() - interval '15 days'")
             self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))                                    # too old: documents arrive
             cur.execute("update public.ask_cache set at = now()")
