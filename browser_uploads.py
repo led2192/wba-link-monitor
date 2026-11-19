@@ -93,18 +93,24 @@ def resolve_requests(uploads, requests):
 def plan(uploads, companies, rows):
     """What to do with each upload. uploads: [dict(id, wba_id, source_url, filename, bytes)]; companies:
     {wba_id: name}; rows: {wba_id: [(record_id, library_id, document_url, has_file, discarded)]}, the company's rows.
-    Returns [(upload, action, library_id, record_id)], action in fill | create | known | same | orphan.
+    Returns [(upload, action, library_id, record_id)], action in fill | create | known | same | again | orphan.
+    again (19 Nov 2026): the row holds a file, and the file sent is another one (another size). A person sends a
+    document we already hold because what we hold could not be read (a download that failed, a file cut short):
+    the owner sent three such files from the list of documents to fetch and all three were called known and
+    dropped. The file sent is put first on the row and the one it had stays (rows may carry a seventh item, the
+    ids of the row's files, to keep them).
     A row is recognised by its document, not by its id (ids.doc_id: the address without the parts that change on
     every visit), as the inbox does: the rows the harvester made carry another kind of id. A discarded row is not
     filled; a document only a discarded row holds is not made again under the same id. Two uploads of one document
     in a batch (two language pages linking the same file) give one row: the second is known."""
     from ids import doc_id
     out, taken = [], set()
-    index = {}
+    index, held_sizes = {}, {}
     for wba, lst in rows.items():
         live, ids, sizes = {}, set(), {}
         for rec, lid, url, has_file, discarded, *rest in lst:
             ids.add(lid)
+            held_sizes[rec] = tuple(rest[0]) if rest else ()
             if not discarded:
                 for size in (rest[0] if rest else ()):          # the bytes of the row's files
                     sizes.setdefault(size, (rec, lid, bool(url)))
@@ -128,6 +134,9 @@ def plan(uploads, companies, rows):
             # with no address (11 Nov 2026: 26 annual reports saved one by one, then sent again from the browser).
             # Nothing is made; the row learns where its file came from, when it did not know.
             out.append((u, "same" if src and not same[2] else "known", same[1], same[0]))
+        elif (has_file and rec and key not in taken and int(u.get("bytes") or 0) >= 20000 and held_sizes.get(rec)
+              and u.get("bytes") not in held_sizes[rec]):
+            out.append((u, "again", key, rec)); taken.add(key)
         elif has_file or key in taken or (not rec and lid in ids):
             out.append((u, "known", key, rec))
         elif rec:
@@ -261,7 +270,9 @@ def main():
             for rec in sweep("report_library", ["library_id", "document_url", "file", "discard"], "{wba_id}='%s'" % wba.replace("'", "")):
                 f = rec.get("fields", {})
                 lst.append((rec["id"], f.get("library_id"), f.get("document_url") or "", bool(f.get("file")), bool(f.get("discard")),
-                            tuple(x.get("size") for x in (f.get("file") or []) if isinstance(x, dict) and x.get("size"))))
+                            tuple(x.get("size") for x in (f.get("file") or []) if isinstance(x, dict) and x.get("size")),
+                            tuple(x.get("id") for x in (f.get("file") or []) if isinstance(x, dict) and x.get("id"))))
+        file_ids = {r[0]: r[6] for lst in rows.values() for r in lst}
         todo = plan(uploads, companies, rows)
         # Room in the base (12 Nov 2026): the Disclosure Library holds 500,000 records at most, and files sent by
         # people arrive in hundreds a day. The count is the last base_health row (daily); new rows stop at 95%.
@@ -306,7 +317,11 @@ def main():
             if act == "orphan":
                 mark(u, "orphan", "the company is not in the companies table"); continue
             if act == "known":
-                mark(u, "known", f"the library already holds this document ({lid})", lid); continue
+                said = sender_fields(u) if rec else {}                 # a person's word on the type and the year is written even when the file is held
+                if said:
+                    airtable_request("PATCH", f"{url}/{rec}", headers, payload={"fields": said, "typecast": True})   # no link field among them
+                    c["type or year said"] += 1
+                mark(u, "known", f"the library already holds this document ({lid})" + ("; the type and year said were written" if said else ""), lid); continue
             if act == "same":
                 airtable_request("PATCH", f"{url}/{rec}", headers, payload={"fields": {"document_url": u["source_url"]}})
                 mark(u, "known", f"the same file was on {lid}, put there by hand: its address is now recorded", lid); continue
@@ -320,6 +335,11 @@ def main():
                 fname += ".pdf"
             file_cell = [{"url": storage.signed(u["path"]), "filename": fname}]
             note = note_for(fname, u["source_url"], u.get("sent_type"), u.get("sent_year"))
+            if act == "again":                                         # the file sent first, the files the row had after it: nothing is removed
+                cell = file_cell + [{"id": i} for i in file_ids.get(rec, ())]
+                airtable_request("PATCH", f"{url}/{rec}", headers, payload={"fields": {"file": cell, "Reviewer notes": note, **sender_fields(u)}, "typecast": True})   # no link field among them
+                mark(u, "taken", f"file put first on row {lid}, which held another file: it is read again", lid)
+                time.sleep(0.25); continue
             if act == "fill":
                 airtable_request("PATCH", f"{url}/{rec}", headers, payload={"fields": {"file": file_cell, "Reviewer notes": note, **sender_fields(u)}, "typecast": True})   # no link field among them
             else:
@@ -332,7 +352,7 @@ def main():
             mark(u, "taken", f"{'file put on the existing row' if act == 'fill' else 'new row'} {lid}", lid)
             time.sleep(0.25)
     c["waiting for a company"] = len(waiting); c["company not added"] = len(refused); c["waiting for room"] = len(held)
-    print(f"{c['create']} new rows, {c['fill']} files put on rows that had none, {c['known'] + c['same']} already held ({c['same']} of them learned their address), {c['failed']} failed, {c['orphan']} without a company"
+    print(f"{c['create']} new rows, {c['fill']} files put on rows that had none, {c['again']} files put on rows whose own file is another one, {c['known'] + c['same']} already held ({c['same']} of them learned their address), {c['failed']} failed, {c['orphan']} without a company"
           + ("" if a.commit else " (dry run: nothing written)"), flush=True)
     run.finish("ok", rows_in=len(uploads), rows_out=(c["create"] + c["fill"]) if a.commit else 0, counters=dict(c), notes="written" if a.commit else "dry run")
     return 0

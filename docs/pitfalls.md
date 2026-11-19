@@ -8,6 +8,9 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## The reader
 - **A model given room to think may hand back its thinking as the answer.** The step that chooses an answer's search words has 800 tokens so the model can reason first; one reply was a single line of words followed by its own doubts, and all of it was searched and shown to the person (19 Nov 2026). Whatever a model returns for use as data is cut to the shape asked for (`ask_keywords_clean`) before it is used.
 
+## Files sent by people
+- **"The row has a file" is not "the document is held".** A row can carry a file that was never read (the download from the attachment failed, the file is cut short, too big). `browser_uploads.py` treated any row with a file as known and dropped what a person sent for it, while the admin list invited him to send exactly those documents (19 Nov 2026). What a person sends on purpose is kept unless it is the very same file.
+
 ## Jobs
 - **One dropped connection must not end a run of hundreds of calls.** `regulator_filings.py` called filings.xbrl.org once per company with no retry; twice in three Mondays the other end closed one connection and 25 to 35 minutes of lookups were lost, nothing written (2 and 16 Nov 2026). A loop over an outside service retries each call and skips the item, never the run.
 - **A watch job is judged by whether one is running, not by when one last ended.** Scan now and the Clock are runs of five and a half hours in a chain; "last success" is the start of the last finished watch, so it is always hours old, and the run queued behind shows as "pending". The Jobs view called a healthy Scan now late (19 Nov 2026).
