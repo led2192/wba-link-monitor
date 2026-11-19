@@ -635,6 +635,22 @@ class SearchOnPostgres(unittest.TestCase):
                 with self.assertRaises(psycopg.Error): cur.execute(bad)
                 cur.execute("rollback to savepoint s")
             cur.execute("delete from public.doc_fixes")
+            # "do we hold the latest?" (v125): the year due from the fiscal year's end, and the companies with no main report of it
+            due = lambda m, day: (cur.execute("select public.report_year_due(%s, %s::date)", (m, day)), cur.fetchone()[0])[1]
+            self.assertEqual([due(12, "2026-11-19"), due(None, "2026-11-19"), due(3, "2026-11-19"), due(9, "2026-11-19")], [2025, 2025, 2025, 2025])
+            self.assertEqual([due(12, "2026-07-31"), due(12, "2026-08-01"), due(3, "2026-10-31"), due(6, "2027-02-01")], [2024, 2025, 2024, 2026])
+            cur.execute("select public.report_year_due(null)"); dy = cur.fetchone()[0]
+            cur.execute("insert into public.companies (wba_id, name, website) values ('LZ1', 'Zeta One', 'https://one.example'), ('LZ2', 'Zeta Two', null), ('LZ3', 'Zeta Three', null), ('LZ4', 'Zeta Four', null)")
+            put("Z2", "LZ2", "Zeta Two", dy, "Annual Report", "no_file"); put("Z3", "LZ3", "Zeta Three", dy - 1, "Sustainability Report", "ok", url="https://x.example/z3.pdf")
+            put("Z3b", "LZ3", "Zeta Three", dy, "Policy Documents", "ok"); put("Z4", "LZ4", "Zeta Four", dy - 2, "Annual Report", "ok")
+            cur.execute("insert into public.company_notes (wba_id, traits, by) values ('LZ4', '{in_parent}', 'a@x.org')")
+            cur.execute("select public.admin_latest_missing('k', 'Zeta')"); lm = cur.fetchone()[0]
+            self.assertEqual((lm["companies"], lm["with_none"]), (3, 1))                                        # a held address of the year due is not missing here; a policy is not a main report
+            self.assertEqual([x["wba_id"] for x in lm["rows"]][-1], "LZ4")                                      # reports inside its parent: last
+            z3 = [x for x in lm["rows"] if x["wba_id"] == "LZ3"][0]
+            self.assertEqual((z3["due"], z3["latest"], z3["last"]["url"], z3["last"]["doc_type"]), (dy, dy - 1, "https://x.example/z3.pdf", "Sustainability Report"))
+            z1 = [x for x in lm["rows"] if x["wba_id"] == "LZ1"][0]; self.assertEqual((z1["latest"], z1["last"], z1["website"]), (None, None, "https://one.example"))
+            cur.execute("delete from public.documents where library_id in ('Z2', 'Z3', 'Z3b', 'Z4')"); cur.execute("delete from public.companies where wba_id like 'LZ%'"); cur.execute("delete from public.company_notes where wba_id = 'LZ4'")
             cur.execute("delete from public.documents where library_id in ('U8', 'U9', 'U10', 'U11')")           # (rows of this test only; rolled back at the end)
             cur.execute("select public.admin_unread_docs('k', null, false, null)"); r = cur.fetchone()[0]
             self.assertEqual(r["documents"], 5)                                                                 # every kind, every year

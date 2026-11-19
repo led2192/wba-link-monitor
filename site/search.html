@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v124 2026-11-19";
+  const CLIENT = "lantern v125 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2461,6 +2461,40 @@
     };
     draw(); return wrap;
   }
+  // v125 (the owner, 19 Nov 2026: "the aim will be: do we hold the latest?"): the companies for which no main report of
+  // the latest year due is held at all, not even as an address (admin_latest_missing). Folded until opened; the
+  // largest companies first. A row: what is due, the latest report held (where last year's was is where this year's
+  // most likely is), the company's site, a web search for the report, and the company's note as in the list below.
+  function latestMissing(st) {
+    const box = el("details"); box.style.cssText = "margin:0 0 14px;padding:8px 12px;border:1px solid var(--line);border-radius:10px";
+    const sum = el("summary", null, "Latest report not held: companies whose latest main report should be out by now and is not in the library"); sum.style.cssText = "cursor:pointer;font-weight:600";
+    const inner = el("div"); box.append(sum, inner); let loaded = false;
+    box.addEventListener("toggle", async () => {
+      if (!box.open || loaded) return; loaded = true; inner.textContent = "Loading…";
+      let r = null; try { r = await authed("admin_latest_missing", { key, search: st.search || null, max_rows: 300 }); } catch (e) { r = null; }
+      if (!r) { inner.textContent = "Not available."; loaded = false; return; }
+      inner.innerHTML = "";
+      const p = el("p", null, `${r.companies} compan${r.companies === 1 ? "y" : "ies"}${r.with_none ? `, ${r.with_none} with no main report at all` : ""}${(r.rows || []).length < r.companies ? `; the first ${r.rows.length} shown, the largest first` : ""}. A report is due seven months after the fiscal year ends. Find it, open it, and send it with the extension; the company leaves this list at the next load of the database.`); p.style.cssText = "font-size:13px;color:var(--muted, #667);margin:8px 0";
+      inner.appendChild(p);
+      const usd = v => v >= 1e9 ? `${(v / 1e9).toFixed(v >= 1e10 ? 0 : 1)} bn USD` : `${Math.round(v / 1e6)} m USD`;
+      for (const d of r.rows || []) {
+        const row = el("div"); row.style.cssText = "padding:6px 0;border-bottom:1px solid var(--line)";
+        const head = el("div"); head.style.cssText = "display:flex;gap:12px;align-items:baseline;flex-wrap:wrap";
+        const name = el("b", null, d.company || d.wba_id);
+        const due = el("span", null, `due: ${d.due}` + (d.latest ? ` · latest held: ${d.latest}` : " · no main report held")); due.style.color = "#B4540A";
+        head.append(name, due);
+        if (d.revenue_usd) { const v = el("span", null, `revenue about ${usd(Number(d.revenue_usd))}`); v.style.cssText = "color:var(--muted, #667);font-size:13px"; head.append(v); }
+        const link = (words, href, tip) => { const a = el("a", null, words); a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer"; a.title = tip || href; a.style.fontSize = "13px"; return a; };
+        if (d.last && d.last.url) head.append(link(`the ${d.latest} ${d.last.doc_type || "report"}`, d.last.url, d.last.label || d.last.url));
+        if (d.website && /^https?:/i.test(d.website)) head.append(link("site", d.website));
+        head.append(link("search the web", "https://www.google.com/search?q=" + encodeURIComponent(`${d.company} annual report ${d.due} OR sustainability report ${d.due} pdf`), "A web search for the report of the year due"));
+        row.append(head, unreadNote(d)); inner.appendChild(row);
+      }
+      if (!(r.rows || []).length) inner.append(el("p", null, "None: every company holds a main report of the year due."));
+    });
+    return box;
+  }
+
   async function adminUnread(body) {
     const st = adminUnreadView;
     const r = await authed("admin_unread_docs", { key, search: st.search || null, only_main: st.main, from_year: st.from, max_rows: 400 }); if (!r) { body.textContent = "Not available."; return; }
@@ -2473,6 +2507,7 @@
     const mainB = adminBtn(st.main ? "Main reports only" : "Every kind of document", () => { st.main = !st.main; again(); }); mainB.title = "Switch between the main reports and every document";
     const yearB = adminBtn(st.from ? `From ${st.from}` : "Every year", () => { st.from = st.from === 2023 ? 2020 : st.from === 2020 ? null : 2023; again(); }); yearB.title = "From 2023, from 2020, or every year";
     bar.append(box, adminBtn("Search", again), mainB, yearB); body.appendChild(bar);
+    body.appendChild(latestMissing(st));
     const why = Object.entries(r.by_status || {}).map(([k, n]) => `${n} ${UNREAD[k] ? k.replace(/_/g, " ") : k}`).join(", ");
     body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.`));
     // v121 (the owner's screenshot: one company, sixteen rows with the same title): rows of a company with the same
