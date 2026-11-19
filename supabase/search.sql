@@ -4014,6 +4014,49 @@ $$;
 -- runs: one link searched the same company three times or more, each within three minutes of the one before.
 -- nothing: no page shown (after the blend when the page reported it, by words before). few: one to three pages
 -- shown. slow: five seconds or more. A hundred of each at most, newest first.
+-- The documents the robot could not get, for the owner to fetch by hand (19 Nov 2026). The robot holds their
+-- address but not their file: the site refuses it, the address died, the download fails. A person's browser often
+-- opens them, and the extension sends the file. The list is the owner's working list, by company: the main reports
+-- first (annual, integrated, sustainability and the like), newest first. A search narrows it to a company or a
+-- word of the title; only_main keeps the main reports; from_year the documents of that year on.
+create or replace function public.admin_unread_docs(key text, search text default null, only_main boolean default true, from_year int default 2023, max_rows int default 300)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  main text[] := array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', '10K Form', 'Registration Document'];
+  s text := nullif(btrim(coalesce(search, '')), '');
+  need int := least(greatest(coalesce(max_rows, 300), 1), 2000);
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with d as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, d.text_status, d.found,
+                      (d.doc_type = any(main)) as is_main
+               from public.documents d
+               where d.text_status in ('no_file', 'download_fail', 'timeout', 'truncated', 'too_big')
+                 and coalesce(d.url, '') <> ''
+                 and (not coalesce(only_main, true) or d.doc_type = any(main))
+                 and (from_year is null or d.year >= from_year)
+                 and (s is null or d.company ilike '%' || s || '%' or d.label ilike '%' || s || '%')),
+         c as (select d.wba_id, max(d.company) as company, count(*) as n, count(*) filter (where d.is_main) as n_main, max(d.year) as newest
+               from d group by d.wba_id),
+         top as (select d.*, c.n as company_n from d join c on c.wba_id = d.wba_id
+                 order by c.n_main desc, c.n desc, d.company, d.is_main desc, d.year desc nulls last, d.doc_type, d.library_id limit need)
+    select jsonb_build_object(
+      'documents', (select count(*) from d),
+      'companies', (select count(*) from c),
+      'by_status', (select coalesce(jsonb_object_agg(t.text_status, t.n), '{}'::jsonb) from (select text_status, count(*) as n from d group by 1) t),
+      'rows', coalesce((select jsonb_agg(jsonb_build_object('library_id', t.library_id, 'company', t.company, 'wba_id', t.wba_id, 'year', t.year, 'doc_type', t.doc_type,
+                                                            'label', t.label, 'url', t.url, 'status', t.text_status, 'found', t.found, 'company_n', t.company_n)
+                                         order by t.company_n desc, t.company, t.is_main desc, t.year desc nulls last, t.doc_type, t.library_id) from top t), '[]'::jsonb)));
+end;
+$$;
+revoke all on function public.admin_unread_docs(text, text, boolean, int, int) from public, anon;
+grant execute on function public.admin_unread_docs(text, text, boolean, int, int) to authenticated;
+
 -- The jobs, seen from the Admin panel (19 Nov 2026). Whether last night's load ran was known only by opening GitHub,
 -- and a load skipped two nights was found by chance. job_state.py copies the runs of the workflows here every few
 -- hours; admin_jobs says, a workflow: its last run, how many runs failed in a row, and when it last went well.

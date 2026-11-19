@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v110 2026-11-19";
+  const CLIENT = "lantern v111 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2048,7 +2048,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Jobs": adminJobs, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2198,6 +2198,38 @@
       else box.appendChild(adminTable(["When", "Question", "Answered", "Facts kept", ""], r.questions.map(x => [adminWhen(x.at), x.question, x.failed ? "failed" : x.answered ? "yes" : "no", x.facts || "", adminRun(x.question, "Run its search")])));
     }
     box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  // v111: the documents the robot could not get (admin_unread_docs), as the owner's working list: by company, the
+  // main reports first, each with its address to open in the browser and send with the extension.
+  const adminUnreadView = { search: "", main: true, from: 2023 };
+  async function adminUnread(body) {
+    const st = adminUnreadView;
+    const r = await authed("admin_unread_docs", { key, search: st.search || null, only_main: st.main, from_year: st.from, max_rows: 400 }); if (!r) { body.textContent = "Not available."; return; }
+    body.innerHTML = "";
+    body.append(el("p", null, "Documents whose address lanterN holds but whose file the robot could not get: the site refuses it, the address no longer answers, or the download fails. Open the address in your browser; if the document opens, send it with the extension and it is read within minutes. Companies with the most main reports missing come first."));
+    const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin:0 0 12px;flex-wrap:wrap";
+    const box = document.createElement("input"); box.placeholder = "a company or a word of the title"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--bg);color:var(--fg)";
+    const again = () => { st.search = box.value.trim(); adminUnread(body); };
+    box.onkeydown = ev => { if (ev.key === "Enter") again(); };
+    const mainB = adminBtn(st.main ? "Main reports only" : "Every kind of document", () => { st.main = !st.main; again(); }); mainB.title = "Switch between the main reports and every document";
+    const yearB = adminBtn(st.from ? `From ${st.from}` : "Every year", () => { st.from = st.from === 2023 ? 2020 : st.from === 2020 ? null : 2023; again(); }); yearB.title = "From 2023, from 2020, or every year";
+    bar.append(box, adminBtn("Search", again), mainB, yearB); body.appendChild(bar);
+    const why = Object.entries(r.by_status || {}).map(([k, n]) => `${n} ${UNREAD[k] ? k.replace(/_/g, " ") : k}`).join(", ");
+    body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.`));
+    let company = null, table = null;
+    for (const d of r.rows || []) {
+      if (d.wba_id !== company) {
+        company = d.wba_id;
+        const h = el("h3", null, `${d.company || d.wba_id} (${d.company_n})`); h.style.cssText = "margin:18px 0 4px;font-size:15px";
+        body.append(h); table = el("div"); body.append(table);
+      }
+      const row = el("div"); row.style.cssText = "display:flex;gap:10px;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--line)";
+      const a = el("a", null, d.label || d.url); a.href = d.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; a.title = d.url;
+      const meta = el("span", null, `${d.year || "no year"} · ${d.doc_type || "untyped"}`); meta.style.cssText = "flex:none;width:230px;color:var(--muted, #667)";
+      const stt = el("span", null, UNREAD[d.status] || d.status); stt.style.cssText = "flex:none;width:330px;color:var(--muted, #667);font-size:13px";
+      row.append(meta, a, stt); table.append(row);
+    }
+    if (!(r.rows || []).length) body.append(el("p", null, "None."));
   }
   // v109: the jobs (admin_jobs): what ran, what failed, and a mark for a critical job that failed twice in a row or has
   // not gone well for longer than it should. The runs are copied from GitHub every few hours by job_state.py.

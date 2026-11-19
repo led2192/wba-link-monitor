@@ -569,6 +569,30 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(cur.fetchall(), [(first[0], first[1], 1), (other[0], other[1], 2)])
             c.rollback()
 
+    def test_the_documents_to_fetch_by_hand_are_listed_by_company_main_reports_first(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            put = lambda lid, wba, company, year, typ, status, url="https://x.example/a.pdf", label=None: cur.execute(
+                "insert into public.documents (library_id, wba_id, company, year, doc_type, label, url, text_status) values (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (lid, wba, company, year, typ, label or lid, url, status))
+            put("U1", "WA", "Alpha", 2024, "Annual Report", "no_file"); put("U2", "WA", "Alpha", 2023, "Sustainability Report", "download_fail")
+            put("U3", "WA", "Alpha", 2024, "Press Release", "no_file"); put("U4", "WA", "Alpha", 2021, "Annual Report", "no_file")
+            put("U5", "WB", "Beta", 2025, "Integrated Report", "no_file", label="Beta integrated 2025"); put("U6", "WB", "Beta", 2024, "Annual Report", "ok")
+            put("U7", "WB", "Beta", 2024, "Annual Report", "no_file", url="")                                   # no address: nothing to open
+            cur.execute("select public.admin_unread_docs('k')"); r = cur.fetchone()[0]
+            self.assertEqual((r["documents"], r["companies"]), (3, 2))                                          # main reports of 2023 on
+            self.assertEqual([d["library_id"] for d in r["rows"]], ["U1", "U2", "U5"])                          # the company with most first, newest first
+            self.assertEqual(r["rows"][0]["company_n"], 2); self.assertEqual(r["by_status"], {"no_file": 2, "download_fail": 1})
+            self.assertEqual(r["rows"][0]["url"], "https://x.example/a.pdf")
+            cur.execute("select public.admin_unread_docs('k', null, false, null)"); r = cur.fetchone()[0]
+            self.assertEqual(r["documents"], 5)                                                                 # every kind, every year
+            self.assertEqual([d["library_id"] for d in r["rows"]][:4], ["U1", "U2", "U4", "U3"])                # main reports before the rest
+            cur.execute("select public.admin_unread_docs('k', 'integrated')"); r = cur.fetchone()[0]
+            self.assertEqual([d["library_id"] for d in r["rows"]], ["U5"])
+            cur.execute("select public.admin_unread_docs('k', 'alph', true, 2020)"); self.assertEqual(cur.fetchone()[0]["documents"], 3)
+            c.rollback()
+
     def test_one_search_blends_words_and_meaning(self):
         """find_blend: the words alone without a vector, in quotes or with a place filter; else both lists merged by
         reciprocal rank. The search by meaning is replaced by a stub here (no vector type in the test database)."""
