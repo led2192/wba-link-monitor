@@ -84,7 +84,7 @@ class ReaderLayout(unittest.TestCase):
         ask = "console.log(JSON.stringify(['fiscal 2025 (WBA reporting year 2025)', \"WBA's reporting year 2022\", 'FY24 (WBA year 2023)', 'WBA benchmarks'].map(plainYear)))"
         out = subprocess.run(["node", "-e", code + "\n" + ask], capture_output=True, text=True, timeout=30)
         self.assertEqual(json.loads(out.stdout), ["fiscal 2025 (reporting year 2025)", "reporting year 2022", "FY24 (reporting year 2023)", "WBA benchmarks"])
-        self.assertIn("escH(plainYear(j.answer))", PAGE)
+        self.assertIn("escH(plainYear(answer))", PAGE)
 
     def test_a_figure_through_three_years_or_more_is_a_series(self):
         code = "const periodKey = p => String(p).toLowerCase().replace(/\\s+/g, '');\n" + PAGE[PAGE.index("  function figureSeries(facts) {"):PAGE.index("  const periodShown = ")]

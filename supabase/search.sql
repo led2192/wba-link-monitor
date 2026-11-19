@@ -3140,7 +3140,7 @@ begin
     if kept is not null then
       insert into public.ask_log (asker, question, answered, ms, client, reused)
         values (who, asked, false, extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60), (kept ->> 'ask_id')::bigint);
-      return (kept -> 'reply') || jsonb_build_object('left', per_day - used, 'per_day', per_day,
+      return (kept -> 'reply') || jsonb_build_object('left', per_day - used, 'per_day', per_day, 'ask_id', kept -> 'ask_id',
                 'reused', jsonb_build_object('at', kept -> 'at', 'words', kept -> 'words', 'same', kept -> 'same'));
     end if;
   end if;
@@ -3274,11 +3274,144 @@ begin
       null;                                                      -- keeping the answer is an extra: never costs the answer
     end;
   end if;
-  return whole || jsonb_build_object('left', per_day - used - 1, 'per_day', per_day);   -- for telling apart: no list written, a list not readable, facts with no page
+  return whole || jsonb_build_object('left', per_day - used - 1, 'per_day', per_day, 'ask_id', ask_id);   -- for telling apart: no list written, a list not readable, facts with no page
 end;
 $$;
 revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean) from public, anon;
 grant execute on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean) to anon, authenticated;     -- anon: a link that may ask (link_asker); anyone else is refused inside
+
+-- A follow-up on an answer (19 Nov 2026, the owner: "the Follow up box"). An answer often leaves the next question
+-- in the air ("and in 2023?", "is that target absolute?", "what does the footnote say?"), and asking it in the box
+-- starts a new search that may read other pages. A follow-up is asked of the same pages the answer read: no search,
+-- no words chosen by the model, one call. The model is given the earlier question and answer, so "that" and "it"
+-- mean what they meant. It counts as one of the day's answers and is kept in ask_log with the answer it follows.
+-- Who may follow an answer: the person it was written for, or a person who was given it again (ask_log.reused).
+alter table public.ask_log add column if not exists follows bigint;       -- the answer (ask_log.id) this question follows, asked of its pages
+
+create or replace function public.ask_follow_text(earlier_question text, earlier_answer text, asked text) returns text
+language sql immutable
+as $fn$
+  select asked || E'\n(This follows an earlier question about the same excerpts. Earlier question: ' || left(coalesce(earlier_question, ''), 400)
+    || E'\nEarlier answer: ' || left(coalesce(earlier_answer, ''), 3000)
+    || E'\nAnswer the new question from the excerpts, with their numbers. Do not repeat the earlier answer. '
+    || 'If the excerpts do not hold what is asked, say so in one line and say which kind of page would.)'
+$fn$;
+
+-- the answer a person may follow: its question, answer and pages, or nothing
+create or replace function public.ask_followable(the_ask bigint, who text) returns jsonb
+language sql stable security definer set search_path = public, extensions
+as $fn$
+  select jsonb_build_object('question', a.question, 'answer', a.answer, 'sources', a.sources)
+  from public.ask_log a
+  where a.id = the_ask and a.answered and a.answer is not null and jsonb_typeof(a.sources) = 'array' and jsonb_array_length(a.sources) > 0
+    and (a.asker = who or exists (select 1 from public.ask_log r where r.asker = who and r.reused = a.id))
+$fn$;
+revoke all on function public.ask_followable(bigint, text) from public, anon, authenticated;
+
+create or replace function public.ask_follow(key text, the_ask bigint, question text, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '75s'
+as $$
+#variable_conflict use_variable
+declare
+  per_day int := 50;
+  per_day_all constant int := 1000;
+  model constant text := 'claude-haiku-5-5';
+  who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));
+  asked text := btrim(coalesce(question, ''));
+  used int;
+  api_key text;
+  http_schema text;
+  t0 timestamptz := clock_timestamp();
+  before jsonb;
+  sources jsonb;
+  s jsonb;
+  body text;
+  context text := '';
+  confirmed jsonb := '[]'::jsonb;
+  known text := '';
+  fiscal text := '';
+  got jsonb;
+  parts jsonb;
+  answer text;
+  err text;
+  ask_id bigint;
+  facts jsonb := '[]'::jsonb;
+begin
+  if who is null or not (who like 'link:%' or public.email_may_search(who)) then
+    raise exception 'sign in with a WBA address to ask' using errcode = '42501';
+  end if;
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if length(asked) < 3 or length(asked) > 400 then
+    raise exception 'a question of 3 to 400 characters' using errcode = '22023';
+  end if;
+  before := public.ask_followable(the_ask, who);
+  if before is null then
+    raise exception 'not an answer of yours' using errcode = '22023';
+  end if;
+  per_day := public.ask_per_day(who);
+  select count(*) into used from public.ask_log a where a.asker = who and a.answered and a.at >= date_trunc('day', now());
+  if used >= per_day then
+    return jsonb_build_object('limit', true, 'left', 0, 'per_day', per_day);
+  end if;
+  if (select count(*) from public.ask_log a where a.answered and a.at >= date_trunc('day', now())) >= per_day_all then
+    return jsonb_build_object('limit', true, 'everyone', true, 'left', per_day - used, 'per_day', per_day);
+  end if;
+  begin
+    select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;
+  exception when others then
+    api_key := null;
+  end;
+  select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
+  if api_key is null or http_schema is null then
+    return jsonb_build_object('off', true, 'left', per_day - used, 'per_day', per_day);
+  end if;
+  -- the same pages, with the same numbers, read again from the library (a page re-read since then is read as it is now)
+  sources := before -> 'sources';
+  for s in select e from jsonb_array_elements(sources) e loop
+    select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body
+      from public.pages pg where pg.library_id = s ->> 'library_id' and pg.page = (s ->> 'page')::int;
+    context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', s ->> 'n', s ->> 'company', coalesce(s ->> 'year', 'no year'),
+                                 coalesce(s ->> 'doc_type', 'document'), s ->> 'page', coalesce(body, ''));
+  end loop;
+  begin
+    confirmed := public.ask_confirmed_facts(null, sources, who);
+    known := public.ask_confirmed_lines(confirmed);
+  exception when others then
+    confirmed := '[]'::jsonb; known := '';
+  end;
+  begin
+    fiscal := public.ask_fiscal_lines(sources);
+  exception when others then
+    fiscal := '';
+  end;
+  got := public.ask_model(api_key, http_schema, model, public.ask_instructions(false),
+           public.ask_message(public.ask_follow_text(before ->> 'question', before ->> 'answer', asked), known, fiscal, '', context), 3500);
+  parts := public.ask_split(got ->> 'text');
+  answer := parts ->> 'answer';
+  err := coalesce(got ->> 'error', case when answer is null then format('the model returned no text (stop %s, %s tokens out)', got ->> 'stop', got ->> 'out') end);
+  insert into public.ask_log (asker, question, answered, answer, sources, input_tokens, output_tokens, ms, error, client, follows)
+    values (who, asked, answer is not null, answer, sources, coalesce((got ->> 'in')::int, 0), coalesce((got ->> 'out')::int, 0),
+            extract(epoch from clock_timestamp() - t0)::numeric * 1000, err, left(client, 60), the_ask)
+    returning id into ask_id;
+  if answer is null then
+    return jsonb_build_object('error', coalesce(err, 'no answer'), 'left', per_day - used, 'per_day', per_day);
+  end if;
+  begin
+    facts := public.ask_keep_facts(ask_id, parts -> 'facts', sources);
+  exception when others then
+    facts := '[]'::jsonb;
+  end;
+  return jsonb_build_object('answer', answer, 'sources', sources, 'facts', facts, 'confirmed', confirmed, 'ask_id', ask_id, 'follows', the_ask,
+                            'left', per_day - used - 1, 'per_day', per_day);
+end;
+$$;
+revoke all on function public.ask_follow(text, bigint, text, text) from public, anon;
+grant execute on function public.ask_follow(text, bigint, text, text) to anon, authenticated;     -- anon: a link that may ask; anyone else is refused inside
 
 -- The owner's panel (13 Nov 2026). lanterN is now used by colleagues: the owner needs to tell the people and the
 -- links apart, to see and correct what people confirmed among the facts of answers, and to see what Ask costs.
