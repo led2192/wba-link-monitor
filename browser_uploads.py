@@ -21,7 +21,12 @@ it has the registered size and it starts as a PDF does.
 An upload whose company is not in the companies table is marked orphan and recorded as a failure: no row is
 invented for it (orphans are logged, never fabricated).
 
-    python browser_uploads.py [--commit] [--limit 200]
+    python browser_uploads.py [--commit] [--limit 200] [--again-known DAYS]
+
+--again-known DAYS (19 Nov 2026): the files of the last DAYS days that were called known and dropped are looked at
+again, as if just sent. Until that day every file sent for a row that held a file was dropped, also when the row's
+own file had never been read; the window does not let a person send such a document twice, so the files already
+stored are taken from where they are. A file that is the very one the row holds is called known again.
 
 Dry run prints what it would do, by company, never who sent it. Env: SUPABASE_DB_URL, SUPABASE_URL,
 SUPABASE_SERVICE_KEY, AIRTABLE_TOKEN, AIRTABLE_BASE; AIRTABLE_QA_TOKEN for the run record.
@@ -41,6 +46,10 @@ def library_id(wba, source_url, filename, size):
     src = (source_url or "").strip()
     key = (normalize(src) or src.lower()) if src else f"upload:{wba}:{(filename or '').lower()}:{size}"
     return f"{wba}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
+
+
+AGAIN_KNOWN_SQL = ("update public.browser_uploads set status = 'stored', result = null "
+                   "where status = 'known' and result like 'the library already holds this document%%' and at > now() - make_interval(days => %s)")
 
 
 def note_for(filename, source_url, sent_type=None, sent_year=None):
@@ -202,6 +211,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int, default=200, help="uploads this run")
+    ap.add_argument("--again-known", type=int, default=0, help="look again at the files called known in the last DAYS days (30 at most)")
     a = ap.parse_args()
     need = ["SUPABASE_DB_URL", "AIRTABLE_TOKEN", "AIRTABLE_BASE"] + (["SUPABASE_URL", "SUPABASE_SERVICE_KEY"] if a.commit else [])
     for v in need:
@@ -224,6 +234,10 @@ def main():
             print("public.browser_uploads is not there yet: nothing to do.")
             run.finish("ok", rows_in=0, rows_out=0, notes="no table yet")
             return 0
+        if a.again_known and a.commit:
+            cur.execute(AGAIN_KNOWN_SQL, (min(max(int(a.again_known), 1), 30),))
+            print(f"  {cur.rowcount} files called known in the last {a.again_known} days are looked at again", flush=True)
+            conn.commit()
         cur.execute("select id, wba_id, source_url, filename, bytes, path, to_jsonb(b) ->> 'sent_type', (to_jsonb(b) ->> 'sent_year')::int "
                     "from public.browser_uploads b where status = 'stored' order by id limit %s", (a.limit,))      # to_jsonb: the two columns may not be installed yet
         uploads = [dict(zip(("id", "wba_id", "source_url", "filename", "bytes", "path", "sent_type", "sent_year"), r)) for r in cur.fetchall()]

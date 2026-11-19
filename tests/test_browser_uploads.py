@@ -57,6 +57,11 @@ class Plan(unittest.TestCase):
         rows = {"PT_1": [("recA", "PT_1-h1", url, True, False)]}                                                        # the sizes of its files are not known: left alone
         self.assertEqual(B.plan([up(1, size=4000000)], {"PT_1": "Co"}, rows)[0][1], "known")
 
+    def test_only_files_dropped_as_known_are_looked_at_again(self):
+        sql = B.AGAIN_KNOWN_SQL
+        self.assertIn("status = 'known'", sql); self.assertIn("like 'the library already holds this document%%'", sql)   # not orphans, not failures
+        self.assertIn("make_interval(days => %s)", sql); self.assertIn("set status = 'stored', result = null", sql)
+
     def test_the_same_file_put_there_by_hand_is_not_made_again(self):
         rows = {"PT_1": [("recH", "PT_1-hand", "", True, False, (11492709,)), ("recS", "PT_1-small", "", True, False, (900,))]}
         u = up(1, url="https://example.com/annual-report-2025.pdf", size=11492709)
