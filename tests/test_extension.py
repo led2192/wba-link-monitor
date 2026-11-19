@@ -49,7 +49,9 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lantrNa decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.6.4"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.6.4", read("extension", "config.js"))
+        self.assertIn('"version": "0.7.0"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.7.0", read("extension", "config.js"))
+        self.assertIn('rpc("page_capture", { company: company.id, url: pageUrl(), title: got.title, body: got.text, client: CLIENT })', js)   # 0.7.0: Send this page
+        self.assertIn('id="capture"', read("extension", "send.html")); self.assertIn("func: pageText", js)
         self.assertIn("if (samePage && !sure) continue;", js)                              # 0.6.4: the page's own filter links are not documents
         self.assertNotIn("if (d.held) { box.disabled = true;", js)                         # 0.6.4: what is held can be sent again
         # 0.6.2: on a document's own tab (a file host, no ".pdf" in the address) no company is said to be missing

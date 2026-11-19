@@ -6780,6 +6780,112 @@ $$;
 revoke all on function public.upload_begin(text, text, bigint, text, text, text, text, text, int) from public, anon;
 grant execute on function public.upload_begin(text, text, bigint, text, text, text, text, text, int) to authenticated;
 
+-- "Send this page" (extension 0.7.0, 19 Nov 2026; the owner: "capture the content of the page itself and store it").
+-- Much of what a company says is on its site and in no PDF: a policy as a web page, a targets page, a statement.
+-- The extension reads the text the person has in front of them (their own browser, the page as they see it) and
+-- sends it here; it becomes a document of type "Web page" for the company, its text cut into pages of about 3,000
+-- characters at paragraph ends, searchable at once (the pages' trigger writes the words). One document an address
+-- for a company: sending the page again replaces its text and its date, so the search holds the page as last seen.
+-- The row is written here and nowhere else: the nightly load only writes the documents of the text store and never
+-- removes another's, so a captured page stays. It is not in Airtable and not in the index of meanings.
+create table if not exists public.web_captures (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  by          text not null,
+  wba_id      text not null,
+  url         text not null,
+  title       text,
+  chars       int not null,
+  pages       int not null,
+  sha256      text not null,
+  library_id  text not null,
+  client      text
+);
+create index if not exists web_captures_doc on public.web_captures (library_id, at desc);
+alter table public.web_captures enable row level security;
+
+-- the text cut into pages: whole paragraphs up to about `size` characters; a paragraph longer than twice that is cut
+create or replace function public.capture_pages(body text, size int default 3000) returns text[]
+language plpgsql immutable
+as $$
+declare
+  out text[] := '{}';
+  cur text := '';
+  para text;
+begin
+  foreach para in array regexp_split_to_array(coalesce(body, ''), E'\n[[:space:]]*\n') loop
+    para := btrim(para);
+    continue when para = '';
+    while length(para) > size * 2 loop
+      if cur <> '' then out := out || cur; cur := ''; end if;
+      out := out || left(para, size); para := substr(para, size + 1);
+    end loop;
+    if cur <> '' and length(cur) + length(para) > size then out := out || cur; cur := ''; end if;
+    cur := case when cur = '' then para else cur || E'\n\n' || para end;
+  end loop;
+  if cur <> '' then out := out || cur; end if;
+  return out;
+end;
+$$;
+
+create or replace function public.page_capture(company text, url text, title text, body text, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '30s'
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+  u text := split_part(btrim(coalesce(url, '')), '#', 1);
+  txt text := btrim(regexp_replace(regexp_replace(coalesce(body, ''), E'\r', '', 'g'), E'[ \t]+\n', E'\n', 'g'));
+  name text;
+  lid text;
+  sha text;
+  parts text[];
+  ttl text := left(btrim(regexp_replace(coalesce(title, ''), '\s+', ' ', 'g')), 200);
+  today text := to_char(now() at time zone 'utc', 'YYYY-MM-DD');
+  again boolean;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a WBA address to send a page' using errcode = '42501';
+  end if;
+  select coalesce((select c.name from public.companies c where c.wba_id = co), (select max(d.company) from public.documents d where d.wba_id = co)) into name;
+  if co = '' or name is null then
+    raise exception 'choose the company the page belongs to' using errcode = '22023';
+  end if;
+  if u !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(u) > 1000 or u ~* '\.pdf([?].*)?$' then
+    raise exception 'that is not a page lantrNa can keep' using errcode = '22023';
+  end if;
+  if length(txt) < 300 or length(txt) > 400000 then
+    raise exception 'a page of 300 to 400,000 characters of text' using errcode = '22023';
+  end if;
+  if (select count(*) from public.web_captures w where w.by = who and w.at > now() - interval '1 day') >= 100 then
+    raise exception 'a hundred pages a day at most' using errcode = '22023';
+  end if;
+  lid := 'web_' || left(encode(extensions.digest(co || '|' || u, 'sha256'), 'hex'), 20);
+  sha := encode(extensions.digest(txt, 'sha256'), 'hex');
+  if exists (select 1 from public.web_captures w where w.library_id = lid and w.sha256 = sha) then
+    return jsonb_build_object('ok', true, 'same', true, 'library_id', lid);        -- the page has not changed since it was last sent
+  end if;
+  parts := public.capture_pages(txt);
+  again := exists (select 1 from public.documents d where d.library_id = lid);
+  insert into public.documents as d (library_id, wba_id, company, doc_type, year, label, url, pages, chars, text_status, found, extracted_at)
+    values (lid, co, name, 'Web page', extract(year from now())::int, coalesce(nullif(ttl, ''), u) || ' (web page, ' || today || ')', u,
+            array_length(parts, 1), length(txt), 'ok', today, today)
+    on conflict (library_id) do update set label = excluded.label, pages = excluded.pages, chars = excluded.chars, year = excluded.year,
+            text_status = 'ok', extracted_at = excluded.extracted_at, loaded_at = now();
+  delete from public.pages p where p.library_id = lid;
+  insert into public.pages (library_id, page, body) select lid, o.n::int, o.t from unnest(parts) with ordinality as o(t, n);
+  insert into public.web_captures (by, wba_id, url, title, chars, pages, sha256, library_id, client)
+    values (who, co, u, nullif(ttl, ''), length(txt), array_length(parts, 1), sha, lid, left(client, 60));
+  return jsonb_build_object('ok', true, 'library_id', lid, 'pages', array_length(parts, 1), 'chars', length(txt), 'again', again);
+end;
+$$;
+revoke all on function public.page_capture(text, text, text, text, text) from public, anon;
+grant execute on function public.page_capture(text, text, text, text, text) to authenticated;
+
 -- Before anything is downloaded: which of these addresses lanterN already holds for the company (a document with
 -- its text, or a file sent before). The extension shows them as held and does not offer them.
 create or replace function public.upload_known(company text, urls text[]) returns jsonb
