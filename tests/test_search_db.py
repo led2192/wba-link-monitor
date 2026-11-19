@@ -536,6 +536,39 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual((jobs["load_supabase.yml"]["runs_7d"], jobs["load_supabase.yml"]["failed_7d"]), (5, 2))
             c.rollback()
 
+    def test_the_two_lists_the_page_asks_for_put_marked_pages_last_and_are_the_same_rows(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select library_id, page from public.find_pages('', 'living wage')"); plain = cur.fetchall()
+            self.assertGreater(len(plain), 1)
+            first = plain[0]
+            cur.execute("insert into public.page_kinds (library_id, page, kind) values (%s, %s, 'index')", first)
+            cur.execute("select set_config('lantern.page_kinds', 'off', false)")
+            cur.execute("select library_id, page, rank from public.find_pages_ranked('', 'living wage')")
+            self.assertEqual([(r[0], r[1]) for r in cur.fetchall()], plain)                 # off: find_pages, untouched
+            cur.execute("select set_config('lantern.page_kinds', 'on', false)")
+            cur.execute("select library_id, page, rank from public.find_pages_ranked('', 'living wage')"); on = cur.fetchall()
+            self.assertEqual({(r[0], r[1]) for r in on}, set(plain)); self.assertEqual((on[-1][0], on[-1][1]), first)
+            self.assertEqual([r[2] for r in on], list(range(1, len(on) + 1)))
+            self.assertEqual([(r[0], r[1]) for r in on[:-1]], plain[1:])                    # the others keep their order
+            cur.execute("update public.page_kinds set kind = 'content'")                    # a mark taken back counts as none
+            cur.execute("select library_id, page from public.find_pages_ranked('', 'living wage')"); self.assertEqual(cur.fetchall(), plain)
+            # the meaning: the same, over whatever find_meaning returns
+            cur.execute("update public.page_kinds set kind = 'contents'")
+            other = plain[1]
+            cur.execute(psycopg.sql.SQL("""create or replace function public.find_meaning(key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null, type_filter text default null, max_rows int default 50)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$ select null::bigint, v.r, v.l, 'c'::text, 'w'::text, 2024, 't'::text, 'l'::text, null::text, v.p, 0.9::real, 'passage'::text
+                                               from (values (1, {}::text, {}::int), (2, {}::text, {}::int)) v(r, l, p) $f$""").format(
+                               *[psycopg.sql.Literal(x) for x in (first[0], first[1], other[0], other[1])]))
+            cur.execute("select library_id, page, rank from public.find_meaning_ranked('', %s::real[])", ([0.0] * 384,))
+            self.assertEqual(cur.fetchall(), [(other[0], other[1], 1), (first[0], first[1], 2)])
+            cur.execute("select set_config('lantern.page_kinds', 'off', false)")
+            cur.execute("select library_id, page, rank from public.find_meaning_ranked('', %s::real[])", ([0.0] * 384,))
+            self.assertEqual(cur.fetchall(), [(first[0], first[1], 1), (other[0], other[1], 2)])
+            c.rollback()
+
     def test_one_search_blends_words_and_meaning(self):
         """find_blend: the words alone without a vector, in quotes or with a place filter; else both lists merged by
         reciprocal rank. The search by meaning is replaced by a stub here (no vector type in the test database)."""
@@ -573,7 +606,7 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertTrue(all(r[4] is not None for r in rows))                 # the search was logged once, by the words
         self.assertLessEqual(max(sum(1 for k in keys if k[0] == d) for d in {k[0] for k in keys}), 3)
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
-        self.assertIn('rpc("find_meaning"', src); self.assertIn("function blend(words, meaning, need)", src)   # the page merges the two itself, asked at once
+        self.assertIn('rpc("find_meaning_ranked"', src); self.assertIn('rpc("find_pages_ranked"', src); self.assertIn("function blend(words, meaning, need)", src)   # the page merges the two itself, asked at once
         self.assertNotIn("Search by meaning (beta)", src)                    # one search, not a choice
 
     def test_the_facts_of_an_answer_are_taken_apart_and_kept_with_their_page(self):
