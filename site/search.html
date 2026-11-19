@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v113 2026-11-19";
+  const CLIENT = "lantern v114 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2340,13 +2340,14 @@
     body.innerHTML = "";
     const jobs = r.jobs || [], bad = jobs.filter(j => j.failing || j.late);
     body.append(el("p", null, `The scheduled jobs and every other workflow that ran, as last read from GitHub ${r.read ? adminWhen(r.read) : "never (the first reading has not run yet)"}. A critical job is marked when it failed twice in a row, or has not gone well for longer than it should.`));
+    if (r.stale) { const old = el("p", null, "This reading is more than five hours old: what follows may be out of date. The reading is refreshed every three hours by the Job state job; if it stays old, that job or the Clock is the one to look at."); old.style.cssText = "padding:10px 14px;border-radius:10px;border:1px solid #B4540A;color:#B4540A"; body.append(old); }
     const note = el("p", null, bad.length ? `${bad.length} critical job${bad.length === 1 ? "" : "s"} need${bad.length === 1 ? "s" : ""} a look: ${bad.map(j => j.name).join(", ")}.` : "Every critical job is well.");
     note.style.cssText = `padding:10px 14px;border-radius:10px;border:1px solid ${bad.length ? "#c0392b" : "var(--line)"};${bad.length ? "color:#c0392b;font-weight:600" : ""}`; body.append(note);
     const ago = t => { if (!t) return "never"; const h = (Date.now() - new Date(t)) / 3600000; return h < 1 ? "under an hour ago" : h < 48 ? `${Math.round(h)} h ago` : `${Math.round(h / 24)} days ago`; };
     const state = j => j.in_a_row > 1 ? `failed ${j.in_a_row} times in a row` : j.late ? (j.last_success ? `no good run for ${ago(j.last_success).replace(" ago", "")}` : "no good run seen") : j.in_a_row ? "failed once" : "";
     const row = j => { const a = el("a", null, j.name); a.href = `https://github.com/led2192/wba-link-monitor/actions/workflows/${j.workflow}`; a.target = "_blank"; a.rel = "noopener";
       const s = el("span", null, state(j)); if (j.failing || j.late) s.style.cssText = "color:#c0392b;font-weight:600";
-      return [a, j.last_started ? `${adminWhen(j.last_started)} · ${j.last_result || ""}` : "no run seen", s, ago(j.last_success), `${j.runs_7d} run${j.runs_7d === 1 ? "" : "s"}${j.failed_7d ? `, ${j.failed_7d} failed` : ""}`]; };
+      return [a, j.last_started ? `${adminWhen(j.last_started)} · ${j.last_result === "in_progress" ? "running" : (j.last_result || "")}` : "no run seen", s, ago(j.last_success), `${j.runs_7d} run${j.runs_7d === 1 ? "" : "s"}${j.failed_7d ? `, ${j.failed_7d} failed` : ""}`]; };
     const heads = ["Job", "Last run", "", "Last good run", "Seven days"];
     body.append(el("h3", null, "Critical jobs")); body.appendChild(adminTable(heads, jobs.filter(j => j.critical).map(row)));
     const rest = jobs.filter(j => !j.critical), failed = rest.filter(j => j.in_a_row > 0);

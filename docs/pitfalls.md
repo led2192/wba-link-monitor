@@ -5,6 +5,11 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## Facts and their names
 - **A word left out of a name's key changes what the name means.** On 15 Nov 2026 "restated" and "restatement" were both left out of `fact_key` so that a restated figure would find its metric. "Restatement of 2023 Scope 1 emissions" (a yes or no) then had the same key as "Scope 1 emissions" and was filed under the tonnes, on the live page, within the hour. Before a word joins the list of words left out, look for names where it is the subject rather than a qualifier; and a metric that is a number takes figures only.
 
+## Jobs
+- **One dropped connection must not end a run of hundreds of calls.** `regulator_filings.py` called filings.xbrl.org once per company with no retry; twice in three Mondays the other end closed one connection and 25 to 35 minutes of lookups were lost, nothing written (2 and 16 Nov 2026). A loop over an outside service retries each call and skips the item, never the run.
+- **A watch job is judged by whether one is running, not by when one last ended.** Scan now and the Clock are runs of five and a half hours in a chain; "last success" is the start of the last finished watch, so it is always hours old, and the run queued behind shows as "pending". The Jobs view called a healthy Scan now late (19 Nov 2026).
+- **The clock reads its table when a watch starts.** A job added to `server/clock.json` is not started until the next watch (up to five and a half hours after the merge): start it by hand once if it matters.
+
 ## The page
 - **A link with `href="#"` and `target="_blank"` opens the page itself in a new tab.** The answer's sources and a result's title did that for every document with no public address: to the person, clicking a source reloaded lanterN (19 Nov 2026). A link that has nowhere to go must do something on click (`docLink` opens the reader) or not be a link.
 

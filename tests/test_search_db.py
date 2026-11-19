@@ -524,8 +524,12 @@ class SearchOnPostgres(unittest.TestCase):
             put(20, "clock.yml", "success", 40)                                                                                                # late: 12 hours allowed
             put(30, "server_meaning.yml", "success", 30); put(31, "server_meaning.yml", "failure", 4)                                         # failed once: no mark yet
             put(40, "some_trial.yml", "failure", 9); put(41, "some_trial.yml", "failure", 8)                                                  # not critical: listed, no mark
+            # a watch: the last finished one started 14 hours ago, one is running since 3 hours ago, the next waits its turn
+            put(50, "scan_now.yml", "success", 14); put(51, "scan_now.yml", None, 3, "in_progress"); put(52, "scan_now.yml", None, 1, "pending"); put(53, "scan_now.yml", "cancelled", 2)
             cur.execute("select public.admin_jobs('k')"); r = cur.fetchone()[0]
             jobs = {j["workflow"]: j for j in r["jobs"]}
+            self.assertEqual((jobs["scan_now.yml"]["late"], jobs["scan_now.yml"]["last_result"]), (False, "in_progress"))                    # running: not late, and the queued run is not "the last run"
+            self.assertFalse(r["stale"])
             self.assertEqual((jobs["load_supabase.yml"]["in_a_row"], jobs["load_supabase.yml"]["failing"], jobs["load_supabase.yml"]["last_result"]), (2, True, "in_progress"))
             self.assertEqual((jobs["propose_values.yml"]["in_a_row"], jobs["propose_values.yml"]["failing"], jobs["propose_values.yml"]["late"]), (0, False, False))
             self.assertEqual((jobs["clock.yml"]["failing"], jobs["clock.yml"]["late"]), (False, True))
