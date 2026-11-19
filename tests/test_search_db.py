@@ -624,6 +624,17 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("insert into public.company_notes (wba_id, traits, by) values ('WD', '{in_parent}', 'a@x.org')")
             cur.execute("select public.admin_unread_docs('k')"); r4 = cur.fetchone()[0]
             self.assertNotEqual(r4["rows"][0]["wba_id"], "WD")                                                  # ticked as reporting inside its parent: not first any more
+            # the owner's corrections: a discarded document leaves the list at once, a corrected one shows its new type and year
+            cur.execute("select public.admin_doc_fix('k', 'U11', 'discard', null, null, 'Dead link')")
+            cur.execute("select public.admin_doc_fix('k', 'U8', 'relabel', 'CSR Report', %s, null)", (y,))
+            cur.execute("select public.admin_unread_docs('k')"); r5 = cur.fetchone()[0]; ids5 = {d["library_id"]: d for d in r5["rows"]}
+            self.assertNotIn("U11", ids5); self.assertEqual((ids5["U8"]["doc_type"], ids5["U8"]["corrected"]), ("CSR Report", True))
+            cur.execute("select action, reason, doc_type, applied_at from public.doc_fixes order by id"); self.assertEqual(cur.fetchall(), [("discard", "dead link", None, None), ("relabel", None, "CSR Report", None)])
+            for bad in ("select public.admin_doc_fix('k', 'NOPE', 'discard')", "select public.admin_doc_fix('k', 'U8', 'delete')", "select public.admin_doc_fix('k', 'U8', 'relabel')", "select public.admin_doc_fix('k', 'U8', 'discard', null, null, 'whim')"):
+                cur.execute("savepoint s")
+                with self.assertRaises(psycopg.Error): cur.execute(bad)
+                cur.execute("rollback to savepoint s")
+            cur.execute("delete from public.doc_fixes")
             cur.execute("delete from public.documents where library_id in ('U8', 'U9', 'U10', 'U11')")           # (rows of this test only; rolled back at the end)
             cur.execute("select public.admin_unread_docs('k', null, false, null)"); r = cur.fetchone()[0]
             self.assertEqual(r["documents"], 5)                                                                 # every kind, every year

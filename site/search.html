@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v121 2026-11-19";
+  const CLIENT = "lantern v122 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2423,7 +2423,25 @@
       const meta = el("span", null, `${d.year || "no year"} · ${d.doc_type || "untyped"}`); meta.style.cssText = "flex:none;width:230px;color:var(--muted, #667)";
       const stt = el("span", null, UNREAD[d.status] || d.status); stt.style.cssText = "flex:none;width:330px;color:var(--muted, #667);font-size:13px";
       if (d.sent) { stt.textContent = `sent ${adminWhen(d.sent.at)} · ${d.sent.status}${d.sent.result ? ": " + d.sent.result : ""}`; stt.title = "Sent with the extension. The row leaves this list once the file is read (minutes for the reading, then the next load of the database)."; stt.style.color = "#2E8B1F"; a.style.opacity = "0.55"; }
-      row.append(meta, a, stt);
+      if (d.corrected) { meta.style.color = "#2E8B1F"; meta.title = "Type and year as you corrected them; the library takes them within minutes"; }
+      // v122: two actions a row (admin_doc_fix): the type and the year put right, or the document out of the library
+      // with a reason (discarded there, never deleted). The row changes at once; doc_fixes.py applies it.
+      const acts = el("span"); acts.style.cssText = "flex:none;font-size:12px;white-space:nowrap";
+      const act = (label, tip, open) => { const l = el("a", null, label); l.href = "#"; l.title = tip; l.style.marginLeft = "10px"; l.onclick = ev => { ev.preventDefault(); if (row.nextSibling && row.nextSibling._form) { row.nextSibling.remove(); return; } const f = el("div"); f._form = true; f.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0 8px 18px;font-size:13px"; open(f); row.after(f); }; acts.appendChild(l); };
+      const send = async (f, body, then) => { const say = f.querySelector("span.say"); let r2 = null; try { r2 = await authed("admin_doc_fix", { key, doc: d.library_id, ...body }); } catch (e) { r2 = null; }
+        if (r2 && r2.ok) { f.remove(); then(); } else say.textContent = "Not saved: sign in again and retry."; };
+      act("fix label", "The row says another type or year than the document: put them right", f => {
+        const ty = el("select"), yr = document.createElement("input"), say = el("span", "say"); say.style.color = "#c0392b";
+        for (const t of [""].concat(TYPES)) { const o = el("option", null, t || "type: leave as it is"); o.value = t; ty.appendChild(o); } if (TYPES.includes(d.doc_type)) ty.value = d.doc_type;
+        yr.type = "number"; yr.min = 1990; yr.max = 2100; yr.placeholder = "year"; yr.value = d.year || ""; yr.style.cssText = "font:inherit;width:84px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)";
+        f.append(ty, yr, adminBtn("Save", () => { const y = yr.value ? Number(yr.value) : null; send(f, { what: "relabel", new_type: ty.value || null, new_year: y }, () => { if (ty.value) d.doc_type = ty.value; if (y) d.year = y; meta.textContent = `${d.year || "no year"} · ${d.doc_type || "untyped"}`; meta.style.color = "#2E8B1F"; }); }), say);
+      });
+      act("discard", "Take this document out of the library: it is discarded with the reason, not deleted", f => {
+        const why = el("select"), say = el("span", "say"); say.style.color = "#c0392b";
+        for (const t of ["dead link", "not a report", "duplicate", "wrong company", "other"]) { const o = el("option", null, t); o.value = t; why.appendChild(o); }
+        f.append(document.createTextNode("Discard because: "), why, adminBtn("Discard", () => send(f, { what: "discard", why: why.value }, () => { row.style.opacity = "0.45"; stt.textContent = `discarded: ${why.value}`; acts.remove(); })), say);
+      });
+      row.append(meta, a, stt, acts);
       if (d._more) { groups.set(d, { rows: [], open: false }); table.append(row);
         if (d._more.length) { const more = el("a", null, `+${d._more.length} more address${d._more.length === 1 ? "" : "es"}`); more.href = "#"; more.title = "The same year, type and title under other addresses: most likely the same document"; more.style.cssText = "flex:none;font-size:12px;margin-left:8px";
           const g = groups.get(d); more.onclick = ev => { ev.preventDefault(); g.open = !g.open; for (const x of g.rows) x.style.display = g.open ? "flex" : "none"; more.textContent = g.open ? "fewer" : `+${d._more.length} more address${d._more.length === 1 ? "" : "es"}`; };

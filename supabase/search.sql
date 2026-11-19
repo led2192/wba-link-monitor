@@ -4162,6 +4162,61 @@ $$;
 -- opens them, and the extension sends the file. The list is the owner's working list, by company: the main reports
 -- first (annual, integrated, sustainability and the like), newest first. A search narrows it to a company or a
 -- word of the title; only_main keeps the main reports; from_year the documents of that year on.
+-- What the owner corrects from the list of documents to fetch (19 Nov 2026): a row that is not what it says, or that
+-- should not be in the library. One line a correction; doc_fixes.py applies the lines to the library (discard with
+-- its reason, never a deletion; the type and the year) and writes back when and what. A discarded document leaves
+-- the list at once; a corrected one shows its new type and year at once.
+create table if not exists public.doc_fixes (
+  id         bigint generated always as identity primary key,
+  at         timestamptz not null default now(),
+  by         text,
+  library_id text not null,
+  action     text not null check (action in ('discard', 'relabel')),
+  doc_type   text,
+  year       int,
+  reason     text,
+  applied_at timestamptz,
+  result     text
+);
+create index if not exists doc_fixes_doc on public.doc_fixes (library_id);
+alter table public.doc_fixes enable row level security;
+
+create or replace function public.admin_doc_fix(key text, doc text, what text, new_type text default null, new_year int default null, why text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t text := nullif(btrim(coalesce(new_type, '')), '');
+  r text := nullif(lower(btrim(coalesce(why, ''))), '');
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if what not in ('discard', 'relabel') then
+    raise exception 'discard or relabel' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.documents d where d.library_id = doc) then
+    raise exception 'no such document' using errcode = '22023';
+  end if;
+  if what = 'relabel' and t is null and new_year is null then
+    raise exception 'give a type or a year' using errcode = '22023';
+  end if;
+  if new_year is not null and new_year not between 1990 and 2100 then
+    raise exception 'that is not a year' using errcode = '22023';
+  end if;
+  if what = 'discard' and coalesce(r, 'other') not in ('dead link', 'not a report', 'duplicate', 'wrong company', 'other') then
+    raise exception 'not one of the reasons' using errcode = '22023';
+  end if;
+  insert into public.doc_fixes (by, library_id, action, doc_type, year, reason)
+    values (lower(auth.jwt() ->> 'email'), doc, what, case when what = 'relabel' then left(t, 60) end, case when what = 'relabel' then new_year end,
+            case when what = 'discard' then coalesce(r, 'other') end);
+  return jsonb_build_object('ok', true);
+end;
+$$;
+revoke all on function public.admin_doc_fix(text, text, text, text, int, text) from public, anon;
+grant execute on function public.admin_doc_fix(text, text, text, text, int, text) to authenticated;
+
 create or replace function public.admin_unread_docs(key text, search text default null, only_main boolean default true, from_year int default 2023, max_rows int default 300)
 returns jsonb
 language plpgsql stable security definer
@@ -4177,11 +4232,19 @@ begin
     raise exception 'not allowed' using errcode = '42501';
   end if;
   return (
-    with d as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, d.text_status, d.found,
+    with d0 as (select d.library_id, d.company, d.wba_id, d.label, d.url, d.text_status, d.found,
+                       -- the owner's last correction of the type and the year, shown before the library has taken it
+                       coalesce((select f.year from public.doc_fixes f where f.library_id = d.library_id and f.action = 'relabel' and f.year is not null order by f.id desc limit 1), d.year) as year,
+                       coalesce((select f.doc_type from public.doc_fixes f where f.library_id = d.library_id and f.action = 'relabel' and f.doc_type is not null order by f.id desc limit 1), d.doc_type) as doc_type,
+                       exists (select 1 from public.doc_fixes f where f.library_id = d.library_id and f.action = 'relabel') as corrected
+                from public.documents d
+                where d.text_status in ('no_file', 'download_fail', 'timeout', 'truncated', 'too_big')
+                  and coalesce(d.url, '') <> ''
+                  and not exists (select 1 from public.doc_fixes f where f.library_id = d.library_id and f.action = 'discard')),
+         d as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, d.text_status, d.found, d.corrected,
                       (d.doc_type = any(main)) as is_main
-               from public.documents d
-               where d.text_status in ('no_file', 'download_fail', 'timeout', 'truncated', 'too_big')
-                 and coalesce(d.url, '') <> ''
+               from d0 d
+               where true
                  and (not coalesce(only_main, true) or d.doc_type = any(main))
                  and (from_year is null or d.year >= from_year)
                  and (s is null or d.company ilike '%' || s || '%' or d.label ilike '%' || s || '%')),
@@ -4213,7 +4276,7 @@ begin
       'by_status', (select coalesce(jsonb_object_agg(t.text_status, t.n), '{}'::jsonb) from (select text_status, count(*) as n from d group by 1) t),
       'rows', coalesce((select jsonb_agg(jsonb_build_object('library_id', t.library_id, 'company', t.company, 'wba_id', t.wba_id, 'year', t.year, 'doc_type', t.doc_type,
                                                             'label', t.label, 'url', t.url, 'status', t.text_status, 'found', t.found, 'company_n', t.company_n,
-                                                            'missing', t.missing, 'revenue_usd', t.revenue,
+                                                            'missing', t.missing, 'revenue_usd', t.revenue, 'corrected', t.corrected,
                                                             'note', (select n.note from public.company_notes n where n.wba_id = t.wba_id),          -- the company's note, as in Contribute
                                                             'traits', coalesce((select to_jsonb(n.traits) from public.company_notes n where n.wba_id = t.wba_id), '[]'::jsonb),
                                                             -- sent with the extension since (the owner: "how do I follow what I have sent?"): the last sending of this
