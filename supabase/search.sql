@@ -4171,8 +4171,10 @@ begin
                  and (s is null or d.company ilike '%' || s || '%' or d.label ilike '%' || s || '%')),
          -- Which company first (19 Nov 2026, the owner: those that lack an important report, then size or importance).
          -- gap: 0 when no main report of either of the last two reporting years is read, 1 when one of the two is
-         -- missing, 2 otherwise. Then the number of WBA benchmarks the company is in (known for every company, also
-         -- for one we hold nothing of), then its revenue as the robot read it (unknown for many of exactly these).
+         -- missing, 2 otherwise. Then its revenue as the robot read it in the last four years (a large, well-known
+         -- company that lacks a report most likely publishes it and we failed to get it). The number of WBA
+         -- benchmarks was the second key for an hour and was taken out the same day at the owner's word: the order
+         -- must not rest on WBA's benchmarks.
          held as (select h.wba_id, bool_or(h.year = y1) as has1, bool_or(h.year = y1 - 1) as has2
                   from public.documents h where h.text_status = 'ok' and h.doc_type = any(main) and h.year in (y1, y1 - 1) group by h.wba_id),
          c0 as (select d.wba_id, max(d.company) as company, count(*) as n, count(*) filter (where d.is_main) as n_main from d group by d.wba_id),
@@ -4184,11 +4186,10 @@ begin
                            when not coalesce(held.has1, false) and not coalesce(held.has2, false) then format('no main report read for %s or %s', y1, y1 - 1)
                            when not coalesce(held.has1, false) then format('no main report read for %s', y1)
                            when not coalesce(held.has2, false) then format('no main report read for %s', y1 - 1) end as missing,
-                      (select count(distinct s.benchmark_name) from public.company_scores s where s.wba_id = c0.wba_id) as benchmarks,
                       rf.figure as revenue
                from c0 left join held on held.wba_id = c0.wba_id left join public.ranking_figures('revenue') rf on rf.wba_id = c0.wba_id),
-         co as (select c.*, row_number() over (order by c.gap, c.benchmarks desc, c.revenue desc nulls last, c.n_main desc, c.n desc, c.company, c.wba_id) as place from c),
-         top as (select d.*, co.n as company_n, co.place, co.missing, co.benchmarks, co.revenue from d join co on co.wba_id = d.wba_id
+         co as (select c.*, row_number() over (order by c.gap, c.revenue desc nulls last, c.n_main desc, c.n desc, c.company, c.wba_id) as place from c),
+         top as (select d.*, co.n as company_n, co.place, co.missing, co.revenue from d join co on co.wba_id = d.wba_id
                  order by co.place, d.is_main desc, d.year desc nulls last, d.doc_type, d.library_id limit need)
     select jsonb_build_object(
       'documents', (select count(*) from d),
@@ -4196,7 +4197,7 @@ begin
       'by_status', (select coalesce(jsonb_object_agg(t.text_status, t.n), '{}'::jsonb) from (select text_status, count(*) as n from d group by 1) t),
       'rows', coalesce((select jsonb_agg(jsonb_build_object('library_id', t.library_id, 'company', t.company, 'wba_id', t.wba_id, 'year', t.year, 'doc_type', t.doc_type,
                                                             'label', t.label, 'url', t.url, 'status', t.text_status, 'found', t.found, 'company_n', t.company_n,
-                                                            'missing', t.missing, 'benchmarks', t.benchmarks, 'revenue_usd', t.revenue,
+                                                            'missing', t.missing, 'revenue_usd', t.revenue,
                                                             'note', (select n.note from public.company_notes n where n.wba_id = t.wba_id),          -- the company's note, as in Contribute
                                                             'traits', coalesce((select to_jsonb(n.traits) from public.company_notes n where n.wba_id = t.wba_id), '[]'::jsonb),
                                                             -- sent with the extension since (the owner: "how do I follow what I have sent?"): the last sending of this
