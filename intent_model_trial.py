@@ -49,8 +49,13 @@ def describe(case, got):
 
 
 def parse_reply(text):
+    """The way in the reply: the JSON asked for, or a short reply that names one way and no other (a model that
+    drops the JSON has still answered). A reply that names several ways, or none, is no answer."""
     m = re.search(r'"way"\s*:\s*"([a-z]+)"', text or "")
-    return m.group(1) if m and m.group(1) in WAYS else None
+    if m:
+        return m.group(1) if m.group(1) in WAYS else None
+    named = {w for w in WAYS if re.search(rf"\b{w}\b", (text or "").lower())}
+    return named.pop() if len(named) == 1 and len((text or "").split()) <= 6 else None
 
 
 def unrecognised(got):
@@ -139,9 +144,10 @@ def main():
             print("ANTHROPIC_API_KEY is not set; the paid model was not run."); return 0
         import model_reader as M
         usage = collections.Counter()
-        ask = lambda text: M.call([{"role": "user", "content": text}], usage, system=SYSTEM, max_tokens=30)
+        ask = lambda text: M.call([{"role": "user", "content": text}], usage, system=SYSTEM, max_tokens=200)       # 30 cut half the replies before the word (run 44487007099: 51 of 101 not answered)
         scored, secs = run_model(ask, sets, stop=lambda: M.cost(usage) >= a.max_usd)
         md += table(os.environ.get("READER_MODEL") or M.DEFAULT_MODEL, scored, secs, M.cost(usage))
+        md += ["", "Replies: " + ("; ".join(f"{k} {v}" for k, v in sorted(usage.items()) if k not in ("calls", "input_tokens", "output_tokens")) or "all with text") + "."]
         md += ["", f"Paid model: {usage['calls']} calls, {usage['input_tokens']:,} tokens in, {usage['output_tokens']:,} out, {M.cost(usage):.4f} USD (stops at {a.max_usd})."]
     names = [m.strip() for m in a.models.split(",") if m.strip()]
     if names:
@@ -157,7 +163,7 @@ def main():
             except Exception as e:
                 md.append(f"| {name} | not loaded: {type(e).__name__} | | | | | | | | |"); continue
             ask = lambda text: llm.create_chat_completion(messages=[{"role": "system", "content": SYSTEM}, {"role": "user", "content": text + suffix}],
-                                                          response_format={"type": "json_object"}, temperature=0, max_tokens=30)["choices"][0]["message"]["content"]
+                                                          response_format={"type": "json_object"}, temperature=0, max_tokens=200)["choices"][0]["message"]["content"]
             scored, secs = run_model(ask, sets)
             md += table(name, scored, secs, None)
             md.append(f"| {name} | loaded in {load:.0f} s, {a.threads} threads | | | | | | | | |")

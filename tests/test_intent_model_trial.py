@@ -12,6 +12,8 @@ class Counting(unittest.TestCase):
     def test_the_reply_is_one_of_the_five_ways_or_nothing(self):
         self.assertEqual(T.parse_reply('{"way": "overview"}'), "overview")
         self.assertEqual(T.parse_reply('Sure: {"way":"fact"} because'), "fact")
+        self.assertEqual(T.parse_reply("overview"), "overview"); self.assertEqual(T.parse_reply("**Fact**."), "fact")
+        self.assertIsNone(T.parse_reply("It could be a fact or a question")); self.assertIsNone(T.parse_reply("I think this long reply is about a search for pages of it"))
         self.assertIsNone(T.parse_reply('{"way": "browse"}')); self.assertIsNone(T.parse_reply("")); self.assertIsNone(T.parse_reply(None))
 
     def test_the_model_is_told_what_was_recognised_and_never_the_answer(self):
