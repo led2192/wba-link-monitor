@@ -244,6 +244,20 @@ def test_a_company_a_person_adds_exists_at_once():
     assert 'rpc/request_company' in PAGE and "Missing a company? Add it" in PAGE
 
 
+def test_a_follow_up_is_asked_of_the_same_pages_and_counted():
+    """Page v124: the Follow up box under an answer."""
+    f = SQL.split("create or replace function public.ask_follow(key text, the_ask bigint, question text, client text default null)")[1].split("\n$$;")[0]
+    assert "public.ask_pages(" not in f and "find_" not in f                                 # no search: the pages are the answer's own
+    assert "before := public.ask_followable(the_ask, who);" in f and "'not an answer of yours'" in f
+    assert "if used >= per_day then" in f and ">= per_day_all then" in f                    # one of the day's answers, under both ceilings
+    assert "public.ask_message(public.ask_follow_text(before ->> 'question', before ->> 'answer', asked), known, fiscal, '', context), 3500);" in f
+    assert "client, follows)" in f and "public.ask_keep(" not in f                          # logged with the answer it follows; never kept as a reusable answer
+    assert "revoke all on function public.ask_followable(bigint, text) from public, anon, authenticated;" in SQL
+    assert "'ask_id', ask_id);" in SQL and "'ask_id', kept -> 'ask_id'," in SQL             # the page learns which answer it shows
+    assert "function followBox(c, askId, src, left) {" in PAGE and "rpc/ask_follow" in PAGE and "followBox(c, j.ask_id, src," in PAGE
+    assert "function answerText(answer, src) {" in PAGE
+
+
 def test_ask_has_a_ceiling_for_everyone_together():
     ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "per_day_all constant int := 1000;" in ask and ">= per_day_all then" in ask and "'everyone', true" in ask
@@ -429,7 +443,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v123 2026-11-19";' in PAGE
+    assert 'const CLIENT = "lantern v124 2026-11-19";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL

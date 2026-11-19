@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v123 2026-11-19";
+  const CLIENT = "lantern v124 2026-11-19";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1617,6 +1617,53 @@
   // v107 (18 Nov 2026, the owner): a person's own link may ask at once, with no sign-in; the answers are counted under
   // the link's name. The owner switches it on for each link in the admin page (never for the shared team link).
   let linkAsk = false;
+  // The text of an answer with its page numbers as links (v124: also for a follow-up, which cites the same pages).
+  function answerText(answer, src) {
+    const body = el("div", "text"); body.innerHTML = escH(plainYear(answer)).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : (s && s.library_id ? `<a href="#" data-cite="${n}" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page + " (shown here: no public link)")}">[${n}]</a>` : m); });
+    body.addEventListener("click", ev => { const a = ev.target.closest && ev.target.closest("a[data-cite]"); if (!a) return; ev.preventDefault(); const s = src.find(x => String(x.n) === a.dataset.cite); if (s) openReader(s.library_id, s.page, pageNeedles(s)); });
+    return body;
+  }
+
+  // v124 (the owner, 19 Nov 2026): a follow-up on the answer. Asked of the same pages the answer read (ask_follow):
+  // no new search, the earlier question and answer given to the model, so "that" and "in 2023?" mean what they meant.
+  // It counts as one of the day's answers. Each follow-up is added under the answer and can be followed in turn.
+  function followBox(c, askId, src, left) {
+    if (!askId || !src.length) return;
+    const wrap = el("div"); wrap.style.cssText = "margin-top:14px;display:flex;gap:8px;align-items:center";
+    const inp = el("input"); inp.type = "text"; inp.maxLength = 400; inp.placeholder = "Follow up: another question about these pages";
+    inp.style.cssText = "flex:1;min-width:0;font:inherit;font-size:14px;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--fg)";
+    const b = el("button", null, "Follow up"); b.type = "button"; b.style.cssText = "font:inherit;font-size:13px;padding:7px 14px;border:1px solid var(--line);border-radius:999px;background:var(--box);color:var(--accent);cursor:pointer;white-space:nowrap";
+    let last = askId;
+    const run = async () => {
+      const text = inp.value.trim(); if (text.length < 3 || b.disabled) return;
+      b.disabled = inp.disabled = true;
+      const out = el("div"); out.style.cssText = "margin-top:14px;padding-top:12px;border-top:1px solid var(--line)";
+      const asked = el("div", null, text); asked.style.cssText = "font-weight:600;margin-bottom:4px";
+      const note = el("div", "what", "Reading the same pages…"); out.append(asked, note); c.insertBefore(out, wrap);
+      let j = null;
+      try {
+        const t = (await token()) || (linkAsk ? CONFIG.key : null);
+        const r = await fetch(`${CONFIG.url}/rest/v1/rpc/ask_follow`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ key, the_ask: last, question: text, client: CLIENT + " follow" }) });
+        j = await r.json().catch(() => ({})); if (!r.ok) j = { error: j.message || `HTTP ${r.status}` };
+      } catch (e) { j = { error: e.message }; }
+      b.disabled = inp.disabled = false;
+      if (typeof j.left === "number") left(`${j.left} of ${j.per_day || 50} answers left today`);
+      if (j.limit) { note.textContent = j.everyone ? "Ask has answered all the questions it can today, for everyone. It comes back at midnight UTC." : `You have had today’s ${j.per_day || 50} answers. They come back at midnight UTC.`; return; }
+      if (j.off) { note.textContent = "Ask is not switched on."; return; }
+      if (j.error || !j.answer) { note.textContent = `No answer: ${j.error || "the model returned nothing"}. This one does not count.`; return; }
+      note.remove(); out.appendChild(answerText(j.answer, src));
+      // the way out when these pages do not hold it: the same words as a new question, searched afresh
+      const again = el("div", "what"); const a = el("a", null, "Search other pages for this"); a.href = "#"; again.style.marginTop = "6px";
+      a.onclick = ev => { ev.preventDefault(); $("q").value = ((state.companyName && !state.company.includes(";") ? state.companyName + " " : "") + text).slice(0, 400); go(); };
+      again.append(document.createTextNode("Answered from the pages listed above. "), a, document.createTextNode(".")); out.appendChild(again);
+      if (Array.isArray(j.facts) && j.facts.length) { state.facts = state.facts.concat(j.facts); showFacts(); }
+      last = j.ask_id || last; inp.value = ""; inp.focus();
+    };
+    b.onclick = run; inp.addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); run(); } });
+    wrap.append(inp, b); c.appendChild(wrap);
+  }
+
   async function ask(auto, quick, fresh) {
     auto = auto === true;
     const text = $("q").value.trim(), box = $("answer"); box.innerHTML = ""; const c = el("div", "answer"); box.appendChild(c);
@@ -1674,8 +1721,7 @@
       if (state.cited.length) { render(citedFirst(state.lastRows), false); window.scrollTo(0, 0); }
       state.facts = Array.isArray(j.facts) ? j.facts : []; state.confirmed = Array.isArray(j.confirmed) ? j.confirmed : []; state.earlier = false; state.answered = true; showFacts();
     }
-    const body = el("div", "text"); body.innerHTML = escH(plainYear(j.answer)).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\[(\d+)\]/g, (m, n) => { const s = src.find(x => String(x.n) === n); return s && s.url ? `<a href="${escH(pageUrl(s))}" target="_blank" rel="noopener" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page)}">[${n}]</a>` : (s && s.library_id ? `<a href="#" data-cite="${n}" title="${escH(s.company + ", " + (s.year || "") + ", page " + s.page + " (shown here: no public link)")}">[${n}]</a>` : m); });
-    body.addEventListener("click", ev => { const a = ev.target.closest && ev.target.closest("a[data-cite]"); if (!a) return; ev.preventDefault(); const s = src.find(x => String(x.n) === a.dataset.cite); if (s) openReader(s.library_id, s.page, pageNeedles(s)); });
+    const body = answerText(j.answer, src);
     c.appendChild(body);
     for (const sr of figureSeries(state.facts)) {
       const t = el("table"); t.style.cssText = "border-collapse:collapse;margin:10px 0 4px;font-variant-numeric:tabular-nums;font-size:14px";
@@ -1697,6 +1743,7 @@
       else if (state.surveyUsed) more.append(document.createTextNode(`A survey would ask each company, but today's ${state.surveyUsed} surveys for this address are used. They come back at midnight UTC.`));
       c.append(more);
     }
+    followBox(c, j.ask_id, src, words => { cap.lastChild.textContent = words; });       // v124
   }
   // v88: a survey in the place of the answer. The offer first (how many companies, about how much), then the result
   // kept short: the count as the headline, the companies that say yes with their page, and the whole table and the

@@ -686,6 +686,21 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023)"); got = cur.fetchone()[0]
             self.assertEqual((got["answer"], got["reused"]["same"], got["left"], got["per_day"]), ("Scope 1 was 10 [1].", True, got["per_day"], got["per_day"]))
             cur.execute("select answered, reused from public.ask_log order by id desc limit 1"); self.assertEqual(cur.fetchone(), (False, 7))
+            # a follow-up (page v124): the answer says which it is; it may be followed by the person it was written for or given again to
+            self.assertEqual(got["ask_id"], 7)
+            cur.execute("select asker from public.ask_log order by id desc limit 1"); me = cur.fetchone()[0]
+            cur.execute("insert into public.ask_log (id, asker, question, answered, answer, sources) overriding system value values (7, 'first@x.org', 'scope 1?', true, 'Scope 1 was 10 [1].', %s::jsonb) on conflict (id) do update set answered = true, answer = excluded.answer, sources = excluded.sources", (psycopg.types.json.Jsonb(reply["sources"]),))
+            cur.execute("select public.ask_followable(7, %s), public.ask_followable(7, 'stranger@x.org')", (me,)); mine, theirs = cur.fetchone()
+            self.assertEqual(mine["answer"], "Scope 1 was 10 [1]."); self.assertIsNone(theirs)
+            cur.execute("select public.ask_follow('k', 7, 'and in 2022?')"); self.assertTrue(cur.fetchone()[0]["off"])            # no model key here: nothing asked, nothing counted
+            cur.execute("insert into public.ask_log (asker, question, answered, answer, sources) values ('stranger@x.org', 'theirs?', true, 'x', %s::jsonb) returning id", (psycopg.types.json.Jsonb(reply["sources"]),)); other = cur.fetchone()[0]
+            for bad in (("select public.ask_follow('k', %s, 'and in 2022?')", (other,)), ("select public.ask_follow('k', 7, 'x')", ())):
+                cur.execute("savepoint s")
+                with self.assertRaises(psycopg.Error): cur.execute(*bad)
+                cur.execute("rollback to savepoint s")
+            cur.execute("select public.ask_follow_text('What is scope 1?', 'It was 10 [1].', 'and in 2022?')"); ft = cur.fetchone()[0]
+            self.assertTrue(ft.startswith("and in 2022?")); self.assertIn("Earlier question: What is scope 1?", ft); self.assertIn("Earlier answer: It was 10 [1].", ft)
+            cur.execute("delete from public.ask_log where id = %s", (other,))
             cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023, null, null, null, null, null, null, true)")
             self.assertNotIn("reused", cur.fetchone()[0])                                                                         # asked again: a new answer is sought
             cur.execute("select set_config('lantern.ask_reuse', 'off', false)")
