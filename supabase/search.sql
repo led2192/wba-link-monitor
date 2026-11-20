@@ -2703,6 +2703,12 @@ end;
 $$;
 revoke all on function public.ask_pages(text, text, real[], text, int, int, text, text, text, text, text) from public, anon, authenticated;
 
+-- Is the option reader_plain_words on (see ask_instructions)? In plpgsql, so that it can stand before survey_option.
+create or replace function public.reader_plain_words() returns boolean
+language plpgsql stable security definer set search_path = public
+as $$ begin return public.survey_option('reader_plain_words'); end $$;
+revoke all on function public.reader_plain_words() from public, anon, authenticated;
+
 -- What Ask is told about the fiscal years of the companies it reads: one line a company whose year does not end in
 -- December, with an example of WBA's reporting year. '' when no such company.
 create or replace function public.ask_fiscal_lines(sources jsonb)
@@ -2710,7 +2716,7 @@ returns text
 language sql stable security definer
 set search_path = public, extensions
 as $$
-  select coalesce(string_agg(format('- %s: the fiscal year ends in %s. WBA''s reporting year: %s.', x.company,
+  select coalesce(string_agg(format('- %s: the fiscal year ends in %s. ' || case when public.reader_plain_words() then 'The reporting year' else 'WBA''s reporting year' end || ': %s.', x.company,
            to_char(make_date(2000, x.m, 1), 'FMMonth'),
            case when x.m between 1 and 5 then 'a fiscal year ending in ' || to_char(make_date(2000, x.m, 1), 'FMMonth') || ' 2024 (often printed "fiscal 2024" or "FY24") is reporting year 2023, one less than its label'
                 else 'the year the fiscal year ends in' end), E'\n' order by x.company), '')
@@ -2788,7 +2794,30 @@ as $$
 $$;
 revoke all on function public.ask_per_day(text) from public, anon, authenticated;
 
+-- Option reader_plain_words (20 Nov 2026, the owner; off until compared, ask_wording_compare.py). Three changes to what
+-- the reader is told, none to what it reads: (1) a confirmed fact is "confirmed earlier by a person", not "by a
+-- colleague" (the page is used outside one organisation); (2) the reporting year is named without WBA; (3) an answer
+-- is never the bare word No or Yes: the evidence follows, or the answer begins "Not stated in these pages".
+insert into public.search_options (name, is_on, note) values ('reader_plain_words', false, 'the reader of Ask says "a person" for who confirmed a fact and "reporting year" without WBA, and never answers with a bare No or Yes')
+on conflict (name) do nothing;
+
 create or replace function public.ask_instructions(with_names boolean) returns text
+language plpgsql stable security definer set search_path = public
+as $fn$
+begin
+  return case when not public.reader_plain_words() then public.ask_instructions_text(with_names)
+    else replace(replace(replace(replace(public.ask_instructions_text(with_names),
+           'facts a colleague confirmed earlier', 'facts a person confirmed earlier'),
+           '"confirmed earlier by a colleague"', '"confirmed earlier by a person"'),
+           'WBA''s reporting year', 'the reporting year'),
+           'WBA reporting year', 'reporting year')
+         || ' Never let the whole answer be the bare word No or Yes: after it, in the same answer, say what the excerpts state that shows it, with its excerpt number; '
+         || 'when nothing in the excerpts bears on the question, begin with "Not stated in these pages" and say what they do contain.' end;
+end;
+$fn$;
+revoke all on function public.ask_instructions(boolean) from public, anon, authenticated;
+
+create or replace function public.ask_instructions_text(with_names boolean) returns text
 language sql immutable
 as $fn$
   select
@@ -2820,10 +2849,10 @@ as $fn$
          || 'with no list (every figure that answers the question, whether or not a listed name fits it), and only then name them.' else '' end
 $fn$;
 create or replace function public.ask_message(asked text, known text, fiscal text, names text, context text) returns text
-language sql immutable
+language sql stable security definer set search_path = public
 as $fn$
   select
-    'Question: ' || asked || case when known <> '' then E'\n\nConfirmed earlier by a colleague:\n' || known else '' end
+    'Question: ' || asked || case when known <> '' then E'\n\nConfirmed earlier by a ' || case when public.reader_plain_words() then 'person' else 'colleague' end || E':\n' || known else '' end
       || case when fiscal <> '' then E'\n\nFiscal years:\n' || fiscal else '' end
       || case when names <> '' then E'\n\nMetric names in use:\n' || names else '' end || E'
 
@@ -4215,6 +4244,61 @@ begin
 end;
 $$;
 revoke all on function public.ask_names_trial(bigint) from public, anon, authenticated;
+
+-- Option reader_plain_words beside today's answers (20 Nov 2026; ask_wording_compare.py). The question and the pages
+-- of a kept answer go to the reader three times: as today, as today again (how much two answers differ by
+-- themselves) and with the option. The option is set for the one call (set_config, local to the statement's
+-- transaction). Nothing is kept. Returns counts per arm, never a text. CALLS THE PAID READER: three calls.
+create or replace function public.ask_wording_trial(the_ask bigint)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '170s'
+as $$
+#variable_conflict use_variable
+declare
+  model constant text := 'claude-haiku-5-5';
+  a record;
+  api_key text;
+  http_schema text;
+  src jsonb;
+  body text;
+  context text := '';
+  fiscal text;
+  known text := '';
+  arm text;
+  got jsonb;
+  said text;
+  out jsonb := '{}'::jsonb;
+  tok_in int := 0;
+  tok_out int := 0;
+begin
+  select l.question, l.sources, l.asker into a from public.ask_log l where l.id = the_ask and l.answered and jsonb_array_length(coalesce(l.sources, '[]'::jsonb)) > 0;
+  if a.question is null then return jsonb_build_object('skipped', 'no such answer'); end if;
+  select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;
+  select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
+  if api_key is null or http_schema is null then return jsonb_build_object('skipped', 'the reader is not switched on'); end if;
+  for src in select e from jsonb_array_elements(a.sources) e order by (e ->> 'n')::int loop
+    select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = src ->> 'library_id' and pg.page = (src ->> 'page')::int;
+    context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', src ->> 'n', src ->> 'company', coalesce(src ->> 'year', 'no year'), coalesce(src ->> 'doc_type', 'document'), src ->> 'page', coalesce(body, ''));
+  end loop;
+  begin known := public.ask_confirmed_lines(public.ask_confirmed_facts(null, a.sources, a.asker)); exception when others then known := ''; end;
+  foreach arm in array array['off', 'again', 'on'] loop
+    perform set_config('lantern.reader_plain_words', case when arm = 'on' then 'on' else 'off' end, true);
+    begin fiscal := public.ask_fiscal_lines(a.sources); exception when others then fiscal := ''; end;
+    got := public.ask_model(api_key, http_schema, model, public.ask_instructions(false), public.ask_message(a.question, coalesce(known, ''), fiscal, '', context), 3500);
+    if got ? 'error' then perform set_config('lantern.reader_plain_words', '', true); return jsonb_build_object('skipped', 'the model did not answer', 'arm', arm); end if;
+    tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
+    said := coalesce(public.ask_split(got ->> 'text') ->> 'answer', '');
+    out := out || jsonb_build_object(arm, public.ask_reply_numbers(got ->> 'text', a.sources, '') || jsonb_build_object(
+             'bare', btrim(said) ~* '^(no|yes|sí|si|non|nein|ja)[.!]?$', 'starts_no', said ~* '^\s*no\M', 'not_stated', said ~* '^\s*not stated',
+             'colleague', said ~* 'colleague', 'wba', said ~ 'WBA'));
+  end loop;
+  perform set_config('lantern.reader_plain_words', '', true);
+  return out || jsonb_build_object('known', known <> '', 'fiscal', coalesce(fiscal, '') <> '', 'tokens_in', tok_in, 'tokens_out', tok_out);
+end;
+$$;
+revoke all on function public.ask_wording_trial(bigint) from public, anon, authenticated;
 
 -- The stage of the semantic fill (15 Nov 2026, semantic_index.py --stage): passages of the older years wait here, with
 -- no index on their embeddings, while the search reads public.chunks as before. They are moved into public.chunks and

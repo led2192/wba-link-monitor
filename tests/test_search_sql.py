@@ -341,7 +341,7 @@ def test_a_mark_on_a_fact_shows():
 def test_confirmed_facts_come_back_with_the_next_answer():
     ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "confirmed := public.ask_confirmed_facts(null, sources, who);" in ask and "'confirmed', confirmed);" in ask
-    assert "Confirmed earlier by a colleague:" in ask and "Do not repeat them in FACTS." in ask          # the answer reads them too
+    assert "Confirmed earlier by a ' || case when public.reader_plain_words() then 'person' else 'colleague' end || E':" in ask and "Do not repeat them in FACTS." in ask          # the answer reads them too
     assert "revoke all on function public.ask_confirmed_facts(bigint, jsonb, text) from public, anon, authenticated;" in SQL
     assert "confirmed by a colleague" in PAGE and "Confirmed before" in PAGE
 
