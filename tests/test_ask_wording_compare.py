@@ -24,8 +24,9 @@ class Sums(unittest.TestCase):
         self.assertIn("No attribute worse by more than 3 points: yes.", W.report(s))
         self.assertEqual(W.verdict(W.summarise([])), (False, ["no case ran"]))
 
-    def test_the_option_is_off_and_the_trial_keeps_nothing(self):
+    def test_the_option_went_on_after_its_comparison_and_the_trial_keeps_nothing(self):
         self.assertIn("insert into public.search_options (name, is_on, note) values ('reader_plain_words', false,", SQL)
+        self.assertIn("note || ' (on since 20 Nov 2026, run 44827372584)' where name = 'reader_plain_words' and not is_on and note not like '%on since%';", SQL)
         t = SQL.split("create or replace function public.ask_wording_trial(the_ask bigint)")[1].split("\n$$;")[0]
         self.assertIn("array['off', 'again', 'on']", t); self.assertNotIn("insert into", t); self.assertNotIn("ask_keep", t)
         self.assertIn("perform set_config('lantern.reader_plain_words', case when arm = 'on' then 'on' else 'off' end, true);", t)
