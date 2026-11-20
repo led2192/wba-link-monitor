@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v125 2026-11-19";
+  const CLIENT = "lantern v126 2026-11-20";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -367,7 +367,7 @@
     key = localStorage.getItem("find_key");
   } catch (e) { key = null; }
   if (!key) {
-    $("notice").innerHTML = '<div class="notice"><b>Open the link you were given.</b><br>This page works from a shared link that carries its key; ask the data team for it. Nothing else is needed, no account and no password.</div>';
+    $("notice").innerHTML = '<div class="notice"><b>Open the link you were given.</b><br>This page works from a shared link that carries its key; ask the person who shared lantrNa with you for it. On the address you used before, the line at the foot of the page opens this one with your key. Nothing else is needed, no account and no password.</div>';
     $("boxwrap").style.display = "none"; $("filters").hidden = true;
     return;
   }
@@ -1958,6 +1958,15 @@
   $("goLucky").onclick = () => $("lucky").click();
   $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; contribute(); window.scrollTo(0, 0); };
   $("foot").style.cssText = "margin-top:8px;padding-top:0"; showMine(false);
+  // v126 (20 Nov 2026): the page also lives at lantrna.com. A browser keeps the key for each address apart, so the old
+  // address offers the way over with the key in the link, as "Copy the link to share" does. Nothing is sent anywhere.
+  if (location.hostname !== "lantrna.com" && /^https?:$/.test(location.protocol)) {
+    const d = el("div"); d.style.cssText = "text-align:center;font-size:13px;margin-top:10px";
+    const a = el("a", null, "Open it there with your key"); a.href = "#"; a.rel = "noopener";
+    a.onclick = ev => { ev.preventDefault(); window.open("https://lantrna.com/#k=" + key, "_blank", "noopener"); };
+    d.append(document.createTextNode("lantrNa has a new address, lantrna.com. "), a, document.createTextNode(". This address keeps working."));
+    $("foot").insertAdjacentElement("beforebegin", d);
+  }
   $("foot").innerHTML = 'Every page of every report in the library, in any language · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lantrNa</a>';
   $("share").onclick = async ev => { ev.preventDefault(); const link = location.origin + location.pathname + "#k=" + key;       // the same key on another device or for a colleague: searching needs only the link; reviews, Ask and adding need a WBA sign-in
     try { await navigator.clipboard.writeText(link); ev.target.textContent = "Link copied: paste it to a colleague or open it on your other device"; } catch (e) { ev.target.textContent = link; } };
