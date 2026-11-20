@@ -2800,6 +2800,12 @@ revoke all on function public.ask_per_day(text) from public, anon, authenticated
 -- is never the bare word No or Yes: the evidence follows, or the answer begins "Not stated in these pages".
 insert into public.search_options (name, is_on, note) values ('reader_plain_words', false, 'the reader of Ask says "a person" for who confirmed a fact and "reporting year" without WBA, and never answers with a bare No or Yes')
 on conflict (name) do nothing;
+-- On since 20 Nov 2026 (run 44827372584): 60 questions, each answered as today, as today again and with the option.
+-- Answered 60, 60, 60; facts with a page 189, 192, 193; figures of the first answer kept by the second plain answer 81%,
+-- by the option's 79%; answers that say "colleague" 13, 12, 0; that say "WBA" 14, 13, 0. Not shown by this run: no
+-- answer of any arm was a bare No or Yes, so that part of the option is untested; and 10 answers of the option began
+-- "Not stated" against 7 and 7.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 20 Nov 2026, run 44827372584)' where name = 'reader_plain_words' and not is_on and note not like '%on since%';
 
 create or replace function public.ask_instructions(with_names boolean) returns text
 language plpgsql stable security definer set search_path = public
