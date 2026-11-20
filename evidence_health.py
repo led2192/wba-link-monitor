@@ -102,6 +102,10 @@ def unindexed_pages(cur):
     try:
         return one(cur, "select count(*) from (select 1 from public.pages where words is null limit 10001) s")
     except Exception:
+        # the count ran out of time: the transaction is spoilt, and every query after it failed with it (the daily
+        # check stopped on 19 and 20 Nov 2026). Put the connection back and go on without this one number.
+        cur.connection.rollback()
+        cur.execute("set statement_timeout = '120s'")
         return None
 
 
