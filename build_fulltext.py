@@ -446,6 +446,11 @@ def needs_work(d, att, retry_failed):
         return True
     if att and d.get("att") and d["att"] != att:          # the file was replaced
         return True
+    if att and not d.get("att") and d["status"] == "no_file":
+        # the row had no file when it was last looked at and has one now (a person sent it, or the attach job fetched
+        # it). Until 20 Nov 2026 "no_file" was final whatever came later: 29 of the files people sent in four days were
+        # put on such rows and never read, and the extension showed them as held.
+        return True
     if d["status"] in TERMINAL:
         return retry_failed and d["status"] in ("parse_fail", "timeout", "crash")
     return d.get("attempts", 1) < MAX_ATTEMPTS            # transient failure: try again, a few times
