@@ -244,6 +244,14 @@ def test_a_company_a_person_adds_exists_at_once():
     assert 'rpc/request_company' in PAGE and "Missing a company? Add it" in PAGE
 
 
+def test_a_year_typed_next_to_a_subject_also_shows_other_years():
+    """Page v127: the year's pages first as before, the other years' pages after them; the second call is not counted as a search."""
+    assert 'rpc("find_pages_ranked", { ...args, year_from: null, year_to: null, client: CLIENT + " +years" }).catch(() => [])' in PAGE
+    assert "state.yearsTyped && (state.from || state.to) && !state.strictYears" in PAGE
+    assert "function withOtherYears(rows) {" in PAGE and "From documents of other years" in PAGE
+    assert SQL.count("and coalesce(l.client, '') not like '% +years'") == 4          # the link's counts (2), the list of a link's searches, the hard searches
+
+
 def test_a_follow_up_is_asked_of_the_same_pages_and_counted():
     """Page v124: the Follow up box under an answer."""
     f = SQL.split("create or replace function public.ask_follow(key text, the_ask bigint, question text, client text default null)")[1].split("\n$$;")[0]
@@ -443,7 +451,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v126 2026-11-20";' in PAGE
+    assert 'const CLIENT = "lantern v127 2026-11-20";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL

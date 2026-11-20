@@ -3438,8 +3438,8 @@ begin
     'links', (select coalesce(jsonb_agg(to_jsonb(x) order by x.name), '[]'::jsonb) from (
         select k.name, k.active, k.created, k.may_ask,
                (select count(*) from public.ask_log a where a.asker = 'link:' || k.name and a.answered and a.at > now() - interval '7 days') as answers_7d,
-               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '7 days') as searches_7d,
-               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '30 days') as searches_30d,
+               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '7 days' and coalesce(l.client, '') not like '% +years') as searches_7d,
+               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '30 days' and coalesce(l.client, '') not like '% +years') as searches_30d,
                (select max(l.at) from public.search_log l where l.key_name = k.name) as last_used
         from public.search_keys k) x),
     'people', (select coalesce(jsonb_agg(to_jsonb(x) order by x.last_seen desc nulls last), '[]'::jsonb) from (
@@ -4275,7 +4275,7 @@ begin
          select l.at, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.typed is not null as as_typed, l.q, l.company, l.year_from, l.year_to,
                 l.doc_type, l.profile, l.n, l.ms, l.shown, l.by_meaning, l.meaning,
                 (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
-         from public.search_log l where l.key_name = link
+         from public.search_log l where l.key_name = link and coalesce(l.client, '') not like '% +years'      -- not the page's second call for a year typed (v127)
          order by l.at desc limit least(greatest(coalesce(max_rows, 200), 1), 1000)) x) end,
     'questions', case when nullif(btrim(coalesce(person, '')), '') is null then '[]'::jsonb else
       (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
@@ -4594,7 +4594,7 @@ begin
       select l.id, l.at, l.key_name, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.company, l.n, l.shown, l.by_meaning, l.meaning, l.ms,
              (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
         from public.search_log l
-       where l.at > since and l.key_name is not null and l.terms is distinct from '(documents only)'),
+       where l.at > since and l.key_name is not null and l.terms is distinct from '(documents only)' and coalesce(l.client, '') not like '% +years'),
     stepped as (
       select l.*, case when lag(l.at) over w is null or l.at - lag(l.at) over w > interval '3 minutes' or l.company is distinct from lag(l.company) over w then 1 else 0 end as starts
         from l window w as (partition by l.key_name order by l.at, l.id)),
