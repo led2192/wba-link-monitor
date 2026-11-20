@@ -12,6 +12,15 @@ class Queue(unittest.TestCase):
                 {"id": "b", "year": 2026}, {"id": "d", "year": 2021}, {"id": "e", "year": 2012}]
         self.assertEqual([d["id"] for d in sorted(docs, key=FT.queue_key)], ["a", "b", "d", "u", "c", "e"])
 
+    def test_a_row_that_had_no_file_is_read_once_it_has_one(self):
+        """20 Nov 2026: "no_file" was final, so a file a person sent for such a row was never read."""
+        self.assertTrue(FT.needs_work({"status": "no_file", "att": ""}, "attNEW", False))
+        self.assertTrue(FT.needs_work({"status": "no_file"}, "attNEW", False))
+        self.assertFalse(FT.needs_work({"status": "no_file", "att": ""}, "", False))          # still no file: nothing to read
+        self.assertFalse(FT.needs_work({"status": "ok"}, "attNEW", False))                    # an old line with no id recorded is not read again
+        self.assertTrue(FT.needs_work({"status": "ok", "att": "attOLD"}, "attNEW", False))    # as before: the file was replaced
+        self.assertFalse(FT.needs_work({"status": "no_text", "att": "attA"}, "attA", False))
+
     def test_a_regulator_filing_is_read_from_its_address(self):
         url = "https://www.sec.gov/Archives/edgar/data/50863/000005086325000009/intc-20241228.htm"
         rec = {"id": "recF", "fields": {"library_id": "PT_1-abc", "wba_id": "PT_1", "document_url": url,
