@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v127 2026-11-20";
+  const CLIENT = "lantern v128 2026-11-20";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -451,6 +451,10 @@
   }
   function parse(text) {
     let q = " " + text.trim().replace(/[?¿!¡]+/g, " ").replace(/\s+/g, " ") + " ";      // a question's marks are not words ("in 2024?" is the year 2024)
+    // v128 (20 Nov 2026, from a real question): "What was the steel production of X in year 2023?" was searched with the
+    // word "year" required on the page, took six seconds and found five pages; without it, half a second. The word
+    // "year" that only introduces the year typed is dropped with it. "base year 2019" and "target year 2030" keep it.
+    q = q.replace(/(?<!\b(?:base|target|baseline|reference|last|next|prior|previous)\s)\b(?:(?:in|for|during|of)\s+(?:the\s+)?)?(?:fiscal\s+|financial\s+|reporting\s+)?year\s+(?=(?:19|20)\d\d\b)/gi, " ");
     const found = { company: null, companyName: null, from: null, to: null, type: null, industry: null, country: null, countryName: null, region: null };
     const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const take = (names) => { for (const n of names) { const re = new RegExp("\\s" + esc(n) + "\\s", "i"); if (re.test(q)) { q = q.replace(re, " "); return true; } } return false; };
