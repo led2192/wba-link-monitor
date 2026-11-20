@@ -45,6 +45,15 @@ class UseCases(unittest.TestCase):
                 wrong.append(f"{case['typed']!r}: no document type read")
         self.assertEqual(wrong, [])
 
+    def test_the_word_year_before_the_year_typed_is_not_searched(self):
+        """v128: "steel production of X in year 2023" required the word "year" on the page."""
+        name = CASES["companies"][0]["name"] if isinstance(CASES["companies"][0], dict) else CASES["companies"][0]
+        got = run_page([{"typed": t} for t in (f"What was the steel production of {name} in year 2023?", f"{name} revenue for the fiscal year 2024",
+                                              f"{name} emissions base year 2019", f"{name} year on year growth", f"{name} target year 2030 net zero")])
+        self.assertNotIn("year", got[0]["q"].lower()); self.assertIn("steel production", got[0]["q"]); self.assertEqual(got[0]["from"], 2023)
+        self.assertNotIn("year", got[1]["q"].lower()); self.assertNotIn("fiscal", got[1]["q"].lower()); self.assertEqual(got[1]["from"], 2024)
+        self.assertIn("base year", got[2]["q"]); self.assertIn("year on year", got[3]["q"]); self.assertIn("target year", got[4]["q"])
+
     def test_a_kind_of_document_next_to_a_subject_is_a_preference_not_a_filter(self):
         """v123: "microsoft's policy on living wage" was searched only inside Policy Documents."""
         name = CASES["companies"][0]["name"] if isinstance(CASES["companies"][0], dict) else CASES["companies"][0]

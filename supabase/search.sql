@@ -3091,6 +3091,8 @@ declare
   vault_err text;
   http_schema text;
   t0 timestamptz := clock_timestamp();
+  t_read timestamptz;                  -- when the reader was called, and when it answered: where an answer's seconds go (20 Nov 2026)
+  t_done timestamptz;
   r record;
   n int := 0;
   context text := '';
@@ -3241,11 +3243,13 @@ begin
       names := '';                                               -- an extra: never costs the answer
     end;
   end if;
+  t_read := clock_timestamp();
   got := public.ask_model(api_key, http_schema, model, public.ask_instructions(names <> ''),
            public.ask_message(asked || case when topic is not null then format(E'\n(This asks for an overview of %s for this company. The excerpts were chosen a part of the topic at a time: %s. '
              || 'Give the key figures and facts of each part the excerpts cover, each with its year and its excerpt number, in a few short lines, the most recent year first. '
              || 'Then say in one line which of these parts the excerpts do not cover. Do not describe documents or list page titles.)', topic ->> 'label',
              (select string_agg(e ->> 'label', ', ') from jsonb_array_elements(topic -> 'groups') e)) else '' end, known, fiscal, names, context), 3500);      -- the answer is short; the room is for the model's reasoning (with 500 a hard question ended before any text) and the facts
+  t_done := clock_timestamp();
   parts := public.ask_split(got ->> 'text');
   answer := parts ->> 'answer';
   err := coalesce(got ->> 'error', case when answer is null then format('the model returned no text (stop %s, %s tokens out)', got ->> 'stop', got ->> 'out') end);
@@ -3253,7 +3257,8 @@ begin
   insert into public.ask_log (asker, question, answered, answer, sources, input_tokens, output_tokens, ms, error, client, keywords, search)
     values (who, asked, answer is not null, answer, sources, tok_in, tok_out,
             extract(epoch from clock_timestamp() - t0)::numeric * 1000, err, left(client, 60), keywords,
-            jsonb_build_object('q', search_q, 'company', company_filter, 'from', year_from, 'to', year_to, 'type', type_filter, 'vector', qvec is not null))
+            jsonb_build_object('q', search_q, 'company', company_filter, 'from', year_from, 'to', year_to, 'type', type_filter, 'vector', qvec is not null,
+                               'ms_find', round(extract(epoch from t_read - t0)::numeric * 1000), 'ms_read', round(extract(epoch from t_done - t_read)::numeric * 1000)))
     returning id into ask_id;
   if answer is not null then
     begin
