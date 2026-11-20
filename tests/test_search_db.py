@@ -207,6 +207,16 @@ class SearchOnPostgres(unittest.TestCase):
                         "('cd-3', 'PT_CARD', 'Card Co', 'Annual Report', 2023, 'AR 2023', 0, 'no_file'), ('cd-4', 'PT_CARD', 'Card Co', 'Annual Report', 2025, 'AR 2025', 0, 'no_file'), "
                         "('cd-5', 'PT_CARD', 'Card Co', 'Code of Conduct', 2023, 'Code', 27, 'ok'), ('cd-6', 'PT_CARD', 'Card Co', 'Code of Conduct', null, 'Code for others', 12, 'ok'), "
                         "('cd-7', 'PT_CARD', 'Card Co', 'Policy Documents', 2020, 'Privacy', 3, 'no_text')")
+            cur.execute("select public.company_card('k', 'PT_CARD')"); self.assertEqual(cur.fetchone()[0]["published"], [])        # no copy of the library here: no dates, no error
+            # v129: when the main reports came out, from the library's copy (the last five reporting years; a policy is not a main report)
+            cur.execute("create table if not exists public.library (library_id text primary key, record_id text, wba_id text, discard boolean not null default false, fields jsonb not null)")
+            cur.execute("update public.documents set year = extract(year from now())::int - 1 where library_id = 'cd-4'")
+            cur.execute("update public.documents set year = extract(year from now())::int - 2 where library_id in ('cd-1', 'cd-2')")
+            cur.execute("insert into public.library (library_id, wba_id, fields) values ('cd-1', 'PT_CARD', '{\"pub_date\": \"2025-03-04\", \"pub_date_precision\": \"day\", \"pub_date_source\": \"filing\"}'), "
+                        "('cd-4', 'PT_CARD', '{\"pub_date\": \"2026-02-01\", \"pub_date_precision\": \"month\"}'), ('cd-5', 'PT_CARD', '{\"pub_date\": \"2023-01-01\"}'), ('cd-3', 'PT_CARD', '{\"pub_date\": \"\"}')")
+            cur.execute("select public.company_card('k', 'PT_CARD')"); pubs = cur.fetchone()[0]["published"]
+            self.assertEqual([(p["date"], p["precision"], p["type"]) for p in pubs], [("2026-02-01", "month", "Annual Report"), ("2025-03-04", "day", "Annual Report")])
+            cur.execute("update public.documents set year = 2025 where library_id = 'cd-4'"); cur.execute("update public.documents set year = 2024 where library_id in ('cd-1', 'cd-2')")
             cur.execute("select public.company_card('k', 'PT_CARD'), public.company_card('k', 'PT_NOBODY')"); card, nobody = cur.fetchone()
             cur.execute("select has_function_privilege('anon', 'public.company_card(text, text)', 'execute')"); public = cur.fetchone()[0]
             c.rollback()

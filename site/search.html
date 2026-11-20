@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v128 2026-11-20";
+  const CLIENT = "lantern v129 2026-11-20";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -610,6 +610,15 @@
       ul.append(el("li", null, `${t.type} (${t.n})${bits.length ? " · " + bits.join(" · ") : ""}`));
     }
     card.append(ul);
+    // v129: when the main reports came out, from the dates the library holds (a filing date or the date the report states)
+    const pubs = (c.published || []).slice(0, 10), asksWhen = /\b(when|publish\w*|release\w*|cu[aá]ndo|publica\w*)\b/i.test($("q").value);
+    if (pubs.length) {
+      const day = p => { const [y, m, d] = String(p.date).slice(0, 10).split("-").map(Number); const mon = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][m - 1]; return p.precision === "day" ? `${d} ${mon} ${y}` : `${mon} ${y}`; };
+      card.append(el("p", null, "When its main reports came out:"));
+      const pl = document.createElement("ul"); pl.style.cssText = "margin:4px 0 6px 18px;padding:0";
+      for (const p of pubs) pl.append(el("li", null, `${p.year} ${p.type} · ${day(p)}`));
+      card.append(pl);
+    } else if (asksWhen) card.append(el("p", null, "The library holds no publication date for this company's main reports."));
     const g = gapsSeen.get(id), miss = g ? gapWords(g) : [];
     if (miss.length) card.append(el("p", null, `Not in the library: ${miss.join(" · ")}.`));
     card.append(el("p", null, "Every document is listed below, newest first."));
@@ -1603,7 +1612,7 @@
   // v108: "what do you have on Nike", "show me everything from Yandex", "which years are covered": the documents are
   // meant though no word for them is said (anything, everything, all of it, the years covered).
   const CATALOGUE_NOUNS = new Set("report reports source sources document documents disclosure disclosures publication publications file files library catalogue catalog informe informes documento documentos fuente fuentes publicaciones anything everything something coverage covered algo todo".split(" "));
-  const CATALOGUE_FILLER = new Set("what which do does did you we have has hold holds held are is there the a an of for and or all list show me available any in on by from your our its their about with years year got can i see find get que qué cuales cuáles hay tienes tenemos tiene de para y los las el la lista todos todas disponibles sobre".split(" "));
+  const CATALOGUE_FILLER = new Set("what which do does did you we have has hold holds held are is there the a an of for and or all list show me available any in on by from your our its their about with years year got can i see find get when publish publishes published release releases released key main latest come comes out date dates cuando cuándo publica publican que qué cuales cuáles hay tienes tenemos tiene de para y los las el la lista todos todas disponibles sobre".split(" "));
   // The names of the broad topics (find_topics), loaded once. topicNorm is the database's topic_norm: lower case, no
   // accents, no punctuation, without the words that only frame a request.
   // v108: the names of the taxonomy's metrics too (find_metric_names: "CEO", "headquarters", "number of employees",

@@ -45,6 +45,16 @@ class UseCases(unittest.TestCase):
                 wrong.append(f"{case['typed']!r}: no document type read")
         self.assertEqual(wrong, [])
 
+    def test_when_a_company_publishes_is_a_question_about_the_library(self):
+        """v129: "when does X publish key reports" was searched as words inside the reports."""
+        name = CASES["companies"][0]["name"] if isinstance(CASES["companies"][0], dict) else CASES["companies"][0]
+        got = run_page([{"typed": t} for t in (f"when does {name} publish key reports", f"when are the {name} reports released?", f"{name} publication dates",
+                                              f"when does {name} publish its scope 3 emissions", f"{name} key risks")])
+        self.assertEqual([g["intent"] for g in got[:3]], ["catalogue"] * 3)
+        self.assertNotEqual(got[3]["intent"], "catalogue"); self.assertNotEqual(got[4]["intent"], "catalogue")       # a subject is asked: not the library
+        self.assertIn("'published', coalesce(pubs, '[]'::jsonb)", open(os.path.join(os.path.dirname(HERE), "supabase", "search.sql"), encoding="utf-8").read())
+        self.assertIn("When its main reports came out:", PAGE)
+
     def test_the_word_year_before_the_year_typed_is_not_searched(self):
         """v128: "steel production of X in year 2023" required the word "year" on the page."""
         name = CASES["companies"][0]["name"] if isinstance(CASES["companies"][0], dict) else CASES["companies"][0]
