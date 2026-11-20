@@ -2445,10 +2445,29 @@ create or replace function public.company_card(key text, company text) returns j
 language plpgsql stable security definer
 set search_path = public
 as $$
+declare
+  pubs jsonb;
 begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
   end if;
+  -- When the main reports came out (20 Nov 2026, from a real question: "when does X publish key reports" was
+  -- searched as words inside the reports and answered by a model from a board approval date). The library holds
+  -- the date for many of them (pub_dates.py: a regulator's filing date, or the date the document states), copied
+  -- every night into public.library. The last five reporting years, one line a report; no date, no line.
+  begin
+    select jsonb_agg(jsonb_build_object('year', x.year, 'type', x.doc_type, 'date', x.pub_date, 'precision', x.prec, 'source', x.src) order by x.pub_date desc)
+      into pubs
+      from (select distinct on (d0.year, d0.doc_type) d0.year, d0.doc_type, l.fields ->> 'pub_date' as pub_date,
+                   l.fields ->> 'pub_date_precision' as prec, l.fields ->> 'pub_date_source' as src
+              from public.documents d0 join public.library l on l.library_id = d0.library_id
+             where d0.wba_id = $2 and d0.year >= extract(year from now())::int - 5
+               and d0.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Climate Report', '10K Form', 'Registration Document')
+               and (l.fields ->> 'pub_date') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+             order by d0.year, d0.doc_type, l.fields ->> 'pub_date') x;
+  exception when undefined_table then
+    pubs := null;
+  end;
   return (
     with d as (
       select distinct on (d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)))
@@ -2469,7 +2488,8 @@ begin
       'first', (select min(d.year) from d), 'last', (select max(d.year) from d),
       'types', (select jsonb_agg(jsonb_build_object('type', t.doc_type, 'n', t.n, 'years_read', to_jsonb(t.years_read), 'years_unread', to_jsonb(t.years_unread), 'undated', t.undated)
                                  order by coalesce(array_position(array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Climate Report', '10K Form'], t.doc_type), 99), t.n desc, t.doc_type)
-                  from t)) end);
+                  from t),
+      'published', coalesce(pubs, '[]'::jsonb)) end);
 end;
 $$;
 revoke all on function public.company_card(text, text) from public;
