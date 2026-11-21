@@ -24,6 +24,9 @@ create extension if not exists btree_gin with schema extensions;
 create extension if not exists fuzzystrmatch with schema extensions;
 """
 
+TESTERS = ["tester@worldbenchmarkingalliance.org", "ana@worldbenchmarkingalliance.org", "e.owner@worldbenchmarkingalliance.org",
+           "someone.else@worldbenchmarkingalliance.org"]
+
 
 def table_ddl():
     """The create-table statements kept inside the loaders (companies, scores): the search functions read them."""
@@ -57,6 +60,8 @@ def install(conn):
     cur.execute("set search_path = public, extensions")
     cur.execute("create index if not exists pages_search on public.pages using gin (words, year, doc_type, wba_id)")
     cur.execute(L.guard_sql(open(os.path.join(ROOT, "supabase", "search.sql"), encoding="utf-8").read()))
+    # the addresses the tests sign in with: only a listed address may search (no mail domain is let in by itself)
+    cur.execute("insert into public.search_access (email) select e from unnest(%s::text[]) e on conflict do nothing", (TESTERS,))
     conn.commit()
 
 

@@ -90,6 +90,16 @@ def test_scores_for_one_company_with_places_counted():
     assert "public.search_key_name(key) is null" in sc and "array_length(ids, 1), 0) <> 1" in sc
     assert "'industry_rank'" in sc and "'areas'" in sc and "to_regclass('public.company_scores') is null" in sc
     assert "from public.published_benchmarks pb where pb.benchmark_id = s.benchmark_id" in sc      # the published ones only
+    assert "if not public.survey_option('card_scores') then" in sc                                # and only while the option is on
+    assert "('card_scores', false," in SQL and "WBA benchmarks" not in PAGE
+
+
+def test_only_a_listed_address_signs_in():
+    rule = SQL[SQL.index("create or replace function public.email_may_search("):SQL.index("create or replace function public.can_search(")]
+    body = rule[:rule.index("-- Once, on the day")]
+    assert "like '%@" not in body and "from public.search_access a" in body               # no mail domain is let in by itself
+    assert "where name = 'domain_rule_off'" in rule and "to_regclass('auth.users') is not null" in rule   # those already in were listed, once
+    assert "WBA email" not in PAGE and "WBA address" not in PAGE and "worldbenchmarkingalliance" not in PAGE
 
 
 def test_ask_is_signed_limited_and_keeps_the_key_out_of_the_page():
@@ -451,7 +461,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v129 2026-11-20";' in PAGE
+    assert 'const CLIENT = "lantern v130 2026-11-21";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
