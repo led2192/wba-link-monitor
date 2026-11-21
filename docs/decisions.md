@@ -958,3 +958,12 @@ What is different in the lane: no sweep of the 330,000 rows (the rows are read b
 What stays as it was: the file is read from the library row's attachment, so the lane starts after `browser_uploads.py` made the row; a document outside the meaning index's scope (not a main report, or before 2024) is found by its words only.
 Rejected: reading the text in the browser extension (two readers of PDFs to keep equal); a database trigger that calls a worker (nothing on the server listens, by design: only port 22 is open).
 
+
+## What the page says comes from the documents and from its own users (21 Nov 2026, owner)
+Three things that came from outside the documents left the page on one day, each behind a switch rather than deleted: a whole mail domain as a way in (`email_may_search` reads the list `search_access` only), the benchmark results on the company card (option `card_scores`), and the validated answers (option `validated_answers`, read through `truth_rows()`). All three options are off.
+
+Why: lantrNa answers from public documents and from what its own users confirmed on the page. A figure it shows should be traceable to a page a person can open.
+
+What is lost with `validated_answers` off: the line "right N% of the time" on a value's card, and the control cards that kept the review game honest. What stays: facts a person confirmed on an answer still serve the next answer (`ask_facts`, verdict right); the evaluation scripts still read their own copy of the validated answers and are not part of the page.
+
+Rejected: deleting the tables (not reversible, and the choice of what may be kept is not settled); leaving the measured share and hiding only its source (a number nobody can check).

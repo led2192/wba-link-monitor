@@ -1298,6 +1298,21 @@ create index if not exists value_reviews_version on public.value_reviews (versio
 create table if not exists public.value_truth (
   wba_id text not null, attribute text not null, year int not null, value double precision not null,
   loaded timestamptz not null default now(), primary key (wba_id, attribute, year));
+-- The validated answers as the page's functions may use them: every row while the option validated_answers is on,
+-- none while it is off (off since 21 Nov 2026, the owner: what the page says comes from the documents and from
+-- what its own users confirmed). With it off there is no measured share on a value's card and no control card in
+-- the review game; the table and its nightly writing stay as they were. In plpgsql, so that it can stand before
+-- survey_option and does not hold the table.
+insert into public.search_options (name, is_on, note) values ('validated_answers', false, 'validated answers feed the measured share on a value''s card and the control cards of the review game (off since 21 Nov 2026)') on conflict (name) do nothing;
+create or replace function public.truth_rows() returns table (wba_id text, attribute text, year int, value double precision)
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if public.survey_option('validated_answers') then
+    return query select t.wba_id, t.attribute, t.year, t.value from public.value_truth t;
+  end if;
+end $$;
+revoke all on function public.truth_rows() from public, anon, authenticated;
 create table if not exists public.value_confidence (
   attribute text not null, evidence text not null, n int not null, good int not null, primary key (attribute, evidence));
 alter table public.value_confidence enable row level security;
@@ -1320,7 +1335,7 @@ begin
          judged as (select b.attribute, public.evidence_group(b.docs, t.variants) as evidence,
                            (abs(b.value - tr.value) / nullif(abs(tr.value), 0) <= 0.005) as good
                     from best b join tot t using (wba_id, attribute, year)
-                    join public.value_truth tr on tr.wba_id = b.wba_id and tr.attribute = b.attribute and tr.year = b.year
+                    join public.truth_rows() tr on tr.wba_id = b.wba_id and tr.attribute = b.attribute and tr.year = b.year
                     where tr.value <> 0)
     select attribute, evidence, count(*)::int, count(*) filter (where good)::int from judged group by 1, 2
     union all
@@ -1413,7 +1428,7 @@ declare
   vid text := version_id;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to review' using errcode = '42501';
+    raise exception 'sign in with a listed address to review' using errcode = '42501';
   end if;
   if verdict not in ('ok', 'wrong', 'unsure') then
     raise exception 'verdict must be ok, wrong or unsure' using errcode = '22023';
@@ -1474,7 +1489,7 @@ declare
   co text := btrim(company);
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to add a value' using errcode = '42501';
+    raise exception 'sign in with a listed address to add a value' using errcode = '42501';
   end if;
   if kind not in ('number', 'yes_no', 'choice') then
     raise exception 'kind must be number, yes_no or choice' using errcode = '22023';
@@ -1614,7 +1629,7 @@ declare
   r record;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to add a company' using errcode = '42501';
+    raise exception 'sign in with a listed address to add a company' using errcode = '42501';
   end if;
   if length(nm) < 2 or length(nm) > 120 then
     raise exception 'the company''s name, 2 to 120 characters' using errcode = '22023';
@@ -2137,7 +2152,7 @@ declare
   done int;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -2268,7 +2283,7 @@ declare
   who text := lower(auth.jwt() ->> 'email');
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -2334,7 +2349,7 @@ declare
   words text := nullif(btrim(regexp_replace(coalesce(note, ''), '\s+', ' ', 'g')), '');
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -3194,7 +3209,7 @@ declare
   whole jsonb;
 begin
   if who is null or not (who like 'link:%' or public.email_may_search(who)) then
-    raise exception 'sign in with a WBA address to ask' using errcode = '42501';
+    raise exception 'sign in with a listed address to ask' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -3420,7 +3435,7 @@ declare
   facts jsonb := '[]'::jsonb;
 begin
   if who is null or not (who like 'link:%' or public.email_may_search(who)) then
-    raise exception 'sign in with a WBA address to ask' using errcode = '42501';
+    raise exception 'sign in with a listed address to ask' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -5280,7 +5295,7 @@ declare
   made int;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to ask' using errcode = '42501';
+    raise exception 'sign in with a listed address to ask' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -5819,7 +5834,7 @@ declare
   n int;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to add a source' using errcode = '42501';
+    raise exception 'sign in with a listed address to add a source' using errcode = '42501';
   end if;
   -- a company of the list, with or without documents yet (11 Nov 2026: a company added that day had none, and
   -- its first links were refused)
@@ -5890,7 +5905,7 @@ declare
   new_id bigint;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to ask for a scan' using errcode = '42501';
+    raise exception 'sign in with a listed address to ask for a scan' using errcode = '42501';
   end if;
   if co = '' or not (exists (select 1 from public.documents d where d.wba_id = co)
                      or exists (select 1 from public.companies c where c.wba_id = co)) then
@@ -5927,7 +5942,7 @@ declare
   u text := split_part(btrim(coalesce(url, '')), '#', 1);
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   return (select jsonb_build_object('status', p.status, 'result', p.result, 'at', p.at, 'done_at', p.done_at, 'mine', p.reviewer = who)
             from public.page_scans p where p.url = u order by p.at desc limit 1);
@@ -5971,7 +5986,7 @@ language sql stable security definer set search_path = public
 as $$
   with rv as (select r.reviewer, r.verdict, r.seconds,
                      (select public.control_verdict(vv.value, t.value) from public.value_versions vv
-                      join public.value_truth t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
+                      join public.truth_rows() t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
                       where vv.version_id = r.version_id) as expected
               from public.value_reviews r where r.verdict in ('ok', 'wrong')),
        pts as (select u.reviewer, greatest(sum(u.p), 0) as points, sum(u.r) as reviews, sum(u.c) as checked, sum(u.g) as good
@@ -6527,11 +6542,11 @@ declare
   cand text;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to review' using errcode = '42501';
+    raise exception 'sign in with a listed address to review' using errcode = '42501';
   end if;
   if random() < 0.2 then                                     -- one card in five is a control card, when there is one left for this person
     select vv.* into p from public.value_versions vv
-      join public.value_truth t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
+      join public.truth_rows() t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
       where public.control_verdict(vv.value, t.value) is not null
         and not exists (select 1 from public.value_reviews r where r.version_id = vv.version_id and r.reviewer = who)
       order by random()
@@ -6610,7 +6625,7 @@ declare
   who text := lower(auth.jwt() ->> 'email');
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   return jsonb_build_object(
     'reviewer', who,
@@ -6770,7 +6785,7 @@ declare
   who text := lower(auth.jwt() ->> 'email');
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+    raise exception 'sign in with a listed address to send documents' using errcode = '42501';
   end if;
   -- the companies, and the ones this person has asked for that are not companies yet (REQ_<request>): the window
   -- was closed and opened again, and the company just asked for was no longer there to choose (11 Nov 2026)
@@ -6843,7 +6858,7 @@ declare
   row public.browser_uploads;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+    raise exception 'sign in with a listed address to send documents' using errcode = '42501';
   end if;
   -- a company of the list, or one this person has asked for (REQ_<request>): its documents wait in the storage
   -- until a person approves the company, so nothing has to be downloaded twice
@@ -6987,7 +7002,7 @@ declare
   again boolean;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to send a page' using errcode = '42501';
+    raise exception 'sign in with a listed address to send a page' using errcode = '42501';
   end if;
   select coalesce((select c.name from public.companies c where c.wba_id = co), (select max(d.company) from public.documents d where d.wba_id = co)) into name;
   if co = '' or name is null then
@@ -7036,7 +7051,7 @@ declare
   co text := btrim(coalesce(company, ''));
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+    raise exception 'sign in with a listed address to send documents' using errcode = '42501';
   end if;
   if coalesce(array_length(urls, 1), 0) > 400 then
     raise exception 'four hundred links at most' using errcode = '22023';

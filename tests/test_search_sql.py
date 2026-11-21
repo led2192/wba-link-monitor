@@ -94,6 +94,13 @@ def test_scores_for_one_company_with_places_counted():
     assert "('card_scores', false," in SQL and "WBA benchmarks" not in PAGE
 
 
+def test_validated_answers_are_used_only_while_their_option_is_on():
+    assert "join public.value_truth" not in SQL                                              # every reader goes through truth_rows()
+    assert SQL.count("join public.truth_rows() t") == 3 and "('validated_answers', false," in SQL
+    fn = SQL[SQL.index("create or replace function public.truth_rows()"):SQL.index("revoke all on function public.truth_rows()")]
+    assert "if public.survey_option('validated_answers') then" in fn and "sign in with a WBA address" not in SQL
+
+
 def test_only_a_listed_address_signs_in():
     rule = SQL[SQL.index("create or replace function public.email_may_search("):SQL.index("create or replace function public.can_search(")]
     body = rule[:rule.index("-- Once, on the day")]
@@ -194,7 +201,7 @@ def test_the_review_game_counts_right_answers():
 
 def test_confidence_is_measured_against_validated_answers():
     conf = SQL[SQL.index("create or replace function public.refresh_value_confidence()"):SQL.index("create or replace function public.find_values(")]
-    assert "join public.value_truth tr" in conf and "<= 0.005) as good" in conf
+    assert "join public.truth_rows() tr" in conf and "<= 0.005) as good" in conf
     assert "where c.n >= 20" in conf                                                      # a group too small falls back to a wider one
     assert "revoke all on function public.confidence_of(text, int, int) from public, anon, authenticated;" in conf
     assert "'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants)" in SQL
