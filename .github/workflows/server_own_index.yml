@@ -1,11 +1,21 @@
 # Passages by meaning for the documents kept on the server only: policies, codes of conduct and human rights
 # policies of every year (server_own_index.py, docs/server.md). Computed on the server's processors and written to
-# the server's database; Supabase is only read. Manual. Not searched until "live" is switched on.
+# the server's database; Supabase is only read. Not searched until "live" is switched on. Started by hand, and by the
+# clock on the server twice a day for each of three slices (server/clock.json, 21 Nov 2026): a run stops after its
+# minutes and the next continues, and once everything is in, a run finds nothing left and ends in a minute, so new
+# policies are taken in the day they are read.
 name: Server own index
 
 on:
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "what the clock starts twice a day for each slice: continue with commit (server/clock.json)"
+        type: boolean
+        default: false
+      threads:
+        description: "processor threads for the model (three slices at once: 5 each on the 16 cores)"
+        default: "5"
       commit:
         description: "embed and write (unticked: say what is left, embed nothing)"
         type: boolean
@@ -69,11 +79,14 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
-          QA_COMMIT: ${{ inputs.commit && 'true' || 'false' }}
+          QA_COMMIT: ${{ (inputs.commit || inputs.as_scheduled) && 'true' || 'false' }}
           LIMIT: ${{ inputs.limit || '0' }}
           MINUTES: ${{ inputs.minutes || '660' }}
           PARTITION: ${{ inputs.partition }}
-          COMMIT: ${{ inputs.commit }}
+          COMMIT: ${{ (inputs.commit || inputs.as_scheduled) && 'true' || 'false' }}
+          OMP_NUM_THREADS: ${{ inputs.threads || '5' }}
+          MKL_NUM_THREADS: ${{ inputs.threads || '5' }}
+          TOKENIZERS_PARALLELISM: "false"
           REMAINING: ${{ inputs.remaining }}
           LIVE: ${{ inputs.live }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

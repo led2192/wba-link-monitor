@@ -74,6 +74,10 @@ class OwnIndex(unittest.TestCase):
 
     def test_the_workflow_is_manual_on_the_server_and_the_search_shows_the_page(self):
         self.assertIn("workflow_dispatch", FLOW); self.assertNotIn("schedule:", FLOW); self.assertNotIn("pull_request", FLOW)
+        self.assertIn("as_scheduled:", FLOW); self.assertIn("OMP_NUM_THREADS", FLOW)
+        import json
+        slices = [e["inputs"]["partition"] for e in json.load(open(os.path.join(ROOT, "server", "clock.json"))) if e["workflow"] == "server_own_index.yml"]
+        self.assertEqual(slices, ["0/3", "1/3", "2/3"])                           # the three slices cover every document once
         self.assertIn("runs-on: [self-hosted, lantern]", FLOW); self.assertIn("alter role lantern_own nologin password null", FLOW)
         self.assertIn("grant lantern_load to lantern_own", FLOW)
         pages = SQL[SQL.index("create or replace function public.meaning_remote_pages("):SQL.index("revoke all on function public.meaning_remote_pages(")]
