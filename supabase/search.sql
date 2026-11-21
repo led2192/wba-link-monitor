@@ -556,6 +556,11 @@ create or replace function public.key_name_checked(key text) returns text
     if who is null or not public.survey_option('link_browsers') then
       return who;
     end if;
+    -- A page left open since before 21 Nov sends the key alone, and a refusal makes that page forget its key. Until
+    -- 28 Nov 2026 the key alone still passes, so that an open tab is reloaded in its own time; after it, it does not.
+    if dev is null then
+      return case when now() < coalesce(nullif(current_setting('lantern.link_grace', true), '')::timestamptz, timestamptz '2026-11-28 00:00+00') then who end;
+    end if;
     if dev is not null and exists (select 1 from public.key_browsers b where b.name = who and b.allowed
                                      and b.device_hash = encode(extensions.digest(dev, 'sha256'), 'hex')) then
       return who;
@@ -811,6 +816,9 @@ create or replace function public.type_words(doc_type text) returns text
 create table if not exists public.search_options (name text primary key, is_on boolean not null default false, note text, changed timestamptz not null default now());
 alter table public.search_options enable row level security;
 insert into public.search_options (name, is_on, note) values ('link_browsers', false, 'a link works only in the browsers the owner allowed for it (the first ones up to its limit are allowed as they arrive)') on conflict (name) do nothing;
+-- On since 21 Nov 2026 (the owner: "cuando quieras"). Only the owner's browser was noted by then and the people with a
+-- link had not come back yet: each one's first two browsers are let in as they arrive.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 21 Nov 2026)' where name = 'link_browsers' and not is_on and note not like '%on since%';
 insert into public.search_options (name, is_on, note) values ('pairs', false, 'ask page_pairs first for quoted phrases and neighbouring words') on conflict (name) do nothing;
 -- 'company_first' (13 Nov 2026): a question of four words or more within one company reads that company's pages and
 -- checks the words on them, in place of asking the word index. search_timing.py, run 43492865629: "level 1" (every

@@ -217,12 +217,17 @@ class AgainstPostgres(unittest.TestCase):
             enter = lambda d: c.execute("select public.link_enter('k1', %s, 'Chrome on Windows <x>')", (d,)).fetchone()[0]
             name = lambda k: c.execute("select public.key_name_checked(%s)", (k,)).fetchone()[0]
             a, b2, c3 = "a" * 20, "b" * 20, "c" * 20
+            self.assertEqual(c.execute("select is_on from public.search_options where name = 'link_browsers'").fetchone(), (True,))   # on as installed
             self.assertEqual((enter(a)["ok"], enter(b2)["ok"]), (True, True))
+            c.execute("select set_config('lantern.link_browsers', 'off', false)")
             third = enter(c3); self.assertEqual((third["ok"], third["waiting"], third["enforced"]), (True, False, False))   # noted, not refused
             self.assertEqual(c.execute("select allowed, label from public.key_browsers where name = 'pat' order by id").fetchall(),
                              [(True, "Chrome on Windows x"), (True, "Chrome on Windows x"), (False, "Chrome on Windows x")])
             self.assertEqual((name("k1"), name("k1~" + c3), name("wrong~" + a)), ("pat", "pat", None))                       # option off: the key alone decides
             c.execute("select set_config('lantern.link_browsers', 'on', false)")
+            c.execute("select set_config('lantern.link_grace', '2999-01-01', false)")
+            self.assertEqual((name("k1"), name("k1~" + c3)), ("pat", None))                 # until the day set, a page left open (the key alone) still passes
+            c.execute("select set_config('lantern.link_grace', '2000-01-01', false)")
             self.assertEqual((name("k1~" + a), name("k1~" + c3), name("k1"), name("k1~" + "z" * 20)), ("pat", None, None, None))
             self.assertEqual((enter(c3)["waiting"], enter(a)["ok"], enter("short")["ok"]), (True, True, False))
             c.execute("select public.admin_link_browser_set('x', (select id from public.key_browsers where name = 'pat' and not allowed), true)")
@@ -233,7 +238,7 @@ class AgainstPostgres(unittest.TestCase):
             with self.assertRaises(Exception):
                 c.execute("select public.link_enter('nokey', %s)", (a,))
             c.rollback() if not c.autocommit else None
-            c.execute("select set_config('lantern.link_browsers', '', false)")
+            c.execute("select set_config('lantern.link_browsers', '', false)"); c.execute("select set_config('lantern.link_grace', '', false)")
             # the validated answers reach the page's functions only while their option is on (off as installed)
             c.execute("insert into public.value_truth (wba_id, attribute, year, value) values ('WBA1', 'X', 2024, 5) on conflict do nothing")
             rows = lambda: c.execute("select count(*) from public.truth_rows()").fetchone()[0]

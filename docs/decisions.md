@@ -971,7 +971,7 @@ Rejected: deleting the tables (not reversible, and the choice of what may be kep
 ## A link is tied to browsers, not to a password (21 Nov 2026, owner: nobody should be able to pass a link on)
 A key in a link can always be copied. What can be done is to see where it is used and to refuse a new place. The page gives each browser a random id, kept in that browser, and sends it with the key. The first browsers of a link are allowed as they arrive, up to the link's limit (2; the owner's link 5; changed per link in Admin). One more waits until the owner allows it. Table `key_browsers`, functions `link_enter`, `key_name_checked`, `admin_link_browsers`, `admin_link_browser_set`.
 
-It ships as the option `link_browsers`, off: browsers are noted from the first day and nobody is refused, so that when it is switched on the people already using a link are already in and the owner has seen the list first. The shared team link needs a higher limit or to be retired before the switch.
+It shipped as the option `link_browsers`, off, and was switched on the same day (the owner; only his own browser had been noted, the three people with a link had not come back, and the shared team link had not been used for a week). The key alone, as a page loaded before the change sends it, passes until 28 Nov 2026. The shared team link needs a higher limit or to be retired before the switch.
 
 Limits of it: a person who copies the link and the id out of the browser's storage gets in; clearing the browser's data makes it a new browser. It stops casual forwarding, which is the case in question.
 
