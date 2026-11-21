@@ -212,6 +212,8 @@ class AgainstPostgres(unittest.TestCase):
             c.execute("insert into public.search_access (email) values ('someone@example.com')")
             self.assertTrue(may("SOMEONE@example.com"))
             self.assertFalse(may("other@example.com"))
+            self.assertEqual(c.execute("select active from public.search_keys where name = 'team'").fetchone(), (False,))       # the shared link is retired
+            self.assertEqual(c.execute("select listed from public.search_access_moves where name = 'team_link_off'").fetchone(), (1,))
             # a link and its browsers: the first two are let in as they arrive, a third waits; refused only with the option on
             c.execute("insert into public.search_keys (name, key_hash) values ('pat', encode(extensions.digest('k1', 'sha256'), 'hex')) on conflict do nothing")
             enter = lambda d: c.execute("select public.link_enter('k1', %s, 'Chrome on Windows <x>')", (d,)).fetchone()[0]
