@@ -105,7 +105,7 @@ class Propose(unittest.TestCase):
         f = P.model_row("PT_01360", "GMC_02526.1", {"name": "Total number of employees", "unit_family": "count"}, 2024,
                         got, {"id": "recDoc", "url": "", "label": "x"}, {}, None, NOW)
         self.assertIsNone(f["source_url"])
-        self.assertEqual(f["evidence_link"], "https://led2192.github.io/wba-link-monitor/?doc=PT_01360-154b2a9cfe"
+        self.assertEqual(f["evidence_link"], "https://lantrna.com/index.html?doc=PT_01360-154b2a9cfe"
                                              "&page=2&q=%2230%2C100%22&alt=employees")
         self.assertIsNone(P.evidence_url("", 2, "1"))
 

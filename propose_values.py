@@ -48,7 +48,7 @@ MAX_NEW = 20000                     # rows a run may add (the base holds at most
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-SEARCH_PAGE = "https://led2192.github.io/wba-link-monitor/"   # the evidence search page (site/index.html)
+SEARCH_PAGE = "https://lantrna.com/index.html"   # (lantrna.com/ alone opens search.html) the evidence search page (site/index.html)
 DEFAULT_YEARS = "2018-"              # 2018 to last year: the years WBA's benchmarks and trends look at
 
 
