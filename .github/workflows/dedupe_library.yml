@@ -28,14 +28,15 @@ concurrency:
 
 jobs:
   dedupe:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lantern]      # on lantrNa's server since the move of 21 Nov 2026 (GitHub's machines before)
     timeout-minutes: 120
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
       - run: pip install -r requirements.txt
       - name: Title, date and label documents from their file name and cover page
         # Rows whose address says nothing (…/media/download/3162) were left 'unresolved' by the URL
