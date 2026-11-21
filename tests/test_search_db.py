@@ -1232,6 +1232,12 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(len(cur.fetchall()), 2)
             cur.execute(q, (None, None, None, None, None, 5))
             self.assertEqual(cur.fetchall(), [])
+            # a document whose passages are kept on the server only: no passage here, the page's own text is shown
+            cur.execute("insert into public.pages (library_id, page, body) values ('RC', 1, 'the policy as its page prints it')")
+            cur.execute(q, (remote, None, None, None, None, 10))
+            got = cur.fetchall()
+            self.assertEqual((got[0][0], got[0][1], got[0][3]), ("RC", 1, "the policy as its page prints it"))
+            self.assertEqual([(g[0], g[1]) for g in got[1:]], [("RA", 1), ("RB", 9), ("RA", 2), ("RA", 3)])
             c.rollback()
 
     def test_a_survey_asks_each_company_and_counts_honestly(self):

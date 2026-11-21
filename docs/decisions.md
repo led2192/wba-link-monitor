@@ -976,3 +976,12 @@ It shipped as the option `link_browsers`, off, and was switched on the same day 
 Limits of it: a person who copies the link and the id out of the browser's storage gets in; clearing the browser's data makes it a new browser. It stops casual forwarding, which is the case in question.
 
 Rejected: reading the machine's characteristics to recognise it (invasive, and the terms would have to say so); a sign-in by email for everyone (the link without sign-in is what made people use the page); one browser per link (a person has a laptop and a phone).
+
+## Policies and codes are searched by meaning from the server only (21 Nov 2026, owner)
+The index of meaning held the main reports from 2024 on. The owner asked for policies, codes of conduct and human rights policies of every year. Their passages (about 1.7 million) do not fit Supabase's disk (127 of 148 GB used), so they are computed on the server and kept there; Supabase is only read.
+
+They ship not live, per the rule that a change to what the search finds runs beside the current one first: the exam before, the switch, the exam after, and back off if any kind of question loses more than 3 points.
+
+Known cost: the line shown under such a result is the start of the page, not the passage that matched, because the passage's text is not stored. If that reads badly in use, the passage's place in the page can be stored with its key (two numbers a passage).
+
+Rejected: a larger Supabase disk (a monthly cost that grows with every document); a second index in Supabase limited to recent policies (the owner asked for all years); storing the passages' text on the server too (the page's text is already in Supabase and is what the reader is given).
