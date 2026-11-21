@@ -51,6 +51,53 @@ ID = re.compile(r"^[A-Za-z0-9_.:\- ]{1,64}$")
 TYPE = re.compile(r"^[A-Za-z0-9_.,&/()' \-]{1,80}$")
 
 
+DOCS_DIR = os.environ.get("MEANING_DOCS", "/srv/lantern/docs")     # the project's documentation, copied here by the workflow Server docs
+DOC_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,60}\.md$", re.I)
+MAX_DOC = 600 * 1024
+
+
+def docs_answer(body, folder=None):
+    """The documentation kept on the server, for the owner's panel. {} lists the documents (name, first heading, size,
+    time changed); {"name": "x.md"} gives one. Only a plain file name of the folder is ever opened."""
+    folder = folder or DOCS_DIR
+    try:
+        j = json.loads(body or b"{}")
+    except (ValueError, UnicodeDecodeError):
+        raise Refused()
+    if not isinstance(j, dict) or set(j) - {"name"}:
+        raise Refused()
+    name = j.get("name")
+    if name is None:
+        out = []
+        try:
+            listed = sorted(os.listdir(folder))
+        except OSError:
+            listed = []
+        for n in listed:
+            path = os.path.join(folder, n)
+            if not DOC_NAME.match(n) or not os.path.isfile(path) or os.path.islink(path):
+                continue
+            title = n
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        if line.startswith("# "):
+                            title = line[2:].strip()[:120]
+                            break
+                st = os.stat(path)
+                out.append({"name": n, "title": title, "size": st.st_size, "changed": int(st.st_mtime)})
+            except OSError:
+                continue
+        return {"docs": out}
+    if not isinstance(name, str) or not DOC_NAME.match(name):
+        raise Refused()
+    path = os.path.join(folder, name)
+    if os.path.islink(path) or not os.path.isfile(path):
+        return {"name": name, "missing": True}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return {"name": name, "text": fh.read(MAX_DOC)}
+
+
 class Refused(Exception):
     """An input that is not exactly what the route takes."""
 
@@ -197,7 +244,7 @@ def handle(method, path, headers, body, *, pool, secrets, rate, schema, who="-",
         except Exception as e:
             log("health", type(e).__name__)
             return plain(503, "unavailable")
-    if path != "/near" or method != "POST":
+    if path not in ("/near", "/docs") or method != "POST":
         return plain(404, "not found")
     if not allowed(headers.get("Authorization"), secrets()):
         return plain(401, "not allowed")
@@ -205,6 +252,16 @@ def handle(method, path, headers, body, *, pool, secrets, rate, schema, who="-",
         return plain(429, "too many requests")
     if body is None:
         return plain(413, "too large")
+    if path == "/docs":                                  # the documentation, behind the same secret; the database is not touched
+        try:
+            got = docs_answer(body)
+        except Refused:
+            return plain(400, "bad request")
+        except Exception as e:
+            log("docs failed", type(e).__name__)
+            return plain(503, "unavailable")
+        log("docs", "one" if "text" in got or got.get("missing") else len(got.get("docs", [])))
+        return (200, "application/json", json.dumps(got, separators=(",", ":")).encode())
     try:
         args = parse(body)
     except Refused:
