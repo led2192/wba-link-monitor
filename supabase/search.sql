@@ -6329,7 +6329,11 @@ begin
   with near as materialized (
          select r ->> 0 as library_id, (r ->> 1)::int as page, (r ->> 2)::int as n, (r ->> 3)::real as dist
          from jsonb_array_elements(coalesce(remote, '[]'::jsonb)) r where jsonb_typeof(r) = 'array' and jsonb_array_length(r) = 4),
-       found as (select n.library_id, n.page, c.body, n.dist from near n join public.chunks c on c.library_id = n.library_id and c.page = n.page and c.n = n.n),
+       -- The passage's text is here for the main reports. For a document whose passages are kept on the server only
+       -- (policies and codes, server_own_index.py, 21 Nov 2026) there is no passage here: the page's own text is shown.
+       found as (select n.library_id, n.page, coalesce(c.body, (select left(p.body, 600) from public.pages p where p.library_id = n.library_id and p.page = n.page)) as body, n.dist
+                 from near n left join public.chunks c on c.library_id = n.library_id and c.page = n.page and c.n = n.n
+                 where c.body is not null or exists (select 1 from public.pages p where p.library_id = n.library_id and p.page = n.page)),
        pages as (select distinct on (f.library_id, f.page) f.library_id, f.page, f.body, f.dist from found f order by f.library_id, f.page, f.dist),
        kept as (select p.*, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url,
                        row_number() over (partition by p.library_id order by p.dist) as in_doc
