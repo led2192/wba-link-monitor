@@ -77,7 +77,7 @@ class OwnIndex(unittest.TestCase):
         self.assertIn("as_scheduled:", FLOW); self.assertIn("OMP_NUM_THREADS", FLOW)
         import json
         slices = [e["inputs"]["partition"] for e in json.load(open(os.path.join(ROOT, "server", "clock.json"))) if e["workflow"] == "server_own_index.yml"]
-        self.assertEqual(slices, ["0/3", "1/3", "2/3"])                           # the three slices cover every document once
+        self.assertEqual(slices, ["0/2", "1/2"])                                  # the slices cover every document once; two, so a runner stays free
         self.assertIn("runs-on: [self-hosted, lantern]", FLOW); self.assertIn("alter role lantern_own nologin password null", FLOW)
         self.assertIn("grant lantern_load to lantern_own", FLOW)
         pages = SQL[SQL.index("create or replace function public.meaning_remote_pages("):SQL.index("revoke all on function public.meaning_remote_pages(")]
