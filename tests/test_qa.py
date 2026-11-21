@@ -328,6 +328,50 @@ class SyncDeriveTests(unittest.TestCase):
         # different keys for the three facts
         self.assertEqual(len({qa.key(c, k, d) for c, d, k, s, _ in fails}), 3)
 
+    def test_type_changes_the_pipeline_made_are_not_corrections(self):
+        """Pipeline QA, 16 Nov 2026: 14,140 LABEL_CORRECTION rows on 10 Nov and 5,043 on 16 Nov, each a sure label
+        'changed by hand', written for type changes no person made."""
+        today = dt.date(2026, 11, 16)
+        base = {"library_id": "PT_01229-bc2a4f8767", "wba_id": "PT_01229", "company_name": "National Grid", "_id": "recN",
+                "document_url": "https://nationalgrid.com/half-year-2025.pdf", "created_time": "2026-07-01T00:00:00.000Z",
+                "cover_status": "ok", "doc_language": "English", "year": 2025, "page_count": 40}
+        # the address rule's type was snapshotted, then the AI field answered: not a person
+        f = dict(base, source_type="Company Presentations", robot_type="Company Presentations", source_type_check="Interim Reports")
+        fails, labels, patch, counts = qa_sync.derive_doc(f, today)
+        self.assertEqual([c for c, *_ in fails], [])
+        self.assertEqual(labels, [])
+        self.assertEqual(patch["robot_type"], "Interim Reports")
+        self.assertEqual(counts["type_change_first_model_type"], 1)
+        # short_reports.py set UNKNOWN on a one-page "Citi 2023 AR" (the AI's Annual Report had been snapshotted)
+        f = dict(base, company_name="Citigroup", source_type="", robot_type="Annual Report", source_type_check="UNKNOWN", page_count=1)
+        fails, labels, patch, counts = qa_sync.derive_doc(f, today)
+        self.assertEqual((fails, labels, patch.get("robot_type")), ([], [], "UNKNOWN"))
+        self.assertEqual(counts["type_change_short_rule"], 1)
+        # the same on a 40-page document is a person's call
+        f = dict(f, page_count=40)
+        self.assertEqual([(c, d, s) for c, d, k, s, _ in qa_sync.derive_doc(f, today)[0]], [("LABEL_CORRECTION", "type", "Low")])
+        # an analyst's flag (McCain's CSR programme reports, flag cleared, note kept) or a verified row: a person
+        f = dict(base, company_name="McCain Foods", source_type="Annual Report", robot_type="Annual Report",
+                 source_type_check="Social Reports", analyst_flag_note="This is annual report for their CSR project")
+        fails, labels, patch, _ = qa_sync.derive_doc(f, today)
+        self.assertEqual([(c, d, s) for c, d, k, s, _ in fails], [("LABEL_CORRECTION", "type", "Low")])
+        self.assertEqual((labels[0]["true_type"], labels[0]["robot_value"]), ("Social Reports", "Annual Report"))
+        self.assertNotIn("robot_type", patch)
+        f = dict(base, source_type="Annual Report", robot_type="Annual Report", source_type_check="Financial Statement", verified=True)
+        self.assertEqual([c for c, *_ in qa_sync.derive_doc(f, today)[0]], ["LABEL_CORRECTION"])
+        # the AI's earlier answer differed from the address and changed: may be a person, still a correction
+        f = dict(base, source_type="Annual Report", robot_type="Integrated Report", source_type_check="Annual Report")
+        self.assertEqual([c for c, *_ in qa_sync.derive_doc(f, today)[0]], ["LABEL_CORRECTION"])
+
+    def test_type_snapshot_waits_for_source_type_check(self):
+        today = dt.date(2026, 11, 16)
+        f = {"library_id": "PT_1-abc", "wba_id": "PT_1", "company_name": "Acme", "_id": "recD", "year": 2025,
+             "document_url": "https://acme.com/annual-report-2025.pdf", "created_time": "2026-11-15T00:00:00.000Z",
+             "cover_status": "ok", "doc_language": "English", "source_type": "Annual Report"}
+        self.assertNotIn("robot_type", qa_sync.derive_doc(f, today)[2])         # the address alone: no snapshot
+        f["source_type_check"] = "Integrated Report"
+        self.assertEqual(qa_sync.derive_doc(f, today)[2]["robot_type"], "Integrated Report")
+
     def test_analyst_flags(self):
         today = dt.date(2026, 10, 22)
         base = {"library_id": "PT_1-abc", "wba_id": "PT_1", "company_name": "Acme", "_id": "recD", "year": 2025,

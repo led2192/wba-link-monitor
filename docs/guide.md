@@ -291,7 +291,7 @@ A failure closes by itself: `resolved_silently` when it has not recurred for 30 
 
 ### 7.3 Where the labels come from
 - **Daily cards**: about 15 cards each weekday (`qa_sample.py`, 04:31 UTC): 5 high-stakes disagreements between the address and the AI, 3 non-English reports, 3 blind controls (the pipeline's answer is hidden, so accuracy is measured honestly), 2 new arrivals, 2 reserved for odd cases. Claude (Opus) labels all of them at 12:46 Madrid, reading blind controls without the pipeline's answer, and leaves about 5 for you (section 7.4).
-- **Corrections**: when you change a type or a title in the Disclosure Library, `qa_sync.py` records it as a label (`labelled_by` = correction).
+- **Corrections**: when you change a type or a title in the Disclosure Library, `qa_sync.py` records it as a label (`labelled_by` = correction). A type change is only taken for yours when a person can have made it: a change the pipeline made itself (the Airtable AI field answering after the address rule, the rule that types one- and two-page files UNKNOWN) is not. If you correct a type whose AI and address types agreed, tick `verified` on the row so that the correction is kept as a label.
 - **Source Library**: `sl_labels.py` matches the analysts' Source Library records to library rows holding the same file and writes the analyst's type and year as labels. 2025 labels count as sure (that cycle was reviewed); 2024 labels as not sure. A label is also marked not sure when the pipeline has strong contrary evidence. This is the largest source of truth: thousands of labels.
 
 ### 7.4 Checking Claude's answers (from 26 Oct 2026)

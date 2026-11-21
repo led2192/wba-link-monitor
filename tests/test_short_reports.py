@@ -29,7 +29,8 @@ class Select(unittest.TestCase):
     def test_the_record_of_what_it_was_is_written_before_airtable(self):
         src = open(S.__file__, encoding="utf-8").read()
         self.assertLess(src.index("insert into public.type_corrections"), src.index('airtable_request("PATCH"'))
-        self.assertIn('{"source_type_check": UNKNOWN}', src)                                   # the only field written
+        self.assertEqual(S.WRITE, {"source_type_check": "UNKNOWN", "robot_type": "UNKNOWN"})   # the only fields written
+        self.assertIn('"fields": WRITE}', src)
 
 
 if __name__ == "__main__":

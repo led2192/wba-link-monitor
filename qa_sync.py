@@ -21,7 +21,10 @@ What it derives (one row per distinct failure, keyed; see qa.py and the design d
     DOC_WRONG_ROW     any other discard_reason
     LABEL_CORRECTION  a robot_* snapshot that no longer matches the live value (a person changed it);
                       the same fact is written as a labels row (labelled_by correction); when an
-                      analyst had flagged the row, the label's reason says so
+                      analyst had flagged the row, the label's reason says so. Low: it records a fix
+                      already made. A type change the pipeline itself made (the AI field's first answer
+                      after an address-type snapshot, the short-reports rule) is not one: the snapshot
+                      moves to the new type and the run counts it (type_change_not_a_person)
     DOC_FLAGGED       analyst_flag set from the Analysts interface; detail = the kind of problem
                       (wrong_type, wrong_year, ...), message = analyst_flag_note. Report-shaped rows
                       flagged for type, year, company, scope or not-a-disclosure are High, the rest
@@ -35,6 +38,8 @@ What it derives (one row per distinct failure, keyed; see qa.py and the design d
 
 Snapshots (written to the Disclosure Library, --commit only): robot_type, robot_year, robot_title are
 filled on rows where they are blank and the live value exists, at most --snapshot-limit rows per run.
+robot_type is taken from source_type_check only (never from the address rule's source_type alone), and
+moves to the new source_type_check when the change was the pipeline's own (see type_change_not_a_person).
 Nothing else in the Disclosure Library is ever written by this script.
 
 Modes: dry run by default (prints the counts by code and severity, writes nothing anywhere);
@@ -45,6 +50,7 @@ import argparse, collections, datetime as dt, os, re, sys, time
 from urllib.parse import quote, urlsplit
 
 import qa
+from load_supabase import SHORT_PAGES
 from monitor_core import airtable_request, reg_domain
 
 API = "https://api.airtable.com/v0"
@@ -116,6 +122,32 @@ def year_of(f):
 
 def eff_type(f):
     return (f.get("source_type_check") or "").strip() or (f.get("source_type") or "").strip()
+
+
+def type_change_not_a_person(f, rt, kw, ai):
+    """Why a change of source_type_check away from the robot_type snapshot is not a person's correction,
+    or "" when it may be one. Since 16 Nov 2026 such a change is a correction (a failure row and a sure
+    label) only when it can be a person's: on 10 and 16 Nov about 19,000 changes made by the AI field and
+    by short_reports.py were recorded as corrections by hand and High failures.
+      short_rule: UNKNOWN on an unverified row of 1 or 2 pages, which is what short_reports.py writes
+                  (it now moves robot_type with it, so only rows written before that are caught here);
+      first_model_type: the snapshot was the address rule's own type (robot_type = source_type) and
+                  nothing says a person was there (no analyst flag or note, not verified). Before 16 Nov
+                  the snapshot was taken from the address when the AI field had not answered yet, so the
+                  AI field's first answer looked like a correction. A person's correction of a row whose
+                  address type the AI had confirmed is lost here unless the row is verified or flagged:
+                  the price of not taking thousands of model answers for people's.
+    """
+    if not (rt and ai and ai != rt):
+        return ""
+    if f.get("verified"):
+        return ""
+    if ai == "UNKNOWN" and 1 <= (f.get("page_count") or 0) <= SHORT_PAGES:
+        return "short_rule"
+    person = (f.get("analyst_flag") or "").strip() or (f.get("analyst_flag_note") or "").strip()
+    if kw and rt == kw and not person:
+        return "first_model_type"
+    return ""
 
 
 def report_shaped(f):
@@ -247,19 +279,26 @@ def derive_doc(f, today):
             if shaped:
                 failures.append(("TYPE_MISSING", detail, lid, "High",
                                  dict(ctx, stage="classify", message=f"language {lang or '?'}; cover {cs or 'not read'}")))
-    # snapshots: fill robot_* where blank and the live value exists
+    # snapshots: fill robot_* where blank and the live value exists. The type snapshot is the first
+    # source_type_check (the AI field's, a model's or a person's), never the address rule's type alone:
+    # a snapshot of the address type made the AI field's later first answer look like a person's
+    # correction (16 Nov 2026: 14,140 such rows on 10 Nov).
     title_live = ai_text(f.get("source_title")) or (f.get("auto_title") or "").strip()
     y = year_of(f)
-    if eff and not (f.get("robot_type") or "").strip():
-        patch["robot_type"] = eff
+    rt = (f.get("robot_type") or "").strip()
+    if ai and not rt:
+        patch["robot_type"] = ai
     if y and not (f.get("robot_year") or "").strip():
         patch["robot_year"] = str(y)
     if title_live and not (f.get("robot_title") or "").strip():
         patch["robot_title"] = title_live[:250]
-    # corrections: a snapshot that no longer matches the live value
-    rt = (f.get("robot_type") or "").strip()
-    if rt and ai and ai != rt:
-        failures.append(("LABEL_CORRECTION", "type", lid, "High",
+    # corrections: a snapshot that no longer matches the live value, when a person changed it
+    why_not = type_change_not_a_person(f, rt, kw, ai)
+    if why_not:
+        counts[f"type_change_{why_not}"] += 1
+        patch["robot_type"] = ai          # the pipeline's own new type becomes the snapshot
+    elif rt and ai and ai != rt:
+        failures.append(("LABEL_CORRECTION", "type", lid, "Low",
                          dict(ctx, stage="classify", message=f"robot {rt}; now {ai}")))
         labels.append({"label_id": f"{lid}|type|correction", "target": "document", "field": "type",
                        "stratum": "correction", "company_name": f.get("company_name"), "wba_id": f.get("wba_id"),
@@ -272,7 +311,7 @@ def derive_doc(f, today):
     curated = (f.get("curated_doc_title") or "").strip()
     ry = (f.get("robot_year") or "").strip()
     if curated and ry and y and str(y) != ry:
-        failures.append(("LABEL_CORRECTION", "year", lid, "Medium",
+        failures.append(("LABEL_CORRECTION", "year", lid, "Low",
                          dict(ctx, stage="classify", message=f"robot {ry}; now {y} (curated title)")))
         labels.append({"label_id": f"{lid}|year|correction", "target": "document", "field": "year",
                        "stratum": "correction", "company_name": f.get("company_name"), "wba_id": f.get("wba_id"),
@@ -282,7 +321,7 @@ def derive_doc(f, today):
                        "reviewed": True, "split": "eval"})
     rtitle = (f.get("robot_title") or "").strip()
     if curated and rtitle and curated != rtitle:
-        failures.append(("LABEL_CORRECTION", "title", lid, "Medium",
+        failures.append(("LABEL_CORRECTION", "title", lid, "Low",
                          dict(ctx, stage="classify", message=f"robot: {rtitle[:120]} | curated: {curated[:120]}")))
         labels.append({"label_id": f"{lid}|title|correction", "target": "document", "field": "title",
                        "stratum": "correction", "company_name": f.get("company_name"), "wba_id": f.get("wba_id"),
@@ -413,7 +452,8 @@ def main():
                        ["library_id", "wba_id", "company_name", "document_url", "doc_label", "discard", "discard_reason",
                         "file_status", "cover_status", "source_type", "source_type_check", "type_mismatch",
                         "doc_language", "year", "doc_year", "source_title", "auto_title", "curated_doc_title",
-                        "robot_type", "robot_year", "robot_title", "created_time", "analyst_flag", "analyst_flag_note"],
+                        "robot_type", "robot_year", "robot_title", "created_time", "analyst_flag", "analyst_flag_note",
+                        "verified", "page_count"],
                        None, "report_library"):
             swept["docs"] += 1
             fails, labels, patch, c = derive_doc(f, today)
