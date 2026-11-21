@@ -8,6 +8,9 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## The reader
 - **A model given room to think may hand back its thinking as the answer.** The step that chooses an answer's search words has 800 tokens so the model can reason first; one reply was a single line of words followed by its own doubts, and all of it was searched and shown to the person (19 Nov 2026). Whatever a model returns for use as data is cut to the shape asked for (`ask_keywords_clean`) before it is used.
 
+## The server's runners
+- **Long jobs can take every runner.** 21 Nov 2026: three eleven-hour runs of the policies index, with the clock, the scan watch and the hourly labelling, used all six runners; a one-minute run waited seven minutes, and a person's upload would have waited the same. Before starting several long runs on the server, count what already holds a runner all day (the clock and the scan watch always do) and leave one free.
+
 ## Who may sign in
 - **One listed address let every signed-in address in.** `email_may_search(email)` compared `lower(a.email) = lower(email)` inside an SQL function: the bare `email` is the column of the table, not the argument, so the line was true for every row and any signed-in address passed once `search_access` held one row. Found 21 Nov 2026 while removing the mail domain rule; the argument is now written `email_may_search.email` and a test lists one address and checks another is refused. In an SQL function, never give an argument the name of a column it is compared with (the same trap as `survey_option`).
 
