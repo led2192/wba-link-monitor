@@ -10,9 +10,11 @@
 --   and a common word cost about the same. Documents with no company (out of the library's scope)
 --   are left out: their pages carry wba_id ''.
 
--- Who may search: a signed-in user with a WBA address, or an address listed in search_access (added by
--- the owner in the SQL editor: insert into search_access (email) values ('name@example.com');).
--- A direct database session (the loader, the checks) may too.
+-- Who may search: a signed-in user whose address is listed in search_access (added by the owner in the
+-- SQL editor: insert into search_access (email) values ('name@example.com');). A direct database session
+-- (the loader, the checks) may too. Until 21 Nov 2026 any address of one mail domain was let in without
+-- being listed; the addresses of that domain that had signed in by then were listed once (see below), so
+-- nobody lost their way in, and a new address has to be listed by the owner.
 create table if not exists public.search_access (
   email     text primary key,
   added_at  timestamptz not null default now()
@@ -22,9 +24,26 @@ alter table public.search_access enable row level security;
 create or replace function public.email_may_search(email text) returns boolean
   language sql stable security definer set search_path = public
   as $$
-    select coalesce(lower(email) like '%@worldbenchmarkingalliance.org', false)
-        or exists (select 1 from public.search_access a where lower(a.email) = lower(email))
+    select exists (select 1 from public.search_access a where lower(a.email) = lower(email_may_search.email))
   $$;
+-- Once, on the day the domain rule went: list the addresses that had signed in under it. The marker row
+-- keeps this from running again (a later sign-up from that domain is not let in by a later load).
+create table if not exists public.search_access_moves (name text primary key, at timestamptz not null default now(), listed int);
+alter table public.search_access_moves enable row level security;
+do $$
+declare n int := 0;
+begin
+  if not exists (select 1 from public.search_access_moves where name = 'domain_rule_off') then
+    if to_regclass('auth.users') is not null then
+      execute $q$ insert into public.search_access (email)
+                  select distinct lower(u.email) from auth.users u
+                  where lower(u.email) like '%@worldbenchmarkingalliance.org'
+                    and not exists (select 1 from public.search_access a where lower(a.email) = lower(u.email)) $q$;
+      get diagnostics n = row_count;
+    end if;
+    insert into public.search_access_moves (name, listed) values ('domain_rule_off', n);
+  end if;
+end $$;
 
 create or replace function public.can_search() returns boolean
   language sql stable security definer set search_path = public
@@ -5687,6 +5706,7 @@ insert into public.published_benchmarks (benchmark_id)
   values ('ACO'), ('CHR'), ('CSI'), ('DIB'), ('FAB'), ('GEA'), ('GEB'), ('JST'), ('NAB'), ('OCE'), ('RDR'), ('URB')
   on conflict (benchmark_id) do nothing;
 
+insert into public.search_options (name, is_on, note) values ('card_scores', false, 'the company card lists the company''s benchmark results (off since 21 Nov 2026)') on conflict (name) do nothing;
 create or replace function public.find_scores(key text, company text) returns jsonb
 language plpgsql stable security definer
 set search_path = public, extensions
@@ -5698,6 +5718,9 @@ declare
 begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if not public.survey_option('card_scores') then        -- off since 21 Nov 2026 (the owner): the card shows what the documents say
+    return '[]'::jsonb;
   end if;
   if to_regclass('public.company_scores') is null or ids is null or coalesce(array_length(ids, 1), 0) <> 1 or ids[1] = '' then
     return '[]'::jsonb;

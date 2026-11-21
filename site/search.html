@@ -312,7 +312,7 @@
 <script>
 (() => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v129 2026-11-20";
+  const CLIENT = "lantern v130 2026-11-21";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1083,7 +1083,7 @@
   }
   const fmt = v => { const a = Math.abs(v); return a >= 1e9 ? (v / 1e9).toLocaleString("en", { maximumFractionDigits: 2 }) + " bn" : a >= 1e6 ? (v / 1e6).toLocaleString("en", { maximumFractionDigits: 2 }) + " m" : v.toLocaleString("en", { maximumFractionDigits: 2 }); };
 
-  // Reviewing needs an author: a code sent to a WBA address, kept in this browser. Searching stays without sign-in.
+  // Reviewing needs an author: a code sent to an address the owner listed, kept in this browser. Searching stays without sign-in.
   const auth = { get() { try { return JSON.parse(localStorage.getItem("find_session") || "null"); } catch (e) { return null; } },
                  set(v) { try { v ? localStorage.setItem("find_session", JSON.stringify(v)) : localStorage.removeItem("find_session"); } catch (e) {} } };
   async function authCall(path, body) {
@@ -1110,8 +1110,8 @@
   function signInBox(panel, then) {
     let box = panel.querySelector(".sign"); if (box) box.remove();
     box = el("div", "sign");
-    const msg = el("div", "what", "To review, enter your WBA email; a code arrives by mail. Once per browser.");
-    const mail = el("input"); mail.type = "email"; mail.placeholder = "name@worldbenchmarkingalliance.org";
+    const msg = el("div", "what", "To review, enter your email; a code arrives by mail. Once per browser.");
+    const mail = el("input"); mail.type = "email"; mail.placeholder = "name@example.org";
     const send = el("button", null, "Send me the code");
     const code = el("input"); code.placeholder = "Code from the email"; code.inputMode = "numeric"; code.style.display = "none";
     const ok = el("button", null, "Sign in"); ok.style.display = "none";
@@ -1292,7 +1292,7 @@
       // its benchmark results, small, under the card's facts: score, place in the benchmark, place in its industry
       rpc("find_scores", { key, company: state.company }).then(rows => {
         if (!rows || !rows.length || !box.isConnected) return;
-        const wrapS = el("div", "scores"); wrapS.append(el("div", "cap", `WBA benchmarks${rows[0].year ? " · " + rows[0].year : ""}`));
+        const wrapS = el("div", "scores"); wrapS.append(el("div", "cap", `Benchmark results${rows[0].year ? " · " + rows[0].year : ""}`));
         const ord = n => Number(n).toLocaleString("en");
         for (const r of rows) {
           const d = el("details"); const s = el("summary");
@@ -1710,13 +1710,13 @@
     const cap = el("div", "cap"); cap.append(el("span", null, "Ask · an answer written from the pages found"), el("span", null, "")); c.appendChild(cap);
     const note = el("div", "what", ""); c.appendChild(note);
     if (auto && !(await token()) && !linkAsk) {
-      note.textContent = "This reads as a question. "; const a = el("a", null, "Sign in with your WBA address to have it answered from the pages"); a.href = "#"; a.onclick = ev => { ev.preventDefault(); ask(); };
+      note.textContent = "This reads as a question. "; const a = el("a", null, "Sign in to have it answered from the pages"); a.href = "#"; a.onclick = ev => { ev.preventDefault(); ask(); };
       note.append(a, document.createTextNode(".")); search(false); return; }
     if (auto && text.length < 8) { box.innerHTML = ""; search(false); return; }                    // v112: too short to be asked ("BP gas"): the search alone
     if (text.length < 8) { note.textContent = "Type a question in the box first, for example: What were Unilever’s scope 1 emissions in 2024?"; return; }
     $("head").classList.remove("home"); closeHistory();
     const t = (await token()) || (linkAsk ? CONFIG.key : null);
-    if (!t) { note.textContent = "Ask answers from the pages lantrNa finds and shows its sources. Three questions a day; sign in with your WBA address.".replace("Three", "Fifty");
+    if (!t) { note.textContent = "Ask answers from the pages lantrNa finds and shows its sources. Three questions a day; sign in with your email.".replace("Three", "Fifty");
               const hold = el("div", "values"); c.appendChild(hold); signInBox(hold, ask); return; }
     note.textContent = "Reading the pages…";
     search(false);                                           // the results under the answer, as for any search; it also reads the filters in the box
@@ -1977,7 +1977,7 @@
         bt.onclick = async () => {
           bt.disabled = true; let r = null; try { r = await authed("ask_fact_verdict", { key, fact_id: f.id, verdict }); } catch (e) { r = null; } bt.disabled = false;
           if (r && r.ok) { f.verdict = verdict; for (const b of marks.children) b.paint(); bt.title = "Saved"; }
-          else bt.title = r ? "Someone else already marked this one" : "Not saved: sign in with your WBA address and try again";
+          else bt.title = r ? "Someone else already marked this one" : "Not saved: sign in and try again";
           if (!(r && r.ok)) { bt.textContent = "!"; setTimeout(() => { bt.textContent = sign; }, 1500); }
         };
         bt.paint = paint; paint(); marks.appendChild(bt);
@@ -2266,7 +2266,7 @@
           ok.onclick = async () => {
             if (why.value === "not_yet" && when.value === "0") { msg.textContent = "“Not published yet” is for one year."; return; }
             ok.disabled = true; const r = await authed("gap_note_set", { key, wba_id: g.wba_id, kind, year: +when.value, reason: why.value });
-            if (r && r.ok) { paint(why.value); ask.textContent = "change"; form.remove(); } else { ok.disabled = false; msg.textContent = "Not saved. Sign in with your WBA address (Review a value asks for it) and try again."; }
+            if (r && r.ok) { paint(why.value); ask.textContent = "change"; form.remove(); } else { ok.disabled = false; msg.textContent = "Not saved. Sign in (Review a value asks for it) and try again."; }
           };
           form.append(why, when, ok, msg); sp.appendChild(form);
         };
@@ -2289,7 +2289,7 @@
       const row = el("div"); row.style.cssText = "display:flex;gap:10px;align-items:center;margin-top:6px"; const ok = el("button", null, "Save"), msg = el("span", "what"); ok.type = "button";
       ok.onclick = async () => { ok.disabled = true; msg.textContent = "";
         const r = await authed("company_note_set", { key, wba_id: g.wba_id, traits: Object.keys(boxes).filter(k => boxes[k].checked), note: ta.value });
-        ok.disabled = false; msg.textContent = r && r.ok ? (r.cleared ? "Cleared." : "Saved. The table follows it the next time this company comes up.") : "Not saved. Sign in with your WBA address (Review a value asks for it) and try again."; };
+        ok.disabled = false; msg.textContent = r && r.ok ? (r.cleared ? "Cleared." : "Saved. The table follows it the next time this company comes up.") : "Not saved. Sign in (Review a value asks for it) and try again."; };
       row.append(ok, msg); box2.append(list, ta, row); c.appendChild(box2); }
     const hold = el("div", "values"); hold.style.marginTop = "8px"; c.appendChild(hold);
     const nav = el("div", "nav");
@@ -2438,7 +2438,7 @@
       const r = await authed("admin_ask_limit_set", { key, email, per_day: n });
       if (!r || r.error) { limitNote.textContent = (r && r.error) || "Not saved."; return; }
       await adminPeople(body);
-      const again = body.querySelector("[data-limit-note]"); if (again) again.textContent = `${r.email}: ${r.per_day} answers a day.` + (r.may_ask ? "" : " This address cannot sign in to Ask today (not a WBA address).");
+      const again = body.querySelector("[data-limit-note]"); if (again) again.textContent = `${r.email}: ${r.per_day} answers a day.` + (r.may_ask ? "" : " This address cannot sign in to Ask today (it is not on the list of addresses).");
     };
     const limitCell = p => { const w = el("span"); const i = document.createElement("input"); i.type = "number"; i.min = 0; i.max = 500; i.value = p.per_day; i.title = "Answers a day for this person";
       i.style.cssText = "font:inherit;width:64px;padding:2px 6px;border:1px solid var(--line);border-radius:8px;background:var(--box);color:var(--fg);margin-right:6px";
