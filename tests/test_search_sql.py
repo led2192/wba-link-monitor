@@ -109,6 +109,18 @@ def test_terms_of_use_are_published_and_the_link_is_personal():
     assert flow.count("send-to-lantern.html terms.html; do") == 2
 
 
+def test_the_documentation_is_read_from_the_server_by_the_owner_alone():
+    call = SQL[SQL.index("create or replace function public.server_docs_call("):SQL.index("create or replace function public.admin_docs(")]
+    assert "address || '/docs'" in call and "meaning_remote_secret" in call and "revoke all on function public.server_docs_call(jsonb) from public, anon, authenticated" in call
+    fn = SQL[SQL.index("create or replace function public.admin_docs("):SQL.index("grant execute on function public.admin_docs(")]
+    assert fn.index("if not public.admin_ok(key) then") < fn.index("public.server_docs_call(") and "{0,60}" in fn
+    assert '"Documentation": adminDocs' in PAGE and 'authed("admin_docs", { key, name: open || null })' in PAGE
+    md = PAGE[PAGE.index("const mdInline = s => escH(s)"):PAGE.index("async function adminDocs(")]
+    assert "escH(code.join(" in md and "data-doc=" in md and "javascript:" not in md          # everything escaped before any tag is added
+    flow = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "server_docs.yml"), encoding="utf-8").read()
+    assert "runs-on: [self-hosted, lantern]" in flow and "pull_request" not in flow and "/srv/lantern/docs" in flow and "/srv/lantern/www" not in flow
+
+
 def test_a_link_is_tied_to_its_browsers():
     fn = SQL[SQL.index("create or replace function public.key_name_checked("):SQL.index("create or replace function public.link_enter(")]
     assert "split_part(coalesce(key, ''), '~', 1)" in fn and "public.survey_option('link_browsers')" in fn and "b.allowed" in fn
@@ -398,7 +410,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_link_browsers", "admin_link_browser_set", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
+    assert set(names) == {"admin_overview", "admin_docs", "admin_link_browsers", "admin_link_browser_set", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -488,7 +500,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v132 2026-11-21";' in PAGE
+    assert 'const CLIENT = "lantern v133 2026-11-21";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -548,7 +560,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "remote := public.meaning_remote_rows(qvec, ids, year_from, year_to, types);" in fm          # the server first, only with the option on
     assert "if remote_pages >= least(need, 10) then" in fm                                              # too little from the server: this database's own search, unchanged
     assert fm.index("remote := public.meaning_remote_rows") < fm.index("if to_regclass('public.chunks_embedding') is null then")
-    assert SQL.count("http_reset_curlopt()") == 3                                                       # before the call, after it, and when it fails
+    assert SQL.count("http_reset_curlopt()") == 6                                                       # before the call, after it, and when it fails
     assert "revoke all on function public.meaning_remote_call(real[], text[], int, int, text[], int) from public, anon, authenticated;" in SQL
     assert "const strong = (typed !== typed.toLowerCase() && !first) || /[;,]$/.test(m[0]);" in PAGE       # v83: a word-name first in the box is the company only when no other company is named
     assert "const m = !hits.length && new RegExp(" in PAGE

@@ -312,7 +312,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v132 2026-11-21";
+  const CLIENT = "lantern v133 2026-11-21";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2356,7 +2356,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2436,6 +2436,53 @@
     return t;
   };
   const adminWhen = t => t ? new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "never";
+  // v133 (21 Nov 2026, the owner): the project's documentation, read here. The files are on lantrNa's server; the
+  // database fetches them for the owner alone. Markdown is shown with a small renderer that escapes everything first:
+  // headings, lists, tables, code, bold, and links (a link to another document opens it here).
+  const mdInline = s => escH(s)
+    .replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => /^[a-z0-9][a-z0-9_-]*\.md(#.*)?$/i.test(u) ? `<a href="#" data-doc="${u.split("#")[0]}">${t}</a>`
+                                                  : /^https?:\/\/[^"'<>`\s]+$/i.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t);
+  function mdRender(text) {
+    const out = []; const lines = String(text || "").replace(/\r/g, "").split("\n"); let i = 0, para = [];
+    const flush = () => { if (para.length) { out.push(`<p>${mdInline(para.join(" "))}</p>`); para = []; } };
+    while (i < lines.length) {
+      const l = lines[i];
+      if (/^```/.test(l)) { flush(); const code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; out.push(`<pre style="overflow:auto;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px">${escH(code.join("\n"))}</pre>`); continue; }
+      const h = l.match(/^(#{1,4})\s+(.*)$/);
+      if (h) { flush(); const n = h[1].length; out.push(`<h${n + 1} style="margin:18px 0 6px">${mdInline(h[2])}</h${n + 1}>`); i++; continue; }
+      if (/^\s*\|.*\|\s*$/.test(l)) { flush(); const rows = []; while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);
+        const cells = r => r.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+        const body = rows.filter(r => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+        out.push(`<div style="overflow:auto"><table style="border-collapse:collapse;font-size:14px;margin:8px 0">` + body.map((r, k) => "<tr>" + cells(r).map(c => `<${k ? "td" : "th"} style="border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top">${mdInline(c)}</${k ? "td" : "th"}>`).join("") + "</tr>").join("") + "</table></div>"); continue; }
+      if (/^\s*([-*]|\d+\.)\s+/.test(l)) { flush(); const ordered = /^\s*\d+\./.test(l); const items = [];
+        while (i < lines.length && (/^\s*([-*]|\d+\.)\s+/.test(lines[i]) || (/^\s{2,}\S/.test(lines[i]) && items.length))) { if (/^\s*([-*]|\d+\.)\s+/.test(lines[i])) items.push(lines[i].replace(/^\s*([-*]|\d+\.)\s+/, "")); else items[items.length - 1] += " " + lines[i].trim(); i++; }
+        out.push(`<${ordered ? "ol" : "ul"} style="margin:6px 0 6px 22px">` + items.map(x => `<li style="margin:3px 0">${mdInline(x)}</li>`).join("") + `</${ordered ? "ol" : "ul"}>`); continue; }
+      if (!l.trim()) { flush(); i++; continue; }
+      para.push(l.trim()); i++;
+    }
+    flush(); return out.join("\n");
+  }
+  async function adminDocs(body, open) {
+    body.innerHTML = "";
+    const r = await authed("admin_docs", { key, name: open || null });
+    if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    if (r.error) { body.textContent = `The documentation could not be read (${r.error}).`; return; }
+    if (!open) {
+      body.append(el("h3", null, "Documentation"));
+      const note = el("p", null, "Kept on lantrNa's server and shown to the owner alone."); note.style.color = "var(--muted, #667)"; body.appendChild(note);
+      const docs = (r.docs || []).slice().sort((a, b) => (a.name === "README.md" ? -1 : b.name === "README.md" ? 1 : a.name.localeCompare(b.name)));
+      if (!docs.length) { body.append(el("p", null, "No document on the server yet: the workflow Server docs copies them at the next change.")); return; }
+      body.appendChild(adminTable(["Document", "File", "Size", "Changed"], docs.map(d => { const a = el("a", null, d.title || d.name); a.href = "#"; a.onclick = ev => { ev.preventDefault(); adminDocs(body, d.name); };
+        return [a, d.name, `${Math.max(1, Math.round(d.size / 1024))} KB`, adminWhen(d.changed * 1000)]; })));
+      return;
+    }
+    const back = el("a", null, "← All documents"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); adminDocs(body); }; body.appendChild(back);
+    if (r.missing) { body.append(el("p", null, `There is no document named ${open}.`)); return; }
+    const art = el("div"); art.style.cssText = "max-width:900px;line-height:1.55"; art.innerHTML = mdRender(r.text); body.appendChild(art);
+    art.querySelectorAll("a[data-doc]").forEach(a => { a.onclick = ev => { ev.preventDefault(); adminDocs(body, a.dataset.doc); body.scrollTop = 0; }; });
+  }
   const adminBtn = (text, fn) => { const b = el("button", null, text); b.type = "button"; b.style.cssText = "font:inherit;font-size:13px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer;margin-right:4px"; b.onclick = fn; return b; };
   async function adminPeople(body) {
     const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
