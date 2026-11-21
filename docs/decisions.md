@@ -967,3 +967,12 @@ Why: lantrNa answers from public documents and from what its own users confirmed
 What is lost with `validated_answers` off: the line "right N% of the time" on a value's card, and the control cards that kept the review game honest. What stays: facts a person confirmed on an answer still serve the next answer (`ask_facts`, verdict right); the evaluation scripts still read their own copy of the validated answers and are not part of the page.
 
 Rejected: deleting the tables (not reversible, and the choice of what may be kept is not settled); leaving the measured share and hiding only its source (a number nobody can check).
+
+## A link is tied to browsers, not to a password (21 Nov 2026, owner: nobody should be able to pass a link on)
+A key in a link can always be copied. What can be done is to see where it is used and to refuse a new place. The page gives each browser a random id, kept in that browser, and sends it with the key. The first browsers of a link are allowed as they arrive, up to the link's limit (2; the owner's link 5; changed per link in Admin). One more waits until the owner allows it. Table `key_browsers`, functions `link_enter`, `key_name_checked`, `admin_link_browsers`, `admin_link_browser_set`.
+
+It ships as the option `link_browsers`, off: browsers are noted from the first day and nobody is refused, so that when it is switched on the people already using a link are already in and the owner has seen the list first. The shared team link needs a higher limit or to be retired before the switch.
+
+Limits of it: a person who copies the link and the id out of the browser's storage gets in; clearing the browser's data makes it a new browser. It stops casual forwarding, which is the case in question.
+
+Rejected: reading the machine's characteristics to recognise it (invasive, and the terms would have to say so); a sign-in by email for everyone (the link without sign-in is what made people use the page); one browser per link (a person has a laptop and a phone).

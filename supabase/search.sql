@@ -517,13 +517,101 @@ create index if not exists search_clicks_log on public.search_clicks (log_id);
 
 -- The key's name when it is an active key; null otherwise. The database owner (postgres) counts as the key
 -- 'owner', so the check script and Claude can call the functions from the connection string.
-create or replace function public.search_key_name(key text) returns text
-  language sql stable security definer set search_path = public, extensions
+--
+-- A link is one person's (21 Nov 2026, the owner: "que nadie pueda compartir enlaces con terceros"). A key cannot
+-- be kept from being copied, so a link is tied to the browsers it is used in: the page makes a random id for the
+-- browser, kept in that browser, and sends the key as "<key>~<browser id>". The first browsers of a link, up to
+-- its limit (search_keys.max_browsers, 2 when not set, 5 for the owner's), are let in as they arrive; one more is
+-- kept waiting until the owner allows it in Admin, People and links. Nothing about the machine is read: the id is
+-- a random string, and the label is the browser and system the page names ("Chrome on Windows").
+-- Enforced only while the option link_browsers is on. With it off every browser is still noted (link_enter), so
+-- that the day it is switched on the people already using a link are already in.
+alter table public.search_keys add column if not exists max_browsers int;
+create table if not exists public.key_browsers (
+  id           bigserial primary key,
+  name         text not null,                 -- the link (search_keys.name)
+  device_hash  text not null,                 -- sha256 of the browser's random id; the id itself is not kept
+  label        text,                          -- "Chrome on Windows", as the page said it
+  first_seen   timestamptz not null default now(),
+  last_seen    timestamptz not null default now(),
+  allowed      boolean not null default true,
+  unique (name, device_hash)
+);
+alter table public.key_browsers enable row level security;
+-- (the option's row is added where search_options is made, further down)
+
+-- The link's name for a key as the page sends it ("<key>" or "<key>~<browser id>"); null when the key is not an
+-- active one or, with the option on, when the browser is not one allowed for that link. In plpgsql: it reads the
+-- option, which is defined further down.
+create or replace function public.key_name_checked(key text) returns text
+  language plpgsql stable security definer set search_path = public, extensions
   as $$
-    select case when session_user = 'postgres' then 'owner'
-                else (select k.name from public.search_keys k
-                      where k.active and k.key_hash = encode(extensions.digest(coalesce(key, ''), 'sha256'), 'hex') limit 1) end
-  $$;
+  declare
+    raw text := split_part(coalesce(key, ''), '~', 1);
+    dev text := nullif(split_part(coalesce(key, ''), '~', 2), '');
+    who text;
+  begin
+    select k.name into who from public.search_keys k
+     where k.active and k.key_hash = encode(extensions.digest(raw, 'sha256'), 'hex') limit 1;
+    if who is null or not public.survey_option('link_browsers') then
+      return who;
+    end if;
+    if dev is not null and exists (select 1 from public.key_browsers b where b.name = who and b.allowed
+                                     and b.device_hash = encode(extensions.digest(dev, 'sha256'), 'hex')) then
+      return who;
+    end if;
+    return null;
+  end $$;
+revoke all on function public.key_name_checked(text) from public, anon, authenticated;
+
+create or replace function public.search_key_name(key text) returns text
+  language plpgsql stable security definer set search_path = public, extensions
+  as $$ begin
+    if session_user = 'postgres' then return 'owner'; end if;
+    return public.key_name_checked(key);
+  end $$;
+
+-- The page says "this browser opens this link" once when it loads. A browser already known is let in or not as
+-- it stands; a new one is allowed while the link has room and kept waiting when it has not.
+create or replace function public.link_enter(key text, device text, label text default null) returns jsonb
+  language plpgsql security definer set search_path = public, extensions
+  as $$
+  #variable_conflict use_variable
+  declare
+    raw text := split_part(coalesce(key, ''), '~', 1);
+    who text;
+    h text;
+    b public.key_browsers%rowtype;
+    room int;
+    held int;
+    enforced boolean := public.survey_option('link_browsers');
+  begin
+    select k.name, coalesce(k.max_browsers, case when k.name = 'owner' then 5 else 2 end) into who, room from public.search_keys k
+     where k.active and k.key_hash = encode(extensions.digest(raw, 'sha256'), 'hex') limit 1;
+    if who is null then
+      raise exception 'not allowed' using errcode = '42501';
+    end if;
+    if coalesce(device, '') !~ '^[A-Za-z0-9_-]{16,64}$' then
+      return jsonb_build_object('ok', not enforced, 'waiting', enforced, 'enforced', enforced);
+    end if;
+    h := encode(extensions.digest(device, 'sha256'), 'hex');
+    select * into b from public.key_browsers kb where kb.name = who and kb.device_hash = h;
+    if b.id is not null then
+      update public.key_browsers kb set last_seen = now() where kb.id = b.id and kb.last_seen < now() - interval '10 minutes';
+    else
+      select count(*) filter (where kb.allowed), count(*) into held, b.id from public.key_browsers kb where kb.name = who;
+      if b.id >= 30 then                                   -- a link passed around widely: stop noting, keep refusing
+        return jsonb_build_object('ok', not enforced, 'waiting', enforced, 'enforced', enforced);
+      end if;
+      b.allowed := held < room;
+      insert into public.key_browsers (name, device_hash, label, allowed)
+        values (who, h, nullif(left(regexp_replace(coalesce(label, ''), '[^A-Za-z0-9 .()-]', '', 'g'), 60), ''), b.allowed)
+        on conflict (name, device_hash) do nothing;
+    end if;
+    return jsonb_build_object('ok', b.allowed or not enforced, 'waiting', enforced and not b.allowed, 'enforced', enforced);
+  end $$;
+revoke all on function public.link_enter(text, text, text) from public;
+grant execute on function public.link_enter(text, text, text) to anon, authenticated;
 
 -- How much a page of each document type weighs in the ranking: the reports people cite first, then the
 -- filings and thematic reports, then policies, then slides and interim statements, then the rest.
@@ -722,6 +810,7 @@ create or replace function public.type_words(doc_type text) returns text
 -- index (page_pairs) first. A session can also try an option alone: set lantern.pairs = 'on' (search_timing.py).
 create table if not exists public.search_options (name text primary key, is_on boolean not null default false, note text, changed timestamptz not null default now());
 alter table public.search_options enable row level security;
+insert into public.search_options (name, is_on, note) values ('link_browsers', false, 'a link works only in the browsers the owner allowed for it (the first ones up to its limit are allowed as they arrive)') on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('pairs', false, 'ask page_pairs first for quoted phrases and neighbouring words') on conflict (name) do nothing;
 -- 'company_first' (13 Nov 2026): a question of four words or more within one company reads that company's pages and
 -- checks the words on them, in place of asking the word index. search_timing.py, run 43492865629: "level 1" (every
@@ -5679,6 +5768,53 @@ end;
 $$;
 revoke all on function public.admin_link_new(text, text) from public, anon;
 grant execute on function public.admin_link_new(text, text) to authenticated;
+
+-- The browsers of every link, for Admin (21 Nov 2026): which are allowed, which wait, and each link's limit.
+create or replace function public.admin_link_browsers(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'enforced', public.survey_option('link_browsers'),
+    'links', (select coalesce(jsonb_agg(jsonb_build_object('name', k.name, 'limit', coalesce(k.max_browsers, case when k.name = 'owner' then 5 else 2 end),
+                       'allowed', (select count(*) from public.key_browsers b where b.name = k.name and b.allowed),
+                       'waiting', (select count(*) from public.key_browsers b where b.name = k.name and not b.allowed)) order by k.name), '[]'::jsonb)
+              from public.search_keys k where k.active),
+    'browsers', (select coalesce(jsonb_agg(jsonb_build_object('id', b.id, 'name', b.name, 'label', b.label, 'first_seen', b.first_seen,
+                          'last_seen', b.last_seen, 'allowed', b.allowed) order by b.name, b.first_seen), '[]'::jsonb)
+                 from public.key_browsers b));
+end;
+$$;
+revoke all on function public.admin_link_browsers(text) from public, anon;
+grant execute on function public.admin_link_browsers(text) to authenticated;
+
+-- Allow a browser or stop it; or set how many browsers a link may have (1 to 20).
+create or replace function public.admin_link_browser_set(key text, browser bigint default null, allowed boolean default null, name text default null, max_browsers int default null)
+returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  done int := 0;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if browser is not null and allowed is not null then
+    update public.key_browsers b set allowed = allowed where b.id = browser;
+    get diagnostics done = row_count;
+  elsif name is not null and max_browsers between 1 and 20 then
+    update public.search_keys k set max_browsers = max_browsers where k.name = name;
+    get diagnostics done = row_count;
+  end if;
+  return jsonb_build_object('ok', done = 1);
+end;
+$$;
+revoke all on function public.admin_link_browser_set(text, bigint, boolean, text, int) from public, anon;
+grant execute on function public.admin_link_browser_set(text, bigint, boolean, text, int) to authenticated;
 
 -- Switch a link off or on again. The owner's own link cannot be switched off from here.
 create or replace function public.admin_link_set(key text, name text, active boolean)
