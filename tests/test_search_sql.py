@@ -101,6 +101,14 @@ def test_validated_answers_are_used_only_while_their_option_is_on():
     assert "if public.survey_option('validated_answers') then" in fn and "sign in with a WBA address" not in SQL
 
 
+def test_terms_of_use_are_published_and_the_link_is_personal():
+    terms = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "terms.html"), encoding="utf-8").read()
+    assert "do not share it" in terms and "automated means" in terms and "law of Spain" in terms and "@" not in terms.split("</style>")[1]
+    assert 'href="terms.html"' in PAGE and "Copy the link to share" not in PAGE and "paste it to a colleague" not in PAGE
+    flow = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "search_page.yml"), encoding="utf-8").read()
+    assert flow.count("send-to-lantern.html terms.html; do") == 2
+
+
 def test_only_a_listed_address_signs_in():
     rule = SQL[SQL.index("create or replace function public.email_may_search("):SQL.index("create or replace function public.can_search(")]
     body = rule[:rule.index("-- Once, on the day")]
@@ -230,7 +238,7 @@ def test_a_result_can_be_judged_from_the_list():
     judge = SQL[SQL.index("create or replace function public.find_judge("):SQL.index("-- The companies, for the page to recognise")]
     assert "public.search_key_name(key) is null" in judge and "case when useful then 'useful' else 'not' end" in judge
     assert "add column if not exists kind text not null default 'open'" in SQL
-    assert 'rpc("find_judge"' in PAGE and 'id="share"' in PAGE and "prompt(" not in PAGE
+    assert 'rpc("find_judge"' in PAGE and 'id="share"' not in PAGE and "prompt(" not in PAGE
 
 
 def test_short_company_names_and_long_questions():
@@ -468,7 +476,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v130 2026-11-21";' in PAGE
+    assert 'const CLIENT = "lantern v131 2026-11-21";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
