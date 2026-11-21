@@ -90,6 +90,23 @@ def test_scores_for_one_company_with_places_counted():
     assert "public.search_key_name(key) is null" in sc and "array_length(ids, 1), 0) <> 1" in sc
     assert "'industry_rank'" in sc and "'areas'" in sc and "to_regclass('public.company_scores') is null" in sc
     assert "from public.published_benchmarks pb where pb.benchmark_id = s.benchmark_id" in sc      # the published ones only
+    assert "if not public.survey_option('card_scores') then" in sc                                # and only while the option is on
+    assert "('card_scores', false," in SQL and "WBA benchmarks" not in PAGE
+
+
+def test_validated_answers_are_used_only_while_their_option_is_on():
+    assert "join public.value_truth" not in SQL                                              # every reader goes through truth_rows()
+    assert SQL.count("join public.truth_rows() t") == 3 and "('validated_answers', false," in SQL
+    fn = SQL[SQL.index("create or replace function public.truth_rows()"):SQL.index("revoke all on function public.truth_rows()")]
+    assert "if public.survey_option('validated_answers') then" in fn and "sign in with a WBA address" not in SQL
+
+
+def test_only_a_listed_address_signs_in():
+    rule = SQL[SQL.index("create or replace function public.email_may_search("):SQL.index("create or replace function public.can_search(")]
+    body = rule[:rule.index("-- Once, on the day")]
+    assert "like '%@" not in body and "from public.search_access a" in body               # no mail domain is let in by itself
+    assert "where name = 'domain_rule_off'" in rule and "to_regclass('auth.users') is not null" in rule   # those already in were listed, once
+    assert "WBA email" not in PAGE and "WBA address" not in PAGE and "worldbenchmarkingalliance" not in PAGE
 
 
 def test_ask_is_signed_limited_and_keeps_the_key_out_of_the_page():
@@ -184,7 +201,7 @@ def test_the_review_game_counts_right_answers():
 
 def test_confidence_is_measured_against_validated_answers():
     conf = SQL[SQL.index("create or replace function public.refresh_value_confidence()"):SQL.index("create or replace function public.find_values(")]
-    assert "join public.value_truth tr" in conf and "<= 0.005) as good" in conf
+    assert "join public.truth_rows() tr" in conf and "<= 0.005) as good" in conf
     assert "where c.n >= 20" in conf                                                      # a group too small falls back to a wider one
     assert "revoke all on function public.confidence_of(text, int, int) from public, anon, authenticated;" in conf
     assert "'confidence', public.confidence_of(p.attribute, p.docs::int, t.variants)" in SQL
@@ -224,7 +241,7 @@ def test_short_company_names_and_long_questions():
 
 
 def test_ask_searches_a_long_question_with_the_models_words():
-    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)")]      # with what the reader is told (ask_instructions, ask_message)
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "if topic is null and coalesce(array_length((public.find_terms(search_q)).words, 1), 0) > 4 then" in ask      # an overview needs no words chosen
     assert "case when attempt = 1 then keywords else search_q end" in ask                    # its words first, the question itself if they find nothing
     assert "revoke all on function public.ask_model(text, text, text, text, text, int) from public, anon, authenticated;" in SQL
@@ -244,8 +261,30 @@ def test_a_company_a_person_adds_exists_at_once():
     assert 'rpc/request_company' in PAGE and "Missing a company? Add it" in PAGE
 
 
+def test_a_year_typed_next_to_a_subject_also_shows_other_years():
+    """Page v127: the year's pages first as before, the other years' pages after them; the second call is not counted as a search."""
+    assert 'rpc("find_pages_ranked", { ...args, year_from: null, year_to: null, client: CLIENT + " +years" }).catch(() => [])' in PAGE
+    assert "state.yearsTyped && (state.from || state.to) && !state.strictYears" in PAGE
+    assert "function withOtherYears(rows) {" in PAGE and "From documents of other years" in PAGE
+    assert SQL.count("and coalesce(l.client, '') not like '% +years'") == 4          # the link's counts (2), the list of a link's searches, the hard searches
+
+
+def test_a_follow_up_is_asked_of_the_same_pages_and_counted():
+    """Page v124: the Follow up box under an answer."""
+    f = SQL.split("create or replace function public.ask_follow(key text, the_ask bigint, question text, client text default null)")[1].split("\n$$;")[0]
+    assert "public.ask_pages(" not in f and "find_" not in f                                 # no search: the pages are the answer's own
+    assert "before := public.ask_followable(the_ask, who);" in f and "'not an answer of yours'" in f
+    assert "if used >= per_day then" in f and ">= per_day_all then" in f                    # one of the day's answers, under both ceilings
+    assert "public.ask_message(public.ask_follow_text(before ->> 'question', before ->> 'answer', asked), known, fiscal, '', context), 3500);" in f
+    assert "client, follows)" in f and "public.ask_keep(" not in f                          # logged with the answer it follows; never kept as a reusable answer
+    assert "revoke all on function public.ask_followable(bigint, text) from public, anon, authenticated;" in SQL
+    assert "'ask_id', ask_id);" in SQL and "'ask_id', kept -> 'ask_id'," in SQL             # the page learns which answer it shows
+    assert "function followBox(c, askId, src, left) {" in PAGE and "rpc/ask_follow" in PAGE and "followBox(c, j.ask_id, src," in PAGE
+    assert "function answerText(answer, src) {" in PAGE
+
+
 def test_ask_has_a_ceiling_for_everyone_together():
-    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)")]      # with what the reader is told (ask_instructions, ask_message)
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "per_day_all constant int := 1000;" in ask and ">= per_day_all then" in ask and "'everyone', true" in ask
     wf = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "propose_values.yml"), encoding="utf-8").read()
     assert "--max-usd ${{ vars.READER_MAX_USD || '5' }}" in wf                       # the owner changes the night's ceiling without a code change
@@ -280,7 +319,7 @@ def test_the_schema_is_guarded_like_the_functions():
 
 
 def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
-    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)")]      # with what the reader is told (ask_instructions, ask_message)
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "from public.ask_pages(key, case when attempt = 1 then keywords else search_q end, qvec," in ask       # the one search's pages, the newest reports among them
     assert "from public.find_blend(key, q, qvec, company_filter, year_from, year_to, type_filter, 24, 'ask'" in SQL      # words and meaning, as the list under it
     assert "'library_id', r.library_id" in ask and "begin with Yes, No, " in ask
@@ -290,7 +329,7 @@ def test_a_question_is_answered_from_the_one_search_and_its_pages_come_first():
 
 
 def test_what_an_answer_finds_is_kept_unconfirmed_and_shown_beside_it():
-    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)")]      # with what the reader is told (ask_instructions, ask_message)
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "write FACTS: followed by a JSON array" in ask and "Only what an excerpt states, never from memory; never an item saying" in ask
     assert "facts := public.ask_keep_facts(ask_id, parts -> 'facts', sources);" in ask and "'facts', facts," in ask and "'facts_stated', parts -> 'stated'" in ask
     assert "revoke all on function public.ask_keep_facts(bigint, jsonb, jsonb) from public, anon, authenticated;" in SQL
@@ -317,15 +356,15 @@ def test_a_mark_on_a_fact_shows():
 
 
 def test_confirmed_facts_come_back_with_the_next_answer():
-    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)")]      # with what the reader is told (ask_instructions, ask_message)
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "confirmed := public.ask_confirmed_facts(null, sources, who);" in ask and "'confirmed', confirmed);" in ask
-    assert "Confirmed earlier by a colleague:" in ask and "Do not repeat them in FACTS." in ask          # the answer reads them too
+    assert "Confirmed earlier by a ' || case when public.reader_plain_words() then 'person' else 'colleague' end || E':" in ask and "Do not repeat them in FACTS." in ask          # the answer reads them too
     assert "revoke all on function public.ask_confirmed_facts(bigint, jsonb, text) from public, anon, authenticated;" in SQL
     assert "confirmed by a colleague" in PAGE and "Confirmed before" in PAGE
 
 
 def test_the_facts_panel_stays_readable():
-    assert "const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)));" in PAGE     # a confirmed figure is not offered again
+    assert "const fresh = state.facts.filter(f => !state.confirmed.some(c => same(f, c)) && !held(f));" in PAGE     # a confirmed figure is not offered again
     assert 'const known = el("details")' in PAGE                                                          # folded: the robot's values stay in sight
     assert 'const words = f.kind === "text";' in PAGE                                                     # a sentence is not set like a figure
 
@@ -339,7 +378,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask"}
+    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -369,7 +408,7 @@ def test_the_owner_groups_the_facts_by_company_and_searches_them():
 
 def test_a_fact_is_something_stated_and_a_text_has_no_unit():
     assert "never an item saying that something is not stated or could not be found" in SQL
-    assert 'if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, f.unit));' in PAGE
+    assert 'if (f.unit && !isYear && f.kind === "number") num.append(el("small", null, unitShown(f.unit)));' in PAGE
 
 
 def test_a_page_without_a_link_can_still_be_read():
@@ -379,7 +418,7 @@ def test_a_page_without_a_link_can_still_be_read():
 
 
 def test_eight_pages_are_not_a_total():
-    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)")]      # with what the reader is told (ask_instructions, ask_message)
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "do not give a count: say first that a total cannot be read from eight pages" in ask
 
 
@@ -394,7 +433,7 @@ def test_nothing_of_the_search_before_stays_when_a_search_runs_or_fails():
 
 
 def test_fiscal_years_are_said_in_both_ways():
-    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)")]      # with what the reader is told (ask_instructions, ask_message)
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]      # with what the reader is told (ask_instructions, ask_message)
     assert "fiscal := public.ask_fiscal_lines(sources);" in ask and 'for example "fiscal 2023 (WBA reporting year 2022)"' in ask
     assert "coalesce((select cf.fy_end_month from public.company_fiscal cf where cf.wba_id = p.wba_id)," in SQL
     assert "coalesce(a.period, '')" not in SQL                                    # one period however written
@@ -429,14 +468,14 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v107 2026-11-18";' in PAGE
+    assert 'const CLIENT = "lantern v130 2026-11-21";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
-    assert 'if (one && !p.type && topics.has(topicNorm(p.q))) return "overview";' in PAGE and 'rpc("find_topics", { key })' in PAGE          # v106
+    assert 'if (one && !p.type && !p.typeHint && topics.has(topicNorm(p.q))) return "overview";' in PAGE and 'rpc("find_topics", { key })' in PAGE          # v106
     assert 'if (asked !== "search" || $("answer").textContent.trim()) return;' in PAGE          # v105: no offer of Ask under an answer
     # v104: what is asked is told before it is searched; the catalogue is answered from the index
-    assert '(i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false); };' in PAGE and 'rpc("company_card", { key, company: id })' in PAGE
+    assert '(i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false);' in PAGE and "if (typoWanted(parsed) && await wordUnknown(parsed.typo.word)) applyTypo(parsed);" in PAGE and 'rpc("company_card", { key, company: id })' in PAGE
     # v103: a typed year that leaves no page is dropped, and the status line says so
     assert "state.yearsDropped = { from: state.from, to: state.to }; state.from = state.to = null; state.yearsTyped = false;" in PAGE
     assert "these are pages of other years. `" in PAGE and "state.strictYears = true; search(true);" in PAGE
@@ -451,7 +490,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert 'seen(words, words, "none")' in PAGE and 'seen(words, words, "late")' in PAGE and 'seen(words, rows, "used")' in PAGE
     assert '"By words", "Shown", "Opened"' in PAGE
     # v97: a company's name typed wrong is taken as the company only when the library does not know the word, and says so
-    assert 'unknown = await rpc("word_unknown", { key, word: parsed.typo.word })' in PAGE
+    assert 'unknown = (await rpc("word_unknown", { key, word })) === true' in PAGE
     assert "if (!hits.length) found.typo = nearCompany(fq);" in PAGE
     assert "Search the words as typed" in PAGE and "is on no page. `" in PAGE
     assert "grant execute on function public.word_unknown(text, text) to anon, authenticated;" in SQL
@@ -478,7 +517,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert 'adminBtn("Download as CSV", () => saveText(surveyFile(g), surveyCsv(g)))' in PAGE                    # v87: a survey's table as a file, made in the page
     assert """if (/^[=+\\-@\\t\\r]/.test(t)) t = "'" + t;""" in PAGE                                          # a cell is never run as a formula
     assert "case when said ->> 'status' in ('yes', 'no') then 1 end" not in SQL                                    # a row's page is never chosen for it
-    assert "industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null }) });" in PAGE   # v86: the answer reads the industry the box filters by
+    assert "industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null, fresh: fresh === true }) });" in PAGE   # v86: the answer reads the industry the box filters by
     ap = SQL[SQL.index("create or replace function public.ask_pages("):SQL.index("revoke all on function public.ask_pages(")]
     assert "24, 'ask', industry_filter, country_filter, region_filter, asked)" in ap
     assert "drop function if exists public.ask(text, text, text, text, int, int, text, text, real[]);" in SQL       # one function named ask, never two
@@ -526,7 +565,7 @@ def test_a_companys_facts_by_year_are_for_the_owner_and_leave_out_the_wrong_ones
 
 def test_the_reader_is_given_the_names_in_use_only_when_the_option_is_on():
     assert "values ('ask_metric_names', false," in SQL and "set is_on = true" not in SQL[SQL.index("values ('ask_metric_names', false,"):SQL.index("create or replace function public.ask_metric_names(")]
-    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)")]
+    ask = SQL[SQL.index("create or replace function public.ask_instructions("):SQL.index("revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)")]
     assert "names := public.ask_metric_names(concat_ws(' ', asked, keywords));" in ask
     assert "|| case when with_names then ' The message may also list metric names already in use." in ask      # the instructions are unchanged while it is off
     assert "|| case when names <> '' then E'\\n\\nMetric names in use:\\n' || names else '' end" in ask

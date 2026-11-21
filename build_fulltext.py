@@ -54,7 +54,7 @@ and a shard stops by itself before the job limit (--budget-min) with everything 
 
 Env: AIRTABLE_TOKEN, AIRTABLE_BASE, AIRTABLE_LIBRARY_TABLE (default report_library),
      TEXT_STORE_REPO + TEXT_STORE_TOKEN (private GitHub repository), or TEXT_STORE_DIR (folder),
-     FULLTEXT_DOC_TIMEOUT (default 240 s), FULLTEXT_MAX_MB (default 200; 150 until 13 Nov 2026, when people began sending reports of 153 and 174 MB)
+     FULLTEXT_DOC_TIMEOUT (default 240 s), FULLTEXT_MAX_MB (default 300; 150 until 13 Nov 2026, when people began sending reports of 153 and 174 MB; 200 until 19 Nov 2026, a report of 202 MB)
 """
 import os, io, sys, json, gzip, time, math, signal, hashlib, logging, argparse, collections, tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -62,6 +62,7 @@ from concurrent.futures.process import BrokenProcessPool
 from urllib.parse import quote
 
 import requests
+import tls_chain
 
 import text_core as tc
 from text_core import clean_page_text, TERMINAL, MAX_ATTEMPTS
@@ -97,7 +98,7 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
                     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 DL_TIMEOUT = 90
 DL_TRIES = 3
-MAX_MB = int(os.environ.get("FULLTEXT_MAX_MB", "200"))            # skip files above this size
+MAX_MB = int(os.environ.get("FULLTEXT_MAX_MB", "300"))            # skip files above this size
 MAX_PAGES = 3000             # read at most this many pages of one document
 MIN_CHARS = 200              # less text than this over a whole document = no text layer
 DOC_TIMEOUT = int(os.environ.get("FULLTEXT_DOC_TIMEOUT", "240"))  # seconds per document, download included
@@ -260,7 +261,7 @@ def fetch_pdf(url, max_bytes):
     last = "download_fail"; delay = 1.0
     for _ in range(DL_TRIES):
         try:
-            with requests.get(url, headers=UA, timeout=DL_TIMEOUT, stream=True) as resp:
+            with tls_chain.requests_get(url, headers=UA, timeout=DL_TIMEOUT, stream=True) as resp:     # a site with an incomplete certificate chain is read as a browser reads it
                 resp.raise_for_status()
                 clen = resp.headers.get("Content-Length")
                 if clen and clen.isdigit() and int(clen) > max_bytes:
@@ -444,6 +445,11 @@ def needs_work(d, att, retry_failed):
     if d is None:
         return True
     if att and d.get("att") and d["att"] != att:          # the file was replaced
+        return True
+    if att and not d.get("att") and d["status"] == "no_file":
+        # the row had no file when it was last looked at and has one now (a person sent it, or the attach job fetched
+        # it). Until 20 Nov 2026 "no_file" was final whatever came later: 29 of the files people sent in four days were
+        # put on such rows and never read, and the extension showed them as held.
         return True
     if d["status"] in TERMINAL:
         return retry_failed and d["status"] in ("parse_fail", "timeout", "crash")

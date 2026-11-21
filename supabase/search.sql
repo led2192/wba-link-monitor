@@ -10,9 +10,11 @@
 --   and a common word cost about the same. Documents with no company (out of the library's scope)
 --   are left out: their pages carry wba_id ''.
 
--- Who may search: a signed-in user with a WBA address, or an address listed in search_access (added by
--- the owner in the SQL editor: insert into search_access (email) values ('name@example.com');).
--- A direct database session (the loader, the checks) may too.
+-- Who may search: a signed-in user whose address is listed in search_access (added by the owner in the
+-- SQL editor: insert into search_access (email) values ('name@example.com');). A direct database session
+-- (the loader, the checks) may too. Until 21 Nov 2026 any address of one mail domain was let in without
+-- being listed; the addresses of that domain that had signed in by then were listed once (see below), so
+-- nobody lost their way in, and a new address has to be listed by the owner.
 create table if not exists public.search_access (
   email     text primary key,
   added_at  timestamptz not null default now()
@@ -22,9 +24,26 @@ alter table public.search_access enable row level security;
 create or replace function public.email_may_search(email text) returns boolean
   language sql stable security definer set search_path = public
   as $$
-    select coalesce(lower(email) like '%@worldbenchmarkingalliance.org', false)
-        or exists (select 1 from public.search_access a where lower(a.email) = lower(email))
+    select exists (select 1 from public.search_access a where lower(a.email) = lower(email_may_search.email))
   $$;
+-- Once, on the day the domain rule went: list the addresses that had signed in under it. The marker row
+-- keeps this from running again (a later sign-up from that domain is not let in by a later load).
+create table if not exists public.search_access_moves (name text primary key, at timestamptz not null default now(), listed int);
+alter table public.search_access_moves enable row level security;
+do $$
+declare n int := 0;
+begin
+  if not exists (select 1 from public.search_access_moves where name = 'domain_rule_off') then
+    if to_regclass('auth.users') is not null then
+      execute $q$ insert into public.search_access (email)
+                  select distinct lower(u.email) from auth.users u
+                  where lower(u.email) like '%@worldbenchmarkingalliance.org'
+                    and not exists (select 1 from public.search_access a where lower(a.email) = lower(u.email)) $q$;
+      get diagnostics n = row_count;
+    end if;
+    insert into public.search_access_moves (name, listed) values ('domain_rule_off', n);
+  end if;
+end $$;
 
 create or replace function public.can_search() returns boolean
   language sql stable security definer set search_path = public
@@ -1279,6 +1298,21 @@ create index if not exists value_reviews_version on public.value_reviews (versio
 create table if not exists public.value_truth (
   wba_id text not null, attribute text not null, year int not null, value double precision not null,
   loaded timestamptz not null default now(), primary key (wba_id, attribute, year));
+-- The validated answers as the page's functions may use them: every row while the option validated_answers is on,
+-- none while it is off (off since 21 Nov 2026, the owner: what the page says comes from the documents and from
+-- what its own users confirmed). With it off there is no measured share on a value's card and no control card in
+-- the review game; the table and its nightly writing stay as they were. In plpgsql, so that it can stand before
+-- survey_option and does not hold the table.
+insert into public.search_options (name, is_on, note) values ('validated_answers', false, 'validated answers feed the measured share on a value''s card and the control cards of the review game (off since 21 Nov 2026)') on conflict (name) do nothing;
+create or replace function public.truth_rows() returns table (wba_id text, attribute text, year int, value double precision)
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if public.survey_option('validated_answers') then
+    return query select t.wba_id, t.attribute, t.year, t.value from public.value_truth t;
+  end if;
+end $$;
+revoke all on function public.truth_rows() from public, anon, authenticated;
 create table if not exists public.value_confidence (
   attribute text not null, evidence text not null, n int not null, good int not null, primary key (attribute, evidence));
 alter table public.value_confidence enable row level security;
@@ -1301,7 +1335,7 @@ begin
          judged as (select b.attribute, public.evidence_group(b.docs, t.variants) as evidence,
                            (abs(b.value - tr.value) / nullif(abs(tr.value), 0) <= 0.005) as good
                     from best b join tot t using (wba_id, attribute, year)
-                    join public.value_truth tr on tr.wba_id = b.wba_id and tr.attribute = b.attribute and tr.year = b.year
+                    join public.truth_rows() tr on tr.wba_id = b.wba_id and tr.attribute = b.attribute and tr.year = b.year
                     where tr.value <> 0)
     select attribute, evidence, count(*)::int, count(*) filter (where good)::int from judged group by 1, 2
     union all
@@ -1394,7 +1428,7 @@ declare
   vid text := version_id;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to review' using errcode = '42501';
+    raise exception 'sign in with a listed address to review' using errcode = '42501';
   end if;
   if verdict not in ('ok', 'wrong', 'unsure') then
     raise exception 'verdict must be ok, wrong or unsure' using errcode = '22023';
@@ -1455,7 +1489,7 @@ declare
   co text := btrim(company);
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to add a value' using errcode = '42501';
+    raise exception 'sign in with a listed address to add a value' using errcode = '42501';
   end if;
   if kind not in ('number', 'yes_no', 'choice') then
     raise exception 'kind must be number, yes_no or choice' using errcode = '22023';
@@ -1595,7 +1629,7 @@ declare
   r record;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to add a company' using errcode = '42501';
+    raise exception 'sign in with a listed address to add a company' using errcode = '42501';
   end if;
   if length(nm) < 2 or length(nm) > 120 then
     raise exception 'the company''s name, 2 to 120 characters' using errcode = '22023';
@@ -2118,7 +2152,7 @@ declare
   done int;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -2249,7 +2283,7 @@ declare
   who text := lower(auth.jwt() ->> 'email');
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -2315,7 +2349,7 @@ declare
   words text := nullif(btrim(regexp_replace(coalesce(note, ''), '\s+', ' ', 'g')), '');
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -2445,10 +2479,29 @@ create or replace function public.company_card(key text, company text) returns j
 language plpgsql stable security definer
 set search_path = public
 as $$
+declare
+  pubs jsonb;
 begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
   end if;
+  -- When the main reports came out (20 Nov 2026, from a real question: "when does X publish key reports" was
+  -- searched as words inside the reports and answered by a model from a board approval date). The library holds
+  -- the date for many of them (pub_dates.py: a regulator's filing date, or the date the document states), copied
+  -- every night into public.library. The last five reporting years, one line a report; no date, no line.
+  begin
+    select jsonb_agg(jsonb_build_object('year', x.year, 'type', x.doc_type, 'date', x.pub_date, 'precision', x.prec, 'source', x.src) order by x.pub_date desc)
+      into pubs
+      from (select distinct on (d0.year, d0.doc_type) d0.year, d0.doc_type, l.fields ->> 'pub_date' as pub_date,
+                   l.fields ->> 'pub_date_precision' as prec, l.fields ->> 'pub_date_source' as src
+              from public.documents d0 join public.library l on l.library_id = d0.library_id
+             where d0.wba_id = $2 and d0.year >= extract(year from now())::int - 5
+               and d0.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Climate Report', '10K Form', 'Registration Document')
+               and (l.fields ->> 'pub_date') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+             order by d0.year, d0.doc_type, l.fields ->> 'pub_date') x;
+  exception when undefined_table then
+    pubs := null;
+  end;
   return (
     with d as (
       select distinct on (d0.year, lower(coalesce(nullif(btrim(d0.label), ''), d0.library_id)))
@@ -2469,7 +2522,8 @@ begin
       'first', (select min(d.year) from d), 'last', (select max(d.year) from d),
       'types', (select jsonb_agg(jsonb_build_object('type', t.doc_type, 'n', t.n, 'years_read', to_jsonb(t.years_read), 'years_unread', to_jsonb(t.years_unread), 'undated', t.undated)
                                  order by coalesce(array_position(array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Climate Report', '10K Form'], t.doc_type), 99), t.n desc, t.doc_type)
-                  from t)) end);
+                  from t),
+      'published', coalesce(pubs, '[]'::jsonb)) end);
 end;
 $$;
 revoke all on function public.company_card(text, text) from public;
@@ -2683,6 +2737,12 @@ end;
 $$;
 revoke all on function public.ask_pages(text, text, real[], text, int, int, text, text, text, text, text) from public, anon, authenticated;
 
+-- Is the option reader_plain_words on (see ask_instructions)? In plpgsql, so that it can stand before survey_option.
+create or replace function public.reader_plain_words() returns boolean
+language plpgsql stable security definer set search_path = public
+as $$ begin return public.survey_option('reader_plain_words'); end $$;
+revoke all on function public.reader_plain_words() from public, anon, authenticated;
+
 -- What Ask is told about the fiscal years of the companies it reads: one line a company whose year does not end in
 -- December, with an example of WBA's reporting year. '' when no such company.
 create or replace function public.ask_fiscal_lines(sources jsonb)
@@ -2690,7 +2750,7 @@ returns text
 language sql stable security definer
 set search_path = public, extensions
 as $$
-  select coalesce(string_agg(format('- %s: the fiscal year ends in %s. WBA''s reporting year: %s.', x.company,
+  select coalesce(string_agg(format('- %s: the fiscal year ends in %s. ' || case when public.reader_plain_words() then 'The reporting year' else 'WBA''s reporting year' end || ': %s.', x.company,
            to_char(make_date(2000, x.m, 1), 'FMMonth'),
            case when x.m between 1 and 5 then 'a fiscal year ending in ' || to_char(make_date(2000, x.m, 1), 'FMMonth') || ' 2024 (often printed "fiscal 2024" or "FY24") is reporting year 2023, one less than its label'
                 else 'the year the fiscal year ends in' end), E'\n' order by x.company), '')
@@ -2768,7 +2828,36 @@ as $$
 $$;
 revoke all on function public.ask_per_day(text) from public, anon, authenticated;
 
+-- Option reader_plain_words (20 Nov 2026, the owner; off until compared, ask_wording_compare.py). Three changes to what
+-- the reader is told, none to what it reads: (1) a confirmed fact is "confirmed earlier by a person", not "by a
+-- colleague" (the page is used outside one organisation); (2) the reporting year is named without WBA; (3) an answer
+-- is never the bare word No or Yes: the evidence follows, or the answer begins "Not stated in these pages".
+insert into public.search_options (name, is_on, note) values ('reader_plain_words', false, 'the reader of Ask says "a person" for who confirmed a fact and "reporting year" without WBA, and never answers with a bare No or Yes')
+on conflict (name) do nothing;
+-- On since 20 Nov 2026 (run 44827372584): 60 questions, each answered as today, as today again and with the option.
+-- Answered 60, 60, 60; facts with a page 189, 192, 193; figures of the first answer kept by the second plain answer 81%,
+-- by the option's 79%; answers that say "colleague" 13, 12, 0; that say "WBA" 14, 13, 0. Not shown by this run: no
+-- answer of any arm was a bare No or Yes, so that part of the option is untested; and 10 answers of the option began
+-- "Not stated" against 7 and 7.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 20 Nov 2026, run 44827372584)' where name = 'reader_plain_words' and not is_on and note not like '%on since%';
+
 create or replace function public.ask_instructions(with_names boolean) returns text
+language plpgsql stable security definer set search_path = public
+as $fn$
+begin
+  return case when not public.reader_plain_words() then public.ask_instructions_text(with_names)
+    else replace(replace(replace(replace(public.ask_instructions_text(with_names),
+           'facts a colleague confirmed earlier', 'facts a person confirmed earlier'),
+           '"confirmed earlier by a colleague"', '"confirmed earlier by a person"'),
+           'WBA''s reporting year', 'the reporting year'),
+           'WBA reporting year', 'reporting year')
+         || ' Never let the whole answer be the bare word No or Yes: after it, in the same answer, say what the excerpts state that shows it, with its excerpt number; '
+         || 'when nothing in the excerpts bears on the question, begin with "Not stated in these pages" and say what they do contain.' end;
+end;
+$fn$;
+revoke all on function public.ask_instructions(boolean) from public, anon, authenticated;
+
+create or replace function public.ask_instructions_text(with_names boolean) returns text
 language sql immutable
 as $fn$
   select
@@ -2800,10 +2889,10 @@ as $fn$
          || 'with no list (every figure that answers the question, whether or not a listed name fits it), and only then name them.' else '' end
 $fn$;
 create or replace function public.ask_message(asked text, known text, fiscal text, names text, context text) returns text
-language sql immutable
+language sql stable security definer set search_path = public
 as $fn$
   select
-    'Question: ' || asked || case when known <> '' then E'\n\nConfirmed earlier by a colleague:\n' || known else '' end
+    'Question: ' || asked || case when known <> '' then E'\n\nConfirmed earlier by a ' || case when public.reader_plain_words() then 'person' else 'colleague' end || E':\n' || known else '' end
       || case when fiscal <> '' then E'\n\nFiscal years:\n' || fiscal else '' end
       || case when names <> '' then E'\n\nMetric names in use:\n' || names else '' end || E'
 
@@ -2900,6 +2989,26 @@ $$;
 revoke all on function public.find_topics(text) from public;
 grant execute on function public.find_topics(text) to anon, authenticated;
 
+-- The names of the taxonomy's metrics as the page compares them (19 Nov 2026): one company and the name of a metric
+-- ("Rosneft CEO", "nike number of employees", "Generali total assets") is a fact that is wanted, so the page asks it
+-- as a question with no year needed. Labels and other names of the active metrics, in topic_norm's form. Names that
+-- are also a broad topic stay the topic's (the page looks at the topics first).
+create or replace function public.find_metric_names(key text) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(distinct x.name), '[]'::jsonb) from (
+            select public.topic_norm(a) as name from public.fact_metrics m, unnest(m.aliases || m.label) a where m.status = 'active') x
+          where x.name <> '' and length(x.name) >= 3);
+end;
+$$;
+revoke all on function public.find_metric_names(text) from public;
+grant execute on function public.find_metric_names(text) to anon, authenticated;
+
 -- The pages an overview reads: one search for each metric of each group of the topic, within the company, and the
 -- best pages taken in turn, a group at a time, so that eight pages cover the topic's parts, where the search by the
 -- topic's own words gave eight pages of one part. A page found twice counts once.
@@ -2932,10 +3041,128 @@ end;
 $$;
 revoke all on function public.overview_pages(text, text, int, int, jsonb) from public, anon, authenticated;
 
+-- An answer given once is not paid for twice (19 Nov 2026, option ask_reuse). Since page v112 a company with a
+-- few words of a topic is answered without anyone pressing Ask, so the same question comes back often: from the same
+-- person looking again, and from the next person. Every answer about one company is kept whole (ask_cache: what ask
+-- returned) with what it was asked for: the company, the years, the kind of report, the words searched and their
+-- vector. A later question is given the kept answer when all of this holds:
+--   the same company, years and kind of report; the kept answer is under 14 days old (documents arrive);
+--   the same numbers in the words ("scope 1" is never "scope 2", measured below);
+--   the same words, or words that mean the same: cosine of the two vectors 0.96 or more.
+-- The threshold was read off the 122 searches of the log on 19 Nov 2026 (7,381 pairs): pairs that ask the same
+-- stand at 0.957 to 0.996 ("who is the CEO" and "who was the CEO" 0.990; "scope 1 emissions" and "what are the scope
+-- 1 emissions" 0.958); pairs that do not reach 0.966 only when a number differs ("scope 1" and "scope 1 or scope
+-- 2" 0.966, "scope 1" and "scope 3" 0.955), which the rule of the numbers refuses; without a number the highest
+-- different pair seen was 0.936. The page says that the answer was given earlier and for which words, and offers
+-- to ask again (fresh => true), which is counted and paid like any answer. A kept answer costs nothing and is not
+-- counted in the person's day.
+create table if not exists public.ask_cache (
+  ask_id    bigint primary key,
+  company   text not null,
+  year_from int,
+  year_to   int,
+  type      text,
+  words     text not null,          -- ask_words_norm of the words searched
+  nums      text not null,          -- ask_nums of the same
+  vec       real[],
+  reply     jsonb not null,
+  at        timestamptz not null default now()
+);
+create index if not exists ask_cache_company on public.ask_cache (company, at desc);
+alter table public.ask_cache enable row level security;
+alter table public.ask_log add column if not exists reused bigint;       -- the answer (ask_log.id) this question was given again, at no cost
+
+create or replace function public.ask_words_norm(t text) returns text language sql immutable
+  as $$ select btrim(regexp_replace(regexp_replace(lower(coalesce($1, '')), '[^[:alnum:][:space:]]', ' ', 'g'), '\s+', ' ', 'g')) $$;
+create or replace function public.ask_nums(t text) returns text language sql immutable
+  as $$ select coalesce((select string_agg(x.n, ' ' order by x.n) from (select distinct m[1] as n from regexp_matches(coalesce($1, ''), '\d+', 'g') m) x), '') $$;
+
+-- The cosine of two vectors, in plain SQL: asked of the few kept answers of one company, where no index is needed.
+create or replace function public.cosine(a real[], b real[]) returns double precision language sql immutable parallel safe
+  as $$ select case when sum(x * x) > 0 and sum(y * y) > 0 then sum(x * y) / (sqrt(sum(x * x)) * sqrt(sum(y * y))) end
+        from unnest($1::double precision[], $2::double precision[]) as t(x, y) $$;
+
+-- The vector of some words, when the page did not send one. The page waits four seconds for the question's vector
+-- and asks without it when it is late; the vector is still made and kept in query_vectors a moment after. The
+-- owner's first trial (19 Nov 2026): "supply chain" was answered without its vector, so "supply chains" asked a
+-- minute later (cosine 0.993 with it) had nothing to be compared with and was paid for again.
+-- The search words the model chose, cleaned (19 Nov 2026). The model is asked for 3 to 5 words and has room to
+-- think first; one answer came back as "scope 3 category 11 use of sold products wait the rule says write
+-- abbreviations in full scope 3 cat 11 should be c", and that whole line was searched (and shown to the person as
+-- "Pages found by searching ..."). Now: the last line of eight words or fewer is the answer; when there is none,
+-- the first line up to where the talk begins (wait, the rule, should, actually ...), eight words at most.
+create or replace function public.ask_keywords_clean(raw text) returns text language sql immutable
+as $$
+  with lines as (select btrim(regexp_replace(regexp_replace(lower(t.l), '[^[:alnum:][:space:]]', ' ', 'g'), '\s+', ' ', 'g')) as l, t.ord
+                 from regexp_split_to_table(coalesce(raw, ''), E'\n') with ordinality t(l, ord)),
+       good as (select l, ord, array_length(string_to_array(l, ' '), 1) as n from lines where l <> ''),
+       cut as (select btrim(regexp_replace((select g.l from good g order by g.ord limit 1),
+                                           '\m(wait|rule|rules|says|should|hmm|actually|let|note|sorry|because|but|so|i|we)\M.*$', '')) as l)
+  select nullif(btrim(left(coalesce((select g.l from good g where g.n <= 8 order by g.ord desc limit 1),
+                                    (select string_agg(w.w, ' ' order by w.i) from cut, regexp_split_to_table(cut.l, ' ') with ordinality w(w, i) where w.w <> '' and w.i <= 8)), 120)), '')
+$$;
+revoke all on function public.ask_keywords_clean(text) from public, anon, authenticated;
+
+create or replace function public.ask_vector(q text, sent real[]) returns real[] language sql stable security definer set search_path = public
+as $$
+  select case when coalesce(array_length(sent, 1), 0) = 384 then sent
+              else (select v.vec from public.query_vectors v where public.ask_words_norm(v.q) = public.ask_words_norm($1) and array_length(v.vec, 1) = 384 order by v.at desc limit 1) end
+$$;
+revoke all on function public.ask_vector(text, real[]) from public, anon, authenticated;
+
+create or replace function public.ask_keep(id bigint, for_company text, y0 int, y1 int, kind text, q text, qvec real[], whole jsonb) returns void
+language sql security definer set search_path = public
+as $$
+  insert into public.ask_cache (ask_id, company, year_from, year_to, type, words, nums, vec, reply)
+    values (id, for_company, y0, y1, kind, public.ask_words_norm(q), public.ask_nums(q), public.ask_vector(q, qvec), whole)
+    on conflict (ask_id) do nothing
+$$;
+revoke all on function public.ask_keep(bigint, text, int, int, text, text, real[], jsonb) from public, anon, authenticated;
+
+-- (the company is named for_company: a parameter called "company" is read as the column, and every company's
+-- kept answer would be given for any company; the test of this function caught it before it was installed)
+-- The same words: also with the spaces taken out ("supply chai n" is "supply chain"). The same meaning: the vector
+-- sent, or the one kept for these words; for a kept answer that has none, the one made since for its words.
+create or replace function public.ask_reusable(for_company text, y0 int, y1 int, kind text, q text, qvec real[]) returns jsonb
+language sql stable security definer set search_path = public, extensions
+as $$
+  with asked as (select public.ask_words_norm(q) as words, public.ask_nums(q) as nums, public.ask_vector(q, qvec) as vec)
+  select jsonb_build_object('ask_id', c.ask_id, 'reply', c.reply, 'at', c.at, 'words', c.words, 'same', c.words = a.words)
+  from public.ask_cache c, asked a
+  where c.company = for_company and c.year_from is not distinct from y0 and c.year_to is not distinct from y1 and c.type is not distinct from kind
+    and c.at > now() - interval '14 days'
+    and c.nums = a.nums
+    and (replace(c.words, ' ', '') = replace(a.words, ' ', '')
+         or public.cosine(coalesce(c.vec, public.ask_vector(c.words, null)), a.vec) >= 0.96)
+  order by (c.words = a.words) desc, c.at desc
+  limit 1
+$$;
+revoke all on function public.ask_reusable(text, int, int, text, text, real[]) from public, anon, authenticated;
+
+insert into public.search_options (name, is_on, note) values ('ask_reuse', true, 'a question already answered for the same company and words (or words that mean the same) is given the kept answer, at no cost') on conflict (name) do nothing;
+-- Option answer_topics (page v112): one company and a few words that are neither a kind of report nor a quoted
+-- phrase are answered at once, the pages below (the owner, 19 Nov 2026: the person must not have to work out
+-- whether to press Ask). The page reads it with search_flags, so it can be switched off without a new page.
+insert into public.search_options (name, is_on, note) values ('answer_topics', true, 'one company and a few words of a topic are answered at once, the pages below') on conflict (name) do nothing;
+
+create or replace function public.search_flags(key text) returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object('answer_topics', public.survey_option('answer_topics'), 'ask_reuse', public.survey_option('ask_reuse'));
+end;
+$$;
+revoke all on function public.search_flags(text) from public;
+grant execute on function public.search_flags(text) to anon, authenticated;
+
+drop function if exists public.ask(text, text, text, text, int, int, text, text, real[], text, text, text);
 create or replace function public.ask(
   key text, question text, q text default null, company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null, client text default null, qvec real[] default null,
-  industry_filter text default null, country_filter text default null, region_filter text default null)
+  industry_filter text default null, country_filter text default null, region_filter text default null, fresh boolean default false)
 returns jsonb
 language plpgsql security definer
 set search_path = public, extensions
@@ -2953,6 +3180,8 @@ declare
   vault_err text;
   http_schema text;
   t0 timestamptz := clock_timestamp();
+  t_read timestamptz;                  -- when the reader was called, and when it answered: where an answer's seconds go (20 Nov 2026)
+  t_done timestamptz;
   r record;
   n int := 0;
   context text := '';
@@ -2975,9 +3204,12 @@ declare
   known text := '';
   fiscal text := '';
   names text := '';
+  kept jsonb;
+  one_company boolean;
+  whole jsonb;
 begin
   if who is null or not (who like 'link:%' or public.email_may_search(who)) then
-    raise exception 'sign in with a WBA address to ask' using errcode = '42501';
+    raise exception 'sign in with a listed address to ask' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -2987,6 +3219,22 @@ begin
   end if;
   per_day := public.ask_per_day(who);
   select count(*) into used from public.ask_log a where a.asker = who and a.answered and a.at >= date_trunc('day', now());
+  -- the answer kept for the same company and the same question, before anything is counted or paid (ask_reusable)
+  one_company := company_filter is not null and position(';' in company_filter) = 0
+                 and industry_filter is null and country_filter is null and region_filter is null;
+  if one_company and not coalesce(fresh, false) and public.survey_option('ask_reuse') then
+    begin
+      kept := public.ask_reusable(company_filter, year_from, year_to, type_filter, coalesce(nullif(btrim(q), ''), asked), qvec);
+    exception when others then
+      kept := null;                                              -- an extra: never costs the answer
+    end;
+    if kept is not null then
+      insert into public.ask_log (asker, question, answered, ms, client, reused)
+        values (who, asked, false, extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60), (kept ->> 'ask_id')::bigint);
+      return (kept -> 'reply') || jsonb_build_object('left', per_day - used, 'per_day', per_day, 'ask_id', kept -> 'ask_id',
+                'reused', jsonb_build_object('at', kept -> 'at', 'words', kept -> 'words', 'same', kept -> 'same'));
+    end if;
+  end if;
   if used >= per_day then
     return jsonb_build_object('limit', true, 'left', 0, 'per_day', per_day);
   end if;
@@ -3034,10 +3282,9 @@ begin
       || '(S1 is scope 1, S3 Cat 11 is scope 3 use of sold products, RY is reporting year). No company names, no years, no punctuation, nothing else.',
       left(search_q, 400), 800);      -- room for the model's own reasoning before the words (with 40, then 150, it stopped before writing any)
     if got ? 'text' then
-      keywords := btrim(left(regexp_replace(lower(coalesce(got ->> 'text', '')), '[^[:alnum:][:space:]]', ' ', 'g'), 120));
+      keywords := public.ask_keywords_clean(got ->> 'text');
       tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
-      if keywords = '' then
-        keywords := null;
+      if keywords is null then
         err := format('search words not chosen: the model returned no text (stop %s, content %s, %s tokens out)', got ->> 'stop', coalesce(got ->> 'kinds', 'none'), got ->> 'out');
       end if;
     else
@@ -3085,11 +3332,13 @@ begin
       names := '';                                               -- an extra: never costs the answer
     end;
   end if;
+  t_read := clock_timestamp();
   got := public.ask_model(api_key, http_schema, model, public.ask_instructions(names <> ''),
            public.ask_message(asked || case when topic is not null then format(E'\n(This asks for an overview of %s for this company. The excerpts were chosen a part of the topic at a time: %s. '
              || 'Give the key figures and facts of each part the excerpts cover, each with its year and its excerpt number, in a few short lines, the most recent year first. '
              || 'Then say in one line which of these parts the excerpts do not cover. Do not describe documents or list page titles.)', topic ->> 'label',
              (select string_agg(e ->> 'label', ', ') from jsonb_array_elements(topic -> 'groups') e)) else '' end, known, fiscal, names, context), 3500);      -- the answer is short; the room is for the model's reasoning (with 500 a hard question ended before any text) and the facts
+  t_done := clock_timestamp();
   parts := public.ask_split(got ->> 'text');
   answer := parts ->> 'answer';
   err := coalesce(got ->> 'error', case when answer is null then format('the model returned no text (stop %s, %s tokens out)', got ->> 'stop', got ->> 'out') end);
@@ -3097,7 +3346,8 @@ begin
   insert into public.ask_log (asker, question, answered, answer, sources, input_tokens, output_tokens, ms, error, client, keywords, search)
     values (who, asked, answer is not null, answer, sources, tok_in, tok_out,
             extract(epoch from clock_timestamp() - t0)::numeric * 1000, err, left(client, 60), keywords,
-            jsonb_build_object('q', search_q, 'company', company_filter, 'from', year_from, 'to', year_to, 'type', type_filter, 'vector', qvec is not null))
+            jsonb_build_object('q', search_q, 'company', company_filter, 'from', year_from, 'to', year_to, 'type', type_filter, 'vector', qvec is not null,
+                               'ms_find', round(extract(epoch from t_read - t0)::numeric * 1000), 'ms_read', round(extract(epoch from t_done - t_read)::numeric * 1000)))
     returning id into ask_id;
   if answer is not null then
     begin
@@ -3109,13 +3359,153 @@ begin
   if answer is null then
     return jsonb_build_object('error', coalesce(err, 'no answer'), 'left', per_day - used, 'per_day', per_day);
   end if;
-  return jsonb_build_object('answer', answer, 'sources', sources, 'left', per_day - used - 1, 'per_day', per_day, 'keywords', keywords, 'facts', facts,
-                            'facts_stated', parts -> 'stated', 'facts_tail', parts -> 'tail',
-                            'confirmed', confirmed);   -- for telling apart: no list written, a list not readable, facts with no page
+  whole := jsonb_build_object('answer', answer, 'sources', sources, 'keywords', keywords, 'facts', facts,
+                              'facts_stated', parts -> 'stated', 'facts_tail', parts -> 'tail', 'confirmed', confirmed);
+  if one_company then
+    begin
+      perform public.ask_keep(ask_id, company_filter, year_from, year_to, type_filter, search_q, qvec, whole);
+    exception when others then
+      null;                                                      -- keeping the answer is an extra: never costs the answer
+    end;
+  end if;
+  return whole || jsonb_build_object('left', per_day - used - 1, 'per_day', per_day, 'ask_id', ask_id);   -- for telling apart: no list written, a list not readable, facts with no page
 end;
 $$;
-revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) from public, anon;
-grant execute on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text) to anon, authenticated;     -- anon: a link that may ask (link_asker); anyone else is refused inside
+revoke all on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean) from public, anon;
+grant execute on function public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean) to anon, authenticated;     -- anon: a link that may ask (link_asker); anyone else is refused inside
+
+-- A follow-up on an answer (19 Nov 2026, the owner: "the Follow up box"). An answer often leaves the next question
+-- in the air ("and in 2023?", "is that target absolute?", "what does the footnote say?"), and asking it in the box
+-- starts a new search that may read other pages. A follow-up is asked of the same pages the answer read: no search,
+-- no words chosen by the model, one call. The model is given the earlier question and answer, so "that" and "it"
+-- mean what they meant. It counts as one of the day's answers and is kept in ask_log with the answer it follows.
+-- Who may follow an answer: the person it was written for, or a person who was given it again (ask_log.reused).
+alter table public.ask_log add column if not exists follows bigint;       -- the answer (ask_log.id) this question follows, asked of its pages
+
+create or replace function public.ask_follow_text(earlier_question text, earlier_answer text, asked text) returns text
+language sql immutable
+as $fn$
+  select asked || E'\n(This follows an earlier question about the same excerpts. Earlier question: ' || left(coalesce(earlier_question, ''), 400)
+    || E'\nEarlier answer: ' || left(coalesce(earlier_answer, ''), 3000)
+    || E'\nAnswer the new question from the excerpts, with their numbers. Do not repeat the earlier answer. '
+    || 'If the excerpts do not hold what is asked, say so in one line and say which kind of page would.)'
+$fn$;
+
+-- the answer a person may follow: its question, answer and pages, or nothing
+create or replace function public.ask_followable(the_ask bigint, who text) returns jsonb
+language sql stable security definer set search_path = public, extensions
+as $fn$
+  select jsonb_build_object('question', a.question, 'answer', a.answer, 'sources', a.sources)
+  from public.ask_log a
+  where a.id = the_ask and a.answered and a.answer is not null and jsonb_typeof(a.sources) = 'array' and jsonb_array_length(a.sources) > 0
+    and (a.asker = who or exists (select 1 from public.ask_log r where r.asker = who and r.reused = a.id))
+$fn$;
+revoke all on function public.ask_followable(bigint, text) from public, anon, authenticated;
+
+create or replace function public.ask_follow(key text, the_ask bigint, question text, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '75s'
+as $$
+#variable_conflict use_variable
+declare
+  per_day int := 50;
+  per_day_all constant int := 1000;
+  model constant text := 'claude-haiku-5-5';
+  who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));
+  asked text := btrim(coalesce(question, ''));
+  used int;
+  api_key text;
+  http_schema text;
+  t0 timestamptz := clock_timestamp();
+  before jsonb;
+  sources jsonb;
+  s jsonb;
+  body text;
+  context text := '';
+  confirmed jsonb := '[]'::jsonb;
+  known text := '';
+  fiscal text := '';
+  got jsonb;
+  parts jsonb;
+  answer text;
+  err text;
+  ask_id bigint;
+  facts jsonb := '[]'::jsonb;
+begin
+  if who is null or not (who like 'link:%' or public.email_may_search(who)) then
+    raise exception 'sign in with a listed address to ask' using errcode = '42501';
+  end if;
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if length(asked) < 3 or length(asked) > 400 then
+    raise exception 'a question of 3 to 400 characters' using errcode = '22023';
+  end if;
+  before := public.ask_followable(the_ask, who);
+  if before is null then
+    raise exception 'not an answer of yours' using errcode = '22023';
+  end if;
+  per_day := public.ask_per_day(who);
+  select count(*) into used from public.ask_log a where a.asker = who and a.answered and a.at >= date_trunc('day', now());
+  if used >= per_day then
+    return jsonb_build_object('limit', true, 'left', 0, 'per_day', per_day);
+  end if;
+  if (select count(*) from public.ask_log a where a.answered and a.at >= date_trunc('day', now())) >= per_day_all then
+    return jsonb_build_object('limit', true, 'everyone', true, 'left', per_day - used, 'per_day', per_day);
+  end if;
+  begin
+    select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;
+  exception when others then
+    api_key := null;
+  end;
+  select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
+  if api_key is null or http_schema is null then
+    return jsonb_build_object('off', true, 'left', per_day - used, 'per_day', per_day);
+  end if;
+  -- the same pages, with the same numbers, read again from the library (a page re-read since then is read as it is now)
+  sources := before -> 'sources';
+  for s in select e from jsonb_array_elements(sources) e loop
+    select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body
+      from public.pages pg where pg.library_id = s ->> 'library_id' and pg.page = (s ->> 'page')::int;
+    context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', s ->> 'n', s ->> 'company', coalesce(s ->> 'year', 'no year'),
+                                 coalesce(s ->> 'doc_type', 'document'), s ->> 'page', coalesce(body, ''));
+  end loop;
+  begin
+    confirmed := public.ask_confirmed_facts(null, sources, who);
+    known := public.ask_confirmed_lines(confirmed);
+  exception when others then
+    confirmed := '[]'::jsonb; known := '';
+  end;
+  begin
+    fiscal := public.ask_fiscal_lines(sources);
+  exception when others then
+    fiscal := '';
+  end;
+  got := public.ask_model(api_key, http_schema, model, public.ask_instructions(false),
+           public.ask_message(public.ask_follow_text(before ->> 'question', before ->> 'answer', asked), known, fiscal, '', context), 3500);
+  parts := public.ask_split(got ->> 'text');
+  answer := parts ->> 'answer';
+  err := coalesce(got ->> 'error', case when answer is null then format('the model returned no text (stop %s, %s tokens out)', got ->> 'stop', got ->> 'out') end);
+  insert into public.ask_log (asker, question, answered, answer, sources, input_tokens, output_tokens, ms, error, client, follows)
+    values (who, asked, answer is not null, answer, sources, coalesce((got ->> 'in')::int, 0), coalesce((got ->> 'out')::int, 0),
+            extract(epoch from clock_timestamp() - t0)::numeric * 1000, err, left(client, 60), the_ask)
+    returning id into ask_id;
+  if answer is null then
+    return jsonb_build_object('error', coalesce(err, 'no answer'), 'left', per_day - used, 'per_day', per_day);
+  end if;
+  begin
+    facts := public.ask_keep_facts(ask_id, parts -> 'facts', sources);
+  exception when others then
+    facts := '[]'::jsonb;
+  end;
+  return jsonb_build_object('answer', answer, 'sources', sources, 'facts', facts, 'confirmed', confirmed, 'ask_id', ask_id, 'follows', the_ask,
+                            'left', per_day - used - 1, 'per_day', per_day);
+end;
+$$;
+revoke all on function public.ask_follow(text, bigint, text, text) from public, anon;
+grant execute on function public.ask_follow(text, bigint, text, text) to anon, authenticated;     -- anon: a link that may ask; anyone else is refused inside
 
 -- The owner's panel (13 Nov 2026). lanterN is now used by colleagues: the owner needs to tell the people and the
 -- links apart, to see and correct what people confirmed among the facts of answers, and to see what Ask costs.
@@ -3142,8 +3532,8 @@ begin
     'links', (select coalesce(jsonb_agg(to_jsonb(x) order by x.name), '[]'::jsonb) from (
         select k.name, k.active, k.created, k.may_ask,
                (select count(*) from public.ask_log a where a.asker = 'link:' || k.name and a.answered and a.at > now() - interval '7 days') as answers_7d,
-               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '7 days') as searches_7d,
-               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '30 days') as searches_30d,
+               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '7 days' and coalesce(l.client, '') not like '% +years') as searches_7d,
+               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '30 days' and coalesce(l.client, '') not like '% +years') as searches_30d,
                (select max(l.at) from public.search_log l where l.key_name = k.name) as last_used
         from public.search_keys k) x),
     'people', (select coalesce(jsonb_agg(to_jsonb(x) order by x.last_seen desc nulls last), '[]'::jsonb) from (
@@ -3895,6 +4285,61 @@ end;
 $$;
 revoke all on function public.ask_names_trial(bigint) from public, anon, authenticated;
 
+-- Option reader_plain_words beside today's answers (20 Nov 2026; ask_wording_compare.py). The question and the pages
+-- of a kept answer go to the reader three times: as today, as today again (how much two answers differ by
+-- themselves) and with the option. The option is set for the one call (set_config, local to the statement's
+-- transaction). Nothing is kept. Returns counts per arm, never a text. CALLS THE PAID READER: three calls.
+create or replace function public.ask_wording_trial(the_ask bigint)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '170s'
+as $$
+#variable_conflict use_variable
+declare
+  model constant text := 'claude-haiku-5-5';
+  a record;
+  api_key text;
+  http_schema text;
+  src jsonb;
+  body text;
+  context text := '';
+  fiscal text;
+  known text := '';
+  arm text;
+  got jsonb;
+  said text;
+  out jsonb := '{}'::jsonb;
+  tok_in int := 0;
+  tok_out int := 0;
+begin
+  select l.question, l.sources, l.asker into a from public.ask_log l where l.id = the_ask and l.answered and jsonb_array_length(coalesce(l.sources, '[]'::jsonb)) > 0;
+  if a.question is null then return jsonb_build_object('skipped', 'no such answer'); end if;
+  select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;
+  select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
+  if api_key is null or http_schema is null then return jsonb_build_object('skipped', 'the reader is not switched on'); end if;
+  for src in select e from jsonb_array_elements(a.sources) e order by (e ->> 'n')::int loop
+    select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = src ->> 'library_id' and pg.page = (src ->> 'page')::int;
+    context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', src ->> 'n', src ->> 'company', coalesce(src ->> 'year', 'no year'), coalesce(src ->> 'doc_type', 'document'), src ->> 'page', coalesce(body, ''));
+  end loop;
+  begin known := public.ask_confirmed_lines(public.ask_confirmed_facts(null, a.sources, a.asker)); exception when others then known := ''; end;
+  foreach arm in array array['off', 'again', 'on'] loop
+    perform set_config('lantern.reader_plain_words', case when arm = 'on' then 'on' else 'off' end, true);
+    begin fiscal := public.ask_fiscal_lines(a.sources); exception when others then fiscal := ''; end;
+    got := public.ask_model(api_key, http_schema, model, public.ask_instructions(false), public.ask_message(a.question, coalesce(known, ''), fiscal, '', context), 3500);
+    if got ? 'error' then perform set_config('lantern.reader_plain_words', '', true); return jsonb_build_object('skipped', 'the model did not answer', 'arm', arm); end if;
+    tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
+    said := coalesce(public.ask_split(got ->> 'text') ->> 'answer', '');
+    out := out || jsonb_build_object(arm, public.ask_reply_numbers(got ->> 'text', a.sources, '') || jsonb_build_object(
+             'bare', btrim(said) ~* '^(no|yes|sí|si|non|nein|ja)[.!]?$', 'starts_no', said ~* '^\s*no\M', 'not_stated', said ~* '^\s*not stated',
+             'colleague', said ~* 'colleague', 'wba', said ~ 'WBA'));
+  end loop;
+  perform set_config('lantern.reader_plain_words', '', true);
+  return out || jsonb_build_object('known', known <> '', 'fiscal', coalesce(fiscal, '') <> '', 'tokens_in', tok_in, 'tokens_out', tok_out);
+end;
+$$;
+revoke all on function public.ask_wording_trial(bigint) from public, anon, authenticated;
+
 -- The stage of the semantic fill (15 Nov 2026, semantic_index.py --stage): passages of the older years wait here, with
 -- no index on their embeddings, while the search reads public.chunks as before. They are moved into public.chunks and
 -- indexed once, when the fill is done. No function reads these tables.
@@ -3979,7 +4424,7 @@ begin
          select l.at, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.typed is not null as as_typed, l.q, l.company, l.year_from, l.year_to,
                 l.doc_type, l.profile, l.n, l.ms, l.shown, l.by_meaning, l.meaning,
                 (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
-         from public.search_log l where l.key_name = link
+         from public.search_log l where l.key_name = link and coalesce(l.client, '') not like '% +years'      -- not the page's second call for a year typed (v127)
          order by l.at desc limit least(greatest(coalesce(max_rows, 200), 1), 1000)) x) end,
     'questions', case when nullif(btrim(coalesce(person, '')), '') is null then '[]'::jsonb else
       (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
@@ -3994,6 +4439,292 @@ $$;
 -- runs: one link searched the same company three times or more, each within three minutes of the one before.
 -- nothing: no page shown (after the blend when the page reported it, by words before). few: one to three pages
 -- shown. slow: five seconds or more. A hundred of each at most, newest first.
+-- The documents the robot could not get, for the owner to fetch by hand (19 Nov 2026). The robot holds their
+-- address but not their file: the site refuses it, the address died, the download fails. A person's browser often
+-- opens them, and the extension sends the file. The list is the owner's working list, by company: the main reports
+-- first (annual, integrated, sustainability and the like), newest first. A search narrows it to a company or a
+-- word of the title; only_main keeps the main reports; from_year the documents of that year on.
+-- The documents label_docs.py has looked at (19 Nov 2026): one line a document, so that none is read by a model twice.
+-- What the model said, and which fields of the library's row were written (none when the row already held them).
+create table if not exists public.doc_labels (
+  library_id text primary key,
+  at         timestamptz not null default now(),
+  model      text not null,
+  type       text,
+  language   text,
+  title      text,
+  written    text
+);
+alter table public.doc_labels enable row level security;
+
+-- What the owner corrects from the list of documents to fetch (19 Nov 2026): a row that is not what it says, or that
+-- should not be in the library. One line a correction; doc_fixes.py applies the lines to the library (discard with
+-- its reason, never a deletion; the type and the year) and writes back when and what. A discarded document leaves
+-- the list at once; a corrected one shows its new type and year at once.
+create table if not exists public.doc_fixes (
+  id         bigint generated always as identity primary key,
+  at         timestamptz not null default now(),
+  by         text,
+  library_id text not null,
+  action     text not null check (action in ('discard', 'relabel')),
+  doc_type   text,
+  year       int,
+  reason     text,
+  applied_at timestamptz,
+  result     text
+);
+create index if not exists doc_fixes_doc on public.doc_fixes (library_id);
+alter table public.doc_fixes enable row level security;
+
+create or replace function public.admin_doc_fix(key text, doc text, what text, new_type text default null, new_year int default null, why text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public
+as $$
+declare
+  t text := nullif(btrim(coalesce(new_type, '')), '');
+  r text := nullif(lower(btrim(coalesce(why, ''))), '');
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if what not in ('discard', 'relabel') then
+    raise exception 'discard or relabel' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.documents d where d.library_id = doc) then
+    raise exception 'no such document' using errcode = '22023';
+  end if;
+  if what = 'relabel' and t is null and new_year is null then
+    raise exception 'give a type or a year' using errcode = '22023';
+  end if;
+  if new_year is not null and new_year not between 1990 and 2100 then
+    raise exception 'that is not a year' using errcode = '22023';
+  end if;
+  if what = 'discard' and coalesce(r, 'other') not in ('dead link', 'not a report', 'duplicate', 'wrong company', 'other') then
+    raise exception 'not one of the reasons' using errcode = '22023';
+  end if;
+  insert into public.doc_fixes (by, library_id, action, doc_type, year, reason)
+    values (lower(auth.jwt() ->> 'email'), doc, what, case when what = 'relabel' then left(t, 60) end, case when what = 'relabel' then new_year end,
+            case when what = 'discard' then coalesce(r, 'other') end);
+  return jsonb_build_object('ok', true);
+end;
+$$;
+revoke all on function public.admin_doc_fix(text, text, text, text, int, text) from public, anon;
+grant execute on function public.admin_doc_fix(text, text, text, text, int, text) to authenticated;
+
+create or replace function public.admin_unread_docs(key text, search text default null, only_main boolean default true, from_year int default 2023, max_rows int default 300)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  main text[] := array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', '10K Form', 'Registration Document'];
+  s text := nullif(btrim(coalesce(search, '')), '');
+  need int := least(greatest(coalesce(max_rows, 300), 1), 2000);
+  y1 int := extract(year from now())::int - 1;        -- the latest reporting year a company has published by now
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with d0 as (select d.library_id, d.company, d.wba_id, d.label, d.url, d.text_status, d.found,
+                       -- the owner's last correction of the type and the year, shown before the library has taken it
+                       coalesce((select f.year from public.doc_fixes f where f.library_id = d.library_id and f.action = 'relabel' and f.year is not null order by f.id desc limit 1), d.year) as year,
+                       coalesce((select f.doc_type from public.doc_fixes f where f.library_id = d.library_id and f.action = 'relabel' and f.doc_type is not null order by f.id desc limit 1), d.doc_type) as doc_type,
+                       exists (select 1 from public.doc_fixes f where f.library_id = d.library_id and f.action = 'relabel') as corrected
+                from public.documents d
+                where d.text_status in ('no_file', 'download_fail', 'timeout', 'truncated', 'too_big')
+                  and coalesce(d.url, '') <> ''
+                  and not exists (select 1 from public.doc_fixes f where f.library_id = d.library_id and f.action = 'discard')),
+         d as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, d.text_status, d.found, d.corrected,
+                      (d.doc_type = any(main)) as is_main
+               from d0 d
+               where true
+                 and (not coalesce(only_main, true) or d.doc_type = any(main))
+                 and (from_year is null or d.year >= from_year)
+                 and (s is null or d.company ilike '%' || s || '%' or d.label ilike '%' || s || '%')),
+         -- Which company first (19 Nov 2026, the owner: those that lack an important report, then size or importance).
+         -- gap: 0 when no main report of either of the last two reporting years is read, 1 when one of the two is
+         -- missing, 2 otherwise. Then its revenue as the robot read it in the last four years (a large, well-known
+         -- company that lacks a report most likely publishes it and we failed to get it). The number of WBA
+         -- benchmarks was the second key for an hour and was taken out the same day at the owner's word: the order
+         -- must not rest on WBA's benchmarks.
+         held as (select h.wba_id, bool_or(h.year = y1) as has1, bool_or(h.year = y1 - 1) as has2
+                  from public.documents h where h.text_status = 'ok' and h.doc_type = any(main) and h.year in (y1, y1 - 1) group by h.wba_id),
+         c0 as (select d.wba_id, max(d.company) as company, count(*) as n, count(*) filter (where d.is_main) as n_main from d group by d.wba_id),
+         -- (a company a person ticked as publishing almost nothing, or as reporting inside its parent, is not put first for it)
+         c as (select c0.*, case when exists (select 1 from public.company_notes n where n.wba_id = c0.wba_id and n.traits && array['no_reports', 'in_parent']) then 2
+                                 when not coalesce(held.has1, false) and not coalesce(held.has2, false) then 0
+                                 when not (coalesce(held.has1, false) and coalesce(held.has2, false)) then 1 else 2 end as gap,
+                      case when exists (select 1 from public.company_notes n where n.wba_id = c0.wba_id and n.traits && array['no_reports', 'in_parent']) then null
+                           when not coalesce(held.has1, false) and not coalesce(held.has2, false) then format('no main report read for %s or %s', y1, y1 - 1)
+                           when not coalesce(held.has1, false) then format('no main report read for %s', y1)
+                           when not coalesce(held.has2, false) then format('no main report read for %s', y1 - 1) end as missing,
+                      rf.figure as revenue
+               from c0 left join held on held.wba_id = c0.wba_id left join public.ranking_figures('revenue') rf on rf.wba_id = c0.wba_id),
+         co as (select c.*, row_number() over (order by c.gap, c.revenue desc nulls last, c.n_main desc, c.n desc, c.company, c.wba_id) as place from c),
+         top as (select d.*, co.n as company_n, co.place, co.missing, co.revenue from d join co on co.wba_id = d.wba_id
+                 order by co.place, d.is_main desc, d.year desc nulls last, d.doc_type, d.library_id limit need)
+    select jsonb_build_object(
+      'documents', (select count(*) from d),
+      'companies', (select count(*) from c),
+      'by_status', (select coalesce(jsonb_object_agg(t.text_status, t.n), '{}'::jsonb) from (select text_status, count(*) as n from d group by 1) t),
+      'rows', coalesce((select jsonb_agg(jsonb_build_object('library_id', t.library_id, 'company', t.company, 'wba_id', t.wba_id, 'year', t.year, 'doc_type', t.doc_type,
+                                                            'label', t.label, 'url', t.url, 'status', t.text_status, 'found', t.found, 'company_n', t.company_n,
+                                                            'missing', t.missing, 'revenue_usd', t.revenue, 'corrected', t.corrected,
+                                                            'note', (select n.note from public.company_notes n where n.wba_id = t.wba_id),          -- the company's note, as in Contribute
+                                                            'traits', coalesce((select to_jsonb(n.traits) from public.company_notes n where n.wba_id = t.wba_id), '[]'::jsonb),
+                                                            -- sent with the extension since (the owner: "how do I follow what I have sent?"): the last sending of this
+                                                            -- document, by the row it became or by its address. The row leaves the list by itself once its text is read.
+                                                            'sent', (select jsonb_build_object('at', u.at, 'status', u.status, 'result', u.result) from public.browser_uploads u
+                                                                     where u.library_id = t.library_id or (u.wba_id = t.wba_id and u.source_url = t.url) order by u.at desc limit 1))
+                                         order by t.place, t.is_main desc, t.year desc nulls last, t.doc_type, t.library_id) from top t), '[]'::jsonb)));
+end;
+$$;
+revoke all on function public.admin_unread_docs(text, text, boolean, int, int) from public, anon;
+grant execute on function public.admin_unread_docs(text, text, boolean, int, int) to authenticated;
+
+-- "Do we hold the latest?" (19 Nov 2026, the owner: the aim moves from holding everything of a company to holding its
+-- latest report). The list above shows documents whose address is held and whose file is not. This one shows the
+-- companies for which no main report of the latest year due is held at all, not even as an address: the robot did
+-- not find it, and the company most likely published it. Which year is due: the latest reporting year whose fiscal
+-- year ended seven months ago or more (the month from company_fiscal, December when unknown; a year ending January
+-- to May is the reporting year before, as wba_year). Seven months, because an annual report comes within four and a
+-- sustainability report within six or seven. The day the library found last year's report was the other candidate
+-- and is not used: most documents were found in the first weeks of the pipeline, so that day says nothing of when
+-- the company published. A company ticked as publishing almost nothing, or as reporting inside its parent, is last.
+create or replace function public.report_year_due(fy_end_month int, today date default current_date) returns int
+language sql immutable
+as $$
+  select max(y)::int from generate_series(extract(year from today)::int - 4, extract(year from today)::int) y
+  where (make_date(case when coalesce(fy_end_month, 12) between 1 and 5 then y + 1 else y end, coalesce(fy_end_month, 12), 1) + interval '8 months')::date <= today
+$$;
+
+create or replace function public.admin_latest_missing(key text, search text default null, max_rows int default 300)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  main text[] := array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', '10K Form', 'Registration Document'];
+  s text := nullif(btrim(coalesce(search, '')), '');
+  need int := least(greatest(coalesce(max_rows, 300), 1), 2000);
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with held as (select d.wba_id, max(d.year) as latest from public.documents d
+                  where d.doc_type = any(main) and d.year is not null and d.year <= extract(year from now())::int + 1
+                    and not exists (select 1 from public.doc_fixes f where f.library_id = d.library_id and f.action = 'discard')
+                  group by d.wba_id),
+         c as (select co.wba_id, co.name, co.website, cf.fy_end_month, public.report_year_due(cf.fy_end_month) as due, h.latest,
+                      exists (select 1 from public.company_notes n where n.wba_id = co.wba_id and n.traits && array['no_reports', 'in_parent']) as excused
+               from public.companies co left join held h on h.wba_id = co.wba_id left join public.company_fiscal cf on cf.wba_id = co.wba_id
+               where co.name is not null and (s is null or co.name ilike '%' || s || '%')),
+         m as (select c.*, rf.figure as revenue from c left join public.ranking_figures('revenue') rf on rf.wba_id = c.wba_id
+               where c.latest is null or c.latest < c.due),
+         top as (select m.*, row_number() over (order by m.excused, m.revenue desc nulls last, m.name, m.wba_id) as place from m)
+    select jsonb_build_object(
+      'companies', (select count(*) from m),
+      'with_none', (select count(*) from m where latest is null),
+      'rows', coalesce((select jsonb_agg(jsonb_build_object('wba_id', t.wba_id, 'company', t.name, 'website', t.website, 'due', t.due, 'latest', t.latest,
+                 'fy_end_month', t.fy_end_month, 'revenue_usd', t.revenue,
+                 -- the latest main report held: where last year's was is where this year's most likely is
+                 'last', (select jsonb_build_object('doc_type', d.doc_type, 'label', d.label, 'url', d.url) from public.documents d
+                          where d.wba_id = t.wba_id and d.year = t.latest and d.doc_type = any(main) and coalesce(d.url, '') <> ''
+                          order by array_position(main, d.doc_type), d.library_id limit 1),
+                 'note', (select n.note from public.company_notes n where n.wba_id = t.wba_id),
+                 'traits', coalesce((select to_jsonb(n.traits) from public.company_notes n where n.wba_id = t.wba_id), '[]'::jsonb))
+               order by t.place) from top t where t.place <= need), '[]'::jsonb)));
+end;
+$$;
+revoke all on function public.admin_latest_missing(text, text, int) from public, anon;
+grant execute on function public.admin_latest_missing(text, text, int) to authenticated;
+
+-- The jobs, seen from the Admin panel (19 Nov 2026). Whether last night's load ran was known only by opening GitHub,
+-- and a load skipped two nights was found by chance. job_state.py copies the runs of the workflows here every few
+-- hours; admin_jobs says, a workflow: its last run, how many runs failed in a row, and when it last went well.
+-- A job in job_critical raises a mark when it failed twice in a row, or when it has not gone well for longer than
+-- its `every_hours` allows (a job that silently does not start fails nobody's check). Runs are never removed.
+create table if not exists public.job_runs (
+  run_id     bigint primary key,
+  workflow   text not null,                 -- the file: load_supabase.yml
+  name       text not null default '',
+  event      text not null default '',
+  status     text not null default '',      -- queued, in_progress, completed
+  conclusion text,                          -- success, failure, cancelled, timed_out, skipped
+  started    timestamptz not null,
+  updated    timestamptz not null default now()
+);
+create index if not exists job_runs_workflow on public.job_runs (workflow, started desc);
+alter table public.job_runs enable row level security;
+
+create table if not exists public.job_critical (
+  workflow    text primary key,
+  every_hours int not null default 36,      -- with no good run for longer than this, the job is late
+  note        text not null default ''
+);
+alter table public.job_critical enable row level security;
+insert into public.job_critical (workflow, every_hours, note) values
+  ('load_supabase.yml', 30, 'documents and pages reach the search'),
+  ('propose_values.yml', 36, 'the nightly reading of values'),
+  ('library_mirror.yml', 36, 'the copy of the library'),
+  ('server_meaning.yml', 36, 'the passages searched by meaning'),
+  ('clock.yml', 12, 'starts every other job at its time'),
+  ('scan_now.yml', 12, 'watches the companies'' pages'),
+  ('fast_lane.yml', 12, 'reads the documents people send'),
+  ('page_kinds.yml', 60, 'marks contents and index pages'),
+  ('search_page.yml', 24 * 30, 'publishes the page'),
+  ('tests.yml', 24 * 30, 'the tests of every pull request')
+on conflict (workflow) do nothing;
+-- The fast lane runs only when someone has sent a document: hours without a run say nothing. It is still marked when
+-- it fails twice in a row. (The first reading showed it "late" 18 hours after its last run, with nothing waiting.)
+update public.job_critical set every_hours = 24 * 30, note = 'reads the documents people send (runs only when one is waiting)' where workflow = 'fast_lane.yml' and every_hours = 12;
+
+create or replace function public.admin_jobs(key text) returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with done as (select r.*, row_number() over (partition by r.workflow order by r.started desc) as i
+                    from public.job_runs r where r.status = 'completed' and r.conclusion in ('success', 'failure', 'timed_out', 'startup_failure')),
+         j as (select r.workflow,
+                      (array_agg(r.name order by r.started desc))[1] as name,
+                      -- A watch (Scan now, Clock) is one run of five and a half hours after another, with the next one queued
+                      -- behind it and cancelled when the chain goes on. The first days showed "pending" as the last run and
+                      -- "no good run for 13 h" while a watch was running: a run waiting its turn, or cancelled in the queue,
+                      -- is not the last run when another one ran, and a run in progress counts as the job being alive.
+                      coalesce(max(r.started) filter (where r.status = 'in_progress' or r.conclusion in ('success', 'failure', 'timed_out', 'startup_failure')), max(r.started)) as last_started,
+                      coalesce((array_agg(coalesce(r.conclusion, r.status) order by r.started desc) filter (where r.status = 'in_progress' or r.conclusion in ('success', 'failure', 'timed_out', 'startup_failure')))[1],
+                               (array_agg(coalesce(r.conclusion, r.status) order by r.started desc))[1]) as last_result,
+                      max(r.started) filter (where r.conclusion = 'success') as last_success,
+                      max(r.started) filter (where r.status = 'in_progress') as running_since,
+                      count(*) filter (where r.started > now() - interval '7 days') as runs_7d,
+                      count(*) filter (where r.started > now() - interval '7 days' and r.conclusion in ('failure', 'timed_out', 'startup_failure')) as failed_7d
+                 from public.job_runs r group by r.workflow),
+         f as (select d.workflow, coalesce(min(d.i) filter (where d.conclusion = 'success') - 1, count(*)) as in_a_row from done d group by d.workflow),
+         x as (select coalesce(j.workflow, c.workflow) as workflow, coalesce(j.name, c.workflow) as name, j.last_started, j.last_result, j.last_success, j.running_since,
+                      coalesce(j.runs_7d, 0) as runs_7d, coalesce(j.failed_7d, 0) as failed_7d, coalesce(f.in_a_row, 0) as in_a_row,
+                      (c.workflow is not null) as critical, c.every_hours, c.note,
+                      (c.workflow is not null and coalesce(f.in_a_row, 0) >= 2) as failing,
+                      (c.workflow is not null and (j.last_success is null or j.last_success < now() - make_interval(hours => c.every_hours))
+                         and (j.running_since is null or j.running_since < now() - make_interval(hours => c.every_hours))) as late
+                 from j full join public.job_critical c on c.workflow = j.workflow left join f on f.workflow = j.workflow)
+    select jsonb_build_object(
+      'read', (select max(updated) from public.job_runs),
+      'stale', coalesce((select max(updated) from public.job_runs) < now() - interval '5 hours', false),
+      'alerts', (select count(*) from x where x.failing or x.late),
+      'jobs', coalesce((select jsonb_agg(to_jsonb(x) order by (x.failing or x.late) desc, x.critical desc, (x.in_a_row > 0) desc, x.last_started desc nulls last) from x), '[]'::jsonb)));
+end;
+$$;
+revoke all on function public.admin_jobs(text) from public, anon;
+grant execute on function public.admin_jobs(text) to authenticated;
+
 -- Whether a result was opened decides nothing here (the owner, 17 Nov 2026): the list shows the passage itself, so a
 -- person reads the answer without opening the document, and someone trying the search opens nothing. `opened` is
 -- returned as a count to read, never as a filter.
@@ -4012,7 +4743,7 @@ begin
       select l.id, l.at, l.key_name, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.company, l.n, l.shown, l.by_meaning, l.meaning, l.ms,
              (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
         from public.search_log l
-       where l.at > since and l.key_name is not null and l.terms is distinct from '(documents only)'),
+       where l.at > since and l.key_name is not null and l.terms is distinct from '(documents only)' and coalesce(l.client, '') not like '% +years'),
     stepped as (
       select l.*, case when lag(l.at) over w is null or l.at - lag(l.at) over w > interval '3 minutes' or l.company is distinct from lag(l.company) over w then 1 else 0 end as starts
         from l window w as (partition by l.key_name order by l.at, l.id)),
@@ -4184,6 +4915,12 @@ $$;
 -- longer than 3,000 characters, 4% longer than 6,000. Option reader_whole_page: 8,000 characters. Off until its
 -- answers are compared with today's: it changes what the reader is given.
 insert into public.search_options (name, is_on, note) values ('reader_whole_page', false, 'answers and surveys read up to 8,000 characters of each page instead of the first 3,000 (a table often stands at the end of a page''s text)') on conflict (name) do nothing;
+-- On since 19 Nov 2026 (the owner's decision). Search exam run 44487795275, 224 validated figures of ten number
+-- attributes: of the 115 whose number is on the eight pages an answer reads, the reader was given it in 102 with the
+-- pages cut at 3,000 characters and in all 115 cut at 8,000. One figure in nine was found by the search and then cut
+-- off before the reader. On 120 validated yes-or-no answers (18 Nov) the longer pages found 39 of 60 against 38 of
+-- 60: no difference. The cost is about a third more text read an answer, a few ten-thousandths of a dollar.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 19 Nov 2026, run 44487795275)' where name = 'reader_whole_page' and not is_on and note not like '%on since%';
 create or replace function public.reader_page_chars() returns int
 language sql stable security definer set search_path = public
 as $$ select case when public.survey_option('reader_whole_page') then 8000 else 3000 end $$;
@@ -4558,7 +5295,7 @@ declare
   made int;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to ask' using errcode = '42501';
+    raise exception 'sign in with a listed address to ask' using errcode = '42501';
   end if;
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
@@ -4984,6 +5721,7 @@ insert into public.published_benchmarks (benchmark_id)
   values ('ACO'), ('CHR'), ('CSI'), ('DIB'), ('FAB'), ('GEA'), ('GEB'), ('JST'), ('NAB'), ('OCE'), ('RDR'), ('URB')
   on conflict (benchmark_id) do nothing;
 
+insert into public.search_options (name, is_on, note) values ('card_scores', false, 'the company card lists the company''s benchmark results (off since 21 Nov 2026)') on conflict (name) do nothing;
 create or replace function public.find_scores(key text, company text) returns jsonb
 language plpgsql stable security definer
 set search_path = public, extensions
@@ -4995,6 +5733,9 @@ declare
 begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if not public.survey_option('card_scores') then        -- off since 21 Nov 2026 (the owner): the card shows what the documents say
+    return '[]'::jsonb;
   end if;
   if to_regclass('public.company_scores') is null or ids is null or coalesce(array_length(ids, 1), 0) <> 1 or ids[1] = '' then
     return '[]'::jsonb;
@@ -5093,7 +5834,7 @@ declare
   n int;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to add a source' using errcode = '42501';
+    raise exception 'sign in with a listed address to add a source' using errcode = '42501';
   end if;
   -- a company of the list, with or without documents yet (11 Nov 2026: a company added that day had none, and
   -- its first links were refused)
@@ -5164,14 +5905,14 @@ declare
   new_id bigint;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to ask for a scan' using errcode = '42501';
+    raise exception 'sign in with a listed address to ask for a scan' using errcode = '42501';
   end if;
   if co = '' or not (exists (select 1 from public.documents d where d.wba_id = co)
                      or exists (select 1 from public.companies c where c.wba_id = co)) then
     raise exception 'choose the company the page belongs to' using errcode = '22023';
   end if;
   if u !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(u) > 1000 or u ~* '\.pdf([?].*)?$' then
-    raise exception 'that is not a page lanterN can read' using errcode = '22023';
+    raise exception 'that is not a page lantrNa can read' using errcode = '22023';
   end if;
   select * into open_one from public.page_scans p
    where p.url = u and p.status in ('new', 'queued', 'added') and p.at > now() - interval '3 hours'
@@ -5201,7 +5942,7 @@ declare
   u text := split_part(btrim(coalesce(url, '')), '#', 1);
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   return (select jsonb_build_object('status', p.status, 'result', p.result, 'at', p.at, 'done_at', p.done_at, 'mine', p.reviewer = who)
             from public.page_scans p where p.url = u order by p.at desc limit 1);
@@ -5245,7 +5986,7 @@ language sql stable security definer set search_path = public
 as $$
   with rv as (select r.reviewer, r.verdict, r.seconds,
                      (select public.control_verdict(vv.value, t.value) from public.value_versions vv
-                      join public.value_truth t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
+                      join public.truth_rows() t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
                       where vv.version_id = r.version_id) as expected
               from public.value_reviews r where r.verdict in ('ok', 'wrong')),
        pts as (select u.reviewer, greatest(sum(u.p), 0) as points, sum(u.r) as reviews, sum(u.c) as checked, sum(u.g) as good
@@ -5571,6 +6312,119 @@ $$;
 revoke all on function public.find_meaning(text, real[], text, int, int, text, int) from public;
 grant execute on function public.find_meaning(text, real[], text, int, int, text, int) to anon, authenticated;
 
+-- Pages that are not content (18 Nov 2026). A search for a company's approach to biodiversity gave first the page of
+-- the report's GRI index that lists "304-1 ... biodiversity ... page 87": the words are there, the answer is not.
+-- Two kinds of page are recognised by their shape alone, whatever the language:
+--   contents  a table of contents: six or more lines of dot leaders that end in a page number and are followed by
+--             the next title (three are enough on a page under 1,500 characters). A financial statement also has
+--             dot leaders, followed by figures ("Gross profit ..... 266,868 200,691"): the number must stand alone
+--             and a letter must follow, so a table of figures is never taken for a contents page.
+--   index     a GRI content index: eight or more disclosure codes of the GRI topic standards (102-x, 103-x, 201-x
+--             to 207-x, 301-x to 308-x, 401-x to 419-x), at least three every 1,000 characters. Codes of other
+--             shapes (street numbers "650-65", CAS numbers "127-91-3", ranges "108-110") are not counted, and a
+--             page of figures that names a few disclosures (a water table under "303-3") stays content.
+-- Measured on a sample of 36,385 pages: 0.2% contents, about 0.3% index. Of 16 pages read by eye, the contents
+-- rule was right on 8 of 8; the index rule before it was narrowed to the GRI codes was right on 6 of 8 (the two
+-- wrong ones were a list of addresses and a staff table, which the narrower rule leaves out).
+-- page_kind_rule(): raised when the rule changes, so page_kinds_step reads again the documents read with an older one.
+create or replace function public.page_kind_rule() returns int language sql immutable as $$ select 1 $$;
+
+create or replace function public.page_kind(body text) returns text
+language sql immutable parallel safe
+as $$
+  select case
+    when x.leaders >= 6 or (x.leaders >= 3 and x.len < 1500) then 'contents'
+    when x.codes >= 8 and x.codes * 1000.0 / greatest(x.len, 1) >= 3 then 'index'
+  end
+  from (select length(coalesce($1, '')) as len,
+               (select count(*) from regexp_matches(coalesce($1, ''), '(\.\s?){5,}\s*\d{1,3}\s+[[:alpha:]]', 'g')) as leaders,
+               (select count(*) from regexp_matches(coalesce($1, ''), '(?<![\d-])(10[23]|20[1-7]|30[1-8]|40[1-9]|41[0-9])-\d{1,2}(?![\d-])', 'g')) as codes) x
+$$;
+
+-- page_kinds holds only the pages that are not content (about one in 200), so the 12 million rows of pages are not
+-- rewritten. page_kind_docs: the documents already read, and with which rule.
+create table if not exists public.page_kinds (
+  library_id text not null,
+  page       int  not null,
+  kind       text not null,
+  primary key (library_id, page)
+);
+alter table public.page_kinds enable row level security;
+create table if not exists public.page_kind_docs (
+  library_id text primary key,
+  rule       int not null,
+  pages      int not null default 0,
+  marked     int not null default 0,
+  done       timestamptz not null default now()
+);
+alter table public.page_kind_docs enable row level security;
+
+-- One step of the reading: the next max_docs documents with text that were not read with today's rule. Rows of
+-- page_kinds are written or corrected, never removed: a page that an older rule marked and today's does not is
+-- set to kind 'content', which the search treats as no mark. Called by page_kinds.py (the owner's connection).
+create or replace function public.page_kinds_step(max_docs int default 200) returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '120s'
+as $$
+declare
+  ids text[];
+  n_pages int := 0;
+  n_marked int := 0;
+  rule_now int := public.page_kind_rule();
+begin
+  select array_agg(t.library_id) into ids from (
+    select d.library_id from public.documents d
+    where d.text_status = 'ok'
+      and not exists (select 1 from public.page_kind_docs k where k.library_id = d.library_id and k.rule >= rule_now)
+    order by d.library_id limit least(greatest(coalesce(max_docs, 200), 1), 2000)) t;
+  if ids is null then
+    return jsonb_build_object('documents', 0, 'pages', 0, 'marked', 0);
+  end if;
+  with r as materialized (select pg.library_id, pg.page, public.page_kind(pg.body) as kind from public.pages pg where pg.library_id = any(ids)),
+       w as (insert into public.page_kinds (library_id, page, kind)
+               select r.library_id, r.page, r.kind from r where r.kind is not null
+               on conflict (library_id, page) do update set kind = excluded.kind
+               returning 1),
+       c as (update public.page_kinds k set kind = 'content' from r
+               where k.library_id = r.library_id and k.page = r.page and r.kind is null and k.kind <> 'content'
+               returning 1),
+       per as (select r.library_id, count(*)::int as pages, count(r.kind)::int as marked from r group by r.library_id),
+       d as (insert into public.page_kind_docs (library_id, rule, pages, marked, done)
+               select i.id, rule_now, coalesce(per.pages, 0), coalesce(per.marked, 0), now()
+               from unnest(ids) as i(id) left join per on per.library_id = i.id
+               on conflict (library_id) do update set rule = excluded.rule, pages = excluded.pages, marked = excluded.marked, done = excluded.done
+               returning pages, marked)
+  select coalesce(sum(d.pages), 0), coalesce(sum(d.marked), 0) into n_pages, n_marked from d;
+  return jsonb_build_object('documents', coalesce(array_length(ids, 1), 0), 'pages', n_pages, 'marked', n_marked);
+end;
+$$;
+revoke all on function public.page_kinds_step(int) from public, anon, authenticated;
+
+-- How far the reading is: documents with text, read with today's rule, pages marked by kind.
+create or replace function public.page_kinds_state() returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  select jsonb_build_object(
+    'documents', (select count(*) from public.documents d where d.text_status = 'ok'),
+    'read', (select count(*) from public.page_kind_docs k where k.rule >= public.page_kind_rule()),
+    'pages', (select coalesce(sum(k.pages), 0) from public.page_kind_docs k where k.rule >= public.page_kind_rule()),
+    'kinds', (select coalesce(jsonb_object_agg(t.kind, t.n), '{}'::jsonb) from (select kind, count(*) as n from public.page_kinds group by kind) t))
+$$;
+revoke all on function public.page_kinds_state() from public, anon, authenticated;
+
+-- Option page_kinds (off): a page marked contents or index goes down the list. With the two lists merged its score
+-- is halved, which puts it after every page that only one list found, unless both lists found it; with the words
+-- alone it goes after the others. It is never taken out: someone looking for the index still finds it. Off until
+-- the search exam (search_exam.py --option page_kinds) shows that no attribute's figure is found less often.
+insert into public.search_options (name, is_on, note) values ('page_kinds', false, 'pages that are a table of contents or a GRI index go down the list') on conflict (name) do nothing;
+-- On since 18 Nov 2026. Every document with text was read (285,009 documents, 12,068,502 pages: 23,310 contents pages and
+-- 32,077 index pages, 0.46%). Search exam run 44338511050, 224 validated answers of 10 number attributes, option off
+-- and on: the same count in every cell (the number on the 24 pages of the search 139 of 191, on the eight pages an
+-- answer reads 115 of 191). The search that started this ("biodiversity approach" within one company, 25 pages): the
+-- index page that came first comes 20th, and the six index pages of the list are its last six.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 18 Nov 2026, run 44338511050)' where name = 'page_kinds' and not is_on and note not like '%on since%';
+
 -- One search (13 Nov 2026). People do not choose between words and meaning: they type, and the search uses both.
 -- find_blend runs the search by words (find_pages, which also logs the search) and, when the page sends the query's
 -- vector, the search by meaning (find_meaning), and merges the two lists by reciprocal rank: a page's score is
@@ -5593,9 +6447,20 @@ as $$
 #variable_conflict use_column
 declare
   need int := least(greatest(coalesce(max_rows, 50), 1), 200);
+  kinds boolean := public.survey_option('page_kinds');           -- contents and index pages go down the list
 begin
   if qvec is null or coalesce(array_length(qvec, 1), 0) <> 384 or position('"' in coalesce(q, '')) > 0
      or industry_filter is not null or country_filter is not null or region_filter is not null then
+    if kinds then
+      return query
+        with w as materialized (select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
+                                                                 industry_filter, country_filter, region_filter, typed))
+        select w.log_id, (row_number() over (order by (pk.kind is not null), w.rank))::int, w.library_id, w.company, w.wba_id, w.year, w.doc_type,
+               w.label, w.url, w.page, w.score, w.excerpt
+        from w left join public.page_kinds pk on pk.library_id = w.library_id and pk.page = w.page and pk.kind <> 'content'
+        order by (pk.kind is not null), w.rank;
+      return;
+    end if;
     return query select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
                                                   industry_filter, country_filter, region_filter, typed);
     return;
@@ -5604,12 +6469,15 @@ begin
     with w as materialized (select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, need, client,
                                                              industry_filter, country_filter, region_filter, typed)),
          m as materialized (select * from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, 60)),
-         u as (select coalesce(w.library_id, m.library_id) as library_id, coalesce(w.page, m.page) as page,
+         u0 as (select coalesce(w.library_id, m.library_id) as library_id, coalesce(w.page, m.page) as page,
                       coalesce(w.company, m.company) as company, coalesce(w.wba_id, m.wba_id) as wba_id, coalesce(w.year, m.year) as year,
                       coalesce(w.doc_type, m.doc_type) as doc_type, coalesce(w.label, m.label) as label, coalesce(w.url, m.url) as url,
                       coalesce(w.excerpt, m.excerpt) as excerpt,
                       (coalesce(1.0 / (60 + w.rank), 0) + coalesce(1.0 / (60 + m.rank), 0)) as s
                from w full join m on m.library_id = w.library_id and m.page = w.page),
+         u as (select u0.library_id, u0.page, u0.company, u0.wba_id, u0.year, u0.doc_type, u0.label, u0.url, u0.excerpt,
+                      (u0.s * case when kinds and pk.kind is not null then 0.5 else 1 end) as s
+               from u0 left join public.page_kinds pk on kinds and pk.library_id = u0.library_id and pk.page = u0.page and pk.kind <> 'content'),
          k as (select u.*, row_number() over (partition by u.library_id order by u.s desc) as in_doc from u)
     select (select max(w.log_id) from w), (row_number() over (order by k.s desc, k.library_id, k.page))::int, k.library_id, k.company, k.wba_id,
            k.year, k.doc_type, k.label, k.url, k.page, k.s::real, k.excerpt
@@ -5674,11 +6542,11 @@ declare
   cand text;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to review' using errcode = '42501';
+    raise exception 'sign in with a listed address to review' using errcode = '42501';
   end if;
   if random() < 0.2 then                                     -- one card in five is a control card, when there is one left for this person
     select vv.* into p from public.value_versions vv
-      join public.value_truth t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
+      join public.truth_rows() t on t.wba_id = vv.wba_id and t.attribute = vv.attribute and t.year = vv.year
       where public.control_verdict(vv.value, t.value) is not null
         and not exists (select 1 from public.value_reviews r where r.version_id = vv.version_id and r.reviewer = who)
       order by random()
@@ -5757,7 +6625,7 @@ declare
   who text := lower(auth.jwt() ->> 'email');
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address' using errcode = '42501';
+    raise exception 'sign in with a listed address' using errcode = '42501';
   end if;
   return jsonb_build_object(
     'reviewer', who,
@@ -5787,6 +6655,80 @@ revoke all on function public.find_word_query(text) from public, anon, authentic
 revoke all on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text, text) from public;
 grant execute on function public.find_pages(text, text, text, int, int, text, int, text, text, text, text, text) to anon, authenticated;
 revoke all on function public.profile_matching(text, text, text) from public, anon, authenticated;
+
+-- The two lists the page asks for, with the pages that are not content last (19 Nov 2026). The option page_kinds
+-- was switched on the day before inside find_blend, and the search that started it still showed the GRI index
+-- first: the page does not call find_blend. It asks for the words (find_pages) and for the meaning (find_meaning)
+-- apart and merges them itself, so neither list knew of the marks. These two are what the page calls now: the same
+-- rows as find_pages and find_meaning, a marked page moved after the others in its own list, so the merge of the
+-- two puts it down whoever does the merge. With the option off they return exactly what the two functions return.
+create or replace function public.find_pages_ranked(
+  key text, q text, company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 50, client text default null,
+  industry_filter text default null, country_filter text default null, region_filter text default null,
+  typed text default null)
+returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
+               label text, url text, page int, score real, excerpt text)
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_column
+begin
+  if not public.survey_option('page_kinds') then
+    return query select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
+                                                  industry_filter, country_filter, region_filter, typed);
+    return;
+  end if;
+  return query
+    with w as materialized (select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
+                                                             industry_filter, country_filter, region_filter, typed))
+    select w.log_id, (row_number() over (order by (pk.kind is not null), w.rank))::int, w.library_id, w.company, w.wba_id, w.year, w.doc_type,
+           w.label, w.url, w.page, w.score, w.excerpt
+    from w left join public.page_kinds pk on pk.library_id = w.library_id and pk.page = w.page and pk.kind <> 'content'
+    order by (pk.kind is not null), w.rank;
+end;
+$$;
+revoke all on function public.find_pages_ranked(text, text, text, int, int, text, int, text, text, text, text, text) from public;
+grant execute on function public.find_pages_ranked(text, text, text, int, int, text, int, text, text, text, text, text) to anon, authenticated;
+
+-- Option recent_meaning (off, 19 Nov 2026). The words' list already weighs the year (a quarter less for each year of
+-- age, find_pages); the meaning's list does not: it is ordered by nearness alone, so a 2001 report can stand second
+-- in a search that names no year. With the option on and no year asked, a page of the meaning's list goes down a
+-- place and a half for each year its document is older than the newest in the list (twelve years at most; a
+-- document with no year counts as three years old, as in find_pages). With a year asked nothing changes.
+insert into public.search_options (name, is_on, note) values ('recent_meaning', false, 'in the list by meaning, older documents go down when no year is asked') on conflict (name) do nothing;
+
+create or replace function public.find_meaning_ranked(
+  key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null,
+  type_filter text default null, max_rows int default 50)
+returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text,
+               label text, url text, page int, score real, excerpt text)
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_column
+declare
+  kinds boolean := public.survey_option('page_kinds');
+  recent boolean := public.survey_option('recent_meaning') and year_from is null and year_to is null;
+  this_year int := extract(year from now())::int;
+begin
+  if not kinds and not recent then
+    return query select * from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, max_rows);
+    return;
+  end if;
+  return query
+    with m as materialized (select f.*, least(greatest(this_year - coalesce(nullif(f.year, 0), this_year - 3), 0), 12) as age
+                            from public.find_meaning(key, qvec, company_filter, year_from, year_to, type_filter, max_rows) f),
+         a as (select m.*, (kinds and pk.kind is not null) as marked,
+                      m.rank + case when recent then 1.5 * (m.age - (select min(x.age) from m x)) else 0 end as place
+               from m left join public.page_kinds pk on pk.library_id = m.library_id and pk.page = m.page and pk.kind <> 'content')
+    select a.log_id, (row_number() over (order by a.marked, a.place, a.rank))::int, a.library_id, a.company, a.wba_id, a.year, a.doc_type,
+           a.label, a.url, a.page, a.score, a.excerpt
+    from a order by a.marked, a.place, a.rank;
+end;
+$$;
+revoke all on function public.find_meaning_ranked(text, real[], text, int, int, text, int) from public;
+grant execute on function public.find_meaning_ranked(text, real[], text, int, int, text, int) to anon, authenticated;
 revoke all on function public.find_click(text, bigint, text, int, int) from public;
 grant execute on function public.find_click(text, bigint, text, int, int) to anon, authenticated;
 revoke all on function public.find_companies(text) from public;
@@ -5843,7 +6785,7 @@ declare
   who text := lower(auth.jwt() ->> 'email');
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+    raise exception 'sign in with a listed address to send documents' using errcode = '42501';
   end if;
   -- the companies, and the ones this person has asked for that are not companies yet (REQ_<request>): the window
   -- was closed and opened again, and the company just asked for was no longer there to choose (11 Nov 2026)
@@ -5916,7 +6858,7 @@ declare
   row public.browser_uploads;
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+    raise exception 'sign in with a listed address to send documents' using errcode = '42501';
   end if;
   -- a company of the list, or one this person has asked for (REQ_<request>): its documents wait in the storage
   -- until a person approves the company, so nothing has to be downloaded twice
@@ -5934,11 +6876,12 @@ begin
   if sent_year is not null and sent_year not between 1990 and 2100 then
     raise exception 'a year between 1990 and 2100' using errcode = '22023';
   end if;
-  -- 200 MB (13 Nov 2026; it was 50, then 150 for an hour): the storage's limit as the owner set it, and the size the
+  -- 300 MB since 19 Nov 2026 (a sustainability report of 202 MB was refused; the owner raised the storage's limit the
+  -- same day). Before: 200 MB (13 Nov 2026; it was 50, then 150 for an hour): the storage's limit as the owner set it, and the size the
   -- text reader takes since the same day (build_fulltext.py FULLTEXT_MAX_MB, table_text.py). A company's extended report ran to 174 MB. The storage's
   -- own limit is set in the Supabase dashboard (Storage, settings, upload file size limit) and must be at least this.
-  if bytes is null or bytes < 1000 or bytes > 209715200 then
-    raise exception 'a file of 1 KB to 200 MB' using errcode = '22023';
+  if bytes is null or bytes < 1000 or bytes > 314572800 then
+    raise exception 'a file of 1 KB to 300 MB' using errcode = '22023';
   end if;
   if src is not null and (src !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(src) > 1000) then
     raise exception 'the address the file came from is not a link' using errcode = '22023';
@@ -5990,6 +6933,112 @@ $$;
 revoke all on function public.upload_begin(text, text, bigint, text, text, text, text, text, int) from public, anon;
 grant execute on function public.upload_begin(text, text, bigint, text, text, text, text, text, int) to authenticated;
 
+-- "Send this page" (extension 0.7.0, 19 Nov 2026; the owner: "capture the content of the page itself and store it").
+-- Much of what a company says is on its site and in no PDF: a policy as a web page, a targets page, a statement.
+-- The extension reads the text the person has in front of them (their own browser, the page as they see it) and
+-- sends it here; it becomes a document of type "Web page" for the company, its text cut into pages of about 3,000
+-- characters at paragraph ends, searchable at once (the pages' trigger writes the words). One document an address
+-- for a company: sending the page again replaces its text and its date, so the search holds the page as last seen.
+-- The row is written here and nowhere else: the nightly load only writes the documents of the text store and never
+-- removes another's, so a captured page stays. It is not in Airtable and not in the index of meanings.
+create table if not exists public.web_captures (
+  id          bigint generated always as identity primary key,
+  at          timestamptz not null default now(),
+  by          text not null,
+  wba_id      text not null,
+  url         text not null,
+  title       text,
+  chars       int not null,
+  pages       int not null,
+  sha256      text not null,
+  library_id  text not null,
+  client      text
+);
+create index if not exists web_captures_doc on public.web_captures (library_id, at desc);
+alter table public.web_captures enable row level security;
+
+-- the text cut into pages: whole paragraphs up to about `size` characters; a paragraph longer than twice that is cut
+create or replace function public.capture_pages(body text, size int default 3000) returns text[]
+language plpgsql immutable
+as $$
+declare
+  out text[] := '{}';
+  cur text := '';
+  para text;
+begin
+  foreach para in array regexp_split_to_array(coalesce(body, ''), E'\n[[:space:]]*\n') loop
+    para := btrim(para);
+    continue when para = '';
+    while length(para) > size * 2 loop
+      if cur <> '' then out := out || cur; cur := ''; end if;
+      out := out || left(para, size); para := substr(para, size + 1);
+    end loop;
+    if cur <> '' and length(cur) + length(para) > size then out := out || cur; cur := ''; end if;
+    cur := case when cur = '' then para else cur || E'\n\n' || para end;
+  end loop;
+  if cur <> '' then out := out || cur; end if;
+  return out;
+end;
+$$;
+
+create or replace function public.page_capture(company text, url text, title text, body text, client text default null)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '30s'
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+  u text := split_part(btrim(coalesce(url, '')), '#', 1);
+  txt text := btrim(regexp_replace(regexp_replace(coalesce(body, ''), E'\r', '', 'g'), E'[ \t]+\n', E'\n', 'g'));
+  name text;
+  lid text;
+  sha text;
+  parts text[];
+  ttl text := left(btrim(regexp_replace(coalesce(title, ''), '\s+', ' ', 'g')), 200);
+  today text := to_char(now() at time zone 'utc', 'YYYY-MM-DD');
+  again boolean;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a listed address to send a page' using errcode = '42501';
+  end if;
+  select coalesce((select c.name from public.companies c where c.wba_id = co), (select max(d.company) from public.documents d where d.wba_id = co)) into name;
+  if co = '' or name is null then
+    raise exception 'choose the company the page belongs to' using errcode = '22023';
+  end if;
+  if u !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(u) > 1000 or u ~* '\.pdf([?].*)?$' then
+    raise exception 'that is not a page lantrNa can keep' using errcode = '22023';
+  end if;
+  if length(txt) < 300 or length(txt) > 400000 then
+    raise exception 'a page of 300 to 400,000 characters of text' using errcode = '22023';
+  end if;
+  if (select count(*) from public.web_captures w where w.by = who and w.at > now() - interval '1 day') >= 100 then
+    raise exception 'a hundred pages a day at most' using errcode = '22023';
+  end if;
+  lid := 'web_' || left(encode(extensions.digest(co || '|' || u, 'sha256'), 'hex'), 20);
+  sha := encode(extensions.digest(txt, 'sha256'), 'hex');
+  if exists (select 1 from public.web_captures w where w.library_id = lid and w.sha256 = sha) then
+    return jsonb_build_object('ok', true, 'same', true, 'library_id', lid);        -- the page has not changed since it was last sent
+  end if;
+  parts := public.capture_pages(txt);
+  again := exists (select 1 from public.documents d where d.library_id = lid);
+  insert into public.documents as d (library_id, wba_id, company, doc_type, year, label, url, pages, chars, text_status, found, extracted_at)
+    values (lid, co, name, 'Web page', extract(year from now())::int, coalesce(nullif(ttl, ''), u) || ' (web page, ' || today || ')', u,
+            array_length(parts, 1), length(txt), 'ok', today, today)
+    on conflict (library_id) do update set label = excluded.label, pages = excluded.pages, chars = excluded.chars, year = excluded.year,
+            text_status = 'ok', extracted_at = excluded.extracted_at, loaded_at = now();
+  delete from public.pages p where p.library_id = lid;
+  insert into public.pages (library_id, page, body) select lid, o.n::int, o.t from unnest(parts) with ordinality as o(t, n);
+  insert into public.web_captures (by, wba_id, url, title, chars, pages, sha256, library_id, client)
+    values (who, co, u, nullif(ttl, ''), length(txt), array_length(parts, 1), sha, lid, left(client, 60));
+  return jsonb_build_object('ok', true, 'library_id', lid, 'pages', array_length(parts, 1), 'chars', length(txt), 'again', again);
+end;
+$$;
+revoke all on function public.page_capture(text, text, text, text, text) from public, anon;
+grant execute on function public.page_capture(text, text, text, text, text) to authenticated;
+
 -- Before anything is downloaded: which of these addresses lanterN already holds for the company (a document with
 -- its text, or a file sent before). The extension shows them as held and does not offer them.
 create or replace function public.upload_known(company text, urls text[]) returns jsonb
@@ -6002,7 +7051,7 @@ declare
   co text := btrim(coalesce(company, ''));
 begin
   if who is null or not public.email_may_search(who) then
-    raise exception 'sign in with a WBA address to send documents' using errcode = '42501';
+    raise exception 'sign in with a listed address to send documents' using errcode = '42501';
   end if;
   if coalesce(array_length(urls, 1), 0) > 400 then
     raise exception 'four hundred links at most' using errcode = '22023';
@@ -6010,8 +7059,14 @@ begin
   perform public.company_overlap_note(co, urls);          -- a company added by a person: which of these another company holds
   return (select coalesce(jsonb_agg(x.u), '[]'::jsonb) from unnest(coalesce(urls, '{}')) as x(u)
           where exists (select 1 from public.documents d where d.url = x.u and coalesce(d.pages, 0) > 0)
-             or exists (select 1 from public.browser_uploads b where b.wba_id = co and b.source_url = x.u and b.status in ('stored', 'taken', 'known'))
-             or exists (select 1 from public.browser_upload_urls a where a.wba_id = co and a.url = x.u));
+             -- sent before: held, unless the document it became is still not read two days later (19 Nov 2026: the
+             -- owner could not send again a report whose first sending had left a row with no text)
+             or exists (select 1 from public.browser_uploads b where b.wba_id = co and b.source_url = x.u and b.status in ('stored', 'taken', 'known')
+                        and (b.at > now() - interval '2 days'
+                             or not exists (select 1 from public.documents d where d.library_id = b.library_id and coalesce(d.pages, 0) = 0)))
+             or exists (select 1 from public.browser_upload_urls a join public.browser_uploads b on b.id = a.upload_id where a.wba_id = co and a.url = x.u
+                        and (b.at > now() - interval '2 days'
+                             or not exists (select 1 from public.documents d where d.library_id = b.library_id and coalesce(d.pages, 0) = 0))));
 end;
 $$;
 revoke all on function public.upload_known(text, text[]) from public, anon;
@@ -6188,7 +7243,7 @@ begin
     raise exception 'not allowed' using errcode = '42501';
   end if;
   if co not like 'LN\_%' or not exists (select 1 from public.companies c where c.wba_id = co) then
-    raise exception 'only a company added in lanterN can be edited here' using errcode = '22023';
+    raise exception 'only a company added in lantrNa can be edited here' using errcode = '22023';
   end if;
   for k, v in select e.key, nullif(btrim(regexp_replace(e.value, '\s+', ' ', 'g')), '') from jsonb_each_text(coalesce(fields, '{}')) e loop
     if k not in ('name', 'website', 'lei', 'isin', 'industry', 'country', 'region') then

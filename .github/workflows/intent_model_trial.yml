@@ -1,0 +1,64 @@
+# A trial: a model beside the page's rules for reading what is typed (intent_model_trial.py). Manual only.
+# The paid job calls the reader's model (a few cents at most, capped). The local job runs open models on the job
+# server at no cost, in its own Python environment (/srv/lantern/venv-llm). Both print counts, seconds and dollars.
+name: Intent model trial
+
+on:
+  workflow_dispatch:
+    inputs:
+      paid:
+        description: "run the paid model"
+        type: boolean
+        default: false
+      max_usd:
+        description: "stop the paid model at this cost"
+        default: "0.10"
+      models:
+        description: "open models on the job server, comma-separated (qwen3-4b, qwen3-8b, smollm3-3b); empty = none"
+        default: ""
+      threads:
+        description: "processors a local model may use (the server has 16)"
+        default: "8"
+
+concurrency:
+  group: intent-model-trial
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  paid:
+    if: ${{ inputs.paid }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Trial with the paid model
+        run: python intent_model_trial.py --paid --max-usd "${{ inputs.max_usd }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  local:
+    if: ${{ inputs.models != '' }}
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: The models' own environment
+        run: |
+          [ -x /srv/lantern/venv-llm/bin/python ] || python3 -m venv /srv/lantern/venv-llm
+          /srv/lantern/venv-llm/bin/pip install -q --upgrade pip
+          /srv/lantern/venv-llm/bin/pip install -q "psycopg[binary]" huggingface_hub requests
+          /srv/lantern/venv-llm/bin/pip install -q --only-binary=:all: llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+      - name: Trial with open models
+        run: /srv/lantern/venv-llm/bin/python intent_model_trial.py --models "${{ inputs.models }}" --threads "${{ inputs.threads }}"
+        env:
+          HF_HOME: /srv/lantern/hf

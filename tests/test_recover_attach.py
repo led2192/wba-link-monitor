@@ -31,6 +31,24 @@ class WhyADownloadFailed(unittest.TestCase):
             with mock.patch.object(R.requests, "get", side_effect=error):
                 self.assertEqual(R.download("https://old.example/a.pdf"), (None, kind), error)
 
+    def test_a_certificate_failure_says_which(self):
+        ex = requests.exceptions
+        cases = [("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)", "error_tls_chain"),
+                 ("certificate verify failed: certificate has expired", "error_tls_expired"),
+                 ("certificate verify failed: Hostname mismatch, certificate is not valid for 'x.example'", "error_tls_name"),
+                 ("hostname 'x.example' doesn't match 'y.example'", "error_tls_name"),
+                 ("certificate verify failed: self-signed certificate in certificate chain", "error_tls_self_signed"),
+                 ("[SSL: SSLV3_ALERT_HANDSHAKE_FAILURE] sslv3 alert handshake failure", "error_tls_old"),
+                 ("[SSL: UNSAFE_LEGACY_RENEGOTIATION_DISABLED] unsafe legacy renegotiation disabled", "error_tls_old"),
+                 ("[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol", "error_tls_cut"),
+                 ("something new", "error_tls")]
+        for text, kind in cases:
+            with mock.patch.object(R.requests, "get", side_effect=ex.SSLError(text)):
+                self.assertEqual(R.download("https://x.example/a.pdf"), (None, kind), text)
+        self.assertEqual(R.host_of("https://Files.Example.com:8443/a.pdf"), "files.example.com")
+        self.assertEqual(R.host_of("not a url"), "")
+        self.assertFalse(any(k.startswith("error_tls") for k in R.REASON_TO_STATUS))          # every one is still retried
+
     def test_an_answer_of_the_site_keeps_its_code_and_the_known_ones_their_names(self):
         for status, body, want in [(503, b"", "http_503"), (429, b"", "http_429"), (403, b"", "forbidden"), (404, b"", "not_found"),
                                    (200, b"<html>", "not_pdf"), (200, b"%PDF-1.7 x", "ok")]:

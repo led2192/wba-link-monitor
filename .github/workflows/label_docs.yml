@@ -1,0 +1,92 @@
+# A type, a language and a title for the documents that have text and no type (label_docs.py).
+# local: an open model on the job server, no cost; started every hour by lanterN's clock (server/clock.json) for the
+#        documents that arrived, and by hand. Its Python environment is its own (/srv/lantern/venv-llm).
+# paid:  the reader's paid model, by hand only, for a backlog; stops at max_usd.
+# Dry run unless commit (or the clock). Prints counts, minutes and dollars only.
+name: Label documents
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "local (the job server, free) or paid (the reader's model, capped)"
+        type: choice
+        default: "local"
+        options: [local, paid]
+      commit:
+        description: "write to the library (off: a dry run)"
+        type: boolean
+        default: false
+      as_scheduled:
+        description: "set by lanterN's clock (server/clock.json, every hour): local model, commit"
+        default: "false"
+      limit:
+        description: "documents this run"
+        default: "60"
+      from_year:
+        description: "only documents of this year or later (empty: every year)"
+        default: ""
+      max_usd:
+        description: "the paid model stops at this cost"
+        default: "5"
+      threads:
+        description: "processors the local model may use (the server has 16)"
+        default: "8"
+
+concurrency:
+  group: label-docs-${{ inputs.model }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  local:
+    if: ${{ inputs.model == 'local' || inputs.as_scheduled == 'true' }}
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - name: The models' own environment
+        run: |
+          [ -x /srv/lantern/venv-llm/bin/python ] || python3 -m venv /srv/lantern/venv-llm
+          /srv/lantern/venv-llm/bin/pip install -q --upgrade pip
+          /srv/lantern/venv-llm/bin/pip install -q "psycopg[binary]" huggingface_hub requests
+          /srv/lantern/venv-llm/bin/pip install -q --only-binary=:all: llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+      - name: Label
+        run: |
+          ARGS=(--model local --limit "${{ inputs.limit || '60' }}" --threads "${{ inputs.threads || '8' }}")
+          if [ -n "${{ inputs.from_year }}" ]; then ARGS+=(--from-year "${{ inputs.from_year }}"); fi
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.commit }}" = "true" ]; then ARGS+=(--commit); fi
+          /srv/lantern/venv-llm/bin/python label_docs.py "${ARGS[@]}"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          HF_HOME: /srv/lantern/hf
+  paid:
+    if: ${{ inputs.model == 'paid' && inputs.as_scheduled != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Label
+        run: |
+          ARGS=(--model paid --limit "${{ inputs.limit }}" --max-usd "${{ inputs.max_usd }}" --minutes 280)
+          if [ -n "${{ inputs.from_year }}" ]; then ARGS+=(--from-year "${{ inputs.from_year }}"); fi
+          if [ "${{ inputs.commit }}" = "true" ]; then ARGS+=(--commit); fi
+          python label_docs.py "${ARGS[@]}"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

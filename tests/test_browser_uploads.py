@@ -46,6 +46,30 @@ class Plan(unittest.TestCase):
         self.assertEqual(B.plan([up(1, url=url)], {"PT_1": "Co"}, {"PT_1": [("recD", lid, url, False, True)]})[0][1], "known")          # same id, discarded: not made again
         self.assertEqual(B.plan([up(1, url=url)], {"PT_1": "Co"}, {"PT_1": [("recD", "PT_1-other", url, False, True)]})[0][1], "create")  # the person sent it: a new row
 
+    def test_a_file_sent_for_a_row_that_holds_another_file_is_taken_again(self):
+        # 19 Nov 2026: a row whose file could not be read; the person opens the address and sends the document
+        url = "https://example.com/doc/annual-report-2024.pdf"
+        rows = {"PT_1": [("recA", "PT_1-h1", url, True, False, (51234,), ("attOLD",))]}
+        self.assertEqual(B.plan([up(1, size=4000000)], {"PT_1": "Co"}, rows)[0][1:], ("again", "PT_1-h1", "recA"))
+        self.assertEqual(B.plan([up(1, size=51234)], {"PT_1": "Co"}, rows)[0][1], "known")                              # the very file the row holds
+        self.assertEqual(B.plan([up(1, size=900)], {"PT_1": "Co"}, rows)[0][1], "known")                                # a stub is not put on a row
+        self.assertEqual([a for _, a, _, _ in B.plan([up(1, size=4000000), up(2, size=4000001)], {"PT_1": "Co"}, rows)], ["again", "known"])   # once a batch
+        rows = {"PT_1": [("recA", "PT_1-h1", url, True, False)]}                                                        # the sizes of its files are not known: left alone
+        self.assertEqual(B.plan([up(1, size=4000000)], {"PT_1": "Co"}, rows)[0][1], "known")
+
+    def test_an_attachment_airtable_never_fetched_is_not_a_file(self):
+        ghost = {"id": "attG", "url": "https://example.com/doc/annual-report-2024.pdf", "filename": ""}
+        real = {"id": "attR", "url": "https://v5.airtableusercontent.com/x", "filename": "a.pdf", "size": 51234, "type": "application/pdf"}
+        self.assertEqual(B.real_files([ghost]), []); self.assertEqual(B.real_files([ghost, real]), [real]); self.assertEqual(B.real_files(None), [])
+        # the row as the script now sees it: no file, so what the person sends fills it
+        rows = {"PT_1": [("recA", "PT_1-h1", "https://example.com/doc/annual-report-2024.pdf", bool(B.real_files([ghost])), False, (), ())]}
+        self.assertEqual(B.plan([up(1, size=4000000)], {"PT_1": "Co"}, rows)[0][1:], ("fill", "PT_1-h1", "recA"))
+
+    def test_only_files_dropped_as_known_are_looked_at_again(self):
+        sql = B.AGAIN_KNOWN_SQL
+        self.assertIn("status = 'known'", sql); self.assertIn("like 'the library already holds this document%%'", sql)   # not orphans, not failures
+        self.assertIn("make_interval(days => %s)", sql); self.assertIn("set status = 'stored', result = null", sql)
+
     def test_the_same_file_put_there_by_hand_is_not_made_again(self):
         rows = {"PT_1": [("recH", "PT_1-hand", "", True, False, (11492709,)), ("recS", "PT_1-small", "", True, False, (900,))]}
         u = up(1, url="https://example.com/annual-report-2025.pdf", size=11492709)

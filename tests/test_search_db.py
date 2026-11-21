@@ -192,10 +192,11 @@ class SearchOnPostgres(unittest.TestCase):
         with psycopg.connect(URL) as c:
             cur = c.cursor()
             cur.execute("select public.reader_page_chars(), (select is_on from public.search_options where name = 'reader_whole_page')"); default = cur.fetchone()
+            cur.execute("select set_config('lantern.reader_whole_page', 'off', true)"); cur.execute("select public.reader_page_chars()"); off = cur.fetchone()[0]
             cur.execute("select set_config('lantern.reader_whole_page', 'on', true)"); cur.execute("select public.reader_page_chars()"); on = cur.fetchone()[0]
             cur.execute("select has_function_privilege('anon', 'public.reader_page_chars()', 'execute')"); public = cur.fetchone()[0]
             c.rollback()
-        self.assertEqual((default, on, public), ((3000, False), 8000, False))            # off until its answers are compared
+        self.assertEqual((default, off, on, public), ((8000, True), 3000, 8000, False))   # on since 19 Nov 2026; a comparison can still read 3,000
 
     def test_what_the_library_holds_for_a_company_is_said_from_the_index(self):
         import psycopg
@@ -206,6 +207,16 @@ class SearchOnPostgres(unittest.TestCase):
                         "('cd-3', 'PT_CARD', 'Card Co', 'Annual Report', 2023, 'AR 2023', 0, 'no_file'), ('cd-4', 'PT_CARD', 'Card Co', 'Annual Report', 2025, 'AR 2025', 0, 'no_file'), "
                         "('cd-5', 'PT_CARD', 'Card Co', 'Code of Conduct', 2023, 'Code', 27, 'ok'), ('cd-6', 'PT_CARD', 'Card Co', 'Code of Conduct', null, 'Code for others', 12, 'ok'), "
                         "('cd-7', 'PT_CARD', 'Card Co', 'Policy Documents', 2020, 'Privacy', 3, 'no_text')")
+            cur.execute("select public.company_card('k', 'PT_CARD')"); self.assertEqual(cur.fetchone()[0]["published"], [])        # no copy of the library here: no dates, no error
+            # v129: when the main reports came out, from the library's copy (the last five reporting years; a policy is not a main report)
+            cur.execute("create table if not exists public.library (library_id text primary key, record_id text, wba_id text, discard boolean not null default false, fields jsonb not null)")
+            cur.execute("update public.documents set year = extract(year from now())::int - 1 where library_id = 'cd-4'")
+            cur.execute("update public.documents set year = extract(year from now())::int - 2 where library_id in ('cd-1', 'cd-2')")
+            cur.execute("insert into public.library (library_id, wba_id, fields) values ('cd-1', 'PT_CARD', '{\"pub_date\": \"2025-03-04\", \"pub_date_precision\": \"day\", \"pub_date_source\": \"filing\"}'), "
+                        "('cd-4', 'PT_CARD', '{\"pub_date\": \"2026-02-01\", \"pub_date_precision\": \"month\"}'), ('cd-5', 'PT_CARD', '{\"pub_date\": \"2023-01-01\"}'), ('cd-3', 'PT_CARD', '{\"pub_date\": \"\"}')")
+            cur.execute("select public.company_card('k', 'PT_CARD')"); pubs = cur.fetchone()[0]["published"]
+            self.assertEqual([(p["date"], p["precision"], p["type"]) for p in pubs], [("2026-02-01", "month", "Annual Report"), ("2025-03-04", "day", "Annual Report")])
+            cur.execute("update public.documents set year = 2025 where library_id = 'cd-4'"); cur.execute("update public.documents set year = 2024 where library_id in ('cd-1', 'cd-2')")
             cur.execute("select public.company_card('k', 'PT_CARD'), public.company_card('k', 'PT_NOBODY')"); card, nobody = cur.fetchone()
             cur.execute("select has_function_privilege('anon', 'public.company_card(text, text)', 'execute')"); public = cur.fetchone()[0]
             c.rollback()
@@ -266,7 +277,7 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("rollback to savepoint s")
             cur.execute("select public.ask('secret-1', 'What were the scope 1 emissions of Acme in 2024?')"); got = cur.fetchone()[0]
             cur.execute("update public.search_keys set active = false where name = 'pers'"); off = may("secret-1")
-            cur.execute("select has_function_privilege('anon', 'public.ask(text, text, text, text, int, int, text, text, real[], text, text, text)', 'execute'), "
+            cur.execute("select has_function_privilege('anon', 'public.ask(text, text, text, text, int, int, text, text, real[], text, text, text, boolean)', 'execute'), "
                         "has_function_privilege('anon', 'public.link_asker(text)', 'execute'), has_function_privilege('anon', 'public.admin_link_ask(text, text, boolean)', 'execute')")
             grants = cur.fetchone()
             c.rollback()
@@ -378,11 +389,26 @@ class SearchOnPostgres(unittest.TestCase):
         for bad_type, bad_year in (("Brochure", None), (None, 1066)):
             with self.assertRaises(psycopg.Error):
                 cur.execute("select public.upload_begin('PT_00000', 'y.pdf', 5000, %s, sent_type => %s, sent_year => %s)", ("ee" * 32, bad_type, bad_year))
-        for bad in (("PT_nope", "a.pdf", 5000, sha, None), ("PT_00000", "a.pdf", 10, sha, None), ("PT_00000", "a.pdf", 210000000, sha, None),
+        for bad in (("PT_nope", "a.pdf", 5000, sha, None), ("PT_00000", "a.pdf", 10, sha, None), ("PT_00000", "a.pdf", 315000000, sha, None),
                     ("PT_00000", "a.pdf", 5000, "zz", None), ("PT_00000", "a.pdf", 5000, "cd" * 32, "not a link")):
             with self.assertRaises(Exception):
                 cur.execute("select public.upload_begin(%s, %s, %s, %s, %s)", bad)
         cur.execute("select jsonb_array_length(public.upload_companies()) > 0"); self.assertTrue(cur.fetchone()[0])
+        # "Send this page" (extension 0.7.0): the page's text becomes a document of type Web page, searchable at once
+        text = "\n\n".join(f"Paragraph {i} about our living wage commitment for suppliers. " * 12 for i in range(12)) + "\n\n" + "x" * 7000
+        cur.execute("select public.page_capture('PT_00000', 'https://example.com/policies/wages#top', '  Wages  policy ', %s)", (text,)); cap = cur.fetchone()[0]
+        self.assertTrue(cap["ok"]); self.assertFalse(cap["again"]); self.assertGreater(cap["pages"], 3)
+        cur.execute("select doc_type, url, text_status, pages, label like 'Wages policy (web page, %%' from public.documents where library_id = %s", (cap["library_id"],))
+        self.assertEqual(cur.fetchone(), ("Web page", "https://example.com/policies/wages", "ok", cap["pages"], True))
+        cur.execute("select count(*), max(length(body)), bool_and(words is not null and doc_type = 'Web page' and wba_id = 'PT_00000') from public.pages where library_id = %s", (cap["library_id"],))
+        n, longest, indexed = cur.fetchone(); self.assertEqual(n, cap["pages"]); self.assertLessEqual(longest, 6000); self.assertTrue(indexed)
+        cur.execute("select public.page_capture('PT_00000', 'https://example.com/policies/wages', 'Wages policy', %s)", (text,)); self.assertTrue(cur.fetchone()[0]["same"])
+        cur.execute("select public.page_capture('PT_00000', 'https://example.com/policies/wages', 'Wages policy', %s)", (text + "\n\nA new paragraph.",)); again = cur.fetchone()[0]
+        self.assertTrue(again["again"]); self.assertEqual(again["library_id"], cap["library_id"])
+        cur.execute("select count(*) from public.documents where url = 'https://example.com/policies/wages'"); self.assertEqual(cur.fetchone()[0], 1)   # one document an address
+        for bad in (("PT_nope", "https://example.com/p", "t", text), ("PT_00000", "https://example.com/a.pdf", "t", text), ("PT_00000", "https://example.com/p", "t", "too short"), ("PT_00000", "ftp://example.com/p", "t", text)):
+            with self.assertRaises(psycopg.Error): cur.execute("select public.page_capture(%s, %s, %s, %s)", bad)
+        cur.execute("delete from public.pages where library_id = %s", (cap["library_id"],)); cur.execute("delete from public.documents where library_id = %s", (cap["library_id"],)); cur.execute("delete from public.web_captures")
         cur.execute("select public.upload_known('PT_00000', %s)", (["https://example.com/ar-2024.pdf", "https://example.com/never.pdf"],))
         self.assertEqual(cur.fetchone()[0], ["https://example.com/ar-2024.pdf"])                                    # sent before: not offered again
 
@@ -418,6 +444,335 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertIn("7 of 7 looked at, 7 written", said[-1])
         self.assertEqual(LS.upsert_documents(conn, many, batch=3, say=lambda *a, **k: None), 0)
         cur.execute("delete from public.documents where library_id = 'PT_00000-loadtest' or library_id like 'PT_00000-batch%'")
+
+    def test_a_contents_page_and_a_gri_index_are_told_from_content_and_from_tables_of_figures(self):
+        cur = self.conn.cursor()
+        kind = lambda body: (cur.execute("select public.page_kind(%s)", (body,)), cur.fetchone()[0])[1]
+        toc = "Contents " + " ".join(f"Chapter {w} {'.' * 40} {n}" for n, w in enumerate(("People", "Planet", "Water", "Waste", "Board", "Tax", "Annex"), 3)) + " End"
+        self.assertEqual(kind(toc), "contents")
+        self.assertEqual(kind("Index Our people . . . . . . . . . . 4 Our planet . . . . . . . . 9 Our board . . . . . . . 12 Annex"), "contents")     # three leaders on a short page
+        statement = " ".join(f"{w} {'.' * 30} {v} {v2}" for w, v, v2 in (("Revenue", "800,864", "711,146"), ("Cost of goods sold", "533,996", "510,455"),
+                             ("Gross profit", "266,868", "200,691"), ("Expenses", "19.5", "19.3"), ("Tax", "(34.4)", "91.8"), ("Net", "$ 12", "$ 9"), ("Units", "14,414", "14,557")))
+        self.assertIsNone(kind(statement))                                   # leaders followed by figures: a statement, never a contents page
+        gri = " ".join(f"GRI {c} Some disclosure title {n}" for n, c in enumerate(("302-1", "302-3", "303-3", "304-1", "304-2", "305-1", "305-2", "305-3", "403-9"), 40))
+        self.assertEqual(kind(gri), "index")
+        self.assertIsNone(kind("Water withdrawals (303-3) by source: sea water 7,885.2 8,869.2 8,743.3; total 10,914.4 13,727.7. " * 3 + "x" * 3000))   # a table that names a disclosure
+        self.assertIsNone(kind(" ".join(f"Seoul district {a} 887 268 788" for a in ("650-65", "164-2", "236-1", "219-43", "209-6", "127-91", "152-3", "131-9", "145-2"))))  # addresses
+        self.assertIsNone(kind("CAS 127-91-3 / 201-291-9 / 204-872-5 beta-pinene " * 6))                       # numbers of three parts
+        self.assertIsNone(kind("See pages 108-110, 203-205 and 301-305 of the report. " * 6))                    # ranges of pages
+        self.assertIsNone(kind("We respect the opinions of others and pay a living wage in every country."))
+        self.assertIsNone(kind(None))
+
+    def test_the_documents_are_read_once_and_marked_pages_go_down_only_with_the_option(self):
+        import psycopg
+        toc = "Contents living wage " + " ".join(f"Living wage chapter {'.' * 40} {n}" for n in range(3, 11)) + " End"
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select library_id, page, rank from public.find_pages('', 'living wage')")
+            words = cur.fetchall()
+            first = words[0]
+            cur.execute("update public.documents set text_status = 'ok'")
+            cur.execute("select body from public.pages where library_id = %s and page = %s", (first[0], first[1]))
+            cur.execute("update public.pages set body = %s || ' ' || body where library_id = %s and page = %s", (toc, first[0], first[1]))
+            cur.execute("select library_id, page from public.find_pages('', 'living wage')")
+            before = cur.fetchall()
+            self.assertGreater(len(before), 1)
+            marked = before[0]
+            cur.execute("select count(*) from public.documents where text_status = 'ok'")
+            docs = cur.fetchone()[0]
+            cur.execute("select public.page_kinds_step(2000)")
+            step = cur.fetchone()[0]
+            self.assertEqual(step["documents"], docs)
+            self.assertGreaterEqual(step["marked"], 1)
+            cur.execute("select kind from public.page_kinds where library_id = %s and page = %s", (first[0], first[1]))
+            self.assertEqual(cur.fetchone()[0], "contents")
+            cur.execute("select public.page_kinds_step(2000)")
+            self.assertEqual(cur.fetchone()[0]["documents"], 0)                # read once
+            cur.execute("select public.page_kinds_state()")
+            state = cur.fetchone()[0]
+            self.assertEqual((state["read"], state["documents"]), (docs, docs))
+            self.assertGreaterEqual(state["kinds"]["contents"], 1)
+            cur.execute("select set_config('lantern.page_kinds', 'off', false)")
+            cur.execute("select library_id, page from public.find_blend('', 'living wage')")
+            self.assertEqual(cur.fetchall(), before)                          # off: nothing moves
+            cur.execute("select set_config('lantern.page_kinds', 'on', false)")
+            cur.execute("select library_id, page, rank from public.find_blend('', 'living wage')")
+            on = cur.fetchall()
+            self.assertEqual({(r[0], r[1]) for r in on}, set(before))         # on: the same pages, none taken out
+            self.assertEqual((on[-1][0], on[-1][1]), (first[0], first[1]))    # the contents page last
+            self.assertEqual([r[2] for r in on], list(range(1, len(on) + 1)))
+            # both lists merged: the marked page, first by words and first by meaning, still goes after a page only the words found
+            cur.execute(psycopg.sql.SQL("""create or replace function public.find_meaning(key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null, type_filter text default null, max_rows int default 50)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$ select null::bigint, 40, {}::text, 'c'::text, 'w'::text, 2024, 't'::text, 'l'::text, null::text, {}::int, 0.9::real, 'nearest passage'::text $f$""").format(
+                               psycopg.sql.Literal(first[0]), psycopg.sql.Literal(first[1])))
+            cur.execute("select library_id, page from public.find_blend('', 'living wage', %s::real[])", ([0.0] * 384,))
+            blended = cur.fetchall()
+            self.assertEqual(set(blended), set(before))
+            self.assertNotEqual(blended[0], (first[0], first[1]))
+            cur.execute("select set_config('lantern.page_kinds', 'off', false)")
+            cur.execute("select library_id, page from public.find_blend('', 'living wage', %s::real[])", ([0.0] * 384,))
+            self.assertEqual(cur.fetchall()[0], (first[0], first[1]))          # off: found by both, it is first
+            # a rule that no longer marks the page: the row stays, as content, and the search treats it as no mark
+            cur.execute("update public.pages set body = 'living wage' where library_id = %s and page = %s", (first[0], first[1]))
+            cur.execute("update public.page_kind_docs set rule = 0")
+            cur.execute("select public.page_kinds_step(2000)")
+            cur.execute("select kind from public.page_kinds where library_id = %s and page = %s", (first[0], first[1]))
+            self.assertEqual(cur.fetchone()[0], "content")
+            c.rollback()
+
+    def test_the_metric_names_the_page_compares_are_the_taxonomy_s_and_the_exams_hold_the_same(self):
+        import json, psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.find_metric_names('k')"); names = cur.fetchone()[0]
+            self.assertTrue({"ceo", "headquarters", "number employees", "scope 1 emissions", "total assets", "revenue"} <= set(names))
+            self.assertFalse(any(len(n) < 3 for n in names))
+            here = os.path.dirname(__file__)
+            for f in ("use_cases.json", "use_case_variants.json"):                # the exams run the page on the names the database gives
+                self.assertEqual(sorted(json.load(open(os.path.join(here, f), encoding="utf-8"))["metrics"]), sorted(names), f)
+            cur.execute("update public.fact_metrics set status = 'retired' where key = 'ceo'")
+            cur.execute("select public.find_metric_names('k')")
+            self.assertNotIn("chief executive officer", cur.fetchone()[0])
+            c.rollback()
+
+    def test_the_jobs_view_marks_a_critical_job_that_failed_twice_in_a_row_or_is_late(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            put = lambda i, wf, concl, hours, status="completed": cur.execute(
+                "insert into public.job_runs (run_id, workflow, name, event, status, conclusion, started) values (%s, %s, %s, 'schedule', %s, %s, now() - make_interval(hours => %s))",
+                (i, wf, wf.split(".")[0], status, concl, hours))
+            put(1, "load_supabase.yml", "success", 50); put(2, "load_supabase.yml", "failure", 20); put(3, "load_supabase.yml", "failure", 5)     # twice in a row
+            put(4, "load_supabase.yml", "cancelled", 3); put(5, "load_supabase.yml", None, 1, "in_progress")                                  # neither counts
+            put(10, "propose_values.yml", "failure", 30); put(11, "propose_values.yml", "success", 6)                                         # failed once, then well
+            put(20, "clock.yml", "success", 40)                                                                                                # late: 12 hours allowed
+            put(30, "server_meaning.yml", "success", 30); put(31, "server_meaning.yml", "failure", 4)                                         # failed once: no mark yet
+            put(40, "some_trial.yml", "failure", 9); put(41, "some_trial.yml", "failure", 8)                                                  # not critical: listed, no mark
+            # a watch: the last finished one started 14 hours ago, one is running since 3 hours ago, the next waits its turn
+            put(50, "scan_now.yml", "success", 14); put(51, "scan_now.yml", None, 3, "in_progress"); put(52, "scan_now.yml", None, 1, "pending"); put(53, "scan_now.yml", "cancelled", 2)
+            cur.execute("select public.admin_jobs('k')"); r = cur.fetchone()[0]
+            jobs = {j["workflow"]: j for j in r["jobs"]}
+            self.assertEqual((jobs["scan_now.yml"]["late"], jobs["scan_now.yml"]["last_result"]), (False, "in_progress"))                    # running: not late, and the queued run is not "the last run"
+            self.assertFalse(r["stale"])
+            self.assertEqual((jobs["load_supabase.yml"]["in_a_row"], jobs["load_supabase.yml"]["failing"], jobs["load_supabase.yml"]["last_result"]), (2, True, "in_progress"))
+            self.assertEqual((jobs["propose_values.yml"]["in_a_row"], jobs["propose_values.yml"]["failing"], jobs["propose_values.yml"]["late"]), (0, False, False))
+            self.assertEqual((jobs["clock.yml"]["failing"], jobs["clock.yml"]["late"]), (False, True))
+            self.assertEqual((jobs["server_meaning.yml"]["in_a_row"], jobs["server_meaning.yml"]["failing"], jobs["server_meaning.yml"]["late"]), (1, False, False))
+            self.assertEqual((jobs["some_trial.yml"]["in_a_row"], jobs["some_trial.yml"]["critical"], jobs["some_trial.yml"]["failing"]), (2, False, False))
+            self.assertTrue(jobs["library_mirror.yml"]["late"] and jobs["library_mirror.yml"]["last_started"] is None)                         # critical and never seen
+            self.assertEqual(r["alerts"], sum(1 for j in r["jobs"] if j["failing"] or j["late"]))
+            self.assertTrue(r["jobs"][0]["failing"] or r["jobs"][0]["late"])                                                                   # what needs a look comes first
+            self.assertEqual((jobs["load_supabase.yml"]["runs_7d"], jobs["load_supabase.yml"]["failed_7d"]), (5, 2))
+            c.rollback()
+
+    def test_the_two_lists_the_page_asks_for_put_marked_pages_last_and_are_the_same_rows(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select library_id, page from public.find_pages('', 'living wage')"); plain = cur.fetchall()
+            self.assertGreater(len(plain), 1)
+            first = plain[0]
+            cur.execute("insert into public.page_kinds (library_id, page, kind) values (%s, %s, 'index')", first)
+            cur.execute("select set_config('lantern.page_kinds', 'off', false)")
+            cur.execute("select library_id, page, rank from public.find_pages_ranked('', 'living wage')")
+            self.assertEqual([(r[0], r[1]) for r in cur.fetchall()], plain)                 # off: find_pages, untouched
+            cur.execute("select set_config('lantern.page_kinds', 'on', false)")
+            cur.execute("select library_id, page, rank from public.find_pages_ranked('', 'living wage')"); on = cur.fetchall()
+            self.assertEqual({(r[0], r[1]) for r in on}, set(plain)); self.assertEqual((on[-1][0], on[-1][1]), first)
+            self.assertEqual([r[2] for r in on], list(range(1, len(on) + 1)))
+            self.assertEqual([(r[0], r[1]) for r in on[:-1]], plain[1:])                    # the others keep their order
+            cur.execute("update public.page_kinds set kind = 'content'")                    # a mark taken back counts as none
+            cur.execute("select library_id, page from public.find_pages_ranked('', 'living wage')"); self.assertEqual(cur.fetchall(), plain)
+            # the meaning: the same, over whatever find_meaning returns
+            cur.execute("update public.page_kinds set kind = 'contents'")
+            other = plain[1]
+            cur.execute(psycopg.sql.SQL("""create or replace function public.find_meaning(key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null, type_filter text default null, max_rows int default 50)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$ select null::bigint, v.r, v.l, 'c'::text, 'w'::text, 2024, 't'::text, 'l'::text, null::text, v.p, 0.9::real, 'passage'::text
+                                               from (values (1, {}::text, {}::int), (2, {}::text, {}::int)) v(r, l, p) $f$""").format(
+                               *[psycopg.sql.Literal(x) for x in (first[0], first[1], other[0], other[1])]))
+            cur.execute("select library_id, page, rank from public.find_meaning_ranked('', %s::real[])", ([0.0] * 384,))
+            self.assertEqual(cur.fetchall(), [(other[0], other[1], 1), (first[0], first[1], 2)])
+            cur.execute("select set_config('lantern.page_kinds', 'off', false)")
+            cur.execute("select library_id, page, rank from public.find_meaning_ranked('', %s::real[])", ([0.0] * 384,))
+            self.assertEqual(cur.fetchall(), [(first[0], first[1], 1), (other[0], other[1], 2)])
+            c.rollback()
+
+    def test_the_search_words_of_an_answer_are_words_not_the_models_talk(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            clean = lambda t: (cur.execute("select public.ask_keywords_clean(%s)", (t,)), cur.fetchone()[0])[1]
+            self.assertEqual(clean("Scope 3 use of sold products"), "scope 3 use of sold products")
+            self.assertEqual(clean("scope 3 category 11 use of sold products wait the rule says write abbreviations in full scope 3 cat 11 should be c"), "scope 3 category 11 use of sold products")   # the owner's screenshot
+            self.assertEqual(clean("The question is about emissions of the products sold by the company.\nscope 3 use of sold products"), "scope 3 use of sold products")   # thinking first, the words last
+            self.assertEqual(clean("one two three four five six seven eight nine ten"), "one two three four five six seven eight")
+            self.assertIsNone(clean("")); self.assertIsNone(clean("  \n ")); self.assertEqual(clean("living-wage, suppliers!"), "living wage suppliers")
+            c.rollback()
+
+    def test_the_documents_to_fetch_by_hand_are_listed_by_company_main_reports_first(self):
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            put = lambda lid, wba, company, year, typ, status, url="https://x.example/a.pdf", label=None: cur.execute(
+                "insert into public.documents (library_id, wba_id, company, year, doc_type, label, url, text_status) values (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (lid, wba, company, year, typ, label or lid, url, status))
+            put("U1", "WA", "Alpha", 2024, "Annual Report", "no_file"); put("U2", "WA", "Alpha", 2023, "Sustainability Report", "download_fail")
+            put("U3", "WA", "Alpha", 2024, "Press Release", "no_file"); put("U4", "WA", "Alpha", 2021, "Annual Report", "no_file")
+            put("U5", "WB", "Beta", 2025, "Integrated Report", "no_file", label="Beta integrated 2025"); put("U6", "WB", "Beta", 2024, "Annual Report", "ok")
+            put("U7", "WB", "Beta", 2024, "Annual Report", "no_file", url="")                                   # no address: nothing to open
+            cur.execute("select public.admin_unread_docs('k')"); r = cur.fetchone()[0]
+            self.assertEqual((r["documents"], r["companies"]), (3, 2))                                          # main reports of 2023 on
+            self.assertEqual([d["library_id"] for d in r["rows"]], ["U1", "U2", "U5"])                          # the company with most first, newest first
+            self.assertEqual(r["rows"][0]["company_n"], 2); self.assertEqual(r["by_status"], {"no_file": 2, "download_fail": 1})
+            self.assertEqual(r["rows"][0]["url"], "https://x.example/a.pdf")
+            self.assertEqual((r["rows"][0]["note"], r["rows"][0]["traits"], r["rows"][0]["sent"]), (None, [], None))
+            cur.execute("insert into public.company_notes (wba_id, traits, note, by) values ('WA', '{no_annual}', 'reports sit behind a form', 'a@x.org')")
+            cur.execute("insert into public.browser_uploads (uploader, wba_id, source_url, filename, bytes, sha256, path, status) values ('a@x.org', 'WA', 'https://x.example/a.pdf', 'a.pdf', 10, 'h', 'WA/h.pdf', 'stored')")
+            cur.execute("select public.admin_unread_docs('k')"); r2 = cur.fetchone()[0]
+            self.assertEqual((r2["rows"][0]["note"], r2["rows"][0]["traits"], r2["rows"][0]["sent"]["status"]), ("reports sit behind a form", ["no_annual"], "stored"))
+            self.assertIsNone(r2["rows"][2]["sent"])                                                            # another company, same address: not its sending
+            # which company first: one that lacks the main reports of both last years, then the one in more benchmarks
+            import datetime; y = datetime.date.today().year - 1
+            put("U8", "WC", "Gamma", y, "Annual Report", "no_file"); put("U9", "WC", "Gamma", y, "Annual Report", "ok", url=""); put("U10", "WC", "Gamma", y - 1, "Annual Report", "ok", url="")
+            put("U11", "WD", "Delta", y, "Annual Report", "no_file")
+            cur.execute("insert into public.fx_rates (code, per_usd, as_of) values ('USD', 1, current_date) on conflict do nothing")
+            cur.execute("insert into public.value_versions (version_id, wba_id, attribute, year, value, unit, printed, library_id, page, method) values ('vWD', 'WD', 'GMC_00048.1', %s, 5e9, 'USD', 'x', 'L', 1, 'm')", (y - 2,))
+            cur.execute("select public.admin_unread_docs('k')"); r3 = cur.fetchone()[0]; seen = []
+            for d in r3["rows"]:
+                if d["wba_id"] not in seen: seen.append(d["wba_id"])
+            self.assertEqual((seen[0], seen[-1]), ("WD", "WC"))                                                 # nothing read and the largest revenue first; nothing missing last
+            first = r3["rows"][0]; self.assertEqual((first["revenue_usd"], first["missing"]), (5e9, f"no main report read for {y} or {y - 1}"))
+            self.assertNotIn("benchmarks", first)                                                               # the order does not rest on WBA's benchmarks
+            self.assertIsNone([d for d in r3["rows"] if d["wba_id"] == "WC"][0]["missing"])
+            cur.execute("insert into public.company_notes (wba_id, traits, by) values ('WD', '{in_parent}', 'a@x.org')")
+            cur.execute("select public.admin_unread_docs('k')"); r4 = cur.fetchone()[0]
+            self.assertNotEqual(r4["rows"][0]["wba_id"], "WD")                                                  # ticked as reporting inside its parent: not first any more
+            # the owner's corrections: a discarded document leaves the list at once, a corrected one shows its new type and year
+            cur.execute("select public.admin_doc_fix('k', 'U11', 'discard', null, null, 'Dead link')")
+            cur.execute("select public.admin_doc_fix('k', 'U8', 'relabel', 'CSR Report', %s, null)", (y,))
+            cur.execute("select public.admin_unread_docs('k')"); r5 = cur.fetchone()[0]; ids5 = {d["library_id"]: d for d in r5["rows"]}
+            self.assertNotIn("U11", ids5); self.assertEqual((ids5["U8"]["doc_type"], ids5["U8"]["corrected"]), ("CSR Report", True))
+            cur.execute("select action, reason, doc_type, applied_at from public.doc_fixes order by id"); self.assertEqual(cur.fetchall(), [("discard", "dead link", None, None), ("relabel", None, "CSR Report", None)])
+            for bad in ("select public.admin_doc_fix('k', 'NOPE', 'discard')", "select public.admin_doc_fix('k', 'U8', 'delete')", "select public.admin_doc_fix('k', 'U8', 'relabel')", "select public.admin_doc_fix('k', 'U8', 'discard', null, null, 'whim')"):
+                cur.execute("savepoint s")
+                with self.assertRaises(psycopg.Error): cur.execute(bad)
+                cur.execute("rollback to savepoint s")
+            cur.execute("delete from public.doc_fixes")
+            # "do we hold the latest?" (v125): the year due from the fiscal year's end, and the companies with no main report of it
+            due = lambda m, day: (cur.execute("select public.report_year_due(%s, %s::date)", (m, day)), cur.fetchone()[0])[1]
+            self.assertEqual([due(12, "2026-11-19"), due(None, "2026-11-19"), due(3, "2026-11-19"), due(9, "2026-11-19")], [2025, 2025, 2025, 2025])
+            self.assertEqual([due(12, "2026-07-31"), due(12, "2026-08-01"), due(3, "2026-10-31"), due(6, "2027-02-01")], [2024, 2025, 2024, 2026])
+            cur.execute("select public.report_year_due(null)"); dy = cur.fetchone()[0]
+            cur.execute("insert into public.companies (wba_id, name, website) values ('LZ1', 'Zeta One', 'https://one.example'), ('LZ2', 'Zeta Two', null), ('LZ3', 'Zeta Three', null), ('LZ4', 'Zeta Four', null)")
+            put("Z2", "LZ2", "Zeta Two", dy, "Annual Report", "no_file"); put("Z3", "LZ3", "Zeta Three", dy - 1, "Sustainability Report", "ok", url="https://x.example/z3.pdf")
+            put("Z3b", "LZ3", "Zeta Three", dy, "Policy Documents", "ok"); put("Z4", "LZ4", "Zeta Four", dy - 2, "Annual Report", "ok")
+            cur.execute("insert into public.company_notes (wba_id, traits, by) values ('LZ4', '{in_parent}', 'a@x.org')")
+            cur.execute("select public.admin_latest_missing('k', 'Zeta')"); lm = cur.fetchone()[0]
+            self.assertEqual((lm["companies"], lm["with_none"]), (3, 1))                                        # a held address of the year due is not missing here; a policy is not a main report
+            self.assertEqual([x["wba_id"] for x in lm["rows"]][-1], "LZ4")                                      # reports inside its parent: last
+            z3 = [x for x in lm["rows"] if x["wba_id"] == "LZ3"][0]
+            self.assertEqual((z3["due"], z3["latest"], z3["last"]["url"], z3["last"]["doc_type"]), (dy, dy - 1, "https://x.example/z3.pdf", "Sustainability Report"))
+            z1 = [x for x in lm["rows"] if x["wba_id"] == "LZ1"][0]; self.assertEqual((z1["latest"], z1["last"], z1["website"]), (None, None, "https://one.example"))
+            cur.execute("delete from public.documents where library_id in ('Z2', 'Z3', 'Z3b', 'Z4')"); cur.execute("delete from public.companies where wba_id like 'LZ%'"); cur.execute("delete from public.company_notes where wba_id = 'LZ4'")
+            cur.execute("delete from public.documents where library_id in ('U8', 'U9', 'U10', 'U11')")           # (rows of this test only; rolled back at the end)
+            cur.execute("select public.admin_unread_docs('k', null, false, null)"); r = cur.fetchone()[0]
+            self.assertEqual(r["documents"], 5)                                                                 # every kind, every year
+            self.assertEqual([d["library_id"] for d in r["rows"]][:4], ["U1", "U2", "U4", "U3"])                # main reports before the rest
+            cur.execute("select public.admin_unread_docs('k', 'integrated')"); r = cur.fetchone()[0]
+            self.assertEqual([d["library_id"] for d in r["rows"]], ["U5"])
+            cur.execute("select public.admin_unread_docs('k', 'alph', true, 2020)"); self.assertEqual(cur.fetchone()[0]["documents"], 3)
+            c.rollback()
+
+    def test_an_answer_is_kept_and_given_again_only_for_the_same_question_of_the_same_company(self):
+        import psycopg, math
+        vec = lambda *head: [float(x) for x in head] + [0.0] * (384 - len(head))
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select public.cosine(%s::real[], %s::real[]), public.cosine(%s::real[], %s::real[]), public.cosine(%s::real[], %s::real[])",
+                        ([1, 0], [1, 0], [1, 0], [0, 1], [0, 0], [1, 0]))
+            same, apart, none = cur.fetchone()
+            self.assertAlmostEqual(same, 1.0); self.assertAlmostEqual(apart, 0.0); self.assertIsNone(none)
+            cur.execute("select public.ask_words_norm('  Scope 1  emissions?! '), public.ask_nums('scope 2 and scope 1, 2 again'), public.ask_nums('water')")
+            self.assertEqual(cur.fetchone(), ("scope 1 emissions", "1 2", ""))
+            reply = {"answer": "Scope 1 was 10 [1].", "sources": [{"n": 1}], "facts": []}
+            cur.execute("select public.ask_keep(7, 'W1', 2023, 2023, null, 'Scope 1 emissions', %s::real[], %s::jsonb)", (vec(1, 0.1), psycopg.types.json.Jsonb(reply)))
+            ask = lambda company, y0, y1, kind, q, v: (cur.execute("select public.ask_reusable(%s, %s, %s, %s, %s, %s::real[])", (company, y0, y1, kind, q, v)), cur.fetchone()[0])[1]
+            hit = ask("W1", 2023, 2023, None, "scope 1 EMISSIONS", None)
+            self.assertEqual((hit["ask_id"], hit["reply"]["answer"], hit["same"]), (7, "Scope 1 was 10 [1].", True))         # the same words, no vector needed
+            near = ask("W1", 2023, 2023, None, "what are the scope 1 emissions", vec(1, 0.12))
+            self.assertEqual((near["ask_id"], near["same"], near["words"]), (7, False, "scope 1 emissions"))                    # other words that mean the same
+            self.assertIsNone(ask("W1", 2023, 2023, None, "scope 2 emissions", vec(1, 0.1)))                                    # the same vector, another number
+            self.assertIsNone(ask("W1", 2023, 2023, None, "what are the scope 1 targets", vec(1, 0.9)))                          # the meaning is not near enough
+            self.assertIsNone(ask("W1", 2023, 2023, None, "what are the scope 1 emissions", None))                               # other words and no vector
+            self.assertIsNone(ask("W2", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))                                    # another company
+            self.assertIsNone(ask("W1", 2024, 2024, None, "scope 1 emissions", vec(1, 0.1)))                                    # other years
+            self.assertIsNone(ask("W1", None, None, None, "scope 1 emissions", vec(1, 0.1)))
+            self.assertIsNone(ask("W1", 2023, 2023, "Annual Report", "scope 1 emissions", vec(1, 0.1)))                         # another kind of report
+            # the page asked before the vector was ready: the one made since for the same words is used, on both sides
+            self.assertEqual(ask("W1", 2023, 2023, None, "scope 1 emissio ns", None)["ask_id"], 7)                             # a stray space: the same words
+            cur.execute("select public.ask_keep(8, 'W1', null, null, null, 'supply chain', null, %s::jsonb)", (psycopg.types.json.Jsonb(reply),))
+            self.assertIsNone(ask("W1", None, None, None, "supply chains", vec(0.2, 1)))                                        # nothing to compare with yet
+            cur.execute("insert into public.query_vectors (q, vec) values ('Supply chain', %s::real[]), ('supply chains', %s::real[])", (vec(0.21, 1), vec(0.2, 1)))
+            self.assertEqual(ask("W1", None, None, None, "supply chains", vec(0.2, 1))["ask_id"], 8)                            # the kept answer's vector, made since
+            self.assertEqual(ask("W1", None, None, None, "supply chains", None)["ask_id"], 8)                                   # and the question's own, when the page sent none
+            cur.execute("select public.ask_keep(9, 'W3', null, null, null, 'Supply chain', null, %s::jsonb)", (psycopg.types.json.Jsonb(reply),))
+            cur.execute("select vec is not null from public.ask_cache where ask_id = 9"); self.assertTrue(cur.fetchone()[0])     # kept with the vector already made
+            cur.execute("delete from public.ask_cache where ask_id in (8, 9)")
+            cur.execute("update public.ask_cache set at = now() - interval '15 days'")
+            self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))                                    # too old: documents arrive
+            cur.execute("update public.ask_cache set at = now()")
+            # through ask itself: given again before anything is counted or paid, logged as reused, never as an answer
+            cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023)"); got = cur.fetchone()[0]
+            self.assertEqual((got["answer"], got["reused"]["same"], got["left"], got["per_day"]), ("Scope 1 was 10 [1].", True, got["per_day"], got["per_day"]))
+            cur.execute("select answered, reused from public.ask_log order by id desc limit 1"); self.assertEqual(cur.fetchone(), (False, 7))
+            # a follow-up (page v124): the answer says which it is; it may be followed by the person it was written for or given again to
+            self.assertEqual(got["ask_id"], 7)
+            cur.execute("select asker from public.ask_log order by id desc limit 1"); me = cur.fetchone()[0]
+            cur.execute("insert into public.ask_log (id, asker, question, answered, answer, sources) overriding system value values (7, 'first@x.org', 'scope 1?', true, 'Scope 1 was 10 [1].', %s::jsonb) on conflict (id) do update set answered = true, answer = excluded.answer, sources = excluded.sources", (psycopg.types.json.Jsonb(reply["sources"]),))
+            cur.execute("select public.ask_followable(7, %s), public.ask_followable(7, 'stranger@x.org')", (me,)); mine, theirs = cur.fetchone()
+            self.assertEqual(mine["answer"], "Scope 1 was 10 [1]."); self.assertIsNone(theirs)
+            cur.execute("select public.ask_follow('k', 7, 'and in 2022?')"); self.assertTrue(cur.fetchone()[0]["off"])            # no model key here: nothing asked, nothing counted
+            cur.execute("insert into public.ask_log (asker, question, answered, answer, sources) values ('stranger@x.org', 'theirs?', true, 'x', %s::jsonb) returning id", (psycopg.types.json.Jsonb(reply["sources"]),)); other = cur.fetchone()[0]
+            for bad in (("select public.ask_follow('k', %s, 'and in 2022?')", (other,)), ("select public.ask_follow('k', 7, 'x')", ())):
+                cur.execute("savepoint s")
+                with self.assertRaises(psycopg.Error): cur.execute(*bad)
+                cur.execute("rollback to savepoint s")
+            cur.execute("select public.ask_follow_text('What is scope 1?', 'It was 10 [1].', 'and in 2022?')"); ft = cur.fetchone()[0]
+            self.assertTrue(ft.startswith("and in 2022?")); self.assertIn("Earlier question: What is scope 1?", ft); self.assertIn("Earlier answer: It was 10 [1].", ft)
+            cur.execute("delete from public.ask_log where id = %s", (other,))
+            cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023, null, null, null, null, null, null, true)")
+            self.assertNotIn("reused", cur.fetchone()[0])                                                                         # asked again: a new answer is sought
+            cur.execute("select set_config('lantern.ask_reuse', 'off', false)")
+            cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023)"); self.assertNotIn("reused", cur.fetchone()[0])
+            cur.execute("select set_config('lantern.ask_reuse', 'on', false)")
+            cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1;W2', 2023, 2023)"); self.assertNotIn("reused", cur.fetchone()[0])   # two companies: never
+            cur.execute("select public.search_flags('k')"); self.assertEqual(cur.fetchone()[0], {"answer_topics": True, "ask_reuse": True})
+            c.rollback()
+
+    def test_in_the_list_by_meaning_older_documents_go_down_only_with_the_option_and_no_year(self):
+        import psycopg, datetime
+        y = datetime.date.today().year
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            rows = ", ".join(f"({r}, 'L{r}'::text, {yr}, {r})" for r, yr in ((1, 2001), (2, y - 4), (3, 0), (4, y - 1), (5, y - 1), (6, y - 2)))
+            cur.execute(f"""create or replace function public.find_meaning(key text, qvec real[], company_filter text default null, year_from int default null, year_to int default null, type_filter text default null, max_rows int default 50)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$ select null::bigint, v.r, v.l, 'c'::text, 'w'::text, v.y, 't'::text, 'l'::text, null::text, v.p, 0.9::real, 'passage'::text from (values {rows}) v(r, l, y, p) $f$""")
+            ask = lambda *years: (cur.execute("select library_id from public.find_meaning_ranked('', %s::real[], null, %s, %s)", ([0.0] * 384, *years)), [r[0] for r in cur.fetchall()])[1]
+            cur.execute("select set_config('lantern.page_kinds', 'off', false), set_config('lantern.recent_meaning', 'off', false)")
+            self.assertEqual(ask(None, None), ["L1", "L2", "L3", "L4", "L5", "L6"])                    # off: nearness alone
+            cur.execute("select set_config('lantern.recent_meaning', 'on', false)")
+            # ages over the newest (a year old): 2001 capped at twelve -> +16.5; four years -> +4.5; no year (three) -> +3; two years -> +1.5
+            self.assertEqual(ask(None, None), ["L4", "L5", "L3", "L2", "L6", "L1"])
+            self.assertEqual(ask(2001, y), ["L1", "L2", "L3", "L4", "L5", "L6"])                       # a year asked: nothing moves
+            cur.execute("insert into public.page_kinds (library_id, page, kind) values ('L4', 4, 'index')")
+            cur.execute("select set_config('lantern.page_kinds', 'on', false)")
+            self.assertEqual(ask(None, None), ["L5", "L3", "L2", "L6", "L1", "L4"])                    # a marked page still goes last
+            cur.execute("select library_id, rank from public.find_meaning_ranked('', %s::real[])", ([0.0] * 384,))
+            self.assertEqual([r[1] for r in cur.fetchall()], [1, 2, 3, 4, 5, 6])
+            c.rollback()
 
     def test_one_search_blends_words_and_meaning(self):
         """find_blend: the words alone without a vector, in quotes or with a place filter; else both lists merged by
@@ -456,7 +811,7 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertTrue(all(r[4] is not None for r in rows))                 # the search was logged once, by the words
         self.assertLessEqual(max(sum(1 for k in keys if k[0] == d) for d in {k[0] for k in keys}), 3)
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "site", "search.html"), encoding="utf-8").read()
-        self.assertIn('rpc("find_meaning"', src); self.assertIn("function blend(words, meaning, need)", src)   # the page merges the two itself, asked at once
+        self.assertIn('rpc("find_meaning_ranked"', src); self.assertIn('rpc("find_pages_ranked"', src); self.assertIn("function blend(words, meaning, need)", src)   # the page merges the two itself, asked at once
         self.assertNotIn("Search by meaning (beta)", src)                    # one search, not a choice
 
     def test_the_facts_of_an_answer_are_taken_apart_and_kept_with_their_page(self):

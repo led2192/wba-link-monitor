@@ -17,12 +17,18 @@
 # Full text never goes into this repository: it is public, and so are its artifacts and logs.
 name: Build full text
 
+# Started by the clock on lantrNa's server at 21:37 UTC (server/clock.json, since 21 Nov 2026), not by GitHub's
+# scheduler: GitHub started the nightly run four to six hours late every night of the week before (21:37 asked,
+# 01:17 to 04:09 given), so it ended after the 01:41 load of the search database and a day's new text reached the
+# search only with the 19:41 load, almost a day late. 21:37 is after the 19:00 attachment recovery and the
+# cover-text run chained to it, so today's PDFs are read today.
 on:
-  schedule:
-    - cron: "37 21 * * *"      # daily 21:37 UTC: after the 19:00 attachment recovery and the
-                               # cover-text run chained to it, so today's PDFs are read today
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "run as the nightly reading: plan and commit, every type and year (the clock ticks this)"
+        type: boolean
+        default: false
       mode:
         description: "What to run"
         type: choice
@@ -95,7 +101,7 @@ jobs:
           # inputs arrive through the environment and are passed as quoted array items, never
           # pasted into the command line: a type name contains spaces and commas
           ARGS=()
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${{ inputs.as_scheduled }}" = "true" ]; then
             ARGS+=(--plan --commit --year-min "$NIGHTLY_YEAR_MIN")
             [ -n "$NIGHTLY_TYPES" ] && ARGS+=(--types "$NIGHTLY_TYPES")
           else
