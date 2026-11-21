@@ -1,0 +1,31 @@
+# The project's documentation on lantrNa's server, where the owner's panel reads it (docs/server.md, 21 Nov 2026).
+# Copies docs/*.md to /srv/lantern/docs, which the web server does not serve: the server's door gives a document only
+# to the database, with the shared secret, and the database only to the owner. Started by a change to docs/ on main,
+# or by hand. Never by a pull request.
+name: Server docs
+
+on:
+  push:
+    branches: [main]
+    paths: [docs/**, .github/workflows/server_docs.yml]
+  workflow_dispatch:
+
+concurrency:
+  group: server-docs
+  cancel-in-progress: true
+
+jobs:
+  copy:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy the documents
+        run: |
+          ls docs/*.md >/dev/null
+          sudo install -d -m 755 /srv/lantern/docs.new
+          sudo cp docs/*.md /srv/lantern/docs.new/
+          sudo chmod -R a+rX /srv/lantern/docs.new
+          sudo rm -rf /srv/lantern/docs.old; if [ -d /srv/lantern/docs ]; then sudo mv /srv/lantern/docs /srv/lantern/docs.old; fi
+          sudo mv /srv/lantern/docs.new /srv/lantern/docs
+          echo "documents on the server: $(find /srv/lantern/docs -type f -name '*.md' | wc -l)"

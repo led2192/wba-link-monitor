@@ -5838,6 +5838,79 @@ $$;
 revoke all on function public.admin_link_browser_set(text, bigint, boolean, text, int) from public, anon;
 grant execute on function public.admin_link_browser_set(text, bigint, boolean, text, int) to authenticated;
 
+-- The project's documentation, read from the owner's panel (21 Nov 2026, the owner: out of the public repository's
+-- reach and "consultable desde el panel de administración"). The files are on lantrNa's server; this database asks
+-- the server's door for them with the same address and secret as the search by meaning, and only for the owner.
+create or replace function public.server_docs_call(payload jsonb) returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  address text;
+  secret text;
+  http_schema text;
+  status int;
+  body text;
+begin
+  begin
+    select d.decrypted_secret into address from vault.decrypted_secrets d where d.name = 'meaning_remote_url' limit 1;
+    select d.decrypted_secret into secret from vault.decrypted_secrets d where d.name = 'meaning_remote_secret' limit 1;
+  exception when others then
+    return jsonb_build_object('error', 'the vault could not be read');
+  end;
+  select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
+  if address is null or secret is null or http_schema is null or address !~ '^https://[a-z0-9.-]+$' then
+    return jsonb_build_object('error', 'the server''s address is not set up');
+  end if;
+  begin
+    execute format('select %I.http_reset_curlopt()', http_schema);
+    begin
+      execute format('select %1$I.http_set_curlopt(''CURLOPT_CONNECTTIMEOUT_MS'', ''1000''), %1$I.http_set_curlopt(''CURLOPT_TIMEOUT_MS'', ''6000'')', http_schema);
+    exception when others then
+      execute format('select %1$I.http_set_curlopt(''CURLOPT_CONNECTTIMEOUT'', ''1''), %1$I.http_set_curlopt(''CURLOPT_TIMEOUT'', ''6'')', http_schema);
+    end;
+    execute format(
+      'select h.status, h.content from %1$I.http(row(''POST'', $1, array[%1$I.http_header(''Authorization'', $2)], $4, $3)::%1$I.http_request) h', http_schema)
+      into status, body using address || '/docs', 'Bearer ' || secret, coalesce(payload, '{}'::jsonb)::text, 'application/json';
+    execute format('select %I.http_reset_curlopt()', http_schema);
+  exception when others then
+    begin execute format('select %I.http_reset_curlopt()', http_schema); exception when others then null; end;
+    return jsonb_build_object('error', 'the server did not answer');
+  end;
+  if status = 200 then
+    begin
+      return body::jsonb;
+    exception when others then
+      return jsonb_build_object('error', 'the server''s answer could not be read');
+    end;
+  end if;
+  return jsonb_build_object('error', 'the server answered HTTP ' || status);
+end;
+$$;
+revoke all on function public.server_docs_call(jsonb) from public, anon, authenticated;
+
+create or replace function public.admin_docs(key text, name text default null) returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if name is null then
+    return public.server_docs_call('{}'::jsonb);
+  end if;
+  if name !~* '^[a-z0-9][a-z0-9_-]{0,60}\.md$' then
+    return jsonb_build_object('error', 'not a document''s name');
+  end if;
+  return public.server_docs_call(jsonb_build_object('name', name));
+end;
+$$;
+revoke all on function public.admin_docs(text, text) from public, anon;
+grant execute on function public.admin_docs(text, text) to authenticated;
+
 -- Switch a link off or on again. The owner's own link cannot be switched off from here.
 create or replace function public.admin_link_set(key text, name text, active boolean)
 returns jsonb
