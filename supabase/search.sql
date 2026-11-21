@@ -540,6 +540,20 @@ create table if not exists public.key_browsers (
 alter table public.key_browsers enable row level security;
 -- (the option's row is added where search_options is made, further down)
 
+-- The shared team link is retired (21 Nov 2026, the owner): a link is one person's, and this one had not been used
+-- for a week. Done once (the marker row), so that the owner can switch it on again from Admin if he ever wants to.
+create table if not exists public.search_access_moves (name text primary key, at timestamptz not null default now(), listed int);
+alter table public.search_access_moves enable row level security;
+do $$
+declare n int := 0;
+begin
+  if not exists (select 1 from public.search_access_moves where name = 'team_link_off') then
+    update public.search_keys set active = false where name = 'team' and active;
+    get diagnostics n = row_count;
+    insert into public.search_access_moves (name, listed) values ('team_link_off', n);
+  end if;
+end $$;
+
 -- The link's name for a key as the page sends it ("<key>" or "<key>~<browser id>"); null when the key is not an
 -- active one or, with the option on, when the browser is not one allowed for that link. In plpgsql: it reads the
 -- option, which is defined further down.
