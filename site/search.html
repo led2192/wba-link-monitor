@@ -310,9 +310,9 @@
 </div>
 
 <script>
-(() => {
+(async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v131 2026-11-21";
+  const CLIENT = "lantern v132 2026-11-21";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -366,6 +366,24 @@
     if (m) { localStorage.setItem("find_key", m[1]); history.replaceState(null, "", location.pathname + location.search); }
     key = localStorage.getItem("find_key");
   } catch (e) { key = null; }
+  // v132 (21 Nov 2026): a link is one person's. This browser gets a random id of its own, kept here, and the key
+  // travels with it ("key~id") so that the owner can see in how many browsers a link is used and allow or stop
+  // each. Nothing about the machine is read. The id can come with the link from the old address (&d=), so that
+  // the two addresses count as one browser.
+  const rawKey = key;
+  let device = null;
+  try {
+    const d = location.hash.match(/[#&]d=([A-Za-z0-9_-]{16,64})/);
+    device = localStorage.getItem("find_device");
+    if (!device && d) device = d[1];
+    if (!device) { const b = new Uint8Array(18); crypto.getRandomValues(b); device = Array.from(b, x => x.toString(16).padStart(2, "0")).join(""); }
+    localStorage.setItem("find_device", device);
+  } catch (e) {}
+  if (key && device) key = key + "~" + device;
+  const browserLabel = () => { const u = navigator.userAgent || "";
+    const b = /Edg\//.test(u) ? "Edge" : /OPR\//.test(u) ? "Opera" : /Firefox\//.test(u) ? "Firefox" : /Chrome\//.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "Browser";
+    const s = /Windows/.test(u) ? "Windows" : /Android/.test(u) ? "Android" : /iPhone|iPad/.test(u) ? "iOS" : /Mac OS X/.test(u) ? "macOS" : /Linux/.test(u) ? "Linux" : "";
+    return s ? `${b} on ${s}` : b; };
   if (!key) {
     $("notice").innerHTML = '<div class="notice"><b>Open the link you were given.</b><br>This page works from a shared link that carries its key; ask the person who shared lantrNa with you for it. On the address you used before, the line at the foot of the page opens this one with your key. Nothing else is needed, no account and no password.</div>';
     $("boxwrap").style.display = "none"; $("filters").hidden = true;
@@ -387,6 +405,19 @@
       throw new Error(msg);
     }
     return r.json();
+  }
+
+  // Say once that this browser opens this link. A browser beyond the link's limit waits for the owner (only when the
+  // owner switched the rule on); nothing else is asked of the database then, so the key stays in this browser.
+  if (device) {
+    let entered = null;
+    try { const r = await fetch(`${CONFIG.url}/rest/v1/rpc/link_enter`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${CONFIG.key}`, "Content-Type": "application/json" },
+                                 body: JSON.stringify({ key: rawKey, device, label: browserLabel() }) }); if (r.ok) entered = await r.json(); } catch (e) {}
+    if (entered && entered.waiting) {
+      $("notice").innerHTML = '<div class="notice"><b>This link is already in use in other browsers.</b><br>A link is personal and works in a small number of browsers. Ask the person who gave it to you to allow this one; then reload this page.</div>';
+      $("boxwrap").style.display = "none"; $("filters").hidden = true;
+      return;
+    }
   }
 
   async function loadCompanies() {
@@ -2003,7 +2034,7 @@
   if (location.hostname !== "lantrna.com" && /^https?:$/.test(location.protocol)) {
     const d = el("div"); d.style.cssText = "text-align:center;font-size:13px;margin-top:10px";
     const a = el("a", null, "Open it there with your key"); a.href = "#"; a.rel = "noopener";
-    a.onclick = ev => { ev.preventDefault(); window.open("https://lantrna.com/#k=" + key, "_blank", "noopener"); };
+    a.onclick = ev => { ev.preventDefault(); window.open("https://lantrna.com/#k=" + rawKey + (device ? "&d=" + device : ""), "_blank", "noopener"); };
     d.append(document.createTextNode("lantrNa has a new address, lantrna.com. "), a, document.createTextNode(". This address keeps working."));
     $("foot").insertAdjacentElement("beforebegin", d);
   }
@@ -2429,6 +2460,19 @@
     body.appendChild(adminTable(["Link", "State", "Searches, 7 days", "30 days", "Answers, 7 days", "Last used", "", ""], o.links.map(l => [opener(l.name, { link: l.name }, "See what this link searched"), l.active ? "on" : "off", l.searches_7d, l.searches_30d, l.answers_7d || "", adminWhen(l.last_used),
       l.name === "owner" ? "" : adminBtn(l.active ? "Switch off" : "Switch on", async () => { await authed("admin_link_set", { key, name: l.name, active: !l.active }); adminPeople(body); }),
       l.name === "owner" || l.name === "team" ? "" : adminBtn(l.may_ask ? "Stop Ask" : "Allow Ask", async () => { await authed("admin_link_ask", { key, name: l.name, may: !l.may_ask }); adminPeople(body); })])));
+    // v132: the browsers of each link. The first ones up to the link's limit are allowed as they arrive; one more waits here.
+    const lb = await authed("admin_link_browsers", { key });
+    if (lb) {
+      body.append(el("h3", null, "Browsers of each link"));
+      body.append(el("p", null, lb.enforced ? "A link works only in the browsers allowed here. A new browser beyond the link's limit waits until you allow it."
+                                            : "Not enforced yet: every browser that opens a link is noted here, and none is refused. When the rule is switched on, a browser marked as waiting stops working until you allow it."));
+      const limitOut = el("span"); limitOut.style.cssText = "font-size:13px;margin-left:8px";
+      body.appendChild(adminTable(["Link", "Allowed", "Waiting", "Limit", ""], lb.links.map(l => { const inp = document.createElement("input"); inp.type = "number"; inp.min = 1; inp.max = 20; inp.value = l.limit; inp.style.cssText = "font:inherit;width:60px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:var(--box);color:var(--fg)";
+        return [l.name, l.allowed, l.waiting || "", inp, adminBtn("Set limit", async () => { const r = await authed("admin_link_browser_set", { key, name: l.name, max_browsers: parseInt(inp.value, 10) }); limitOut.textContent = r && r.ok ? `Limit of ${l.name} set.` : "A number from 1 to 20."; })]; })));
+      body.appendChild(limitOut);
+      if (lb.browsers.length) body.appendChild(adminTable(["Link", "Browser", "First seen", "Last used", "State", ""], lb.browsers.map(b => [b.name, b.label || "?", adminWhen(b.first_seen), adminWhen(b.last_seen), b.allowed ? "allowed" : "waiting",
+        adminBtn(b.allowed ? "Stop" : "Allow", async () => { await authed("admin_link_browser_set", { key, browser: b.id, allowed: !b.allowed }); adminPeople(body); })])));
+    }
     body.append(el("h3", null, "People who signed in"));
     // v82 (the owner): answers today against the person's limit, and the limit set here (50 a day unless changed).
     const limitNote = el("span"); limitNote.style.cssText = "font-size:13px;margin-left:8px";

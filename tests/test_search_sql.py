@@ -109,6 +109,18 @@ def test_terms_of_use_are_published_and_the_link_is_personal():
     assert flow.count("send-to-lantern.html terms.html; do") == 2
 
 
+def test_a_link_is_tied_to_its_browsers():
+    fn = SQL[SQL.index("create or replace function public.key_name_checked("):SQL.index("create or replace function public.link_enter(")]
+    assert "split_part(coalesce(key, ''), '~', 1)" in fn and "public.survey_option('link_browsers')" in fn and "b.allowed" in fn
+    assert "return public.key_name_checked(key);" in fn and "session_user = 'postgres'" in fn
+    assert SQL.index("create table if not exists public.search_options") < SQL.index("values ('link_browsers', false,")   # the row after its table
+    enter = SQL[SQL.index("create or replace function public.link_enter("):SQL.index("grant execute on function public.link_enter(")]
+    assert "b.allowed := held < room;" in enter and "'^[A-Za-z0-9_-]{16,64}$'" in enter and "digest(device, 'sha256')" in enter
+    assert 'key = key + "~" + device' in PAGE and 'rpc/link_enter' in PAGE and "body: JSON.stringify({ key: rawKey, device, label: browserLabel() })" in PAGE
+    assert '"https://lantrna.com/#k=" + rawKey' in PAGE and "crypto.getRandomValues" in PAGE and "This link is already in use in other browsers" in PAGE
+    assert 'authed("admin_link_browsers", { key })' in PAGE and 'authed("admin_link_browser_set"' in PAGE
+
+
 def test_only_a_listed_address_signs_in():
     rule = SQL[SQL.index("create or replace function public.email_may_search("):SQL.index("create or replace function public.can_search(")]
     body = rule[:rule.index("-- Once, on the day")]
@@ -386,7 +398,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_overview", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
+    assert set(names) == {"admin_overview", "admin_link_browsers", "admin_link_browser_set", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -476,7 +488,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v131 2026-11-21";' in PAGE
+    assert 'const CLIENT = "lantern v132 2026-11-21";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
