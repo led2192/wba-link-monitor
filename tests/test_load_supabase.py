@@ -212,6 +212,13 @@ class AgainstPostgres(unittest.TestCase):
             c.execute("insert into public.search_access (email) values ('someone@example.com')")
             self.assertTrue(may("SOMEONE@example.com"))
             self.assertFalse(may("other@example.com"))
+            # the validated answers reach the page's functions only while their option is on (off as installed)
+            c.execute("insert into public.value_truth (wba_id, attribute, year, value) values ('WBA1', 'X', 2024, 5) on conflict do nothing")
+            rows = lambda: c.execute("select count(*) from public.truth_rows()").fetchone()[0]
+            self.assertEqual(c.execute("select is_on from public.search_options where name = 'validated_answers'").fetchone(), (False,))
+            self.assertEqual(rows(), 0)
+            c.execute("select set_config('lantern.validated_answers', 'on', false)"); self.assertEqual(rows(), 1)
+            c.execute("select set_config('lantern.validated_answers', '', false)"); self.assertEqual(rows(), 0)
 
 
 
