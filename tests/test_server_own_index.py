@@ -69,6 +69,9 @@ class OwnIndex(unittest.TestCase):
     def test_the_nightly_refresh_leaves_them_alone(self):
         self.assertIn("where not exists (select 1 from {schema}.chunk_filters f where f.library_id = c.library_id and f.own)", MEANING)   # not compared with Supabase
         self.assertIn("where f.live and not f.own and not exists", MEANING)                                                               # not marked gone
+        self.assertIn("live = true, own = false", MEANING)                       # a document Supabase indexed is Supabase's, and is counted
+        self.assertIn("note like '%on since%' and note not like '%off by the owner%'", MEANING)    # what a refresh switched off, a refresh switches on
+        self.assertIn('d.execute(f"select library_id from {SCHEMA}.chunk_filters")', SRC)
         own = MEANING[MEANING.index("def refresh_own("):MEANING.index("def refresh_report(")]
         self.assertIn("name = 'own_live'", own); self.assertIn("set live = false where f.own and f.live and not exists", own)
 
