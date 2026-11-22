@@ -2039,7 +2039,10 @@ begin
           where not e.gone and e.kind = 'term' and e.name_key like replace(replace(k, '%', ''), '_', '') || ' %'
           order by length(e.name_key), e.name limit 1) o;
   end if;
-  if found = '[]'::jsonb and array_length(string_to_array(k, ' '), 1) <= 5 and length(k) >= 3 then
+  -- Counted as a candidate only when the library knows every word of it: "zyntharix emissions" (a name no page holds,
+  -- which names_not_held already counts for the owner) was listed here on the first evening as a term to add.
+  if found = '[]'::jsonb and array_length(string_to_array(k, ' '), 1) <= 5 and length(k) >= 3
+     and not exists (select 1 from unnest(string_to_array(k, ' ')) w where public.word_unknown(key, w)) then
     insert into public.reference_misses as m (asked_key, asked, question) values (k, left(btrim(s), 90), asked)
       on conflict (asked_key) do update set times = m.times + 1, last_at = now(), question = m.question or excluded.question;
   end if;

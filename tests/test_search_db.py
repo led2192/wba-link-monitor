@@ -1850,12 +1850,14 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([e["name"] for e in look("pretend scope")], ["Pretend Scope Emissions"])
         # asked and not in the list: counted for the owner, as compared, questions marked
         cur.execute("delete from public.reference_misses")
+        cur.execute("insert into public.search_vocab (word, n) values ('fanciful', 9), ('stewardship', 9) on conflict do nothing")           # words the library knows
         self.assertEqual(look("What is Fanciful Stewardship?"), []); self.assertEqual(look("fanciful  stewardship"), []); self.assertEqual(look("one two three four five six"), [])
+        self.assertEqual(look("zyntharix stewardship"), [])                                                                                 # a name no page holds: not a term to add
         cur.execute("select asked_key, asked, question, times from public.reference_misses"); self.assertEqual(cur.fetchall(), [("fanciful stewardship", "fanciful stewardship", True, 2)])
         cur.execute("select public.admin_reference_asked_set('k', 'fanciful stewardship', true)"); self.assertTrue(cur.fetchone()[0]["ok"])
         cur.execute("select public.admin_reference('k')"); adm = cur.fetchone()[0]
         self.assertEqual([(m["asked"], m["times"], m["dismissed"]) for m in adm["asked"]], [("fanciful stewardship", 2, True)]); self.assertGreaterEqual(adm["kinds"]["term"], 3)
-        cur.execute("delete from public.reference_misses")
+        cur.execute("delete from public.reference_misses"); cur.execute("delete from public.search_vocab where word in ('fanciful', 'stewardship')")
         with psycopg.connect(URL) as c:
             rows, _ = R.entry_rows(entries); R.plan(c, rows); R.write(c); c.execute("delete from public.reference_entries where id in ('term:t5', 'term:t6', 'norm:t7')")
         self.assertEqual([e["name"] for e in look("Invented Reporting Rule")], ["Invented Reporting Rule (IRR)"])               # the name without its bracket
