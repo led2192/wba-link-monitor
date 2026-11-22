@@ -1886,7 +1886,8 @@ class SearchOnPostgres(unittest.TestCase):
         import psycopg
         with psycopg.connect(URL) as c:
             cur = c.cursor()
-            cur.execute("select is_on from public.search_options where name = 'reader_asked_form'"); self.assertEqual(cur.fetchone(), (False,))
+            cur.execute("select is_on from public.search_options where name = 'reader_asked_form'"); self.assertEqual(cur.fetchone(), (True,))       # on after its comparison (run 45073687451)
+            cur.execute("select set_config('lantern.reader_asked_form', 'off', true)")
             topic = '{"label": "the business", "groups": [{"label": "Identity"}, {"label": "Structure"}]}'
             cur.execute("select public.ask_instructions(false), public.ask_overview_note(%s::jsonb)", (topic,)); plain, note = cur.fetchone()
             self.assertNotIn("not always a question", plain); self.assertIn("Then say in one line which of these parts the excerpts do not cover.", note)

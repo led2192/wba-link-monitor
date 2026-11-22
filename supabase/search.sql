@@ -3202,6 +3202,11 @@ update public.search_options set is_on = true, changed = now(), note = note || '
 -- only when the excerpts do not cover it. Neither changes what the reader reads.
 insert into public.search_options (name, is_on, note) values ('reader_asked_form', false, 'the reader of Ask begins with Yes or No only when the words typed are a question, and names a part of an overview only when the pages do not cover it')
 on conflict (name) do nothing;
+-- On since 22 Nov 2026 (run 45073687451): 60 questions, each answered as today, as today again and with the option.
+-- Answered 60, 60, 60; facts with a page 198, 195, 207; figures of the first answer kept by the second plain answer
+-- 85%, by the option's 82.5%; Yes or No to words that were not a question (29 of the 60) 4, 3, 0; answers that begin
+-- with Yes 8, 8, 4; answers that talk about parts being covered (4 overviews) 1, 1, 0. Cost about 0.35 USD.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 22 Nov 2026, run 45073687451)' where name = 'reader_asked_form' and not is_on and note not like '%on since%';
 create or replace function public.reader_asked_form() returns boolean
 language plpgsql stable security definer set search_path = public
 as $$ begin return public.survey_option('reader_asked_form'); end $$;
