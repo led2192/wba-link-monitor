@@ -312,7 +312,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v134 2026-11-22";
+  const CLIENT = "lantern v135 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2477,6 +2477,9 @@
         try {
           const { svg } = await mermaid.render("mmd" + Date.now() + "_" + (n++), pre.textContent);
           const box = el("div"); box.style.cssText = "overflow:auto;margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px"; box.innerHTML = svg; pre.replaceWith(box);
+          // At its natural size (v135): the library shrinks a drawing to the width of the column, and a wide map became unreadable. A wide one scrolls sideways.
+          const pic = box.querySelector("svg"), vb = pic && pic.viewBox && pic.viewBox.baseVal;
+          if (pic && vb && vb.width) { pic.style.maxWidth = "none"; pic.style.width = Math.round(vb.width) + "px"; pic.style.height = "auto"; }
         } catch (e) { /* this one stays as text */ }
       }
     } catch (e) { /* no library: the text stays */ }
