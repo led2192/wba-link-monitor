@@ -232,7 +232,8 @@ class SearchOnPostgres(unittest.TestCase):
             cur = c.cursor()
             topic = lambda t: (cur.execute("select public.topic_of(%s)", (t,)), cur.fetchone()[0])[1]
             env = topic("environmental impact"); water = topic("overview of the Water data"); spanish = topic("Impacto ambiental")
-            none = [topic(t) for t in ("biodiversity approach", "steel production", "", "trees plants")]
+            none = [topic(t) for t in ("biodiversity approach", "steel production", "", "trees plants", "business model", "What is the business model of")]      # 22 Nov 2026: a business model is searched, it is not the overview of the business
+            self.assertEqual(topic("main business")["key"], "business")
             cur.execute("select public.find_topics('k')"); names = cur.fetchone()[0]
             # each search gives the pages of its words: three a metric, the metric's name in the excerpt
             cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
@@ -250,7 +251,7 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((env["key"], [g["key"] for g in env["groups"]]), ("environment", ["e1", "e3", "e5", "e2", "e4"]))
         self.assertTrue(all(1 <= len(g["metrics"]) <= 3 for g in env["groups"]))               # five parts: one metric each, so that eight searches cover them
         self.assertEqual((water["key"], [g["key"] for g in water["groups"]], spanish["key"]), ("e3", ["e3"], "environment"))      # a group is a topic too; no accents, any language held
-        self.assertEqual(none, [None] * 4)                                                      # the text must be the topic and nothing else
+        self.assertEqual(none, [None] * 6)                                                      # the text must be the topic and nothing else
         self.assertIn("environmental impact", names); self.assertIn("water", names); self.assertIn("derechos humanos", names)
         self.assertEqual(len(pages), 8); self.assertEqual(len({p for p, _ in pages}), 8)        # eight pages, none twice
         first_five = [e.split(" / ")[0] for _, e in pages[:5]]

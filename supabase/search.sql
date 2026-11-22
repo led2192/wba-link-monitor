@@ -3205,9 +3205,16 @@ insert into public.topic_concepts (key, label, aliases, groups, position) values
   ('governance', 'governance', '{"governance","corporate governance","gobernanza","gobierno corporativo"}', '{g1,people,pay}', 50),
   ('workforce', 'workforce', '{"workforce","employees","workers","own workforce","staff","plantilla","empleados","trabajadores"}', '{s1,workforce_size}', 60),
   ('sustainability', 'sustainability', '{"sustainability","esg","sustainability performance","sostenibilidad"}', '{e1,e3,e5,s1,g1,targets}', 70),
-  ('business', 'the business', '{"business","main business","business model","activities","main activities","products","negocio","negocio principal","actividades"}', '{identity,structure,results}', 80),
+  ('business', 'the business', '{"business","main business","activities","main activities","products","negocio","negocio principal","actividades"}', '{identity,structure,results}', 80),
   ('finance', 'financial results', '{"financial results","financial performance","financials","finances","finance","resultados financieros","finanzas"}', '{results,balance,investment}', 90)
 on conflict (key) do nothing;
+-- "business model" is not a name of the topic "the business" (22 Nov 2026). The owner asked "What is the business
+-- model of <a company>?" and was given the overview of the business: where it is based, how many countries, its
+-- revenue. Those parts (identity, structure, results) are not a business model. Checked on four companies: of the
+-- eight pages the overview read, 6 of 32 mention a business model or value creation; of the eight the words
+-- "business model" find, 32 of 32. The name is taken off the row installed before this day too.
+update public.topic_concepts set aliases = array_remove(array_remove(aliases, 'business model'), 'modelo de negocio')
+  where key = 'business' and (aliases @> array['business model'] or aliases @> array['modelo de negocio']);
 
 -- The words of a topic as they are compared: lower case, no accents, no punctuation, and without the words that
 -- only frame a request ("overview of", "general", "data on").
