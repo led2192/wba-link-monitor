@@ -83,7 +83,7 @@ def write_document(d, doc, rows, live, schema=SCHEMA):
             for page, n, vec in rows:
                 out.write_row((lid, page, n, halfvec_literal(vec)))
     d.execute(f"""insert into {schema}.chunk_filters (library_id, wba_id, year, doc_type, live, own) values (%s, %s, %s, %s, %s, true)
-                  on conflict (library_id) do update set wba_id = excluded.wba_id, year = excluded.year, doc_type = excluded.doc_type, own = true""",
+                  on conflict (library_id) do update set wba_id = excluded.wba_id, year = excluded.year, doc_type = excluded.doc_type""",
               (lid, wba_id, year, doc_type, live))
 
 
@@ -142,7 +142,8 @@ def main(argv=None):
             return 0
         live = own_live(d)
         scope = in_scope(s, OWN_TYPES, partition); src.rollback()
-        d.execute(f"select library_id from {SCHEMA}.chunk_filters where own")
+        # every document the server holds, its own or copied from Supabase: a document Supabase indexed is Supabase's
+        d.execute(f"select library_id from {SCHEMA}.chunk_filters")
         held = [r[0] for r in d.fetchall()]; dst.rollback()
         todo = to_do(scope, held)
         m = dict(scope=len(scope), held=len(scope) - len(todo), todo=len(todo), done=0, passages=0, empty=0, minutes=0.0, rate=0.0, live=live)
