@@ -284,6 +284,47 @@
    "company": null,
    "intent": "search",
    "note": "a topic with no company is a search"
+  },
+  {
+   "typed": "reports from target",
+   "company": "PT_3",
+   "intent": "catalogue",
+   "seen": "2026-11-22",
+   "was": "a company whose name is an everyday word, asked for its documents: searched as the word"
+  },
+  {
+   "typed": "reports target",
+   "company": "PT_3",
+   "intent": "catalogue",
+   "seen": "2026-11-22"
+  },
+  {
+   "typed": "sources from target",
+   "company": "PT_3",
+   "intent": "catalogue",
+   "seen": "2026-11-22"
+  },
+  {
+   "typed": "all the documents by target",
+   "company": "PT_3",
+   "intent": "catalogue"
+  },
+  {
+   "typed": "scope 3 emissions reduction target",
+   "company": null,
+   "intent": "search"
+  },
+  {
+   "typed": "reports with a target next year",
+   "company": null,
+   "intent": "search"
+  },
+  {
+   "typed": "emissions data from target 2024",
+   "company": "PT_3",
+   "from": 2024,
+   "to": 2024,
+   "intent": "fact"
   }
  ],
  "topics": [
