@@ -1833,6 +1833,16 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertTrue(unknown("unilver")); self.assertTrue(unknown(" Severestal "))
         self.assertFalse(unknown("unilever"))                                     # a word of a title or a company's name
         self.assertFalse(unknown("x1")); self.assertFalse(unknown(None))          # not a word
+        # a name the library does not hold (22 Nov 2026): not a word of the vocabulary, not a word typed wrong; counted for the owner
+        cur.execute("delete from public.company_misses")
+        held = lambda ws: (cur.execute("select public.names_not_held('', %s::text[])", (ws,)), cur.fetchone()[0])[1]
+        self.assertEqual(held(["Zyntharix", "scope", "unilver", "x1", "zyntharix"]), ["zyntharix"])     # "unilver" is Unilever typed wrong; "scope" is a word
+        self.assertEqual(held(["zyntharix"]), ["zyntharix"]); self.assertEqual(held(None), [])
+        cur.execute("select word, times, cardinality(people), dismissed from public.company_misses"); self.assertEqual(cur.fetchall(), [("zyntharix", 2, 1, False)])
+        cur.execute("select public.admin_name_not_held_set('k', 'Zyntharix', true)"); done = cur.fetchone()[0]
+        cur.execute("select public.admin_names_not_held('k')"); rows = cur.fetchone()[0]
+        self.assertTrue(done["ok"]); self.assertEqual([(r["word"], r["times"], r["people"], r["dismissed"]) for r in rows], [("zyntharix", 2, 1, True)])
+        cur.execute("delete from public.company_misses")
 
     def test_the_review_card_lists_every_reading_and_carries_the_page_when_there_is_no_link(self):
         """12 Nov 2026: the card said "1 give another" and not which figure or where; and a document with no address

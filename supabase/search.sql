@@ -1938,6 +1938,67 @@ grant execute on function public.word_unknown(text, text) to anon, authenticated
 revoke all on function public.did_you_mean(text, text) from public;
 grant execute on function public.did_you_mean(text, text) to anon, authenticated;
 
+-- A name the library does not hold (22 Nov 2026, the owner: "someone will ask about a company that is not in our
+-- documents: an alert for us, and tell the person we hold nothing on it and that they can ask for it"). A search
+-- that named no company sends its words; a word is "not held" when it is no word of a title or a company's name,
+-- fewer than twenty pages hold it (word_unknown's test) and no word of the vocabulary is one or two slips away (that
+-- is a word typed wrong, and did_you_mean answers it). The page then says that no page holds the word and offers to
+-- add the company (request_company, which makes it at once). Each such word is counted in company_misses, which
+-- the owner reads in the admin panel: what people look for and lantrNa does not follow. The page's own words are
+-- hedged ("if it is a company"): the library cannot tell a company's name from any other rare word, and this
+-- function does not pretend to.
+create table if not exists public.company_misses (
+  word      text primary key,                -- lower case
+  times     int not null default 1,
+  people    text[] not null default '{}',    -- the names of the links that searched it (search_key_name), never an address
+  first_at  timestamptz not null default now(),
+  last_at   timestamptz not null default now(),
+  dismissed boolean not null default false   -- the owner: not a company, or not one to follow
+);
+alter table public.company_misses enable row level security;
+
+create or replace function public.names_not_held(key text, words text[], client text default null) returns text[]
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '5s'
+set enable_seqscan = 'off'          -- as in did_you_mean: the word index, not the table
+as $$
+declare
+  who text := public.search_key_name(key);
+  lev text := (select e.extnamespace::regnamespace::text from pg_extension e where e.extname = 'fuzzystrmatch');
+  w text;
+  far int;
+  near text;
+  seen text[] := '{}';
+  outw text[] := '{}';
+begin
+  if who is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  foreach w in array coalesce(words[1:6], '{}') loop
+    w := lower(btrim(coalesce(w, '')));
+    continue when w !~ '^[[:alpha:]]{4,30}$' or w = any(seen);
+    seen := seen || w;
+    continue when exists (select 1 from public.search_vocab v where v.word = w);
+    continue when (select count(*) from (select 1 from public.pages p where p.words @@ quote_literal(w)::tsquery limit 20) x) >= 20;
+    if lev is not null then
+      far := case when length(w) >= 8 then 2 else 1 end;
+      execute format('select v.word from public.search_vocab v
+                      where length(v.word) between $1 - $2 and $1 + $2 and %s.levenshtein_less_equal(v.word, $3, $2) <= $2 limit 1', lev)
+        into near using length(w), far, w;
+      continue when near is not null;
+    end if;
+    outw := outw || w;
+    insert into public.company_misses as m (word, people) values (w, array[who])
+      on conflict (word) do update set times = m.times + 1, last_at = now(),
+        people = case when who = any(m.people) or cardinality(m.people) >= 50 then m.people else m.people || who end;
+  end loop;
+  return outw;
+end;
+$$;
+revoke all on function public.names_not_held(text, text[], text) from public;
+grant execute on function public.names_not_held(text, text[], text) to anon, authenticated;
+
 -- "Ask" (10 Nov 2026, the owner: like a web search's answer box, three questions a day a person). A signed-in
 -- WBA address asks a question; the search finds the pages (find_pages, the same ranking as the results under
 -- it); the first lines of the best six pages go to the reader model with the question, and the model answers
@@ -7395,6 +7456,40 @@ end;
 $$;
 revoke all on function public.admin_companies(text) from public, anon;
 grant execute on function public.admin_companies(text) to authenticated;
+
+-- What people looked for and lantrNa does not follow (company_misses, 22 Nov 2026): the words, most searched
+-- first, with how many times and by how many links. A word the owner set aside stays in the table, so that it is
+-- not listed again, and is shown last.
+create or replace function public.admin_names_not_held(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('word', m.word, 'times', m.times, 'people', cardinality(m.people),
+                                                       'first_at', m.first_at, 'last_at', m.last_at, 'dismissed', m.dismissed)
+                                    order by m.dismissed, m.times desc, m.last_at desc), '[]'::jsonb)
+          from (select * from public.company_misses order by dismissed, times desc, last_at desc limit 300) m);
+end;
+$$;
+revoke all on function public.admin_names_not_held(text) from public, anon;
+grant execute on function public.admin_names_not_held(text) to authenticated;
+
+create or replace function public.admin_name_not_held_set(key text, word text, dismissed boolean) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  update public.company_misses m set dismissed = coalesce(dismissed, false) where m.word = lower(btrim(coalesce(word, '')));
+  return jsonb_build_object('ok', found);
+end;
+$$;
+revoke all on function public.admin_name_not_held_set(text, text, boolean) from public, anon;
+grant execute on function public.admin_name_not_held_set(text, text, boolean) to authenticated;
 
 -- Accept, reject, merge or reopen (15 Nov 2026). Only companies people added (LN_) are touched; a company with a
 -- WBA id cannot be rejected here. Nothing is deleted from the library.
