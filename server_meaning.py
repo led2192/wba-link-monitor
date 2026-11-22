@@ -217,7 +217,10 @@ def refresh(src, dst, schema, commit, out=print):
         for block in source:
             target.write(block)
     d.execute(f"insert into {schema}.chunk_filters (library_id, wba_id, year, doc_type, live) select library_id, wba_id, year, doc_type, true from fresh "
-              f"on conflict (library_id) do update set wba_id = excluded.wba_id, year = excluded.year, doc_type = excluded.doc_type, live = true")
+              # a document Supabase holds passages for is Supabase's, whatever its type says today: a report first typed as a
+              # policy can be in both (three were, 22 Nov 2026). Left marked own, it was copied every night and never counted,
+              # so the copy looked different for ever and the remote search was switched off.
+              f"on conflict (library_id) do update set wba_id = excluded.wba_id, year = excluded.year, doc_type = excluded.doc_type, live = true, own = false")
     d.execute(f"update {schema}.chunk_filters f set live = false where f.live and not f.own and not exists (select 1 from fresh x where x.library_id = f.library_id)")
     dst.commit(); src.rollback()
     m["own"] = refresh_own(src, dst, schema)
@@ -225,8 +228,15 @@ def refresh(src, dst, schema, commit, out=print):
     new, changed, gone = drift(theirs, ours, dead)
     m["left"] = len(new) + len(changed)
     if m["left"]:
-        s.execute("update public.search_options set is_on = false where name = 'meaning_remote' and is_on")
+        s.execute("update public.search_options set is_on = false, changed = now(), note = note || ' [off by the refresh]' where name = 'meaning_remote' and is_on")
         m["switched_off"] = s.rowcount > 0
+        src.commit()
+    else:
+        # the copy is current again: what a refresh switched off, a refresh switches on. An option the owner switched on
+        # ("on since" in its note) and nobody else switched off (a hand writes "off by the owner" in the note to keep it off).
+        s.execute("update public.search_options set is_on = true, changed = now(), note = replace(note, ' [off by the refresh]', '') "
+                  "where name = 'meaning_remote' and not is_on and note like '%on since%' and note not like '%off by the owner%'")
+        m["switched_on"] = s.rowcount > 0
         src.commit()
     return m
 
@@ -265,6 +275,8 @@ def refresh_report(m, schema, commit):
         lines.append(f"Copied again: {m['copied']:,}; left out for an odd name: {m['skipped']:,}. Documents that still differ: {m['left']:,}.")
         if m["left"]:
             lines.append("The copy is NOT current. The option meaning_remote " + ("was switched off: Supabase's own search carries on." if m["switched_off"] else "was already off."))
+        elif m.get("switched_on"):
+            lines.append("The copy is current again: the option meaning_remote, switched off by an earlier refresh, is on again.")
     return lines
 
 
