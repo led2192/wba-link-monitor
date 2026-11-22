@@ -36,6 +36,7 @@ Lessons that cost time to learn. Read before changing the area they name.
 - **A link with `href="#"` and `target="_blank"` opens the page itself in a new tab.** The answer's sources and a result's title did that for every document with no public address: to the person, clicking a source reloaded lanterN (19 Nov 2026). A link that has nowhere to go must do something on click (`docLink` opens the reader) or not be a link.
 
 ## SQL
+- **`requests.request` opens a new connection for every call.** Unnoticed on GitHub's machines, close to Airtable; from a server in Europe each TLS handshake crosses the Atlantic and a sweep of 2,800 calls took twice as long (22 Nov 2026). Use `keepalive.session()` for anything called in a loop.
 - **A kept result must carry the state of what it was made from.** Kept answers were reused for 14 days by company and words alone; a company whose main reports arrived the night after a question kept answering "Not stated" (22 Nov 2026). `documents.loaded_at` cannot tell when a document arrived: every load rewrites it. The kept row now holds a count of the company's library and is reused only while the count is equal.
 - **A parameter of an SQL-language function named like a column is read as the column.** `ask_reusable(company text, ...)` with `where c.company = company` compared the column with itself: every company's kept answer would have been given for any company. The function's own test caught it before it was installed (19 Nov 2026). Name such parameters apart (`for_company`) or use `$1`.
 

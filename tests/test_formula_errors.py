@@ -22,7 +22,7 @@ class FormulaErrors(unittest.TestCase):
     def test_errors_become_none_ai_fields_stay(self):
         data = {"records": [{"id": "r1", "fields": {"doc_label": {"error": "#ERROR!"}, "year": {"specialValue": "NaN"},
                                                     "source_title": {"state": "generated", "value": "X"}, "name": "ok"}}]}
-        with mock.patch.object(M.requests, "request", return_value=FakeResp(data)):
+        with mock.patch.object(M.keepalive, "session", return_value=mock.Mock(request=mock.Mock(return_value=FakeResp(data)))):
             j = M.airtable_request("GET", "https://api.airtable.com/v0/app/t", {}).json()
         f = j["records"][0]["fields"]
         self.assertIsNone(f["doc_label"])

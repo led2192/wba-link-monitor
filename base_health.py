@@ -27,6 +27,8 @@ from urllib.parse import quote
 
 import requests
 
+import keepalive
+
 API = "https://api.airtable.com/v0"
 TOKEN = os.environ.get("AIRTABLE_TOKEN"); BASE = os.environ.get("AIRTABLE_BASE")
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -51,7 +53,7 @@ def req(method, url, **kw):
     delay = 2
     for attempt in range(6):
         try:
-            r = requests.request(method, url, headers=H, timeout=60, **kw)
+            r = keepalive.session().request(method, url, headers=H, timeout=60, **kw)
         except requests.exceptions.RequestException:
             if attempt == 5: raise
             time.sleep(delay); delay = min(delay * 2, 30); continue
@@ -177,7 +179,7 @@ def qa_stats():
             params.append(("filterByFormula", formula))
         while True:
             p = [x for x in params if x[1] != ""] + ([("offset", offset)] if offset else [])
-            r = requests.get(f"{API}/{base}/{quote(table)}", headers=h, params=p, timeout=60)
+            r = keepalive.session().get(f"{API}/{base}/{quote(table)}", headers=h, params=p, timeout=60)
             r.raise_for_status(); j = r.json()
             n += len(j.get("records", [])); offset = j.get("offset"); time.sleep(0.12)
             if not offset:
