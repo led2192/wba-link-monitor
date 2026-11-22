@@ -138,10 +138,11 @@ $HOST {
 		max_size 64KB
 	}
 	header -Server
-	# the one route the world reaches; the health route answers on the machine itself only
+	# the two routes the world reaches, both behind the shared secret: the search by meaning and, since 22 Nov 2026,
+	# the documentation for the owner's panel. The health route answers on the machine itself only.
 	@near {
 		method POST
-		path /near
+		path /near /docs
 	}
 	handle @near {
 		reverse_proxy 127.0.0.1:$PORT
