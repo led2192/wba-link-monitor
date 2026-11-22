@@ -20,10 +20,19 @@ What is written. One row a company and field (upsert): the value, the document a
 person confirmed or corrected (status other than 'read') is never overwritten. A field the pages do not state is not
 written. Nothing is deleted.
 
-    python company_profile.py [--limit 20] [--minutes 50] [--threads 8] [--partition 0/1] [--redo-days 180] [--commit]
+Two models (22 Nov 2026, the first trial: the open model took 42 minutes for one company while the server was busy,
+and many minutes when it was not):
+
+    --model local    the open model on the job server (Qwen3 8B): no cost, minutes a company
+    --model paid     the reader's paid model: seconds and about a tenth of a US cent a company (two questions, about
+                     7,000 tokens read); stops at --max-usd. The whole list of 2,000 companies is about 2 to 3 USD.
+
+    python company_profile.py [--model local|paid] [--limit 20] [--minutes 50] [--threads 8] [--max-usd 3]
+                              [--partition 0/1] [--redo-days 180] [--commit]
 
 Dry run reads and prints counts only. The log is public: counts, seconds and shares, never a company, a value or a
-title. Env: SUPABASE_DB_URL; HF_HOME for the model's file; AIRTABLE_QA_TOKEN for the run record.
+title. Env: SUPABASE_DB_URL; HF_HOME for the open model's file; ANTHROPIC_API_KEY for --model paid; AIRTABLE_QA_TOKEN
+for the run record.
 """
 import argparse, collections, json, os, re, sys, time, zlib
 
@@ -160,6 +169,24 @@ def pick_pages(cur, docs, question):
     return found
 
 
+def json_of(reply):
+    """The JSON object in a reply that may have words around it (the paid model is asked for JSON, not held to it)."""
+    reply = reply or ""
+    a, b = reply.find("{"), reply.rfind("}")
+    return reply[a:b + 1] if 0 <= a < b else reply
+
+
+def paid_model():
+    """(ask(text, schema) -> reply, spent() -> USD) with the reader's paid model."""
+    import model_reader
+    usage = collections.Counter()
+    system = "You read excerpts of a company's own reports and reply with one JSON object and nothing else. You use only what the excerpts state."
+
+    def ask(text, sch):
+        return json_of(model_reader.call([{"role": "user", "content": text}], usage, system=system, max_tokens=900))
+    return ask, lambda: model_reader.cost(usage)
+
+
 def in_partition(wba_id, partition):
     k, n = (int(x) for x in partition.split("/"))
     return zlib.crc32(wba_id.encode("utf-8")) % n == k
@@ -178,6 +205,8 @@ def local_model(threads):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--model", choices=["local", "paid"], default="local")
+    ap.add_argument("--max-usd", type=float, default=3.0, help="the paid model stops at this cost")
     ap.add_argument("--limit", type=int, default=20, help="companies this run")
     ap.add_argument("--minutes", type=int, default=50, help="stop cleanly after this many minutes")
     ap.add_argument("--threads", type=int, default=8)
@@ -204,10 +233,16 @@ def main():
         print(f">>> {len(queue):,} companies wait in slice {a.partition}; {len(todo)} this run", flush=True)
         if not todo:
             run.finish("ok", rows_in=0, rows_out=0, notes="nothing waiting"); return 0
-        ask = local_model(a.threads)
+        if a.model == "paid":
+            ask, spent = paid_model()
+        else:
+            ask, spent = local_model(a.threads), (lambda: 0.0)
+        name_of_model = MODEL if a.model == "local" else (os.environ.get("READER_MODEL") or __import__("model_reader").DEFAULT_MODEL)
         for wba_id in todo:
             if time.time() - t0 > a.minutes * 60:
                 c["stopped at the time cap"] = 1; break
+            if spent() >= a.max_usd:
+                c["stopped at the cost cap"] = 1; break
             t1 = time.time()
             cur.execute("select name from public.companies where wba_id = %s", (wba_id,)); name = cur.fetchone()[0]
             cur.execute(DOCS_SQL, (wba_id, year_now - 3)); docs = [r[0] for r in cur.fetchall()]
@@ -233,17 +268,17 @@ def main():
                                    values (%s, %s, %s::jsonb, %s, %s, %s, now(), 'read')
                                    on conflict (wba_id, field) do update set value = excluded.value, library_id = excluded.library_id, page = excluded.page,
                                      model = excluded.model, read_at = now()
-                                   where public.company_profile.status = 'read'""", (wba_id, field, json.dumps(value, ensure_ascii=False), lib, page, MODEL))
-                cur.execute("insert into public.company_profile_runs (wba_id, fields, seconds, model) values (%s, %s, %s, %s)", (wba_id, len(rows), time.time() - t1, MODEL))
+                                   where public.company_profile.status = 'read'""", (wba_id, field, json.dumps(value, ensure_ascii=False), lib, page, name_of_model))
+                cur.execute("insert into public.company_profile_runs (wba_id, fields, seconds, model) values (%s, %s, %s, %s)", (wba_id, len(rows), time.time() - t1, name_of_model))
                 conn.commit()
             print(f"    company {c['companies']}: {len(rows)} fields in {time.time() - t1:.0f} s", flush=True)
     n = max(c["companies"], 1)
-    print(f">>> {c['companies']} companies, {c['fields']} fields ({c['fields'] / n:.1f} a company), {(time.time() - t0) / n:.0f} s a company; " + ("written" if a.commit else "dry run"))
+    print(f">>> {c['companies']} companies, {c['fields']} fields ({c['fields'] / n:.1f} a company), {(time.time() - t0) / n:.0f} s a company, {spent():.3f} USD ({a.model}); " + ("written" if a.commit else "dry run"))
     print("    filled: " + ", ".join(f"{f} {filled[f]}" for q in QUESTIONS.values() for f in q["fields"]))
     for k, v in sorted(c.items()):
         if k not in ("companies", "fields"):
             print(f"    {k}: {v}")
-    run.finish("ok", rows_in=len(todo), rows_out=c["fields"] if a.commit else 0, counters={**{k: v for k, v in c.items()}, **{f"filled_{f}": v for f, v in filled.items()}},
+    run.finish("ok", rows_in=len(todo), rows_out=c["fields"] if a.commit else 0, counters={**{k: v for k, v in c.items()}, **{f"filled_{f}": v for f, v in filled.items()}, "usd_cents": round(spent() * 100)},
                notes="written" if a.commit else "dry run")
     return 0
 

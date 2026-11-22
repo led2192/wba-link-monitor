@@ -54,7 +54,15 @@ class Rules(unittest.TestCase):
 
     def test_the_workflow_runs_on_the_server_dry_by_hand_and_no_pull_request_starts_it(self):
         self.assertIn("runs-on: [self-hosted, lantern]", FLOW); self.assertNotIn("pull_request", FLOW); self.assertIn("/srv/lantern/venv-llm/bin/python company_profile.py", FLOW)
-        self.assertIn("default: false", FLOW); self.assertNotIn("ANTHROPIC", FLOW)          # no paid model
+        self.assertIn("default: false", FLOW)
+        paid = FLOW.split("\n  paid:")[1]
+        self.assertIn("inputs.model == 'paid' && inputs.as_scheduled != 'true'", paid); self.assertIn("--max-usd", paid)     # the paid model by hand only, with a cap
+        self.assertNotIn("ANTHROPIC", FLOW.split("\n  paid:")[0])
+
+    def test_a_reply_with_words_around_its_json_is_still_read_and_the_paid_model_has_a_cap(self):
+        self.assertEqual(C.json_of('Here it is:\n{"sector": "Technology", "from": {"sector": 1}}\nDone.'), '{"sector": "Technology", "from": {"sector": 1}}')
+        self.assertEqual(C.json_of("no json"), "no json"); self.assertEqual(C.json_of(None), "")
+        self.assertIn("if spent() >= a.max_usd:", SRC)
 
 
 if __name__ == "__main__":

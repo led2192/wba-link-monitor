@@ -1,12 +1,22 @@
 # What a company is, read from its own reports (company_profile.py): headquarters, countries, subsidiaries, segments,
-# sector, industry and sub-sector, each with its page. An open model on the job server, no cost; its Python
-# environment is the models' own (/srv/lantern/venv-llm). By hand, and by lantrNa's clock at night once the trial is
-# read. Dry run unless commit (or the clock). Prints counts and seconds only, never a company or a value.
+# sector, industry and sub-sector, each with its page.
+# local: an open model on the job server, no cost, minutes a company; its Python environment is the models' own
+#        (/srv/lantern/venv-llm).
+# paid:  the reader's paid model, by hand only: seconds and about a tenth of a US cent a company; stops at max_usd.
+# Dry run unless commit (or the clock). Prints counts, seconds and dollars only, never a company or a value.
 name: Company profile
 
 on:
   workflow_dispatch:
     inputs:
+      model:
+        description: "local (the job server, free) or paid (the reader's model, capped)"
+        type: choice
+        default: "local"
+        options: [local, paid]
+      max_usd:
+        description: "the paid model stops at this cost"
+        default: "3"
       commit:
         description: "write to the database (off: a dry run)"
         type: boolean
@@ -28,7 +38,7 @@ on:
         default: "0/1"
 
 concurrency:
-  group: company-profile-${{ inputs.partition || '0/1' }}
+  group: company-profile-${{ inputs.model || 'local' }}-${{ inputs.partition || '0/1' }}
   cancel-in-progress: false
 
 permissions:
@@ -36,6 +46,7 @@ permissions:
 
 jobs:
   read:
+    if: ${{ inputs.model != 'paid' || inputs.as_scheduled == 'true' }}
     runs-on: [self-hosted, lantern]
     timeout-minutes: 480
     steps:
@@ -56,3 +67,24 @@ jobs:
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
           HF_HOME: /srv/lantern/hf
+  paid:
+    if: ${{ inputs.model == 'paid' && inputs.as_scheduled != 'true' }}
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Read
+        run: |
+          ARGS=(--model paid --limit "${{ inputs.limit || '20' }}" --minutes 280 --max-usd "${{ inputs.max_usd || '3' }}" --partition "${{ inputs.partition || '0/1' }}")
+          if [ "${{ inputs.commit }}" = "true" ]; then ARGS+=(--commit); fi
+          python company_profile.py "${ARGS[@]}"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
