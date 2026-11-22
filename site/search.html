@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v137 2026-11-22";
+  const CLIENT = "lantern v138 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2407,7 +2407,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2437,6 +2437,17 @@
       act.append(adminBtn(m.dismissed ? "Bring back" : "Set aside", async () => { const r = await authed("admin_name_not_held_set", { key, word: m.word, dismissed: !m.dismissed }); if (r && r.ok) adminNotHeld(body); else say.textContent = " not saved"; }), say);
       return [m.word, m.times, m.people, adminWhen(m.last_at), m.dismissed ? "set aside" : "", act]; };
     body.appendChild(adminTable(["Word", "Searches", "Links", "Last", "", ""], rows.map(line)));
+  }
+  // v138: the reference list, and what people asked of it that it does not hold
+  async function adminReference(body) {
+    const r = await authed("admin_reference", { key }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    body.innerHTML = ""; const k = r.kinds || {};
+    body.appendChild(el("p", "what", `The reference list answers a search that is the name or the acronym of an entry, with no model. It shows ${Object.values(k).reduce((a, b) => a + b, 0).toLocaleString()} entries: ${["term", "norm", "regulation", "organisation"].map(x => `${(k[x] || 0).toLocaleString()} ${x}s`).join(", ")}${r.loaded_at ? `; loaded ${adminWhen(r.loaded_at)}` : ""}. Below: short searches that named no company and found no entry, questions first. They are the candidates for the list.`));
+    const rows = r.asked || []; if (!rows.length) { body.appendChild(el("p", null, "Nothing asked and not found yet.")); return; }
+    const line = m => { const act = el("div"); const say = el("span", "what", "");
+      act.append(adminBtn(m.dismissed ? "Bring back" : "Set aside", async () => { const x = await authed("admin_reference_asked_set", { key, asked_key: m.key, dismissed: !m.dismissed }); if (x && x.ok) adminReference(body); else say.textContent = " not saved"; }), say);
+      return [m.asked, m.question ? "asked as a question" : "", m.times, adminWhen(m.last_at), m.dismissed ? "set aside" : "", act]; };
+    body.appendChild(adminTable(["Asked", "", "Searches", "Last", "", ""], rows.map(line)));
   }
   async function adminCompanies(body) {
     const rows = await authed("admin_companies", { key }); if (!rows) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }

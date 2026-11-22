@@ -1973,35 +1973,77 @@ alter table public.reference_entries enable row level security;
 create index if not exists reference_entries_name on public.reference_entries (name_key);
 create index if not exists reference_entries_alias on public.reference_entries using gin (alias_keys);
 
+-- What was asked of the list and is not in it (22 Nov 2026): the list's first day answered "CSRD" and "living wage"
+-- and had no entry for "double materiality", "net zero" or "scope 3". A search of at most five words that names no
+-- company and finds no entry is counted here, as compared (reference_key), with one spelling as typed. It is the
+-- owner's list of candidates in the admin panel: what people ask that the list should hold.
+create table if not exists public.reference_misses (
+  asked_key text primary key,
+  asked     text not null,
+  question  boolean not null default false,      -- asked as "what is X" at least once
+  times     int not null default 1,
+  first_at  timestamptz not null default now(),
+  last_at   timestamptz not null default now(),
+  dismissed boolean not null default false
+);
+alter table public.reference_misses enable row level security;
+
+create or replace function public.reference_card(entry text) returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  select jsonb_build_object('id', e.id, 'kind', e.kind, 'name', e.name, 'aliases', e.aliases, 'category', e.category, 'subcategory', e.subcategory,
+                            'type', e.type, 'geography', e.geography, 'year', e.year, 'url', e.url,
+                            'text', left(e.text_en, 2400), 'text_es', left(e.text_es, 2400), 'issuers', e.issuers, 'related', e.related, 'ai', e.ai)
+  from public.reference_entries e where e.id = entry
+$$;
+revoke all on function public.reference_card(text) from public, anon, authenticated;
+
 create or replace function public.reference_lookup(key text, q text) returns jsonb
-language plpgsql stable security definer
+language plpgsql security definer
 set search_path = public, extensions
 set statement_timeout = '3s'
 as $$
 declare
   s text := lower(btrim(coalesce(q, '')));
   k text;
+  asked boolean;
+  found jsonb;
 begin
   if public.search_key_name(key) is null then
     raise exception 'not allowed' using errcode = '42501';
   end if;
   -- "what is X", "what does X mean", "define X", "qué es X": the thing asked about
   s := regexp_replace(s, '[?¿!¡.]+', ' ', 'g');
+  asked := s ~ '^\s*(what (is|are|was|were)|what does|what do|who (is|are)|define|definition of|meaning of|explain|tell me about|qu[eé] (es|son|significa)|definici[oó]n de)\s';
   s := regexp_replace(s, '^\s*(what (is|are|was|were)|what does|what do|who (is|are)|define|definition of|meaning of|explain|tell me about|qu[eé] (es|son|significa)|definici[oó]n de)\s+(an?\s+|the\s+|el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?', '');
   s := regexp_replace(s, '\s+(mean|means|stand for|stands for)\s*$', '');
   k := public.reference_key(s);
   if k = '' or length(k) > 90 or array_length(string_to_array(k, ' '), 1) > 9 then
     return '[]'::jsonb;
   end if;
-  return (select coalesce(jsonb_agg(x.j order by x.ord, x.name), '[]'::jsonb) from (
-    select e.name, array_position(array['norm', 'regulation', 'term', 'organisation'], e.kind) as ord,
-           jsonb_build_object('id', e.id, 'kind', e.kind, 'name', e.name, 'aliases', e.aliases, 'category', e.category, 'subcategory', e.subcategory,
-                              'type', e.type, 'geography', e.geography, 'year', e.year, 'url', e.url,
-                              'text', left(e.text_en, 2400), 'text_es', left(e.text_es, 2400), 'issuers', e.issuers, 'related', e.related, 'ai', e.ai) as j
+  -- The entries whose name or acronym is the search. One thing listed under two kinds (a directive as a norm and as a
+  -- term) is shown once, the norm first: entries are told apart by their name without a closing bracket.
+  with hit as (
+    select e.*, array_position(array['norm', 'regulation', 'term', 'organisation'], e.kind) as ord,
+           public.reference_key(regexp_replace(e.name, '\s*\([^)]*\)\s*$', '')) as bare
     from public.reference_entries e
     where not e.gone and (e.name_key = k or e.alias_keys @> array[k]
-                          or (k ~ 's$' and e.name_key = left(k, -1)) or e.name_key = k || 's')      -- a plural asked of a singular entry, and the other way
-    order by 2, 1 limit 3) x);
+                          or (k ~ 's$' and e.name_key = left(k, -1)) or e.name_key = k || 's')),     -- a plural asked of a singular entry, and the other way
+  one as (select distinct on (bare) * from hit order by bare, ord, name)
+  select coalesce(jsonb_agg(public.reference_card(o.id) order by o.ord, o.name), '[]'::jsonb) into found from (select * from one order by ord, name limit 2) o;
+  -- No entry of that name: a term whose name begins with the words asked ("scope 3" is the term "Scope 3 Emissions"),
+  -- the shortest first. Terms only: forty norms begin with "net zero" and none of them is what "net zero" asks.
+  if found = '[]'::jsonb and (length(k) >= 6 or k ~ ' ') then
+    select coalesce(jsonb_agg(public.reference_card(o.id) order by length(o.name_key), o.name), '[]'::jsonb) into found
+    from (select e.id, e.name, e.name_key from public.reference_entries e
+          where not e.gone and e.kind = 'term' and e.name_key like replace(replace(k, '%', ''), '_', '') || ' %'
+          order by length(e.name_key), e.name limit 1) o;
+  end if;
+  if found = '[]'::jsonb and array_length(string_to_array(k, ' '), 1) <= 5 and length(k) >= 3 then
+    insert into public.reference_misses as m (asked_key, asked, question) values (k, left(btrim(s), 90), asked)
+      on conflict (asked_key) do update set times = m.times + 1, last_at = now(), question = m.question or excluded.question;
+  end if;
+  return found;
 end;
 $$;
 revoke all on function public.reference_lookup(text, text) from public;
@@ -7525,6 +7567,41 @@ end;
 $$;
 revoke all on function public.admin_companies(text) from public, anon;
 grant execute on function public.admin_companies(text) to authenticated;
+
+-- The reference list for the owner (22 Nov 2026): how many entries of each kind are shown, and what was asked of
+-- the list and is not in it, most asked first, questions ("what is X") before bare words.
+create or replace function public.admin_reference(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'kinds', (select coalesce(jsonb_object_agg(kind, n), '{}'::jsonb) from (select kind, count(*) as n from public.reference_entries where not gone group by kind) x),
+    'loaded_at', (select max(loaded_at) from public.reference_entries),
+    'asked', (select coalesce(jsonb_agg(jsonb_build_object('key', m.asked_key, 'asked', m.asked, 'question', m.question, 'times', m.times, 'last_at', m.last_at, 'dismissed', m.dismissed)
+                                        order by m.dismissed, m.question desc, m.times desc, m.last_at desc), '[]'::jsonb)
+              from (select * from public.reference_misses order by dismissed, question desc, times desc, last_at desc limit 300) m));
+end;
+$$;
+revoke all on function public.admin_reference(text) from public, anon;
+grant execute on function public.admin_reference(text) to authenticated;
+
+create or replace function public.admin_reference_asked_set(key text, asked_key text, dismissed boolean) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  update public.reference_misses m set dismissed = coalesce(dismissed, false) where m.asked_key = asked_key;
+  return jsonb_build_object('ok', found);
+end;
+$$;
+revoke all on function public.admin_reference_asked_set(text, text, boolean) from public, anon;
+grant execute on function public.admin_reference_asked_set(text, text, boolean) to authenticated;
 
 -- What people looked for and lantrNa does not follow (company_misses, 22 Nov 2026): the words, most searched
 -- first, with how many times and by how many links. A word the owner set aside stays in the table, so that it is
