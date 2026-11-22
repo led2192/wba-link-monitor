@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v138 2026-11-22";
+  const CLIENT = "lantern v139 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -513,7 +513,14 @@
       if (WORD_NAMES.has(name)) {
         const typed = q.slice(m.index + 1, m.index + 2), first = fold(text.trim()).toLowerCase().startsWith(name);
         const strong = (typed !== typed.toLowerCase() && !first) || /[;,]$/.test(m[0]);
-        if (!strong) { if (first) weak.push({ c, name }); else found.maybe = found.maybe || { id: c.id, name: c.name, word: name }; continue; }
+        // v139 (22 Nov 2026, the owner typed "reports from apple", "reports apple", "sources from apple" and got pages that
+        // hold the word): the word is the company when the text says so. It follows "from" or "by"; or it ends the text
+        // and every other word asks for documents ("reports", "sources", "the", "all": the catalogue's own words).
+        const before = (fq.slice(0, m.index + 1).trim().split(/\s+/).pop() || "").toLowerCase();
+        const others = fold(text).toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(w => w && w !== name);
+        const last = !fq.slice(m.index + m[0].length).trim();
+        const asked = /^(from|by)$/.test(before) || (last && others.some(w => CATALOGUE_NOUNS.has(w)) && others.every(w => CATALOGUE_NOUNS.has(w) || CATALOGUE_FILLER.has(w)));
+        if (!strong && !asked) { if (first) weak.push({ c, name }); else found.maybe = found.maybe || { id: c.id, name: c.name, word: name }; continue; }
       }
       hits.push(c);
       q = q.slice(0, m.index) + " " + q.slice(m.index + m[0].length);
