@@ -1839,6 +1839,24 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([e["name"] for e in look("What is Made-Up Materiality?")], ["Made-up Materiality"])
         self.assertEqual([e["name"] for e in look("¿Qué es la made up materiality?")], ["Made-up Materiality"])
         self.assertEqual([e["name"] for e in look("what does IRR stand for")], ["Invented Reporting Rule (IRR)", "IRR"])        # the norm first, then the organisation
+        # one thing listed under two kinds is shown once, the norm; a term whose name begins with the words asked answers them
+        with psycopg.connect(URL) as c:
+            more = entries + [{"id": "term:t5", "kind": "term", "name": "Invented Reporting Rule", "text_en": "The same rule, listed as a term."},
+                              {"id": "term:t6", "kind": "term", "name": "Pretend Scope Emissions", "text_en": "Begins with the words asked."},
+                              {"id": "norm:t7", "kind": "norm", "name": "Pretend Scope Standard of Somewhere", "text_en": "A norm that begins alike."}]
+            rows, _ = R.entry_rows(more); R.plan(c, rows); R.write(c)
+        self.assertEqual([(e["kind"], e["name"]) for e in look("invented reporting rule")], [("norm", "Invented Reporting Rule (IRR)")])
+        self.assertEqual([e["name"] for e in look("pretend scope")], ["Pretend Scope Emissions"])
+        # asked and not in the list: counted for the owner, as compared, questions marked
+        cur.execute("delete from public.reference_misses")
+        self.assertEqual(look("What is Fanciful Stewardship?"), []); self.assertEqual(look("fanciful  stewardship"), []); self.assertEqual(look("one two three four five six"), [])
+        cur.execute("select asked_key, asked, question, times from public.reference_misses"); self.assertEqual(cur.fetchall(), [("fanciful stewardship", "fanciful stewardship", True, 2)])
+        cur.execute("select public.admin_reference_asked_set('k', 'fanciful stewardship', true)"); self.assertTrue(cur.fetchone()[0]["ok"])
+        cur.execute("select public.admin_reference('k')"); adm = cur.fetchone()[0]
+        self.assertEqual([(m["asked"], m["times"], m["dismissed"]) for m in adm["asked"]], [("fanciful stewardship", 2, True)]); self.assertGreaterEqual(adm["kinds"]["term"], 3)
+        cur.execute("delete from public.reference_misses")
+        with psycopg.connect(URL) as c:
+            rows, _ = R.entry_rows(entries); R.plan(c, rows); R.write(c); c.execute("delete from public.reference_entries where id in ('term:t5', 'term:t6', 'norm:t7')")
         self.assertEqual([e["name"] for e in look("Invented Reporting Rule")], ["Invented Reporting Rule (IRR)"])               # the name without its bracket
         self.assertEqual([e["name"] for e in look("imaginary target")], ["Imaginary Targets"])                                # singular asked of a plural entry
         self.assertEqual(look("made-up materiality of Acme in 2023"), []); self.assertEqual(look(""), []); self.assertEqual(look(None), [])
