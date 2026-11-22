@@ -312,7 +312,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v133 2026-11-21";
+  const CLIENT = "lantern v134 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2449,7 +2449,7 @@
     const flush = () => { if (para.length) { out.push(`<p>${mdInline(para.join(" "))}</p>`); para = []; } };
     while (i < lines.length) {
       const l = lines[i];
-      if (/^```/.test(l)) { flush(); const code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; out.push(`<pre style="overflow:auto;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px">${escH(code.join("\n"))}</pre>`); continue; }
+      if (/^```/.test(l)) { flush(); const lang = l.slice(3).trim().toLowerCase(); const code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; out.push(`<pre${lang === "mermaid" ? ' class="mmd"' : ""} style="overflow:auto;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px">${escH(code.join("\n"))}</pre>`); continue; }
       const h = l.match(/^(#{1,4})\s+(.*)$/);
       if (h) { flush(); const n = h[1].length; out.push(`<h${n + 1} style="margin:18px 0 6px">${mdInline(h[2])}</h${n + 1}>`); i++; continue; }
       if (/^\s*\|.*\|\s*$/.test(l)) { flush(); const rows = []; while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);
@@ -2463,6 +2463,23 @@
       para.push(l.trim()); i++;
     }
     flush(); return out.join("\n");
+  }
+  // A diagram written as text (a ```mermaid block) is drawn (page v134: the owner saw the text of the diagrams, not the
+  // diagrams). The drawing library is fetched only when a document has one; if it cannot be fetched or a diagram
+  // cannot be drawn, the text stays as it was.
+  async function mdDiagrams(art) {
+    const blocks = Array.from(art.querySelectorAll("pre.mmd")); if (!blocks.length) return;
+    try {
+      const mermaid = (await import("https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.esm.min.mjs")).default;
+      mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
+      let n = 0;
+      for (const pre of blocks) {
+        try {
+          const { svg } = await mermaid.render("mmd" + Date.now() + "_" + (n++), pre.textContent);
+          const box = el("div"); box.style.cssText = "overflow:auto;margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px"; box.innerHTML = svg; pre.replaceWith(box);
+        } catch (e) { /* this one stays as text */ }
+      }
+    } catch (e) { /* no library: the text stays */ }
   }
   async function adminDocs(body, open) {
     body.innerHTML = "";
@@ -2480,7 +2497,7 @@
     }
     const back = el("a", null, "← All documents"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); adminDocs(body); }; body.appendChild(back);
     if (r.missing) { body.append(el("p", null, `There is no document named ${open}.`)); return; }
-    const art = el("div"); art.style.cssText = "max-width:900px;line-height:1.55"; art.innerHTML = mdRender(r.text); body.appendChild(art);
+    const art = el("div"); art.style.cssText = "max-width:900px;line-height:1.55"; art.innerHTML = mdRender(r.text); body.appendChild(art); mdDiagrams(art);
     art.querySelectorAll("a[data-doc]").forEach(a => { a.onclick = ev => { ev.preventDefault(); adminDocs(body, a.dataset.doc); body.scrollTop = 0; }; });
   }
   const adminBtn = (text, fn) => { const b = el("button", null, text); b.type = "button"; b.style.cssText = "font:inherit;font-size:13px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer;margin-right:4px"; b.onclick = fn; return b; };
