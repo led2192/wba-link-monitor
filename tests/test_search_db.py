@@ -1881,6 +1881,24 @@ class SearchOnPostgres(unittest.TestCase):
         with psycopg.connect(URL) as c:
             c.execute("delete from public.reference_entries where id like '%:t_'")
 
+    def test_option_reader_asked_form_changes_two_sentences_and_only_when_on(self):
+        """22 Nov 2026: Yes or No only to a question; a part of an overview named only when the pages do not cover it."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select is_on from public.search_options where name = 'reader_asked_form'"); self.assertEqual(cur.fetchone(), (False,))
+            topic = '{"label": "the business", "groups": [{"label": "Identity"}, {"label": "Structure"}]}'
+            cur.execute("select public.ask_instructions(false), public.ask_overview_note(%s::jsonb)", (topic,)); plain, note = cur.fetchone()
+            self.assertNotIn("not always a question", plain); self.assertIn("Then say in one line which of these parts the excerpts do not cover.", note)
+            self.assertIn("an overview of the business for this company", note); self.assertIn("Identity, Structure", note)
+            cur.execute("select set_config('lantern.reader_asked_form', 'on', true)")
+            cur.execute("select public.ask_instructions(false), public.ask_overview_note(%s::jsonb)", (topic,)); on, note_on = cur.fetchone()
+            self.assertTrue(on.startswith(plain)); self.assertIn("Begin with Yes or No only when they are a question", on)
+            self.assertIn("when they cover all of them, say nothing about the parts", note_on); self.assertNotIn("Then say in one line", note_on)
+            cur.execute("select public.ask_option_trial(1, 'card_scores'), public.ask_option_trial(1, null)")           # not an option of the reader: nothing is called
+            self.assertEqual([x["skipped"] for x in cur.fetchone()], ["not an option of the reader"] * 2)
+            c.rollback()
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:

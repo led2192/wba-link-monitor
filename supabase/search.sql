@@ -3162,7 +3162,50 @@ on conflict (name) do nothing;
 -- "Not stated" against 7 and 7.
 update public.search_options set is_on = true, changed = now(), note = note || ' (on since 20 Nov 2026, run 44827372584)' where name = 'reader_plain_words' and not is_on and note not like '%on since%';
 
+-- Option reader_asked_form (22 Nov 2026, the owner; off until compared, ask_wording_compare.py --option). Two things
+-- the reader said that nobody asked for. (1) "Adidas CSRD", two words typed, was answered "Yes. The 2025 Annual
+-- Report says ...": the reader is told to begin with Yes or No when the question asks whether something exists, and
+-- it read two words as that question. With the option, Yes or No only when the words typed are a question.
+-- (2) An overview ended "All three parts are covered, so none is missing": the overview's note asks which parts the
+-- excerpts do not cover, and the reader answered that too when none was missing. With the option, a part is named
+-- only when the excerpts do not cover it. Neither changes what the reader reads.
+insert into public.search_options (name, is_on, note) values ('reader_asked_form', false, 'the reader of Ask begins with Yes or No only when the words typed are a question, and names a part of an overview only when the pages do not cover it')
+on conflict (name) do nothing;
+create or replace function public.reader_asked_form() returns boolean
+language plpgsql stable security definer set search_path = public
+as $$ begin return public.survey_option('reader_asked_form'); end $$;
+revoke all on function public.reader_asked_form() from public, anon, authenticated;
+
+-- What the reader is told with an overview (the note after the question). One place, for ask and for the trial.
+create or replace function public.ask_overview_note(topic jsonb) returns text
+language plpgsql stable security definer set search_path = public
+as $fn$
+begin
+  return format(E'\n(This asks for an overview of %s for this company. The excerpts were chosen a part of the topic at a time: %s. '
+             || 'Give the key figures and facts of each part the excerpts cover, each with its year and its excerpt number, in a few short lines, the most recent year first. '
+             || case when public.reader_asked_form()
+                     then 'If the excerpts do not cover one of these parts, say which in one line; when they cover all of them, say nothing about the parts. '
+                     else 'Then say in one line which of these parts the excerpts do not cover. ' end
+             || 'Do not describe documents or list page titles.)', topic ->> 'label',
+             (select string_agg(e ->> 'label', ', ') from jsonb_array_elements(topic -> 'groups') e));
+end;
+$fn$;
+revoke all on function public.ask_overview_note(jsonb) from public, anon, authenticated;
+
 create or replace function public.ask_instructions(with_names boolean) returns text
+language plpgsql stable security definer set search_path = public
+as $fn$
+begin
+  return public.ask_instructions_plain(with_names)
+    || case when public.reader_asked_form()
+            then ' The words typed are not always a question. Begin with Yes or No only when they are a question that asks whether something exists or was done; '
+              || 'a company''s name with a topic ("Adidas CSRD") is not one: say what the excerpts state about the topic, with no Yes or No before it.'
+            else '' end;
+end;
+$fn$;
+revoke all on function public.ask_instructions(boolean) from public, anon, authenticated;
+
+create or replace function public.ask_instructions_plain(with_names boolean) returns text
 language plpgsql stable security definer set search_path = public
 as $fn$
 begin
@@ -3176,7 +3219,7 @@ begin
          || 'when nothing in the excerpts bears on the question, begin with "Not stated in these pages" and say what they do contain.' end;
 end;
 $fn$;
-revoke all on function public.ask_instructions(boolean) from public, anon, authenticated;
+revoke all on function public.ask_instructions_plain(boolean) from public, anon, authenticated;
 
 create or replace function public.ask_instructions_text(with_names boolean) returns text
 language sql immutable
@@ -3683,10 +3726,7 @@ begin
   end if;
   t_read := clock_timestamp();
   got := public.ask_model(api_key, http_schema, model, public.ask_instructions(names <> ''),
-           public.ask_message(asked || case when topic is not null then format(E'\n(This asks for an overview of %s for this company. The excerpts were chosen a part of the topic at a time: %s. '
-             || 'Give the key figures and facts of each part the excerpts cover, each with its year and its excerpt number, in a few short lines, the most recent year first. '
-             || 'Then say in one line which of these parts the excerpts do not cover. Do not describe documents or list page titles.)', topic ->> 'label',
-             (select string_agg(e ->> 'label', ', ') from jsonb_array_elements(topic -> 'groups') e)) else '' end, known, fiscal, names, context), 3500);      -- the answer is short; the room is for the model's reasoning (with 500 a hard question ended before any text) and the facts
+           public.ask_message(asked || case when topic is not null then public.ask_overview_note(topic) else '' end, known, fiscal, names, context), 3500);      -- the answer is short; the room is for the model's reasoning (with 500 a hard question ended before any text) and the facts
   t_done := clock_timestamp();
   parts := public.ask_split(got ->> 'text');
   answer := parts ->> 'answer';
@@ -4688,6 +4728,71 @@ begin
 end;
 $$;
 revoke all on function public.ask_wording_trial(bigint) from public, anon, authenticated;
+
+-- The same trial for any option of the reader (22 Nov 2026; ask_wording_compare.py --option): the question and the
+-- pages of a kept answer go to the reader as today, as today again and with the option named. An answer that was an
+-- overview (its search words are a topic's name) is asked with the overview's note, as it was. Nothing is kept.
+-- Returns counts per arm, never a text. CALLS THE PAID READER: three calls.
+create or replace function public.ask_option_trial(the_ask bigint, option text)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '170s'
+as $$
+#variable_conflict use_variable
+declare
+  model constant text := 'claude-haiku-5-5';
+  a record;
+  api_key text;
+  http_schema text;
+  src jsonb;
+  body text;
+  context text := '';
+  fiscal text;
+  known text := '';
+  topic jsonb;
+  arm text;
+  got jsonb;
+  said text;
+  out jsonb := '{}'::jsonb;
+  tok_in int := 0;
+  tok_out int := 0;
+  is_question boolean;
+begin
+  if option is null or not exists (select 1 from public.search_options o where o.name = option and o.name like 'reader\_%') then
+    return jsonb_build_object('skipped', 'not an option of the reader');
+  end if;
+  select l.question, l.sources, l.asker, l.keywords into a from public.ask_log l where l.id = the_ask and l.answered and jsonb_array_length(coalesce(l.sources, '[]'::jsonb)) > 0;
+  if a.question is null then return jsonb_build_object('skipped', 'no such answer'); end if;
+  select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;
+  select n.nspname into http_schema from pg_extension e join pg_namespace n on n.oid = e.extnamespace where e.extname = 'http';
+  if api_key is null or http_schema is null then return jsonb_build_object('skipped', 'the reader is not switched on'); end if;
+  for src in select e from jsonb_array_elements(a.sources) e order by (e ->> 'n')::int loop
+    select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = src ->> 'library_id' and pg.page = (src ->> 'page')::int;
+    context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', src ->> 'n', src ->> 'company', coalesce(src ->> 'year', 'no year'), coalesce(src ->> 'doc_type', 'document'), src ->> 'page', coalesce(body, ''));
+  end loop;
+  begin known := public.ask_confirmed_lines(public.ask_confirmed_facts(null, a.sources, a.asker)); exception when others then known := ''; end;
+  begin topic := public.topic_of(a.keywords); exception when others then topic := null; end;
+  is_question := a.question ~ '[?¿]' or a.question ~* '^\s*(is|are|was|were|does|do|did|has|have|had|can|could|will|would|should|what|which|who|whom|when|where|why|how|qu[eé]|cu[aá]l|cu[aá]ndo|d[oó]nde|c[oó]mo|tiene|hay|existe)\M';
+  foreach arm in array array['off', 'again', 'on'] loop
+    perform set_config('lantern.' || option, case when arm = 'on' then 'on' else 'off' end, true);
+    begin fiscal := public.ask_fiscal_lines(a.sources); exception when others then fiscal := ''; end;
+    got := public.ask_model(api_key, http_schema, model, public.ask_instructions(false),
+             public.ask_message(a.question || case when topic is not null then public.ask_overview_note(topic) else '' end, coalesce(known, ''), fiscal, '', context), 3500);
+    if got ? 'error' then perform set_config('lantern.' || option, '', true); return jsonb_build_object('skipped', 'the model did not answer', 'arm', arm); end if;
+    tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
+    said := coalesce(public.ask_split(got ->> 'text') ->> 'answer', '');
+    out := out || jsonb_build_object(arm, public.ask_reply_numbers(got ->> 'text', a.sources, '') || jsonb_build_object(
+             'bare', btrim(said) ~* '^(no|yes|sí|si|non|nein|ja)[.!]?$', 'starts_no', said ~* '^\W*no\M', 'not_stated', said ~* '^\W*not stated',
+             'starts_yes', said ~* '^\W*(yes|sí)\M', 'verdict_unasked', (not is_question) and said ~* '^\W*(yes|sí|no)\M' and said !~* '^\W*not stated',
+             'parts_talk', said ~* '(parts?|areas?|topics?) (is|are) (all |fully |both )?covered|none (is|are) missing|all (the )?(two|three|four|five|six|\d+)? ?parts',
+             'colleague', said ~* 'colleague', 'wba', said ~ 'WBA'));
+  end loop;
+  perform set_config('lantern.' || option, '', true);
+  return out || jsonb_build_object('known', known <> '', 'fiscal', coalesce(fiscal, '') <> '', 'overview', topic is not null, 'question', is_question, 'tokens_in', tok_in, 'tokens_out', tok_out);
+end;
+$$;
+revoke all on function public.ask_option_trial(bigint, text) from public, anon, authenticated;
 
 -- The stage of the semantic fill (15 Nov 2026, semantic_index.py --stage): passages of the older years wait here, with
 -- no index on their embeddings, while the search reads public.chunks as before. They are moved into public.chunks and
