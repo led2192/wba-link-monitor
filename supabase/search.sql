@@ -3158,6 +3158,7 @@ revoke all on function public.overview_pages(text, text, int, int, jsonb) from p
 -- returned) with what it was asked for: the company, the years, the kind of report, the words searched and their
 -- vector. A later question is given the kept answer when all of this holds:
 --   the same company, years and kind of report; the kept answer is under 14 days old (documents arrive);
+--   the company's library is as it was and the answer does not begin "Not stated" (22 Nov 2026, below);
 --   the same numbers in the words ("scope 1" is never "scope 2", measured below);
 --   the same words, or words that mean the same: cosine of the two vectors 0.96 or more.
 -- The threshold was read off the 122 searches of the log on 19 Nov 2026 (7,381 pairs): pairs that ask the same
@@ -3181,6 +3182,24 @@ create table if not exists public.ask_cache (
 );
 create index if not exists ask_cache_company on public.ask_cache (company, at desc);
 alter table public.ask_cache enable row level security;
+-- A kept answer follows the library (22 Nov 2026). A company's first documents were in the search at midday and
+-- "scope 1 emissions" was answered "Not stated in these pages", rightly: the eight pages read were of short filings.
+-- Its integrated reports were loaded that night and the figures read from them. The next day the same words were
+-- given the kept answer, "Not stated", above a list whose first page printed the figures. Two rules since:
+--   the answer is kept with the state of the company's library (documents with text, their pages, values held) and
+--   is given again only while that state is the same (ask_library_state); rows kept before this have none and are
+--   not given again;
+--   an answer that begins "Not stated" is never given again: the next person pays for a new reading, which is the
+--   only way to learn that the pages are there now.
+alter table public.ask_cache add column if not exists library text;
+create or replace function public.ask_library_state(for_company text) returns text
+language sql stable security definer set search_path = public
+as $$
+  with ids as (select coalesce(public.find_company_ids(for_company), '{}'::text[]) as a)
+  select (select count(*) || ':' || coalesce(sum(d.pages), 0) from public.documents d, ids where d.wba_id = any(ids.a) and d.text_status = 'ok')
+         || ':' || (select count(*) from public.value_versions v, ids where v.wba_id = any(ids.a))
+$$;
+revoke all on function public.ask_library_state(text) from public, anon, authenticated;
 alter table public.ask_log add column if not exists reused bigint;       -- the answer (ask_log.id) this question was given again, at no cost
 
 create or replace function public.ask_words_norm(t text) returns text language sql immutable
@@ -3224,8 +3243,8 @@ revoke all on function public.ask_vector(text, real[]) from public, anon, authen
 create or replace function public.ask_keep(id bigint, for_company text, y0 int, y1 int, kind text, q text, qvec real[], whole jsonb) returns void
 language sql security definer set search_path = public
 as $$
-  insert into public.ask_cache (ask_id, company, year_from, year_to, type, words, nums, vec, reply)
-    values (id, for_company, y0, y1, kind, public.ask_words_norm(q), public.ask_nums(q), public.ask_vector(q, qvec), whole)
+  insert into public.ask_cache (ask_id, company, year_from, year_to, type, words, nums, vec, reply, library)
+    values (id, for_company, y0, y1, kind, public.ask_words_norm(q), public.ask_nums(q), public.ask_vector(q, qvec), whole, public.ask_library_state(for_company))
     on conflict (ask_id) do nothing
 $$;
 revoke all on function public.ask_keep(bigint, text, int, int, text, text, real[], jsonb) from public, anon, authenticated;
@@ -3242,6 +3261,8 @@ as $$
   from public.ask_cache c, asked a
   where c.company = for_company and c.year_from is not distinct from y0 and c.year_to is not distinct from y1 and c.type is not distinct from kind
     and c.at > now() - interval '14 days'
+    and c.library = public.ask_library_state(for_company)             -- nothing arrived for the company since
+    and coalesce(c.reply ->> 'answer', '') !~* '^\W*not stated'        -- "Not stated" is asked again
     and c.nums = a.nums
     and (replace(c.words, ' ', '') = replace(a.words, ' ', '')
          or public.cosine(coalesce(c.vec, public.ask_vector(c.words, null)), a.vec) >= 0.96)
