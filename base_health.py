@@ -237,7 +237,7 @@ def model_spend(now, get=None):
     if not (tok and repo):
         return None
     h = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}
-    get = get or (lambda url, **kw: requests.get(url, headers=h, timeout=120, **kw))
+    get = get or (lambda url, **kw: keepalive.session().get(url, headers=h, timeout=120, **kw))   # one connection for the run
     since = now - timedelta(days=7)
     out = {"24h": 0.0, "7d": 0.0, "by": collections.Counter()}
     try:
@@ -347,6 +347,15 @@ def previous_avg(today):
     return rows[-1]["fields"].get("completeness_avg") if rows else None
 
 
+def timed(label, fn):
+    """Run one part of the snapshot and print how long it took (22 Nov 2026: on the server the parts after
+    ">>> companies" took 27 minutes against 10 on GitHub's machines, and the log could not say which one)."""
+    t0 = time.time()
+    out = fn()
+    print(f"    {label}: {time.time() - t0:.0f} s", flush=True)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -366,13 +375,13 @@ def main():
     pages_check = sum(1 for _ in sweep("monitored_links", ["monitor"],
                                        formula="{possible_issue}='Document links not in the library'"))
     print(">>> companies ...", flush=True)
-    co = company_stats()
-    fails = failed_jobs(now)
-    prev = previous_avg(today)
-    qs = qa_stats()
-    eb = evidence_backlog()
-    spend = model_spend(now)
-    ai = ai_typing(now)
+    co = timed("companies", company_stats)
+    fails = timed("failed jobs", lambda: failed_jobs(now))
+    prev = timed("previous average", lambda: previous_avg(today))
+    qs = timed("quality base", qa_stats)
+    eb = timed("evidence backlog", evidence_backlog)
+    spend = timed("model spend", lambda: model_spend(now))
+    ai = timed("AI typing", lambda: ai_typing(now))
 
     total = sum(counts.values())
     full = total / RECORD_LIMIT
