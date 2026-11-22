@@ -46,3 +46,33 @@ class Compact(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TemplatesKept(unittest.TestCase):
+    """22 Nov 2026: the served page read "1,245terms, 712norms" and "in the 2025Integrated Report,page 95". rjsmin
+    reads a template literal inside another one's ${ } as code and removes its spaces."""
+    def test_a_template_inside_a_template_keeps_its_spaces(self):
+        import build_page as B
+        src = 'const s = `It shows ${[1, 2].map(x => `${x} ${x}s`).join(", ")}${k ? `; loaded ${k}` : ""}. Below`;   // a `tick` in a comment\n'
+        out = B.compact_js(src)
+        self.assertIn('`It shows ${[1, 2].map(x => `${x} ${x}s`).join(", ")}${k ? `; loaded ${k}` : ""}. Below`', out)
+        self.assertNotIn("comment", out); self.assertNotIn("\x01", out)
+
+    def test_ticks_and_quotes_in_a_regular_expression_a_string_or_a_comment_start_no_template(self):
+        import build_page as B
+        src = "const r = /[`\"']/g, d = a / b / c; /* a ` here */ const t = `x ${ {a: `}`}.a }  y`; f(/`/.test(s) ? `a  b` : \"c`d\");"
+        self.assertEqual([src[a:b] for a, b in B.template_spans(src)], ["`x ${ {a: `}`}.a }  y`", "`a  b`"])
+        out = B.compact_js(src)
+        for kept in ("/[`\"']/g", "d=a/b/c", "`x ${ {a: `}`}.a }  y`", "`a  b`", '"c`d"'):
+            self.assertIn(kept, out)
+
+    def test_every_template_of_the_search_page_is_served_as_written(self):
+        import re, build_page as B
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        page = open(os.path.join(root, "site", "search.html"), encoding="utf-8").read()
+        script = max(re.findall(r"<script\b[^>]*>(.*?)</script>", page, re.S), key=len)
+        spans = B.template_spans(script); out = B.compact_js(script)
+        self.assertGreater(len(spans), 300)
+        for a, b in spans:
+            self.assertIn(script[a:b], out)
+        self.assertLess(len(out), len(script) * 0.9); self.assertNotIn("\x01", out)
