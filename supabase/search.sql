@@ -1938,6 +1938,75 @@ grant execute on function public.word_unknown(text, text) to anon, authenticated
 revoke all on function public.did_you_mean(text, text) from public;
 grant execute on function public.did_you_mean(text, text) to anon, authenticated;
 
+-- The reference list (22 Nov 2026). Terms, norms and frameworks, regulations and organisations of sustainability,
+-- from the owner's own lists (kept in the private store, loaded by load_reference.py; none of it is in this
+-- repository). A search that is the name or the acronym of an entry, alone or asked as "what is X", is answered
+-- with a card from the list above the pages: no model is called and nothing is spent. Most descriptions were
+-- drafted with AI help (`ai`), and the card says so and gives the entry's own address to check.
+create or replace function public.reference_key(t text) returns text
+language sql immutable
+as $$
+  select btrim(regexp_replace(lower(regexp_replace(normalize(coalesce(t, ''), NFD), '[̀-ͯ]', '', 'g')), '[^a-z0-9]+', ' ', 'g'))
+$$;
+create table if not exists public.reference_entries (
+  id          text primary key,            -- kind and a hash of the name as compared: the same entry keeps its id
+  kind        text not null,               -- term, norm, regulation, organisation
+  name        text not null,
+  name_key    text not null,
+  aliases     text[] not null default '{}',
+  alias_keys  text[] not null default '{}',
+  category    text,
+  subcategory text,
+  type        text,
+  geography   text,
+  year        int,
+  url         text,
+  text_en     text,
+  text_es     text,
+  issuers     text[] not null default '{}',
+  related     text[] not null default '{}',
+  ai          boolean not null default true,
+  gone        boolean not null default false,   -- no longer in the list: kept, not shown
+  loaded_at   timestamptz not null default now()
+);
+alter table public.reference_entries enable row level security;
+create index if not exists reference_entries_name on public.reference_entries (name_key);
+create index if not exists reference_entries_alias on public.reference_entries using gin (alias_keys);
+
+create or replace function public.reference_lookup(key text, q text) returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '3s'
+as $$
+declare
+  s text := lower(btrim(coalesce(q, '')));
+  k text;
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  -- "what is X", "what does X mean", "define X", "qué es X": the thing asked about
+  s := regexp_replace(s, '[?¿!¡.]+', ' ', 'g');
+  s := regexp_replace(s, '^\s*(what (is|are|was|were)|what does|what do|who (is|are)|define|definition of|meaning of|explain|tell me about|qu[eé] (es|son|significa)|definici[oó]n de)\s+(an?\s+|the\s+|el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?', '');
+  s := regexp_replace(s, '\s+(mean|means|stand for|stands for)\s*$', '');
+  k := public.reference_key(s);
+  if k = '' or length(k) > 90 or array_length(string_to_array(k, ' '), 1) > 9 then
+    return '[]'::jsonb;
+  end if;
+  return (select coalesce(jsonb_agg(x.j order by x.ord, x.name), '[]'::jsonb) from (
+    select e.name, array_position(array['norm', 'regulation', 'term', 'organisation'], e.kind) as ord,
+           jsonb_build_object('id', e.id, 'kind', e.kind, 'name', e.name, 'aliases', e.aliases, 'category', e.category, 'subcategory', e.subcategory,
+                              'type', e.type, 'geography', e.geography, 'year', e.year, 'url', e.url,
+                              'text', left(e.text_en, 2400), 'text_es', left(e.text_es, 2400), 'issuers', e.issuers, 'related', e.related, 'ai', e.ai) as j
+    from public.reference_entries e
+    where not e.gone and (e.name_key = k or e.alias_keys @> array[k]
+                          or (k ~ 's$' and e.name_key = left(k, -1)) or e.name_key = k || 's')      -- a plural asked of a singular entry, and the other way
+    order by 2, 1 limit 3) x);
+end;
+$$;
+revoke all on function public.reference_lookup(text, text) from public;
+grant execute on function public.reference_lookup(text, text) to anon, authenticated;
+
 -- A name the library does not hold (22 Nov 2026, the owner: "someone will ask about a company that is not in our
 -- documents: an alert for us, and tell the person we hold nothing on it and that they can ask for it"). A search
 -- that named no company sends its words; a word is "not held" when it is no word of a title or a company's name,

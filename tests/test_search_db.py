@@ -1821,6 +1821,39 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertIsNone(explained)
         self.assertEqual(bad, [])                                                        # only the answers of the list, for a company that exists
 
+    def test_the_reference_list_answers_a_name_an_acronym_and_a_question(self):
+        """22 Nov 2026: a search that is the name or the acronym of an entry of the reference list gets its card; the
+        loader upserts by id and marks gone what left the file. Invented entries: the list itself is private."""
+        import psycopg, load_reference as R
+        entries = [{"id": "norm:t1", "kind": "norm", "name": "Invented Reporting Rule (IRR)", "aliases": ["IRR"], "year": 2019, "url": "https://rule.example/irr", "text_en": "A rule invented for a test.", "issuers": ["Invented Board"]},
+                   {"id": "term:t2", "kind": "term", "name": "Made-up Materiality", "text_en": "A term invented for a test.", "text_es": "Un término inventado."},
+                   {"id": "organisation:t3", "kind": "organisation", "name": "IRR", "text_en": "An organisation that shares the acronym."},
+                   {"id": "term:t4", "kind": "term", "name": "Imaginary Targets", "text_en": "Plural name."}]
+        with psycopg.connect(URL) as c:
+            rows, skipped = R.entry_rows(entries); p = R.plan(c, rows); R.write(c)
+            self.assertEqual((skipped, p["new"], p["changed"], p["gone"]), (0, 4, 0, 0))
+            p2 = R.plan(c, rows); c.rollback(); self.assertEqual((p2["new"], p2["changed"], p2["same"]), (0, 0, 4))      # run again: nothing to do
+        cur = self.conn.cursor()
+        look = lambda q: (cur.execute("select public.reference_lookup('', %s)", (q,)), cur.fetchone()[0])[1]
+        self.assertEqual([e["name"] for e in look("made-up materiality")], ["Made-up Materiality"])
+        self.assertEqual([e["name"] for e in look("What is Made-Up Materiality?")], ["Made-up Materiality"])
+        self.assertEqual([e["name"] for e in look("¿Qué es la made up materiality?")], ["Made-up Materiality"])
+        self.assertEqual([e["name"] for e in look("what does IRR stand for")], ["Invented Reporting Rule (IRR)", "IRR"])        # the norm first, then the organisation
+        self.assertEqual([e["name"] for e in look("Invented Reporting Rule")], ["Invented Reporting Rule (IRR)"])               # the name without its bracket
+        self.assertEqual([e["name"] for e in look("imaginary target")], ["Imaginary Targets"])                                # singular asked of a plural entry
+        self.assertEqual(look("made-up materiality of Acme in 2023"), []); self.assertEqual(look(""), []); self.assertEqual(look(None), [])
+        got = look("irr")[0]; self.assertEqual((got["kind"], got["year"], got["url"], got["issuers"], got["ai"]), ("norm", 2019, "https://rule.example/irr", ["Invented Board"], True))
+        # an entry that left the file is kept and no longer shown; one that comes back is shown again
+        with psycopg.connect(URL) as c:
+            rows, _ = R.entry_rows(entries[:3]); p = R.plan(c, rows); R.write(c); self.assertEqual((p["gone"], p["same"]), (1, 3))
+        self.assertEqual(look("imaginary targets"), [])
+        cur.execute("select count(*), count(*) filter (where gone) from public.reference_entries where id like '%:t_'"); self.assertEqual(cur.fetchone(), (4, 1))
+        with psycopg.connect(URL) as c:
+            rows, _ = R.entry_rows(entries); p = R.plan(c, rows); R.write(c); self.assertEqual(p["changed"], 1)
+        self.assertEqual(len(look("imaginary targets")), 1)
+        with psycopg.connect(URL) as c:
+            c.execute("delete from public.reference_entries where id like '%:t_'")
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:

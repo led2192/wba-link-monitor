@@ -170,7 +170,7 @@
   .values .subhead { font-size: 12px; color: var(--muted); text-transform: none; padding: 10px 0 2px; border-top: 1px solid var(--line); margin-top: 6px; }
   /* While a card is up it is the page: the search box, its chips and the status line step aside (11 Nov 2026: the
      card began halfway down the screen). "Back to search" on the card, or the lamp, brings them back. */
-  body.playing .boxwrap, body.playing #chips, body.playing #filters, body.playing #answer, body.playing #status, body.playing #strip, body.playing #homebtns { display: none !important; }
+  body.playing .boxwrap, body.playing #chips, body.playing #filters, body.playing #answer, body.playing #reference, body.playing #status, body.playing #strip, body.playing #homebtns { display: none !important; }
   .lucky .top a { color: var(--accent); text-decoration: none; }
   .lucky { max-width: 760px; margin: 8px auto 0; padding: 26px 30px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--box); box-shadow: 0 6px 24px rgba(0, 25, 75, .06); }
   .lucky .top { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
@@ -300,6 +300,7 @@
       <select id="fType"><option value="">Any document type</option></select>
     </div>
   </div>
+  <div id="reference"></div>
   <div id="answer"></div>
   <div class="status" id="status"></div>
   <details class="values" id="values" hidden open></details>
@@ -312,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v136 2026-11-22";
+  const CLIENT = "lantern v137 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -835,7 +836,7 @@
   async function search(fromChips, more) {
     document.body.classList.remove("playing");                    // a search ends the card game
     if (typeof closeHistory === "function") closeHistory();          // and the suggestions step aside for the results (they stayed open over them when the page opened on a search)
-    if (!more) { state.cited = []; state.facts = []; state.confirmed = []; state.earlier = false; state.answered = false; }                                 // the pages an answer cited belong to that question
+    if (!more) { state.cited = []; state.facts = []; state.confirmed = []; state.earlier = false; state.answered = false; $("reference").innerHTML = ""; }                                 // the pages an answer cited belong to that question
     if (!fromChips) {
       const parsed = parse($("q").value);
       state.fixed = null;
@@ -960,6 +961,7 @@
       }
       if (!more && state.q && !state.fixed) didYouMean($("q").value.trim());
       if (!more && !fromChips && state.q && !state.company && !state.fixed) notHeld($("q").value.trim(), state.q);          // v136: a name the library does not hold
+      if (!more && !fromChips && !state.company) referenceCard($("q").value.trim());                                                // v137: a term, a norm, a regulation or an organisation of the reference list
       if (!more && !fromChips) offerAsk();
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
@@ -1087,6 +1089,34 @@
   // v136 (22 Nov 2026, the owner): someone asks about a company lantrNa does not follow. The search that named no
   // company sends its words; for one that no page holds (and that is not a word typed wrong) the page says so and
   // offers to add the company. The server counts the word for the owner (Admin, "Names not held").
+  // v137 (22 Nov 2026): the reference list. A search that is the name or the acronym of a term, a norm, a regulation or
+  // an organisation of sustainability ("double materiality", "CSRD", "what is the GHG Protocol") gets a card from the
+  // list above the pages. No model is called. The descriptions were mostly drafted with AI help: the card says so and
+  // links the entry's own address.
+  async function referenceCard(typed) {
+    const box = $("reference"); box.innerHTML = "";
+    if (!typed || typed.length > 120) return;
+    let found = null; try { found = await rpc("reference_lookup", { key, q: typed }); } catch (e) { return; }
+    if (!found || !found.length || $("q").value.trim() !== typed) return;
+    const KIND = { term: "Term", norm: "Norm or framework", regulation: "Regulation", organisation: "Organisation" };
+    for (const e of found) {
+      const card = el("div", "answer");
+      card.append(el("div", "dym", "From lantrNa's reference list · no model was asked"));
+      const h = el("p"); h.style.cssText = "margin:6px 0 2px;font-size:17px;font-weight:600"; h.textContent = e.name + ((e.aliases || []).length ? ` (${e.aliases.join(", ")})` : ""); card.append(h);
+      const facts = [KIND[e.kind] || e.kind, e.type, e.category, e.geography, e.year && (e.kind === "organisation" ? `founded ${e.year}` : String(e.year)), (e.issuers || []).length && `by ${e.issuers.slice(0, 3).join(", ")}`].filter(Boolean);
+      card.append(el("div", "what", [...new Set(facts)].join(" · ")));
+      const full = e.text || "", cut = full.length > 520 ? full.slice(0, full.lastIndexOf(" ", 480)) + "…" : full;
+      const body = el("p", null, cut); body.style.cssText = "margin:8px 0 6px;white-space:pre-line"; card.append(body);
+      const foot = el("div", "what");
+      if (full.length > cut.length) { const more = el("a", null, "Read more"); more.href = "#"; more.onclick = ev => { ev.preventDefault(); body.textContent = full; more.remove(); }; foot.append(more, document.createTextNode(" · ")); }
+      if (e.text_es) { const es = el("a", null, "En español"); es.href = "#"; es.onclick = ev => { ev.preventDefault(); body.textContent = e.text_es; es.remove(); }; foot.append(es, document.createTextNode(" · ")); }
+      if (e.url && /^https?:\/\//i.test(e.url)) { const a = el("a", null, e.url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")); a.href = e.url; a.target = "_blank"; a.rel = "noopener"; foot.append(document.createTextNode("Its own page: "), a, document.createTextNode(" · ")); }
+      foot.append(document.createTextNode(e.ai ? "The description was drafted with AI help and is not yet reviewed: check it against the source." : "From the reference list."));
+      card.append(foot);
+      if ((e.related || []).length) card.append(el("div", "what", `Related: ${e.related.slice(0, 6).join(" · ")}`));
+      box.append(card);
+    }
+  }
   async function notHeld(typed, q) {
     const words = [...new Set(q.split(/\s+/).filter(w => /^[A-Za-z\u00C0-\u024F]{4,30}$/.test(w)))].slice(0, 6);
     if (!words.length) return;
