@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v141 2026-11-22";
+  const CLIENT = "lantern v142 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2761,10 +2761,11 @@
     box.onkeydown = ev => { if (ev.key === "Enter") again(); };
     const mainB = adminBtn(st.main ? "Main reports only" : "Every kind of document", () => { st.main = !st.main; again(); }); mainB.title = "Switch between the main reports and every document";
     const yearB = adminBtn(st.from ? `From ${st.from}` : "Every year", () => { st.from = st.from === 2023 ? 2020 : st.from === 2020 ? null : 2023; again(); }); yearB.title = "From 2023, from 2020, or every year";
-    bar.append(box, adminBtn("Search", again), mainB, yearB); body.appendChild(bar);
+    const fresh = adminBtn("Refresh", again); fresh.title = "Read the list again: what you sent in the meantime shows at once";
+    bar.append(box, adminBtn("Search", again), mainB, yearB, fresh); body.appendChild(bar);
     body.appendChild(latestMissing(st));
     const why = Object.entries(r.by_status || {}).map(([k, n]) => `${n} ${UNREAD[k] ? k.replace(/_/g, " ") : k}`).join(", ");
-    body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.`));
+    body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.${r.covered ? ` ${r.covered} more ${r.covered === 1 ? "address is" : "addresses are"} not listed: the library already reads a document of the same company, year and kind.` : ""}`));
     // v121 (the owner's screenshot: one company, sixteen rows with the same title): rows of a company with the same
     // year, type and title are one document held under several addresses. The first is shown, the others fold under
     // "+N more addresses"; a row already sent is put first, so that the group shows it.
@@ -2780,6 +2781,9 @@
         const usd = v => v >= 1e9 ? `${(v / 1e9).toFixed(v >= 1e10 ? 0 : 1)} bn USD` : `${Math.round(v / 1e6)} m USD`;
         const why = [d.missing, d.revenue_usd ? `revenue about ${usd(Number(d.revenue_usd))} (as the robot read it)` : ""].filter(Boolean).join(" · ");
         if (why) { const w = el("div", null, why); w.style.cssText = "font-size:13px;margin:0 0 4px;color:" + (d.missing ? "#B4540A" : "var(--muted, #667)"); body.append(w); }
+        // v142: what was sent for this company in the last two days, whatever row each file became
+        if (d.company_sent) { const cs = d.company_sent, bits = [cs.taken && `${cs.taken} taken`, cs.known && `${cs.known} already held`, cs.waiting && `${cs.waiting} being checked`].filter(Boolean).join(", ");
+          const sl = el("div", null, `Sent in the last two days: ${cs.n} file${cs.n === 1 ? "" : "s"}${bits ? ` (${bits})` : ""}, the last ${adminWhen(cs.last)}. A row leaves once the library reads a document of its year and kind.`); sl.style.cssText = "font-size:13px;margin:0 0 4px;color:#2E8B1F"; body.append(sl); }
         body.append(unreadNote(d)); table = el("div"); body.append(table);
       }
       const row = el("div"); row.style.cssText = "display:flex;gap:10px;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--line)";

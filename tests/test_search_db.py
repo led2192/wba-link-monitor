@@ -633,6 +633,7 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("insert into public.browser_uploads (uploader, wba_id, source_url, filename, bytes, sha256, path, status) values ('a@x.org', 'WA', 'https://x.example/a.pdf', 'a.pdf', 10, 'h', 'WA/h.pdf', 'stored')")
             cur.execute("select public.admin_unread_docs('k')"); r2 = cur.fetchone()[0]
             self.assertEqual((r2["rows"][0]["note"], r2["rows"][0]["traits"], r2["rows"][0]["sent"]["status"]), ("reports sit behind a form", ["no_annual"], "stored"))
+            self.assertEqual((r2["rows"][0]["company_sent"]["n"], r2["rows"][0]["company_sent"]["waiting"], r2["rows"][2]["company_sent"]), (1, 1, None))   # 22 Nov 2026: what was sent for the company, at once
             self.assertIsNone(r2["rows"][2]["sent"])                                                            # another company, same address: not its sending
             # which company first: one that lacks the main reports of both last years, then the one in more benchmarks
             import datetime; y = datetime.date.today().year - 1
@@ -643,10 +644,9 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.admin_unread_docs('k')"); r3 = cur.fetchone()[0]; seen = []
             for d in r3["rows"]:
                 if d["wba_id"] not in seen: seen.append(d["wba_id"])
-            self.assertEqual((seen[0], seen[-1]), ("WD", "WC"))                                                 # nothing read and the largest revenue first; nothing missing last
+            self.assertEqual(seen[0], "WD"); self.assertNotIn("WC", seen); self.assertEqual(r3["covered"], 1)      # nothing read and the largest revenue first; an address whose year and kind the library already reads is counted, not listed (22 Nov 2026)
             first = r3["rows"][0]; self.assertEqual((first["revenue_usd"], first["missing"]), (5e9, f"no main report read for {y} or {y - 1}"))
             self.assertNotIn("benchmarks", first)                                                               # the order does not rest on WBA's benchmarks
-            self.assertIsNone([d for d in r3["rows"] if d["wba_id"] == "WC"][0]["missing"])
             cur.execute("insert into public.company_notes (wba_id, traits, by) values ('WD', '{in_parent}', 'a@x.org')")
             cur.execute("select public.admin_unread_docs('k')"); r4 = cur.fetchone()[0]
             self.assertNotEqual(r4["rows"][0]["wba_id"], "WD")                                                  # ticked as reporting inside its parent: not first any more
