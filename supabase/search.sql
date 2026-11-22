@@ -1973,6 +1973,29 @@ alter table public.reference_entries enable row level security;
 create index if not exists reference_entries_name on public.reference_entries (name_key);
 create index if not exists reference_entries_alias on public.reference_entries using gin (alias_keys);
 
+-- About lantrNa itself (22 Nov 2026, the owner typed "What is lantrNa?" and got an offer to survey 150 companies and
+-- fifty pages "that say it in other words"). Entries of kind 'about' answer a search that names lantrNa: what it
+-- is, how it works, how answers are written, how to add a company or a document. They are written here, not loaded
+-- from the private list (load_reference.py never touches this kind), and a change of wording here reaches the
+-- database with the next deploy. The aliases are the words that tell the entries apart ("how", "work", "answer").
+insert into public.reference_entries (id, kind, name, name_key, aliases, alias_keys, category, text_en, text_es, ai) values
+  ('about:lantrna', 'about', 'lantrNa', 'lantrna', '{}', '{}', 'About',
+   'lantrNa is a search engine over what companies publish about themselves: annual, integrated and sustainability reports, policies, codes of conduct and filings. It reads every page of every document, so a search finds the page that states something, not only the document that holds it. Search by words or by meaning, in any language; name a company and a year to narrow it. Ask a question and a short answer is written from the pages found, and only from them, with each page cited so that you can check it. The library follows about 2,000 of the world''s largest companies and grows as people add companies and documents.',
+   'lantrNa es un buscador sobre lo que las empresas publican de sí mismas: informes anuales, integrados y de sostenibilidad, políticas, códigos de conducta y registros. Lee cada página de cada documento, así que una búsqueda encuentra la página que dice algo, no solo el documento que la contiene. Se busca por palabras o por significado, en cualquier idioma; nombrar una empresa y un año lo acota. Si se hace una pregunta, se escribe una respuesta breve a partir de las páginas encontradas, y solo de ellas, con cada página citada para poder comprobarla. La biblioteca sigue a unas 2.000 de las mayores empresas del mundo y crece cuando alguien añade empresas y documentos.', false),
+  ('about:how', 'about', 'How lantrNa works', 'how lantrna works', '{"how","work","works","working","built","behind","cómo","como","funciona"}', '{how,work,works,working,built,behind,como,funciona}', 'About',
+   'A robot visits the pages where each company publishes its reports and collects every new document. The text of each page is read and kept with its document, company, year and kind of report. Two indexes are built over the pages: one of words, one of meaning, so that a page is found even when it says the thing in other words. A search ranks pages, not documents, and shows at most three pages of one document. Figures that reports state (emissions, revenue, employees) are read into values with the page they come from, for people to confirm. Common terms, standards and organisations are answered from a reference list, with no model.',
+   'Un robot visita las páginas donde cada empresa publica sus informes y recoge cada documento nuevo. El texto de cada página se lee y se guarda con su documento, empresa, año y tipo de informe. Sobre las páginas se construyen dos índices, uno de palabras y otro de significado, para encontrar una página aunque diga lo mismo con otras palabras. La búsqueda ordena páginas, no documentos, y muestra como mucho tres páginas de un mismo documento. Las cifras que los informes declaran (emisiones, ingresos, plantilla) se leen como valores con la página de la que salen, para que las personas las confirmen. Los términos, normas y organizaciones habituales se contestan desde una lista de referencia, sin modelo.', false),
+  ('about:answers', 'about', 'How lantrNa writes an answer', 'how lantrna writes an answer', '{"answer","answers","ask","question","questions","accurate","accuracy","trust","reliable","model","ai","sources","respuesta","respuestas","fiable"}', '{answer,answers,ask,question,questions,accurate,accuracy,trust,reliable,model,ai,sources,respuesta,respuestas,fiable}', 'About',
+   'When you ask a question, lantrNa first searches the library and takes the best pages for it, at most eight. Those pages, and nothing else, are given to a language model, which writes a short answer and cites each page it used by number. The model is told to say "Not stated in these pages" when the pages do not answer. An answer is therefore only as complete as the eight pages read: open the cited page before you use a figure. Questions across many companies are answered as a survey, one row a company with its source. Each person has a number of answers a day; searching has no limit.',
+   'Cuando se hace una pregunta, lantrNa busca primero en la biblioteca y toma las mejores páginas, ocho como mucho. Esas páginas, y nada más, se dan a un modelo de lenguaje, que escribe una respuesta breve y cita por número cada página usada. Al modelo se le pide decir "Not stated in these pages" cuando las páginas no contestan. Una respuesta es, por tanto, tan completa como las ocho páginas leídas: conviene abrir la página citada antes de usar una cifra. Las preguntas sobre muchas empresas se contestan como encuesta, una fila por empresa con su fuente. Cada persona tiene un número de respuestas al día; buscar no tiene límite.', false),
+  ('about:add', 'about', 'Adding a company or a document to lantrNa', 'adding a company or a document to lantrna', '{"add","adding","missing","new","request","upload","send","contribute","company","companies","document","documents","report","cover","covers","coverage","covered","añadir","falta","subir"}', '{add,adding,missing,new,request,upload,send,contribute,company,companies,document,documents,report,cover,covers,coverage,covered,anadir,falta,subir}', 'About',
+   'The library follows about 2,000 large companies and anyone with access can extend it. Under the results, "Missing a company? Add it" takes a name and, if you know it, a website: the company exists at once and its site is searched for reports within minutes. "Missing a document? Add its link, or the page that lists it" takes the address of a report or of the page where a company lists its reports; the robot fetches the document and keeps watching the page for new ones. A company''s card says which of its main reports of the last three years are not in the library yet.',
+   'La biblioteca sigue a unas 2.000 grandes empresas y cualquiera con acceso puede ampliarla. Bajo los resultados, "Missing a company? Add it" pide un nombre y, si se conoce, una web: la empresa existe al momento y su web se rastrea en busca de informes en minutos. "Missing a document? Add its link, or the page that lists it" pide la dirección de un informe o de la página donde la empresa lista sus informes; el robot trae el documento y sigue vigilando la página. La ficha de una empresa dice cuáles de sus informes principales de los últimos tres años no están todavía en la biblioteca.', false)
+on conflict (id) do update set name = excluded.name, name_key = excluded.name_key, aliases = excluded.aliases, alias_keys = excluded.alias_keys,
+  category = excluded.category, text_en = excluded.text_en, text_es = excluded.text_es, ai = false, gone = false, loaded_at = now()
+  where (public.reference_entries.name, public.reference_entries.aliases, public.reference_entries.text_en, public.reference_entries.text_es, public.reference_entries.gone)
+        is distinct from (excluded.name, excluded.aliases, excluded.text_en, excluded.text_es, false);
+
 -- What was asked of the list and is not in it (22 Nov 2026): the list's first day answered "CSRD" and "living wage"
 -- and had no entry for "double materiality", "net zero" or "scope 3". A search of at most five words that names no
 -- company and finds no entry is counted here, as compared (reference_key), with one spelling as typed. It is the
@@ -2018,6 +2041,18 @@ begin
   s := regexp_replace(s, '^\s*(what (is|are|was|were)|what does|what do|who (is|are)|define|definition of|meaning of|explain|tell me about|qu[eé] (es|son|significa)|definici[oó]n de)\s+(an?\s+|the\s+|el\s+|la\s+|los\s+|las\s+|un\s+|una\s+)?', '');
   s := regexp_replace(s, '\s+(mean|means|stand for|stands for)\s*$', '');
   k := public.reference_key(s);
+  -- A search that names lantrNa is about lantrNa: the entry whose own words it uses most ("how does lantrna work"),
+  -- and the general one when it uses none ("what is lantrna", "lantrna").
+  if public.reference_key(q) ~ '\m(lantrna|lantern)\M' and public.reference_key(q) ~ '\mlantrna\M' then
+    select coalesce(jsonb_agg(public.reference_card(o.id) order by o.hits desc, o.id), '[]'::jsonb) into found
+    from (select e.id, (select count(*) from unnest(e.alias_keys) a where a = any(string_to_array(public.reference_key(q), ' '))) as hits
+          from public.reference_entries e where e.kind = 'about' and not e.gone order by 2 desc, 1 limit 1) o
+    where o.hits > 0;
+    if found = '[]'::jsonb then
+      found := jsonb_build_array(public.reference_card('about:lantrna'));
+    end if;
+    return found;
+  end if;
   if k = '' or length(k) > 90 or array_length(string_to_array(k, ' '), 1) > 9 then
     return '[]'::jsonb;
   end if;
@@ -2027,7 +2062,7 @@ begin
     select e.*, array_position(array['norm', 'regulation', 'term', 'organisation'], e.kind) as ord,
            public.reference_key(regexp_replace(e.name, '\s*\([^)]*\)\s*$', '')) as bare
     from public.reference_entries e
-    where not e.gone and (e.name_key = k or e.alias_keys @> array[k]
+    where not e.gone and e.kind <> 'about' and (e.name_key = k or e.alias_keys @> array[k]
                           or (k ~ 's$' and e.name_key = left(k, -1)) or e.name_key = k || 's')),     -- a plural asked of a singular entry, and the other way
   one as (select distinct on (bare) * from hit order by bare, ord, name)
   select coalesce(jsonb_agg(public.reference_card(o.id) order by o.ord, o.name), '[]'::jsonb) into found from (select * from one order by ord, name limit 2) o;

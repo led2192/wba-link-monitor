@@ -105,7 +105,7 @@ def plan(conn, rows):
     """{"new", "changed", "same", "gone", "held"}: what a commit would do, from the ids and contents the database holds."""
     with conn.cursor() as c:
         c.execute("select id, md5(row(kind, name, aliases, category, subcategory, type, geography, year, url, text_en, text_es, issuers, related, ai)::text), gone "
-                  "from public.reference_entries")
+                  "from public.reference_entries where kind <> 'about'")              # the entries about lantrNa itself are written in search.sql, not in the list
         held = {r[0]: (r[1], r[2]) for r in c.fetchall()}
         c.execute("create temp table if not exists reference_in (like public.reference_entries including defaults) on commit drop")
         c.execute("truncate reference_in")
@@ -132,7 +132,7 @@ def write(conn):
                        alias_keys = excluded.alias_keys, category = excluded.category, subcategory = excluded.subcategory, type = excluded.type,
                        geography = excluded.geography, year = excluded.year, url = excluded.url, text_en = excluded.text_en, text_es = excluded.text_es,
                        issuers = excluded.issuers, related = excluded.related, ai = excluded.ai, gone = false, loaded_at = now()""")
-        c.execute("update public.reference_entries e set gone = true where not e.gone and not exists (select 1 from reference_in i where i.id = e.id)")
+        c.execute("update public.reference_entries e set gone = true where not e.gone and e.kind <> 'about' and not exists (select 1 from reference_in i where i.id = e.id)")
     conn.commit()
 
 

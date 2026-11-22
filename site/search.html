@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v139 2026-11-22";
+  const CLIENT = "lantern v140 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -967,7 +967,8 @@
         const d = el("div", "dym"); d.append(document.createTextNode(`Searching the company ${fx.name}: “${fx.word}” is on no page. `), a); $("status").appendChild(d);
       }
       if (!more && state.q && !state.fixed) didYouMean($("q").value.trim());
-      if (!more && !fromChips && state.q && !state.company && !state.fixed) notHeld($("q").value.trim(), state.q);          // v136: a name the library does not hold
+      const refHit = !state.company && refSeen.typed === $("q").value.trim() && refSeen.found.length > 0;                              // v140: the reference list answers this text
+      if (!more && !fromChips && state.q && !state.company && !state.fixed && !refHit) notHeld($("q").value.trim(), state.q);          // v136: a name the library does not hold
       if (!more && !fromChips && !state.company) referenceCard($("q").value.trim());                                                // v137: a term, a norm, a regulation or an organisation of the reference list
       if (!more && !fromChips) offerAsk();
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
@@ -1062,6 +1063,7 @@
     // a figure or a fact? Ask it as a question"). What is asked as a question, a fact or the catalogue is not a
     // search made again: it is neither counted in the run nor offered Ask.
     const asked = intent($("q").value, parse($("q").value));
+    if (refSeen.typed === $("q").value.trim() && refSeen.found.length) return;                  // v140: answered by the reference list
     if (asked !== "search" || $("answer").textContent.trim()) return;
     trail.push({ t: Date.now(), company: state.company, opened: false, words: !!state.q });
     const last = trail.slice(-3);
@@ -1100,17 +1102,25 @@
   // an organisation of sustainability ("double materiality", "CSRD", "what is the GHG Protocol") gets a card from the
   // list above the pages. No model is called. The descriptions were mostly drafted with AI help: the card says so and
   // links the entry's own address.
+  // v140: what the reference list holds for a text, asked once a text (go() asks before it decides what the text is,
+  // and the card shows the same answer). A text that names a company is never asked of the list.
+  let refSeen = { typed: null, found: [] };
+  async function referenceFound(typed) {
+    if (!typed || typed.length > 120) return [];
+    if (refSeen.typed === typed) return refSeen.found;
+    let found = []; try { found = (await rpc("reference_lookup", { key, q: typed })) || []; } catch (e) { return []; }
+    refSeen = { typed, found }; return found;
+  }
   async function referenceCard(typed) {
     const box = $("reference"); box.innerHTML = "";
-    if (!typed || typed.length > 120) return;
-    let found = null; try { found = await rpc("reference_lookup", { key, q: typed }); } catch (e) { return; }
-    if (!found || !found.length || $("q").value.trim() !== typed) return;
-    const KIND = { term: "Term", norm: "Norm or framework", regulation: "Regulation", organisation: "Organisation" };
+    const found = await referenceFound(typed);
+    if (!found.length || $("q").value.trim() !== typed) return;
+    const KIND = { term: "Term", norm: "Norm or framework", regulation: "Regulation", organisation: "Organisation", about: "About lantrNa" };
     for (const e of found) {
       const card = el("div", "answer");
-      card.append(el("div", "dym", "From lantrNa's reference list · no model was asked"));
+      card.append(el("div", "dym", e.kind === "about" ? "About lantrNa · no model was asked" : "From lantrNa's reference list · no model was asked"));
       const h = el("p"); h.style.cssText = "margin:6px 0 2px;font-size:17px;font-weight:600"; h.textContent = e.name + ((e.aliases || []).length ? ` (${e.aliases.join(", ")})` : ""); card.append(h);
-      const facts = [KIND[e.kind] || e.kind, e.type, e.category, e.geography, e.year && (e.kind === "organisation" ? `founded ${e.year}` : String(e.year)), (e.issuers || []).length && `by ${e.issuers.slice(0, 3).join(", ")}`].filter(Boolean);
+      const facts = e.kind === "about" ? [] : [KIND[e.kind] || e.kind, e.type, e.category, e.geography, e.year && (e.kind === "organisation" ? `founded ${e.year}` : String(e.year)), (e.issuers || []).length && `by ${e.issuers.slice(0, 3).join(", ")}`].filter(Boolean);
       card.append(el("div", "what", [...new Set(facts)].join(" · ")));
       const full = e.text || "", cut = full.length > 520 ? full.slice(0, full.lastIndexOf(" ", 480)) + "…" : full;
       const body = el("p", null, cut); body.style.cssText = "margin:8px 0 6px;white-space:pre-line"; card.append(body);
@@ -1118,7 +1128,8 @@
       if (full.length > cut.length) { const more = el("a", null, "Read more"); more.href = "#"; more.onclick = ev => { ev.preventDefault(); body.textContent = full; more.remove(); }; foot.append(more, document.createTextNode(" · ")); }
       if (e.text_es) { const es = el("a", null, "En español"); es.href = "#"; es.onclick = ev => { ev.preventDefault(); body.textContent = e.text_es; es.remove(); }; foot.append(es, document.createTextNode(" · ")); }
       if (e.url && /^https?:\/\//i.test(e.url)) { const a = el("a", null, e.url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")); a.href = e.url; a.target = "_blank"; a.rel = "noopener"; foot.append(document.createTextNode("Its own page: "), a, document.createTextNode(" · ")); }
-      foot.append(document.createTextNode(e.ai ? "The description was drafted with AI help and is not yet reviewed: check it against the source." : "From the reference list."));
+      if (e.kind === "about") { const t = el("a", null, "Terms of use"); t.href = "terms.html"; foot.append(t); }
+      else foot.append(document.createTextNode(e.ai ? "The description was drafted with AI help and is not yet reviewed: check it against the source." : "From the reference list."));
       card.append(foot);
       if ((e.related || []).length) card.append(el("div", "what", `Related: ${e.related.slice(0, 6).join(" · ")}`));
       box.append(card);
@@ -1730,6 +1741,9 @@
     const text = $("q").value, parsed = parse(text);
     if (typoWanted(parsed) && await wordUnknown(parsed.typo.word)) applyTypo(parsed);          // v108: the near name first, then what is asked
     if ($("q").value !== text) return;                                                            // the box changed while the word was looked up
+    // v140 (22 Nov 2026, "What is lantrNa?" was offered a survey of 150 companies): a text that names no company and that the
+    // reference list answers is not sent to the reader. The card is the answer, and the pages are listed under it.
+    if (!parsed.company && !$("fCompany").value && (await referenceFound(text.trim())).length) { if ($("q").value !== text) return; search(false); return; }
     const i = intent(text, parsed); (i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false);
   };
   // The pages an answer cites, first in the list: the person reads the answer and its proof together.
