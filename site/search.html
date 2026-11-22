@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v140 2026-11-22";
+  const CLIENT = "lantern v141 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2419,7 +2419,7 @@
       document.body.appendChild(d);
       document.addEventListener("keydown", ev => { if (ev.key === "Escape" && $("admin") && !$("admin").hidden && !document.querySelector("dialog[open]")) closeAdmin(); });
     }
-    d.hidden = false; d.innerHTML = ""; document.body.style.overflow = "hidden";
+    d.hidden = false; d.style.display = "flex"; d.innerHTML = ""; document.body.style.overflow = "hidden";
     const head = el("div"); head.style.cssText = "display:flex;align-items:center;gap:14px;padding:12px 24px;border-bottom:1px solid var(--line)";
     const back = el("a", null, "← Back to the search"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); closeAdmin(); };
     const title = el("b", null, "lantrNa · admin"); title.style.fontSize = "17px";
@@ -2439,7 +2439,9 @@
     (nav.querySelector(`[data-view="${first || "Companies"}"]`) || nav.firstChild).click();
     adminWaiting(nav); adminJobsMark(nav);
   }
-  function closeAdmin() { const d = $("admin"); if (d) d.hidden = true; document.body.style.overflow = ""; }
+  // v141: the panel is laid out with display:flex in its own style, and that wins over the hidden attribute: "Back to
+  // the search" did nothing (the owner, 22 Nov 2026). The display itself is switched.
+  function closeAdmin() { const d = $("admin"); if (d) { d.hidden = true; d.style.display = "none"; } document.body.style.overflow = ""; }
   // the number of companies not looked at yet, beside the section's name
   async function adminWaiting(nav) {
     try { const rows = await authed("admin_companies", { key }); const n = (rows || []).filter(c => !c.review).length;
