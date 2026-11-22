@@ -5021,10 +5021,17 @@ begin
                 where d.text_status in ('no_file', 'download_fail', 'timeout', 'truncated', 'too_big')
                   and coalesce(d.url, '') <> ''
                   and not exists (select 1 from public.doc_fixes f where f.library_id = d.library_id and f.action = 'discard')),
+         -- Not listed when the library reads a document of the same company, year and kind (22 Nov 2026, the owner sent
+         -- dozens of files in an evening and the list did not move): a report downloaded from another address than the
+         -- one held becomes a new document, and the old address stayed here as if nothing had been sent. They are
+         -- counted (`covered`), not shown. A row the owner corrected to another kind or year is listed again.
+         d1 as (select d.*, exists (select 1 from public.documents h where h.wba_id = d.wba_id and h.text_status = 'ok' and h.year = d.year and h.doc_type = d.doc_type
+                                      and h.year is not null and coalesce(h.doc_type, '') <> '') as covered
+                from d0 d),
          d as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, d.text_status, d.found, d.corrected,
                       (d.doc_type = any(main)) as is_main
-               from d0 d
-               where true
+               from d1 d
+               where not d.covered
                  and (not coalesce(only_main, true) or d.doc_type = any(main))
                  and (from_year is null or d.year >= from_year)
                  and (s is null or d.company ilike '%' || s || '%' or d.label ilike '%' || s || '%')),
@@ -5054,10 +5061,17 @@ begin
       'documents', (select count(*) from d),
       'companies', (select count(*) from c),
       'by_status', (select coalesce(jsonb_object_agg(t.text_status, t.n), '{}'::jsonb) from (select text_status, count(*) as n from d group by 1) t),
+      'covered', (select count(*) from d1 where d1.covered and (not coalesce(only_main, true) or d1.doc_type = any(main)) and (from_year is null or d1.year >= from_year)
+                    and (s is null or d1.company ilike '%' || s || '%' or d1.label ilike '%' || s || '%')),
       'rows', coalesce((select jsonb_agg(jsonb_build_object('library_id', t.library_id, 'company', t.company, 'wba_id', t.wba_id, 'year', t.year, 'doc_type', t.doc_type,
                                                             'label', t.label, 'url', t.url, 'status', t.text_status, 'found', t.found, 'company_n', t.company_n,
                                                             'missing', t.missing, 'revenue_usd', t.revenue, 'corrected', t.corrected,
                                                             'note', (select n.note from public.company_notes n where n.wba_id = t.wba_id),          -- the company's note, as in Contribute
+                                                            -- what was sent for the company in the last two days, whatever row it became: seen at once, before any text is read
+                                                            'company_sent', (select case when count(*) > 0 then jsonb_build_object('n', count(*), 'taken', count(*) filter (where u.status = 'taken'),
+                                                                                    'known', count(*) filter (where u.status = 'known'), 'waiting', count(*) filter (where u.status not in ('taken', 'known')),
+                                                                                    'last', max(u.at)) end
+                                                                             from public.browser_uploads u where u.wba_id = t.wba_id and u.at > now() - interval '2 days'),
                                                             'traits', coalesce((select to_jsonb(n.traits) from public.company_notes n where n.wba_id = t.wba_id), '[]'::jsonb),
                                                             -- sent with the extension since (the owner: "how do I follow what I have sent?"): the last sending of this
                                                             -- document, by the row it became or by its address. The row leaves the list by itself once its text is read.
