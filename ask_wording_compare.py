@@ -13,7 +13,11 @@ It CALLS THE PAID READER: three calls a question (about 0.6 US cents a question 
 allowed it on 20 Nov 2026, up to about 0.6 USD. The log is public: it prints counts and shares only, never a question,
 a company or a value.
 
-    python ask_wording_compare.py [--limit 60]
+Since 22 Nov 2026 the same comparison serves any option of the reader (--option, public.ask_option_trial). The owner
+allowed it that day for reader_asked_form: Yes or No only when the words typed are a question, and a part of an
+overview named only when the pages do not cover it.
+
+    python ask_wording_compare.py [--limit 60] [--option reader_asked_form]
 
 Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run record (QA_COMMIT).
 """
@@ -23,14 +27,15 @@ import qa
 from ask_names_compare import CASES_SQL, kept, share
 
 ARMS = ("off", "again", "on")
-FLAGS = ("bare", "starts_no", "not_stated", "colleague", "wba")
+FLAGS = ("bare", "starts_no", "not_stated", "colleague", "wba", "starts_yes", "verdict_unasked", "parts_talk")
 
 
 def summarise(trials):
     done = [t for t in trials if not t.get("skipped")]
     out = {"cases": len(done), "skipped": len(trials) - len(done), "tokens_in": sum(t.get("tokens_in", 0) for t in done),
            "tokens_out": sum(t.get("tokens_out", 0) for t in done), "with_known": sum(1 for t in done if t.get("known")),
-           "with_fiscal": sum(1 for t in done if t.get("fiscal")), "arms": {}}
+           "with_fiscal": sum(1 for t in done if t.get("fiscal")), "overviews": sum(1 for t in done if t.get("overview")),
+           "not_questions": sum(1 for t in done if t.get("question") is False), "arms": {}}
     for arm in ARMS:
         rows = [t[arm] for t in done]
         a = {"answered": sum(1 for r in rows if r.get("answered")), "facts": sum(r.get("facts", 0) for r in rows),
@@ -61,10 +66,10 @@ def verdict(s):
     return not worse, worse
 
 
-def report(s):
+def report(s, option="reader_plain_words"):
     a, cases = s["arms"], s["cases"]
     ok, worse = verdict(s)
-    lines = ["### Ask: plain words for the reader (option reader_plain_words)", "",
+    lines = [f"### Ask: the reader's wording (option {option})", "",
              f"{cases} questions answered three times from the pages they once read ({s['skipped']} skipped); {s['with_known']} had a confirmed fact "
              f"to show the reader, {s['with_fiscal']} a company whose year does not end in December. {s['tokens_in']:,} tokens read, {s['tokens_out']:,} written. Nothing was kept.", "",
              "| | as today | as today, again | with the option |", "|---|---|---|---|"]
@@ -79,6 +84,12 @@ def report(s):
     row("answers that begin \"Not stated\"", lambda r: r["not_stated"])
     row("answers that say \"colleague\"", lambda r: r["colleague"])
     row("answers that say \"WBA\"", lambda r: r["wba"])
+    if option != "reader_plain_words":
+        lines.insert(3, f"{s.get('overviews', 0)} of them were overviews of a topic; {s.get('not_questions', 0)} were words typed, not a question.")
+        lines.insert(4, "")
+        row("answers that begin with Yes", lambda r: r["starts_yes"])
+        row("Yes or No to words that were not a question", lambda r: r["verdict_unasked"])
+        row("answers that talk about parts being covered", lambda r: r["parts_talk"])
     lines += ["", "No attribute worse by more than 3 points: " + ("yes." if ok else "NO: " + "; ".join(worse) + "."), ""]
     return "\n".join(lines)
 
@@ -86,7 +97,10 @@ def report(s):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=60)
+    ap.add_argument("--option", default="reader_plain_words", help="the reader's option to compare (a name that begins reader_)")
     a = ap.parse_args()
+    if not a.option.startswith("reader_") or not a.option.replace("_", "").isalnum():
+        sys.exit("--option is the name of an option of the reader (reader_...).")
     import psycopg
     run = qa.Run("ask_wording_compare.py")
     trials = []
@@ -96,21 +110,24 @@ def main():
         ids = [r[0] for r in cur.fetchall()]
         for n, i in enumerate(ids, 1):
             try:
-                cur.execute("select public.ask_wording_trial(%s)", (i,))
+                if a.option == "reader_plain_words":
+                    cur.execute("select public.ask_wording_trial(%s)", (i,))
+                else:
+                    cur.execute("select public.ask_option_trial(%s, %s)", (i, a.option))
                 trials.append(cur.fetchone()[0])
             except Exception as e:                                # one question that fails does not cost the others
                 trials.append({"skipped": type(e).__name__})
                 run.failure("RUN_FAILED", f"ask_wording_trial: {type(e).__name__}", key=f"trial-{n}")
             print(f"  {n} of {len(ids)}" + (" skipped" if trials[-1].get("skipped") else ""), flush=True)
     s = summarise(trials)
-    text = report(s)
+    text = report(s, a.option)
     print(text)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
             fh.write(text + "\n")
     ok, _ = verdict(s)
-    run.finish("ok", rows_in=len(ids), rows_out=s["cases"], notes=f"wording compare: {s['cases']} cases, not worse: {ok}",
+    run.finish("ok", rows_in=len(ids), rows_out=s["cases"], notes=f"wording compare ({a.option}): {s['cases']} cases, not worse: {ok}",
                counters={"cases": s["cases"], "skipped": s["skipped"], "facts_off": s["arms"]["off"]["facts"], "facts_on": s["arms"]["on"]["facts"],
                          "bare_off": s["arms"]["off"]["bare"], "bare_on": s["arms"]["on"]["bare"]})
     return 0

@@ -1,6 +1,6 @@
-# Option reader_plain_words beside today's answers (ask_wording_compare.py). Manual only. CALLS THE PAID READER: three
-# calls a question, about 0.6 US cents a question; the owner allowed it on 20 Nov 2026, up to about 0.6 USD. Keeps nothing in the
-# database. Prints counts only.
+# An option of the reader beside today's answers (ask_wording_compare.py). Manual only. CALLS THE PAID READER: three
+# calls a question, about 0.6 US cents a question; the owner allowed it on 20 Nov 2026 (reader_plain_words) and on
+# 22 Nov 2026 (reader_asked_form), up to about 0.6 USD a run. Keeps nothing in the database. Prints counts only.
 name: Ask wording comparison
 
 on:
@@ -9,6 +9,9 @@ on:
       limit:
         description: "questions at most (three reader calls each)"
         default: "60"
+      option:
+        description: "the reader's option to compare"
+        default: "reader_plain_words"
 
 concurrency:
   group: ask-wording-compare
@@ -26,7 +29,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Compare
-        run: python ask_wording_compare.py --limit "${{ inputs.limit || '60' }}"
+        run: python ask_wording_compare.py --limit "${{ inputs.limit || '60' }}" --option "${{ inputs.option || 'reader_plain_words' }}"
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
