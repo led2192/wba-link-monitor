@@ -312,7 +312,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v135 2026-11-22";
+  const CLIENT = "lantern v136 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -959,6 +959,7 @@
         const d = el("div", "dym"); d.append(document.createTextNode(`Searching the company ${fx.name}: “${fx.word}” is on no page. `), a); $("status").appendChild(d);
       }
       if (!more && state.q && !state.fixed) didYouMean($("q").value.trim());
+      if (!more && !fromChips && state.q && !state.company && !state.fixed) notHeld($("q").value.trim(), state.q);          // v136: a name the library does not hold
       if (!more && !fromChips) offerAsk();
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
@@ -1083,6 +1084,26 @@
   }
   // "Did you mean": a word typed wrong, set right from the words the library knows (did_you_mean). Asked after the
   // results are shown; the person decides whether to take it.
+  // v136 (22 Nov 2026, the owner): someone asks about a company lantrNa does not follow. The search that named no
+  // company sends its words; for one that no page holds (and that is not a word typed wrong) the page says so and
+  // offers to add the company. The server counts the word for the owner (Admin, "Names not held").
+  async function notHeld(typed, q) {
+    const words = [...new Set(q.split(/\s+/).filter(w => /^[A-Za-z\u00C0-\u024F]{4,30}$/.test(w)))].slice(0, 6);
+    if (!words.length) return;
+    try {
+      const miss = await rpc("names_not_held", { key, words, client: CLIENT });
+      if (!miss || !miss.length || $("q").value.trim() !== typed) return;
+      for (const w of miss.slice(0, 2)) {
+        const as = (typed.match(new RegExp("(?:^|\\s)(" + w + ")(?=$|[\\s,;.?!'])", "i")) || [])[1] || w;      // as the person wrote it
+        const name = as === as.toLowerCase() ? as.charAt(0).toUpperCase() + as.slice(1) : as;
+        const a = el("a", null, "add it"); a.href = "#"; a.title = "A company lantrNa does not follow yet: its website is searched for its reports within minutes";
+        const d = el("div", "dym"); const hold = el("div", "values");
+        a.onclick = ev => { ev.preventDefault(); askCompanyForm(hold, name); };
+        d.append(document.createTextNode(`No page in the library holds “${as}”. If it is a company lantrNa does not follow yet, you can `), a, document.createTextNode("."), hold);
+        $("status").appendChild(d);
+      }
+    } catch (e) {}
+  }
   async function didYouMean(typed) {
     try {
       const better = await rpc("did_you_mean", { key, q: typed });
@@ -1200,9 +1221,9 @@
     holder.appendChild(f); (co.value ? links : co).focus();
   }
   // "Missing a company? Add it": a request, read by a person before the company is added and its pages searched for
-  function askCompanyForm(holder) {
+  function askCompanyForm(holder, named) {
     if (holder.querySelector(".askco")) return; const f = el("div", "fix add askco"); const lab = t => el("label", "lab", t);
-    const nm = el("input"); nm.placeholder = "The company's name"; nm.maxLength = 120;
+    const nm = el("input"); nm.placeholder = "The company's name"; nm.maxLength = 120; if (named) nm.value = named;
     const site = el("input"); site.placeholder = "https://… (optional)";
     const lei = el("input"); lei.placeholder = "20 characters (optional)"; lei.maxLength = 24;
     const why = el("textarea"); why.rows = 2; why.placeholder = "Optional: why it matters, where its reports are";
@@ -1223,7 +1244,7 @@
     const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
     const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
     f.append(el("div", "what", "A company lantrNa does not follow yet"), lab("Company"), nm, lab("Website"), site, lab("LEI"), lei, lab("A note for the team"), why, msg, acts);
-    holder.appendChild(f); nm.focus();
+    holder.appendChild(f); (named ? site : nm).focus();
   }
   function addValueLink(panel, attrs) {
     const wrap = el("div", "addrow"); const a = el("a", "addlink", "+ Add a value"); a.href = "#"; a.title = "Add a value the robot does not hold, with its source";
@@ -2356,7 +2377,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2376,6 +2397,17 @@
   // Companies people added (v69). A company exists from the moment a person adds it; here the owner reads who added
   // it, the doubts the database noted (a name close to another company's, the same documents under another company)
   // and accepts or rejects. Rejecting asks twice: the company leaves the list and its documents are discarded.
+  // v136: the words people searched that no page holds and that are no word typed wrong: often a company lantrNa does not follow.
+  async function adminNotHeld(body) {
+    const rows = await authed("admin_names_not_held", { key }); if (!rows) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    body.innerHTML = "";
+    body.appendChild(el("p", "what", "Words of searches that named no company, that no page in the library holds and that are not a known word typed wrong. Many are companies lantrNa does not follow: the person was told so and offered to add the company. Add the ones worth following yourself (search page, \"Missing a company?\"), and set aside what is not a company."));
+    if (!rows.length) { body.appendChild(el("p", null, "Nothing yet.")); return; }
+    const line = m => { const act = el("div"); const say = el("span", "what", "");
+      act.append(adminBtn(m.dismissed ? "Bring back" : "Set aside", async () => { const r = await authed("admin_name_not_held_set", { key, word: m.word, dismissed: !m.dismissed }); if (r && r.ok) adminNotHeld(body); else say.textContent = " not saved"; }), say);
+      return [m.word, m.times, m.people, adminWhen(m.last_at), m.dismissed ? "set aside" : "", act]; };
+    body.appendChild(adminTable(["Word", "Searches", "Links", "Last", "", ""], rows.map(line)));
+  }
   async function adminCompanies(body) {
     const rows = await authed("admin_companies", { key }); if (!rows) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
     body.innerHTML = "";
