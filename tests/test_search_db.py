@@ -1863,6 +1863,12 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([e["name"] for e in look("Invented Reporting Rule")], ["Invented Reporting Rule (IRR)"])               # the name without its bracket
         self.assertEqual([e["name"] for e in look("imaginary target")], ["Imaginary Targets"])                                # singular asked of a plural entry
         self.assertEqual(look("made-up materiality of Acme in 2023"), []); self.assertEqual(look(""), []); self.assertEqual(look(None), [])
+        # a text that names lantrNa is about lantrNa: the entry whose own words it uses, else the general one; the loader leaves these alone
+        self.assertEqual([e["id"] for e in look("What is lantrNa?")], ["about:lantrna"]); self.assertEqual([e["id"] for e in look("lantrna")], ["about:lantrna"])
+        self.assertEqual([e["id"] for e in look("how does lantrNa work?")], ["about:how"]); self.assertEqual([e["id"] for e in look("can I trust lantrna answers")], ["about:answers"])
+        self.assertEqual([e["id"] for e in look("how do I add a company to lantrna")], ["about:add"]); self.assertEqual([e["id"] for e in look("¿Qué es lantrNa?")], ["about:lantrna"])
+        self.assertFalse(look("lantrna")[0]["ai"]); self.assertEqual(look("irr lantern"), [])
+        cur.execute("select count(*) from public.reference_entries where kind = 'about' and not gone"); self.assertEqual(cur.fetchone()[0], 4)
         got = look("irr")[0]; self.assertEqual((got["kind"], got["year"], got["url"], got["issuers"], got["ai"]), ("norm", 2019, "https://rule.example/irr", ["Invented Board"], True))
         # an entry that left the file is kept and no longer shown; one that comes back is shown again
         with psycopg.connect(URL) as c:
