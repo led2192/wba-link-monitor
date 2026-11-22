@@ -246,6 +246,12 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TheWebServerLetsTheDocsThrough(unittest.TestCase):
+    def test_both_routes_are_passed_on(self):
+        sh = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server", "service_install.sh"), encoding="utf-8").read()
+        self.assertIn("path /near /docs", sh)          # 22 Nov 2026: the service answered /docs and the web server in front of it did not pass it on
+
+
 class Documentation(unittest.TestCase):
     """The documentation path of the door: behind the same secret, plain names only, the database untouched."""
     def setUp(self):

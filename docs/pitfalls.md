@@ -8,6 +8,9 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## The reader
 - **A model given room to think may hand back its thinking as the answer.** The step that chooses an answer's search words has 800 tokens so the model can reason first; one reply was a single line of words followed by its own doubts, and all of it was searched and shown to the person (19 Nov 2026). Whatever a model returns for use as data is cut to the shape asked for (`ask_keywords_clean`) before it is used.
 
+## The server's door
+- **A new path of the service needs the web server's rule too.** 22 Nov 2026: `/docs` was added to the service and tested against the service; from outside it answered 404, because Caddy passes on only the paths its rule names. The check that would have caught it is one request from outside after the install (Server service, mode `check`, prints the door's answer without the secret: 401 means it arrives).
+
 ## The server's copy of the passages
 - **Two owners for one document switched the remote search off.** 22 Nov 2026: the policies index (server only) took three documents that Supabase's index also held, because their type had changed. The nightly refresh skipped "server only" documents when counting, so those three looked missing after every copy, the copy was judged not current, and `meaning_remote` was switched off for the night; the search went on from Supabase's own index. A rule that exempts rows from a comparison must say what happens to a row that is on both sides. And a switch that a job turns off by itself needs the same job to turn it on again, or it stays off until someone reads a log.
 
