@@ -1973,6 +1973,37 @@ alter table public.reference_entries enable row level security;
 create index if not exists reference_entries_name on public.reference_entries (name_key);
 create index if not exists reference_entries_alias on public.reference_entries using gin (alias_keys);
 
+-- What a company is, read from its own reports (22 Nov 2026; company_profile.py on the job server, an open model, no
+-- cost). One row a company and field: headquarters_city, headquarters_country, country_of_incorporation,
+-- year_founded, listing, ownership, parent, subsidiaries, countries, countries_count, segments, products, customers,
+-- sector, industry, subsector, description. The value is text, a number or a list; library_id and page are where it
+-- was read. status: 'read' (by the model), or what a person made of it ('confirmed', 'corrected', 'rejected'); the
+-- reader never overwrites a row a person touched. company_profile_runs: one line a company read, so that it is not
+-- read again for months. No function reads these tables yet: the profile is measured before it is shown.
+create table if not exists public.company_profile (
+  wba_id     text not null,
+  field      text not null,
+  value      jsonb not null,
+  library_id text,
+  page       int,
+  model      text,
+  read_at    timestamptz not null default now(),
+  status     text not null default 'read',
+  primary key (wba_id, field)
+);
+alter table public.company_profile enable row level security;
+create index if not exists company_profile_field on public.company_profile (field);
+create table if not exists public.company_profile_runs (
+  id      bigint generated always as identity primary key,
+  wba_id  text not null,
+  at      timestamptz not null default now(),
+  fields  int not null default 0,
+  seconds real,
+  model   text
+);
+alter table public.company_profile_runs enable row level security;
+create index if not exists company_profile_runs_company on public.company_profile_runs (wba_id, at desc);
+
 -- About lantrNa itself (22 Nov 2026, the owner typed "What is lantrNa?" and got an offer to survey 150 companies and
 -- fifty pages "that say it in other words"). Entries of kind 'about' answer a search that names lantrNa: what it
 -- is, how it works, how answers are written, how to add a company or a document. They are written here, not loaded
