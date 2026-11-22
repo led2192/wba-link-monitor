@@ -723,6 +723,20 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("update public.ask_cache set at = now() - interval '15 days'")
             self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))                                    # too old: documents arrive
             cur.execute("update public.ask_cache set at = now()")
+            # the library moved (22 Nov 2026): a document with text arrives for the company, the kept answer is not given; it leaves, it is
+            cur.execute("select library, public.ask_library_state('W1') from public.ask_cache where ask_id = 7"); was, now_ = cur.fetchone()
+            self.assertEqual(was, now_); self.assertRegex(was, r"^\d+:\d+:\d+$")
+            cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, pages, text_status) values ('L-late', 'W1', 'Acme', 'Integrated Report', 2023, 250, 'ok')")
+            self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))
+            cur.execute("delete from public.documents where library_id = 'L-late'")
+            self.assertEqual(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1))["ask_id"], 7)
+            cur.execute("update public.ask_cache set library = null where ask_id = 7")                                          # kept before the rule: not given
+            self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))
+            cur.execute("update public.ask_cache set library = public.ask_library_state('W1') where ask_id = 7")
+            # "Not stated" is never given again
+            cur.execute("select public.ask_keep(10, 'W1', 2023, 2023, null, 'water withdrawal', null, %s::jsonb)", (psycopg.types.json.Jsonb({"answer": "Not stated in these pages. They cover governance.", "sources": []}),))
+            self.assertIsNone(ask("W1", 2023, 2023, None, "water withdrawal", None))
+            cur.execute("delete from public.ask_cache where ask_id = 10")
             # through ask itself: given again before anything is counted or paid, logged as reused, never as an answer
             cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023)"); got = cur.fetchone()[0]
             self.assertEqual((got["answer"], got["reused"]["same"], got["left"], got["per_day"]), ("Scope 1 was 10 [1].", True, got["per_day"], got["per_day"]))
