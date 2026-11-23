@@ -7798,6 +7798,74 @@ $$;
 revoke all on function public.admin_reference(text) from public, anon;
 grant execute on function public.admin_reference(text) to authenticated;
 
+-- Examples for the terms, from the reports themselves (23 Nov 2026; reference_examples.py on the job server cuts the
+-- sentence of a report that explains or applies a term, the best of up to three companies). status: 'found' (by the
+-- script), or what the owner made of it ('approved', 'rejected'); the script never touches a row a person judged.
+-- Shown under the term's card to the owner only, until the option reference_examples is switched on; a rejected
+-- example is shown to nobody.
+create table if not exists public.reference_examples (
+  entry      text not null,
+  library_id text not null,
+  page       int not null,
+  wba_id     text,
+  year       int,
+  excerpt    text not null,
+  score      int not null default 0,
+  status     text not null default 'found',
+  found_at   timestamptz not null default now(),
+  primary key (entry, library_id, page)
+);
+alter table public.reference_examples enable row level security;
+insert into public.search_options (name, is_on, note) values ('reference_examples', false, 'the examples from the reports are shown under a term''s card to everyone (off: to the owner only)')
+on conflict (name) do nothing;
+
+create or replace function public.reference_examples_of(key text, entry text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+set statement_timeout = '3s'
+as $$
+#variable_conflict use_variable
+declare
+  who text := public.search_key_name(key);
+begin
+  if who is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if who <> 'owner' and not public.survey_option('reference_examples') then
+    return '[]'::jsonb;
+  end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('library_id', x.library_id, 'page', x.page, 'excerpt', x.excerpt, 'year', x.year, 'status', x.status,
+                                                       'company', coalesce(c.name, d.company), 'doc_type', d.doc_type, 'url', d.url)
+                                    order by (x.status = 'approved') desc, x.score desc, x.year desc nulls last), '[]'::jsonb)
+          from (select * from public.reference_examples x where x.entry = entry and x.status <> 'rejected'
+                order by (x.status = 'approved') desc, x.score desc, x.year desc nulls last limit 3) x
+          join public.documents d on d.library_id = x.library_id
+          left join public.companies c on c.wba_id = x.wba_id);
+end;
+$$;
+revoke all on function public.reference_examples_of(text, text) from public;
+grant execute on function public.reference_examples_of(text, text) to anon, authenticated;
+
+create or replace function public.admin_reference_example_set(key text, entry text, library_id text, page int, status text) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  done int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if status is null or status not in ('found', 'approved', 'rejected') then
+    raise exception 'approved, rejected or found' using errcode = '22023';
+  end if;
+  update public.reference_examples x set status = status where x.entry = entry and x.library_id = library_id and x.page = page;
+  get diagnostics done = row_count;
+  return jsonb_build_object('ok', done = 1);
+end;
+$$;
+revoke all on function public.admin_reference_example_set(text, text, text, int, text) from public, anon;
+grant execute on function public.admin_reference_example_set(text, text, text, int, text) to authenticated;
+
 -- How much each norm and regulation is used in the reports, by reporting year (23 Nov 2026; reference_use.py on the
 -- job server counts the documents and companies with a page that prints the entry's name or acronym). For the owner
 -- only: admin_reference_use gives the years counted and, for one year, the entries most named, with the share of

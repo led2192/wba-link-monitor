@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v146 2026-11-23";
+  const CLIENT = "lantern v147 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1144,7 +1144,23 @@
       card.append(foot);
       if ((e.related || []).length) card.append(el("div", "what", `Related: ${e.related.slice(0, 6).join(" · ")}`));
       box.append(card);
+      if (e.kind === "term") referenceExamples(e, card);                                             // v147: how reports write about it
     }
+  }
+  // v147 (23 Nov 2026, the owner: "for the terms that gain from it, add examples"): up to three sentences of reports that
+  // explain or apply the term, each with its company, year and page. Cut from the pages with no model (reference_examples.py).
+  // To the owner only until the option reference_examples is on; the owner can take one away here.
+  async function referenceExamples(e, card) {
+    let list = []; try { list = await rpc("reference_examples_of", { key, entry: e.id }) || []; } catch (err) { return; }
+    if (!list.length || !card.isConnected) return;
+    const box = el("div"); box.style.cssText = "margin-top:10px;padding-top:8px;border-top:1px solid var(--line)"; box.append(el("div", "dym", "In the reports"));
+    for (const x of list) { const p = el("p"); p.style.cssText = "margin:6px 0 2px"; p.textContent = `“${x.excerpt}”`; const src = el("div", "what");
+      const label = [x.company, x.year, x.doc_type, x.page && `page ${x.page}`].filter(Boolean).join(" · ");
+      if (/^https?:\/\//i.test(x.url || "")) { const a = el("a", null, label); a.href = /\.pdf(\?|$)/i.test(x.url) || !/#/.test(x.url) ? `${x.url}#page=${x.page || 1}` : x.url; a.target = "_blank"; a.rel = "noopener"; src.append(a); } else src.append(document.createTextNode(label));
+      if ($("adminOpen")) { const no = el("a", null, "not a good example"); no.href = "#"; no.onclick = async ev => { ev.preventDefault(); const r = await authed("admin_reference_example_set", { key, entry: e.id, library_id: x.library_id, page: x.page, status: "rejected" }); if (r && r.ok) { p.remove(); src.remove(); } };
+        src.append(document.createTextNode(" · "), no); }
+      box.append(p, src); }
+    card.append(box);
   }
   async function notHeld(typed, q) {
     const words = [...new Set(q.split(/\s+/).filter(w => /^[A-Za-z\u00C0-\u024F]{4,30}$/.test(w)))].slice(0, 6);

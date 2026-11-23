@@ -1961,6 +1961,26 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("delete from public.reference_use"); cur.execute("delete from public.reference_entries where id = 'norm:izs'")
         cur.execute("delete from public.pages where library_id like 'RU_'"); cur.execute("delete from public.documents where library_id like 'RU_'")
 
+    def test_a_term_gets_examples_from_the_reports(self):
+        """23 Nov 2026: a term's card shows how reports write about it. The sentence is cut from the page with no model:
+        prose that explains or applies the term, not a line of a contents page; one a company; a rejected one is gone."""
+        import reference_examples as E
+        good = ("Our approach. In 2024 we carried out a zebra materiality assessment in line with the applicable reporting standards, looking both at how such matters affect "
+                "our business and at how our business affects people and the environment around it.")
+        self.assertEqual(E.excerpt_of("Contents 1 Zebra materiality .... 12 Governance .... 14.", "Zebra Materiality"), None)
+        score, text = E.excerpt_of("Contents. " + good + " Zebra materiality 4 5 6 7 2024 2023.", "Zebra Materiality"); self.assertGreaterEqual(score, 4); self.assertTrue(text.startswith("In 2024 we carried out"))
+        rows = [("RX1", 3, "RXA", 2024, "Annual Report", good), ("RX2", 9, "RXA", 2023, "Annual Report", good), ("RX3", 1, "RXB", 2024, "x", "Zebra materiality 12.")]
+        got = E.pick(rows, "Zebra Materiality"); self.assertEqual([(g[0], g[1], g[2]) for g in got], [("RX1", 3, "RXA")])       # one a company, the newer; the bare line is no example
+        cur = self.conn.cursor()
+        cur.execute("insert into public.companies (wba_id, name) values ('RXA', 'Example Maker') on conflict do nothing")
+        cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, label, url, pages, text_status) values ('RX1', 'RXA', 'Example Maker', 'Annual Report', 2024, 'a', 'https://x.example/a.pdf', 9, 'ok')")
+        cur.executemany("insert into public.reference_examples (entry, library_id, page, wba_id, year, excerpt, score) values ('term:zm', %s, %s, %s, %s, %s, %s)", got)
+        of = lambda: (cur.execute("select public.reference_examples_of('k', 'term:zm')"), cur.fetchone()[0])[1]
+        self.assertEqual([(x["company"], x["year"], x["page"], x["url"], x["status"]) for x in of()], [("Example Maker", 2024, 3, "https://x.example/a.pdf", "found")])
+        cur.execute("select public.admin_reference_example_set('k', 'term:zm', 'RX1', 3, 'rejected')"); self.assertTrue(cur.fetchone()[0]["ok"]); self.assertEqual(of(), [])
+        cur.execute("select public.admin_reference_example_set('k', 'term:zm', 'RX9', 3, 'approved')"); self.assertFalse(cur.fetchone()[0]["ok"])
+        cur.execute("delete from public.reference_examples where entry = 'term:zm'"); cur.execute("delete from public.documents where library_id = 'RX1'"); cur.execute("delete from public.companies where wba_id = 'RXA'")
+
     def test_the_owner_sees_and_judges_a_company_profile(self):
         """23 Nov 2026: the profile read from a company's reports is shown to the owner first, field by field with
         where it was read; what the owner confirms, rejects or corrects is kept, and a correction carries a value."""
