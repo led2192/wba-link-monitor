@@ -11,6 +11,9 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "set by lantrNa's clock (server/clock.json): run as the nightly run does"
+        default: "false"
       commit:
         description: "WRITE the fields. Leave OFF for a dry run."
         type: boolean
@@ -49,7 +52,7 @@ jobs:
           TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
           TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ inputs.as_scheduled }}" = "true" ]; then
             python sustainability_class.py --commit
           else
             ARGS="--limit ${{ inputs.limit }}"
