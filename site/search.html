@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v145 2026-11-23";
+  const CLIENT = "lantern v146 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -421,17 +421,28 @@
     }
   }
 
-  async function loadCompanies() {
+  // v146 (23 Nov 2026, "main difficulties porsche in 2025" was told that no company is named): the database was busy,
+  // the company list did not load, and with no list no name is a company. The list is now kept in this browser and used
+  // at once; the load is tried three times; and a search waits for the list when there is none (go()).
+  const useCompanies = list => { companies = list || [];
+    industries = [...new Set(companies.map(c => c.industry).filter(Boolean))].sort();
+    regions = [...new Set(companies.map(c => c.region).filter(Boolean))].sort();
+    const dl = $("companies"); dl.innerHTML = ""; for (const c of companies) { const o = document.createElement("option"); o.value = c.name; dl.appendChild(o); } };
+  let companiesLoading = null;
+  function loadCompanies() { return companiesLoading || (companiesLoading = loadCompaniesNow().finally(() => { companiesLoading = null; })); }
+  async function loadCompaniesNow() {
+    if (!companies.length) { try { const kept = JSON.parse(localStorage.getItem("companies_kept") || "null"); if (Array.isArray(kept) && kept.length) useCompanies(kept); } catch (e) {} }
+    let list = null, why = "";
+    for (let attempt = 0; attempt < 3 && !list; attempt++) {
+      try { list = await rpc("find_companies", { key }); } catch (e) { why = e.message; list = null; if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); }
+    }
+    if (list && list.length) { useCompanies(list); try { localStorage.setItem("companies_kept", JSON.stringify(list)); } catch (e) {} }
     try {
-      companies = await rpc("find_companies", { key });
-      industries = [...new Set(companies.map(c => c.industry).filter(Boolean))].sort();
-      regions = [...new Set(companies.map(c => c.region).filter(Boolean))].sort();
+      if (!companies.length) throw new Error(why || "no answer");
       rpc("find_topics", { key }).then(list => { topics = new Set(list || []); }).catch(() => {});      // v106: the broad topics, for intent()
       rpc("find_metric_names", { key }).then(list => { metricNames = new Set(list || []); }).catch(() => {});   // v108: the metrics' names, for intent()
       rpc("search_flags", { key }).then(f => { flags = f || {}; }).catch(() => {});                              // v112: what is switched on (answer_topics)
       rpc("link_may_ask", { key }).then(v => { linkAsk = v === true; }).catch(() => {});                 // v107: this person's link may ask without a sign-in
-      const dl = $("companies"); dl.innerHTML = "";
-      for (const c of companies) { const o = document.createElement("option"); o.value = c.name; dl.appendChild(o); }
     } catch (e) { setStatus(`Could not load the company list: ${e.message}`); }
   }
   for (const t of TYPES) { const o = document.createElement("option"); o.value = t; o.textContent = t; $("fType").appendChild(o); }
@@ -1738,6 +1749,8 @@
   }
   const go = async () => {
     closeHistory(); $("answer").innerHTML = "";
+    if (!companies.length) { setStatus("Loading the company list…"); await loadCompanies(); }       // v146: never read a text with no list of companies
+    if (!companies.length) { setStatus("The company list did not load (the database is busy), so the search was not run: a name could not be told from a word. Try again in a moment."); return; }
     const text = $("q").value, parsed = parse(text);
     if (typoWanted(parsed) && await wordUnknown(parsed.typo.word)) applyTypo(parsed);          // v108: the near name first, then what is asked
     if ($("q").value !== text) return;                                                            // the box changed while the word was looked up
