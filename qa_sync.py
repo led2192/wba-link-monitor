@@ -12,7 +12,8 @@ What it derives (one row per distinct failure, keyed; see qa.py and the design d
     PAGE_EMPTY        possible_issue 'No document links found on the page'   detail no_links
     PAGE_UNHARVESTED  unharvested_links >= 3                  message = unharvested_sample
   report_library (discarded rows only feed DOC_DUPLICATE / DOC_WRONG_ROW)
-    DOC_FETCH_FAIL    file_status blocked/gone/too_big/not_pdf, or cover_status download_fail
+    DOC_FETCH_FAIL    file_status blocked/gone/too_big/not_pdf, or cover_status download_fail; a too_big
+                      file whose text was read from its link (cover_status ok) is counted, not a failure
     DOC_UNREADABLE    cover_status no_text / parse_fail / truncated
     TYPE_DISAGREE     type_mismatch = 1 AND the two types satisfy different completeness checks
                       (high_stakes); low-stakes disagreements are counted, not written
@@ -215,7 +216,12 @@ def derive_doc(f, today):
     flagged = f"; an analyst had flagged it ({flag}{': ' + flag_note[:200] if flag_note else ''})" if flag else ""
     fs = (f.get("file_status") or "").strip()
     cs = (f.get("cover_status") or "").strip()
-    if fs in FETCH_STATUSES or cs == "download_fail":
+    if fs == "too_big" and cs == "ok":
+        # Over the 5 MB Airtable upload limit, but its text was read from the document's link
+        # (the owner of too_big, #47): the document is usable, so it is counted, not a failure.
+        # 23 Nov 2026: 27 of 30 sampled open too_big rows were like this (1,349 open, 842 High).
+        counts["too_big_read_from_link"] += 1
+    elif fs in FETCH_STATUSES or cs == "download_fail":
         detail = fs if fs in FETCH_STATUSES else "download_fail"
         counts["fetch_fail"] += 1
         if shaped:
