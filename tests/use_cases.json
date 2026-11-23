@@ -36,6 +36,16 @@
   {
    "id": "PT_9",
    "name": "Rosneft"
+  },
+  {
+   "id": "PT_S1",
+   "name": "Zuffenhaus AG",
+   "short": "Zuffenhaus"
+  },
+  {
+   "id": "PT_S2",
+   "name": "Northern Zebra Motors Company",
+   "short": "Northern Zebra Motors"
   }
  ],
  "this_year": 2026,
@@ -325,6 +335,28 @@
    "from": 2024,
    "to": 2024,
    "intent": "fact"
+  },
+  {
+   "typed": "main difficulties zuffenhaus in 2025",
+   "company": "PT_S1",
+   "from": 2025,
+   "to": 2025,
+   "intent": "fact"
+  },
+  {
+   "typed": "northern zebra motors scope 1",
+   "company": "PT_S2",
+   "intent": "fact"
+  },
+  {
+   "typed": "Zuffenhaus AG revenue 2024",
+   "company": "PT_S1",
+   "intent": "fact"
+  },
+  {
+   "typed": "zebra motors emissions",
+   "company": null,
+   "intent": "search"
   }
  ],
  "topics": [

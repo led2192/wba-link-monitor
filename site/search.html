@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v148 2026-11-23";
+  const CLIENT = "lantern v149 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -492,6 +492,8 @@
     }
     return best && !tie ? { word: best.word, id: best.id, name: best.name } : null;
   }
+  let shortList = null, shortOf = null;
+  const shortFirst = () => { if (shortOf !== companies) { shortOf = companies; shortList = companies.filter(c => c.short && c.short.length >= 4).sort((a, b) => b.short.length - a.short.length); } return shortList; };
   function parse(text) {
     let q = " " + text.trim().replace(/[?¿!¡]+/g, " ").replace(/\s+/g, " ") + " ";      // a question's marks are not words ("in 2024?" is the year 2024)
     // v128 (20 Nov 2026, from a real question): "What was the steel production of X in year 2023?" was searched with the
@@ -544,6 +546,20 @@
       hits.push(w.c);
       q = q.slice(0, m.index) + " " + q.slice(m.index + m[0].length);
       fq = fq.slice(0, m.index) + " " + fq.slice(m.index + m[0].length);
+    }
+    // v149 (23 Nov 2026, "main difficulties porsche in 2025" named no company: it is listed as "Porsche AG"): when no
+    // listed name is in the text, a company is also known by its name without the legal form (c.short, worked out and
+    // judged safe on the server: company_short_names.py). The longest first; one company.
+    if (!hits.length) {
+      for (const c of shortFirst()) {
+        const s = fold(c.short).toLowerCase();
+        if (!fq.toLowerCase().includes(s)) continue;
+        const m = new RegExp("\\s" + esc(s) + "(?:'s)?[;,:.]?(?=\\s)", "i").exec(fq);
+        if (!m) continue;
+        if (WORD_NAMES.has(s)) { found.maybe = found.maybe || { id: c.id, name: c.name, word: s }; continue; }
+        hits.push(c); q = q.slice(0, m.index) + " " + q.slice(m.index + m[0].length); fq = fq.slice(0, m.index) + " " + fq.slice(m.index + m[0].length);
+        break;
+      }
     }
     if (hits.length) q = q.replace(/\s[;,](?=\s)/g, " ");
     // v97 (17 Nov 2026): a company's name typed wrong. "base year target severestal" named no company, so 1,300 pages
