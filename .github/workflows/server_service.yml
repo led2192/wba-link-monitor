@@ -7,12 +7,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check (reads only), install, open, close, stop; link (tell Supabase the address and the secret); probe (measure the way from Supabase)"
+        description: "check (reads only), install, open, site (the search page under the name in host; host off takes it away), close, stop; link (tell Supabase the address and the secret); probe (measure the way from Supabase)"
         type: choice
-        options: [check, install, open, close, stop, link, probe, storm, breaker, pause, resume, restart-db]
+        options: [check, install, open, site, close, stop, link, probe, storm, breaker, pause, resume, restart-db]
         default: check
       host:
-        description: "with open and link: the name that points to the server"
+        description: "with open, site and link: the name that points to the server"
         default: ""
       times:
         description: "with probe and storm: how many calls or searches"

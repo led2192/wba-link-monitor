@@ -25,7 +25,7 @@ class Extension(unittest.TestCase):
         self.assertLess(js.index('rpc("upload_begin"'), js.index("/storage/v1/object/uploads/"))
         self.assertLess(js.index("/storage/v1/object/uploads/"), js.index('rpc("upload_done"'))
         self.assertIn('head.includes("%PDF-")', js)                                       # what is not a PDF is not sent
-        self.assertIn("MAX_BYTES = 200 * 1024 * 1024", js)
+        self.assertIn("MAX_BYTES = 300 * 1024 * 1024", js)
 
     def test_what_is_held_is_not_offered_and_only_reports_are_ticked(self):
         js = read("extension", "send.js")
@@ -46,10 +46,14 @@ class Extension(unittest.TestCase):
     def test_the_sender_can_say_type_and_year_and_send_a_file_from_the_computer(self):
         js, html = read("extension", "send.js"), read("extension", "send.html")
         self.assertIn('sent_type: doc.kind && doc.kind.value || null, sent_year: year', js)
-        self.assertIn('"type: let lanterN decide"', js)                                   # optional: nothing chosen, nothing said
+        self.assertIn('"type: let lantrNa decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.6.2"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.6.2", read("extension", "config.js"))
+        self.assertIn('"version": "0.7.1"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.7.1", read("extension", "config.js"))
+        self.assertIn('rpc("page_capture", { company: company.id, url: pageUrl(), title: got.title, body: got.text, client: CLIENT })', js)   # 0.7.0: Send this page
+        self.assertIn('id="capture"', read("extension", "send.html")); self.assertIn("func: pageText", js)
+        self.assertIn("if (samePage && !sure) continue;", js)                              # 0.6.4: the page's own filter links are not documents
+        self.assertNotIn("if (d.held) { box.disabled = true;", js)                         # 0.6.4: what is held can be sent again
         # 0.6.2: on a document's own tab (a file host, no ".pdf" in the address) no company is said to be missing
         self.assertIn('if (!guess && /^https?:/.test(TAB.url) && !tabIsDoc) {', js); self.assertIn('$("deeper").hidden = tabIsDoc ||', js)
 

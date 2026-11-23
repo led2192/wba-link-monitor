@@ -31,10 +31,11 @@ Env: AIRTABLE_TOKEN, AIRTABLE_BASE, AIRTABLE_LIBRARY_TABLE (default report_libra
 """
 import argparse, os, sys, time, base64, collections
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import quote, urlsplit, unquote
+from urllib.parse import quote, urlsplit, unquote, urlparse
 
 from monitor_core import airtable_request   # retrying Airtable helper (reads, writes, uploads)
 import requests
+import tls_chain
 
 API = "https://api.airtable.com/v0"
 CONTENT_API = "https://content.airtable.com/v0"   # upload endpoint lives on a different host
@@ -87,14 +88,45 @@ def select_missing(base, token, table, attach_field, status_field, types, year_m
     return out
 
 
+TLS_KINDS = [                       # the first that matches, in this order
+    ("error_tls_chain", ("unable to get local issuer", "unable to get issuer", "unable to verify the first")),
+    ("error_tls_expired", ("certificate has expired", "not yet valid")),
+    ("error_tls_name", ("hostname mismatch", "doesn't match", "does not match", "ip address mismatch")),
+    ("error_tls_self_signed", ("self-signed", "self signed")),
+    ("error_tls_old", ("handshake failure", "unsafe legacy renegotiation", "wrong version number", "unsupported protocol",
+                       "dh key too small", "wrong signature type", "no protocols available", "tlsv1 alert", "sslv3 alert")),
+    ("error_tls_cut", ("eof occurred", "unexpected eof", "connection reset")),
+]
+
+
+def tls_kind(text):
+    """Which failure of the secure connection, from the error's text. error_tls_chain: the site sends its own
+    certificate without the one that signed it, which a browser fetches and this script does not (the only kind
+    that can be repaired on our side without trusting less). error_tls_expired, error_tls_name (the certificate is
+    of another name), error_tls_self_signed: the site's own fault. error_tls_old: a protocol or cipher no longer
+    accepted. error_tls_cut: the site closed during the handshake. error_tls: none of these."""
+    text = (text or "").lower()
+    for kind, needles in TLS_KINDS:
+        if any(n in text for n in needles):
+            return kind
+    return "error_tls"
+
+
+def host_of(url):
+    try:
+        return (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
 def why_failed(e):
     """The kind of a failed request, from its exception: error_dns (the name does not resolve: the site is gone
-    or moved), error_timeout, error_tls (certificate), error_refused, error_reset, error_connection,
+    or moved), error_timeout, error_tls and its kinds (tls_kind), error_refused, error_reset, error_connection,
     error_redirects, error_bad_url, error_other."""
     ex = requests.exceptions
     text = str(e).lower()
     if isinstance(e, ex.SSLError):
-        return "error_tls"
+        return tls_kind(text)
     if isinstance(e, ex.Timeout):
         return "error_timeout"
     if isinstance(e, ex.TooManyRedirects):
@@ -115,10 +147,23 @@ def why_failed(e):
 
 
 def download(url):
-    """Return (bytes, 'ok') or (None, reason)."""
+    """Return (bytes, 'ok') or (None, reason). A site that sends its certificate without the one that signed it
+    (error_tls_chain) is read once more with the chain completed as a browser does (tls_chain.py: nothing more is
+    trusted); if that fails too the reason stays error_tls_chain."""
     try:
-        r = requests.get(url, headers={"User-Agent": UA}, timeout=25,
-                         stream=True, allow_redirects=True)
+        try:
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=25,
+                             stream=True, allow_redirects=True)
+        except requests.exceptions.SSLError as e:
+            if tls_kind(str(e)) != "error_tls_chain":
+                raise
+            r = None
+            try:
+                r = tls_chain.get(url, headers={"User-Agent": UA}, timeout=25, stream=True, allow_redirects=True)
+            except Exception:
+                r = None
+            if r is None:
+                return None, "error_tls_chain"
         sc = r.status_code
         if sc in (401, 403): r.close(); return None, "forbidden"
         if sc in (404, 410): r.close(); return None, "not_found"
@@ -191,6 +236,7 @@ def main():
         return
 
     counts = collections.Counter()
+    hosts = collections.defaultdict(set)         # kind of failure -> the sites it came from (only their number is printed)
     pending = []
     done = 0
     for i in range(0, len(rows), CHUNK):
@@ -209,6 +255,7 @@ def main():
                 # success -> file present (no status); failed upload -> leave empty to retry
             else:
                 counts[reason] += 1
+                hosts[reason].add(host_of(r[1]))
                 st = REASON_TO_STATUS.get(reason)        # other/error -> None -> retry next run
                 if st:
                     pending.append((rid, st))
@@ -223,7 +270,7 @@ def main():
     first = ["attached", "too_big", "not_found", "forbidden", "not_pdf", "upload_failed"]
     for k in first + sorted(k for k in counts if k not in first):           # then each kind of failure: error_dns, http_503...
         if counts.get(k):
-            print(f"  {k:18} {counts[k]}")
+            print(f"  {k:22} {counts[k]:6}" + (f"   from {len(hosts[k])} sites" if hosts.get(k) else ""))
     print("=" * 50)
     print(f"recovered {counts['attached']} files; "
           f"marked {sum(counts[r] for r in REASON_TO_STATUS)} rows with a terminal status.")

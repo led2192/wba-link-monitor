@@ -346,6 +346,7 @@ def side_jobs(run=subprocess.run):
     # search, it starts the Fast lane workflow (full text, load, meaning index for those documents only)
     for name, cmd in (("add_companies", [sys.executable, "add_companies.py", "--commit", "--ids-file", ids_file]),
                       ("browser_uploads", [sys.executable, "browser_uploads.py", "--commit"]),
+                      ("doc_fixes", [sys.executable, "doc_fixes.py", "--commit"]),          # the owner's corrections from the admin list (19 Nov 2026)
                       ("fast_lane", [sys.executable, "fast_lane.py", "--dispatch"])):
         try:
             r = run(cmd, timeout=900)

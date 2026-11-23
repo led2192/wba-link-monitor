@@ -6,3 +6,5 @@ langdetect
 cryptography
 psycopg[binary]
 numpy
+certifi
+rjsmin

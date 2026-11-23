@@ -1,6 +1,18 @@
 [
   {"workflow": "load_supabase.yml", "name": "Evidence database load", "at": ["01:41", "19:41"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "build_fulltext.yml", "name": "Build full text (the nightly reading of new documents)", "at": ["21:37"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "sustainability_class.yml", "name": "Sustainability class (after the nightly reading of new documents)", "at": ["23:05"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "evidence_chunks.yml", "name": "Evidence passages (after the nightly reading)", "at": ["23:06"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "mention_search.yml", "name": "Mention search (after the nightly reading)", "at": ["23:07"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "fiscal_years.yml", "name": "Fiscal years (after the nightly reading)", "at": ["23:08"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "pub_dates.yml", "name": "Publication dates (after Fiscal years)", "at": ["23:50"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "load_companies.yml", "name": "Company profiles (after each Evidence database load)", "at": ["01:58", "19:58"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "server_own_index.yml", "name": "Server own index, slice 1 of 2 (policies and codes by meaning)", "at": ["22:13"], "inputs": {"as_scheduled": "true", "partition": "0/2", "threads": "7", "minutes": "450"}},
+  {"workflow": "server_own_index.yml", "name": "Server own index, slice 2 of 2", "at": ["22:14"], "inputs": {"as_scheduled": "true", "partition": "1/2", "threads": "7", "minutes": "450"}},
   {"workflow": "propose_values.yml", "name": "Propose values (the nightly pass)", "at": ["03:30"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "library_mirror.yml", "name": "Library mirror", "at": ["04:43"], "inputs": {"as_scheduled": "true"}},
-  {"workflow": "server_meaning.yml", "name": "Server meaning (the nightly refresh of the passages)", "at": ["02:23"], "inputs": {"as_scheduled": "true"}}
+  {"workflow": "server_meaning.yml", "name": "Server meaning (the nightly refresh of the passages)", "at": ["02:23"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "job_state.yml", "name": "Job state (the runs, for the Admin panel)", "at": ["00:20", "03:20", "06:20", "09:20", "12:20", "15:20", "18:20", "21:20"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "page_kinds.yml", "name": "Page kinds (contents and index pages of the new documents)", "at": ["05:41"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "label_docs.yml", "name": "Label documents (type, language and title for new documents with none)", "at": ["00:50", "01:50", "02:50", "03:50", "04:50", "05:50", "06:50", "07:50", "08:50", "09:50", "10:50", "11:50", "12:50", "13:50", "14:50", "15:50", "16:50", "17:50", "18:50", "19:50", "20:50", "21:50", "22:50", "23:50"], "inputs": {"as_scheduled": "true"}}
 ]

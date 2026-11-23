@@ -10,6 +10,9 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "set by lantrNa's clock (server/clock.json): run as the nightly run does"
+        default: "false"
       mode:
         description: "dry_run or commit"
         default: "dry_run"
@@ -28,16 +31,17 @@ concurrency:
 jobs:
   evidence:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lantern]      # on lantrNa's server since the move of 22 Nov 2026 (GitHub's machines before)
     timeout-minutes: 330
     permissions:
       contents: read
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
       - run: pip install -r requirements.txt
       - name: Evidence passages
         env:
@@ -48,7 +52,7 @@ jobs:
           TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
           TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then ARGS="--commit --limit 3000"
+          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ inputs.as_scheduled }}" = "true" ]; then ARGS="--commit --limit 3000"
           elif [ "${{ github.event_name }}" = "pull_request" ]; then ARGS="--limit 40"
           else ARGS="--limit ${{ inputs.limit }}"; [ "${{ inputs.mode }}" = "commit" ] && ARGS="$ARGS --commit"; [ "${{ inputs.all }}" = "true" ] && ARGS="$ARGS --all"; fi
           python evidence_chunks.py $ARGS

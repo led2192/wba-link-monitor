@@ -1,0 +1,48 @@
+# Marks the pages that are not content (a table of contents, a GRI index) in the evidence database (page_kinds.py),
+# so the search can put them down the list. Each document is read once; every night the new ones. Prints counts only.
+name: Page kinds
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "read the documents not read yet (off = only say how far the reading is)"
+        type: boolean
+        default: false
+      as_scheduled:
+        description: "set by lanterN's clock (server/clock.json, 05:41 UTC, after the night's load): the same as commit"
+        default: "false"
+      minutes:
+        description: "minutes of reading"
+        default: "40"
+
+concurrency:
+  group: page-kinds
+  cancel-in-progress: false
+
+jobs:
+  mark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Mark
+        run: |
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.commit }}" = "true" ]; then
+            python page_kinds.py --commit --minutes "${MINUTES:-40}"
+          else
+            python page_kinds.py
+          fi
+        env:
+          MINUTES: ${{ inputs.minutes }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: ${{ (inputs.as_scheduled == 'true' || inputs.commit) && 'true' || 'false' }}

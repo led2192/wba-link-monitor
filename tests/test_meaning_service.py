@@ -115,6 +115,13 @@ class Service(unittest.TestCase):
         self.assertIn("method POST", INSTALL)
         self.assertNotIn("path /health", INSTALL)                                                 # the health route is not passed on by the web server
         self.assertIn("caddy validate", INSTALL)
+        site = INSTALL.split("\nsite() {")[1].split("\n}\n")[0]                                  # the page under the owner's name (19 Nov 2026)
+        self.assertIn("Caddyfile.before-site", site); self.assertIn("Put back as it was.", site)   # an invalid configuration never stays
+        self.assertIn('points_here "$HOST" ||', site); self.assertIn("run the workflow Search page first", site)
+        self.assertIn("rewrite @home /search.html", INSTALL); self.assertIn("respond 405", INSTALL)
+        wf = open(os.path.join(HERE, ".github", "workflows", "search_page.yml"), encoding="utf-8").read()
+        self.assertIn("runs-on: [self-hosted, lantern]", wf); self.assertNotIn("pull_request", wf)
+        self.assertEqual(wf.count("placeholders left in the extension"), 2)                        # both copies are built the same way
         self.assertIn("Nothing opened.", INSTALL)                                                 # the name must point here before a certificate is asked for
         for guard in ("IPAddressDeny=any", "TasksMax=200", "CapabilityBoundingSet=", "connection limit 6"):
             self.assertIn(guard, INSTALL)
@@ -237,3 +244,45 @@ class Link(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheWebServerLetsTheDocsThrough(unittest.TestCase):
+    def test_both_routes_are_passed_on(self):
+        sh = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server", "service_install.sh"), encoding="utf-8").read()
+        self.assertIn("path /near /docs", sh)          # 22 Nov 2026: the service answered /docs and the web server in front of it did not pass it on
+
+
+class Documentation(unittest.TestCase):
+    """The documentation path of the door: behind the same secret, plain names only, the database untouched."""
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        for name, text in (("README.md", "intro\n# The index\nbody"), ("server.md", "# The server\ntext"), ("notes.txt", "no"), (".hidden.md", "no")):
+            open(os.path.join(self.dir, name), "w", encoding="utf-8").write(text)
+        os.symlink("/etc/hostname", os.path.join(self.dir, "link.md"))
+        self.old = S.DOCS_DIR; S.DOCS_DIR = self.dir
+
+    def tearDown(self):
+        S.DOCS_DIR = self.old
+
+    def test_the_list_and_one_document(self):
+        got = S.docs_answer(b"{}")
+        self.assertEqual([(d["name"], d["title"]) for d in got["docs"]], [("README.md", "The index"), ("server.md", "The server")])   # not the text file, the hidden one or the link
+        self.assertEqual(S.docs_answer(b'{"name": "server.md"}')["text"], "# The server\ntext")
+        self.assertTrue(S.docs_answer(b'{"name": "absent.md"}')["missing"])
+        self.assertTrue(S.docs_answer(b'{"name": "link.md"}')["missing"])                    # a link is never followed
+
+    def test_only_a_plain_name_is_taken(self):
+        for bad in (b'{"name": "../etc/passwd"}', b'{"name": "a/b.md"}', b'{"name": "x.txt"}', b'{"name": 5}', b'{"name": "a.md", "more": 1}', b"[]", b"not json", b'{"name": "..md"}'):
+            with self.assertRaises(S.Refused, msg=bad):
+                S.docs_answer(bad)
+
+    def test_the_door_asks_for_the_secret_and_never_the_database(self):
+        class NoDatabase:
+            def run(self, *a, **k): raise AssertionError("the database was asked")
+        (status, kind, data), _, logs = ask(path="/docs", body=b"{}", pool=NoDatabase())
+        self.assertEqual((status, kind), (200, "application/json")); self.assertEqual(len(json.loads(data)["docs"]), 2)
+        self.assertEqual(ask(path="/docs", body=b"{}", secret="wrong" * 8, pool=NoDatabase())[0][0], 401)
+        self.assertEqual(ask(path="/docs", body=b'{"name": "../x.md"}', pool=NoDatabase())[0][0], 400)
+        self.assertEqual(ask(method="GET", path="/docs", pool=NoDatabase())[0][0], 404)
+        self.assertNotIn("The index", " ".join(str(x) for l in logs for x in l))                # the log holds counts, not text

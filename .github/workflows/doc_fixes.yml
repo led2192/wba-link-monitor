@@ -1,0 +1,40 @@
+# The owner's corrections from the admin list "Documents to fetch" (public.doc_fixes) applied to report_library
+# (doc_fixes.py): discard with a reason, or the type and the year put right. Run by the Scan now watch about every
+# 15 minutes (scan_now.side_jobs), and here by hand: no schedule, so that two runs never write at the same moment.
+# Dry run on a PR.
+name: Document fixes
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "commit"
+  pull_request:
+    paths: [doc_fixes.py, .github/workflows/doc_fixes.yml]
+
+concurrency:
+  group: doc-fixes
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Apply the fixes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.mode }}" = "dry_run" ]; then python doc_fixes.py
+          else python doc_fixes.py --commit; fi
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
