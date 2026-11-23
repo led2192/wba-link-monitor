@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-23: The server's policies index is not searched yet
+The index of policies and codes by meaning was complete on the server (42,873 of 42,909 documents) and `own_live` would make the search read it. Compared with the search exam before and after on the same 250 answers: two attributes lost one answer each (Scope 1 on the 24 pages, 89% to 84%; Scope 2 market-based on the eight pages, 61% to 56%), eight were the same, none gained. One answer of 18 or 19 is more than 3 points, so by the no-going-back rule the setting went back to off. The two exams ran on a database busy with other jobs, where a search by meaning can time out and fall back, so the loss may be noise: the comparison is repeated on a quiet database (off, then on, the same night) and the setting follows that result. Rejected: keeping it on because the difference is small and probably noise (the rule exists for exactly that temptation).
+
 ### 2026-11-23: A term's examples are sentences of reports, chosen by rule, removed by the owner
 The owner asked for examples on the terms that gain from one. Decided: the example is how a company writes about the term in its own report, with company, year and page, because that is what the library has and a glossary has not. The sentence is chosen by rule (prose, a cue that it explains or applies the term, a main report, one a company), not written or chosen by a model: no cost, and nothing is invented. Rejected: approval of every example before it shows (1,400 terms by three is work nobody will do); instead the examples show to the owner first, he removes the poor ones where he meets them, and option `reference_examples` opens them to everyone when the quality is seen. A term with no sentence good enough has no example.
 
