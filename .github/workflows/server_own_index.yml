@@ -1,0 +1,95 @@
+# Passages by meaning for the documents kept on the server only: policies, codes of conduct and human rights
+# policies of every year (server_own_index.py, docs/server.md). Computed on the server's processors and written to
+# the server's database; Supabase is only read. Not searched until "live" is switched on. Started by hand, and by the
+# clock on the server twice a day for each of three slices (server/clock.json, 21 Nov 2026): a run stops after its
+# minutes and the next continues, and once everything is in, a run finds nothing left and ends in a minute, so new
+# policies are taken in the day they are read.
+name: Server own index
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_scheduled:
+        description: "what the clock starts twice a day for each slice: continue with commit (server/clock.json)"
+        type: boolean
+        default: false
+      threads:
+        description: "processor threads for the model (three slices at once: 5 each on the 16 cores)"
+        default: "5"
+      commit:
+        description: "embed and write (unticked: say what is left, embed nothing)"
+        type: boolean
+        default: false
+      remaining:
+        description: "only say how many documents are done and left"
+        type: boolean
+        default: false
+      limit:
+        description: "documents this run (0 = all that are left)"
+        default: "0"
+      minutes:
+        description: "stop cleanly after this many minutes (the next run continues)"
+        default: "660"
+      partition:
+        description: "k/N: this run takes slice k of N of the documents (two runs can share the work: 0/2 and 1/2)"
+        default: ""
+      live:
+        description: "switch the server-only documents into or out of the search (on / off), and stop; needs commit"
+        default: ""
+
+concurrency:
+  group: server-own-index-${{ inputs.partition || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools (installed once, then only checked)
+        run: |
+          V=/srv/lantern/venv
+          if [ ! -x "$V/bin/python" ] || ! "$V/bin/python" -c "import sentence_transformers" 2>/dev/null; then
+            sudo mkdir -p /srv/lantern && sudo chown "$(id -un)" /srv/lantern
+            python3 -m venv "$V" 2>/dev/null || { sudo apt-get update -q >/dev/null; sudo apt-get install -y -q python3-venv >/dev/null; python3 -m venv "$V"; }
+            "$V/bin/pip" install -q --upgrade pip
+            "$V/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cpu
+          fi
+          "$V/bin/pip" install -q -r requirements.txt sentence-transformers
+      - name: Index
+        run: |
+          # a role of its own for the run, with a password made here, never printed or stored
+          PW=$(openssl rand -hex 24); echo "::add-mask::$PW"
+          sudo -u postgres psql -d lantern -Atc "select 1 from pg_roles where rolname = 'lantern_own'" | grep -q 1 || sudo -u postgres createuser lantern_own
+          printf "alter role lantern_own login password '%s';\n" "$PW" | sudo -u postgres psql -d lantern -q
+          # the schema and its tables belong to the role of the nightly refresh (lantern_load): this run's role is made a
+          # member of it, so both may read and write the same tables, and what this run creates is handed to it
+          sudo -u postgres psql -d lantern -Atc "select 1 from pg_roles where rolname = 'lantern_load'" | grep -q 1 || sudo -u postgres createuser lantern_load
+          sudo -u postgres psql -d lantern -qc "grant create on database lantern to lantern_load; grant lantern_load to lantern_own"
+          sudo -u postgres psql -d lantern -qc "create schema if not exists meaning authorization lantern_load"
+          sudo -u postgres psql -d lantern -qc "create table if not exists meaning.settings (name text primary key, is_on boolean not null default false, changed timestamptz not null default now()); alter table meaning.settings owner to lantern_load"
+          export LOCAL_DB_URL="postgresql://lantern_own:$PW@127.0.0.1:5432/lantern"
+          ARGS=(--limit "$LIMIT" --minutes "$MINUTES")
+          [ -n "$PARTITION" ] && ARGS+=(--partition "$PARTITION")
+          [ "$COMMIT" = "true" ] && ARGS+=(--commit)
+          [ "$REMAINING" = "true" ] && ARGS+=(--remaining)
+          [ "$LIVE" = "on" ] || [ "$LIVE" = "off" ] && ARGS+=(--live "$LIVE")
+          /srv/lantern/venv/bin/python server_own_index.py "${ARGS[@]}"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          QA_COMMIT: ${{ (inputs.commit || inputs.as_scheduled) && 'true' || 'false' }}
+          LIMIT: ${{ inputs.limit || '0' }}
+          MINUTES: ${{ inputs.minutes || '660' }}
+          PARTITION: ${{ inputs.partition }}
+          COMMIT: ${{ (inputs.commit || inputs.as_scheduled) && 'true' || 'false' }}
+          OMP_NUM_THREADS: ${{ inputs.threads || '5' }}
+          MKL_NUM_THREADS: ${{ inputs.threads || '5' }}
+          TOKENIZERS_PARALLELISM: "false"
+          REMAINING: ${{ inputs.remaining }}
+          LIVE: ${{ inputs.live }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+      - name: The role can no longer log in
+        if: always()
+        run: sudo -u postgres psql -d lantern -qc "alter role lantern_own nologin password null"

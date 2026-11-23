@@ -9,7 +9,7 @@ name: Search page
 on:
   push:
     branches: [main]
-    paths: [site/**, extension/**, .github/workflows/search_page.yml]
+    paths: [site/**, extension/**, build_page.py, .github/workflows/search_page.yml]
   workflow_dispatch:
 
 permissions:
@@ -36,10 +36,13 @@ jobs:
         run: |
           test -n "$KEY" || { echo "Set the repository variable SUPABASE_PUBLISHABLE_KEY first"; exit 1; }
           mkdir -p public
-          for f in index.html search.html bot.html send-to-lantern.html; do
+          for f in index.html search.html bot.html send-to-lantern.html terms.html; do
             sed -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" site/$f > public/$f
             grep -q "__SUPABASE_" public/$f && { echo "placeholders left in $f"; exit 1; } || true
           done
+          # served without the source's comments (build_page.py); the deploy stops if a page would lose what it needs
+          pip install -q rjsmin
+          python3 build_page.py public/index.html public/search.html public/bot.html public/send-to-lantern.html public/terms.html --keep "lantern v" --keep "rpc/link_enter"
       - name: Build the browser extension (Send to lanterN) with the same two values
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -48,6 +51,7 @@ jobs:
           mkdir -p build/send-to-lantern && cp extension/* build/send-to-lantern/
           sed -i -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" build/send-to-lantern/config.js
           grep -q "__SUPABASE_" build/send-to-lantern/config.js && { echo "placeholders left in the extension"; exit 1; } || true
+          python3 build_page.py build/send-to-lantern/*.js build/send-to-lantern/*.html --keep "send-to-lantern "
           (cd build && zip -qr ../public/send-to-lantern.zip send-to-lantern)
           # the download link carries the version: a browser that kept the last zip served 0.4.2 after 0.4.3 was out (13 Nov 2026)
           V=$(python3 -c "import json;print(json.load(open('extension/manifest.json'))['version'])")
@@ -59,3 +63,48 @@ jobs:
           path: public
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # The same files on lantrNa's own server (19 Nov 2026), where the web server serves them under the owner's domain
+  # once "Server service, site NAME" has been run. Started by a push to main or by hand, never by a pull request.
+  server:
+    runs-on: [self-hosted, lantern]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fill in the project address and the publishable key
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          test -n "$KEY" || { echo "Set the repository variable SUPABASE_PUBLISHABLE_KEY first"; exit 1; }
+          mkdir -p public
+          for f in index.html search.html bot.html send-to-lantern.html terms.html; do
+            sed -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" site/$f > public/$f
+            grep -q "__SUPABASE_" public/$f && { echo "placeholders left in $f"; exit 1; } || true
+          done
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          /srv/lantern/venv/bin/pip install -q rjsmin
+          /srv/lantern/venv/bin/python build_page.py public/index.html public/search.html public/bot.html public/send-to-lantern.html public/terms.html --keep "lantern v" --keep "rpc/link_enter"
+      - name: Build the browser extension (Send to lanterN) with the same two values
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          mkdir -p build/send-to-lantern && cp extension/* build/send-to-lantern/
+          sed -i -e "s#__SUPABASE_URL__#${SUPABASE_URL%/}#" -e "s#__SUPABASE_PUBLISHABLE_KEY__#${KEY}#" build/send-to-lantern/config.js
+          grep -q "__SUPABASE_" build/send-to-lantern/config.js && { echo "placeholders left in the extension"; exit 1; } || true
+          /srv/lantern/venv/bin/python build_page.py build/send-to-lantern/*.js build/send-to-lantern/*.html --keep "send-to-lantern "
+          (cd build && python3 -m zipfile -c ../public/send-to-lantern.zip send-to-lantern)   # public/send-to-lantern.zip, as the job above; the server has no zip
+          # the download link carries the version: a browser that kept the last zip served 0.4.2 after 0.4.3 was out (13 Nov 2026)
+          V=$(python3 -c "import json;print(json.load(open('extension/manifest.json'))['version'])")
+          sed -i -e "s#href=\"send-to-lantern.zip\">Download the extension (zip)#href=\"send-to-lantern.zip?v=$V\">Download the extension, version $V (zip)#" public/send-to-lantern.html
+          grep -q "send-to-lantern.zip?v=$V" public/send-to-lantern.html || { echo "the download link was not given its version"; exit 1; }
+      - name: Copy the files to the web server's folder
+        run: |
+          test -s public/search.html && test -s public/send-to-lantern.zip
+          sudo install -d -m 755 /srv/lantern/www.new
+          sudo cp -r public/. /srv/lantern/www.new/
+          sudo chmod -R a+rX /srv/lantern/www.new
+          sudo rm -rf /srv/lantern/www.old; if [ -d /srv/lantern/www ]; then sudo mv /srv/lantern/www /srv/lantern/www.old; fi
+          sudo mv /srv/lantern/www.new /srv/lantern/www
+          echo "files in the folder: $(find /srv/lantern/www -type f | wc -l)"

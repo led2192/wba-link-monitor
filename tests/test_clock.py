@@ -69,6 +69,23 @@ class Table(unittest.TestCase):
             self.assertIn("as_scheduled:", src, e["workflow"])                           # it can be started as its scheduled run
             self.assertNotIn("schedule:", src, e["workflow"] + " still has a schedule of its own: it would run twice")
 
+    def test_a_job_that_follows_a_job_of_the_clock_is_on_the_clock_too(self):
+        """23 Nov 2026: GitHub starts no follow-up run after a run started with the repository's own token, which is how
+        the clock starts jobs. Four jobs did not run for two nights. A workflow that follows (workflow_run) one the clock
+        starts must be started by the clock as well (Scores is switched off on purpose)."""
+        import glob, re
+        flows = os.path.join(ROOT, ".github", "workflows")
+        on_clock = {e["workflow"] for e in C.table()}
+        names = {re.search(r"^name:\s*(.+)$", open(os.path.join(flows, w), encoding="utf-8").read(), re.M).group(1).strip().strip('"'): w for w in on_clock}
+        for path in glob.glob(os.path.join(flows, "*.yml")):
+            src = open(path, encoding="utf-8").read()
+            m = re.search(r"workflow_run:\s*\n\s*workflows:\s*\[([^\]]*)\]", src)
+            if not m or os.path.basename(path) == "load_scores.yml":
+                continue
+            parents = [p.strip().strip('"') for p in m.group(1).split(",")]
+            if any(p in names for p in parents):
+                self.assertIn(os.path.basename(path), on_clock, os.path.basename(path) + " follows a job the clock starts and is not on the clock")
+
     def test_the_command(self):
         self.assertEqual(C.command(E1, "o/r"), ["gh", "workflow", "run", "a.yml", "--repo", "o/r", "--ref", "main", "-f", "as_scheduled=true"])
 

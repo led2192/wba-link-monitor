@@ -179,7 +179,9 @@ def counts(src, dst, schema):
     s.execute("set statement_timeout = '30min'")
     s.execute("select library_id, count(*) from public.chunks where embedding is not null group by 1")
     theirs = dict(s.fetchall())
-    d.execute(f"select library_id, count(*) from {schema}.chunks group by 1")
+    # documents whose passages live on the server only (server_own_index.py) are not Supabase's to compare
+    d.execute(f"alter table {schema}.chunk_filters add column if not exists own boolean not null default false")
+    d.execute(f"select c.library_id, count(*) from {schema}.chunks c where not exists (select 1 from {schema}.chunk_filters f where f.library_id = c.library_id and f.own) group by 1")
     ours = dict(d.fetchall())
     d.execute(f"select library_id from {schema}.chunk_filters where not live")
     dead = [r[0] for r in d.fetchall()]
@@ -215,17 +217,55 @@ def refresh(src, dst, schema, commit, out=print):
         for block in source:
             target.write(block)
     d.execute(f"insert into {schema}.chunk_filters (library_id, wba_id, year, doc_type, live) select library_id, wba_id, year, doc_type, true from fresh "
-              f"on conflict (library_id) do update set wba_id = excluded.wba_id, year = excluded.year, doc_type = excluded.doc_type, live = true")
-    d.execute(f"update {schema}.chunk_filters f set live = false where f.live and not exists (select 1 from fresh x where x.library_id = f.library_id)")
+              # a document Supabase holds passages for is Supabase's, whatever its type says today: a report first typed as a
+              # policy can be in both (three were, 22 Nov 2026). Left marked own, it was copied every night and never counted,
+              # so the copy looked different for ever and the remote search was switched off.
+              f"on conflict (library_id) do update set wba_id = excluded.wba_id, year = excluded.year, doc_type = excluded.doc_type, live = true, own = false")
+    d.execute(f"update {schema}.chunk_filters f set live = false where f.live and not f.own and not exists (select 1 from fresh x where x.library_id = f.library_id)")
     dst.commit(); src.rollback()
+    m["own"] = refresh_own(src, dst, schema)
     theirs, ours, dead = counts(src, dst, schema)
     new, changed, gone = drift(theirs, ours, dead)
     m["left"] = len(new) + len(changed)
     if m["left"]:
-        s.execute("update public.search_options set is_on = false where name = 'meaning_remote' and is_on")
+        s.execute("update public.search_options set is_on = false, changed = now(), note = note || ' [off by the refresh]' where name = 'meaning_remote' and is_on")
         m["switched_off"] = s.rowcount > 0
         src.commit()
+    else:
+        # the copy is current again: what a refresh switched off, a refresh switches on. An option the owner switched on
+        # ("on since" in its note) and nobody else switched off (a hand writes "off by the owner" in the note to keep it off).
+        s.execute("update public.search_options set is_on = true, changed = now(), note = replace(note, ' [off by the refresh]', '') "
+                  "where name = 'meaning_remote' and not is_on and note like '%on since%' and note not like '%off by the owner%'")
+        m["switched_on"] = s.rowcount > 0
+        src.commit()
     return m
+
+
+def refresh_own(src, dst, schema):
+    """The documents kept on the server only: company, year and type from Supabase, and live only while the setting
+    own_live is on and Supabase still holds the document. Returns how many there are."""
+    s, d = src.cursor(), dst.cursor()
+    d.execute(f"select count(*) from {schema}.chunk_filters where own")
+    n = d.fetchone()[0]
+    if not n:
+        dst.rollback()
+        return 0
+    d.execute(f"create table if not exists {schema}.settings (name text primary key, is_on boolean not null default false, changed timestamptz not null default now())")
+    d.execute(f"select coalesce((select is_on from {schema}.settings where name = 'own_live'), false)")
+    on = d.fetchone()[0]
+    d.execute("create temp table fresh_own (library_id text primary key, wba_id text, year int, doc_type text) on commit drop")
+    d.execute(f"select array_agg(distinct doc_type) from {schema}.chunk_filters where own")
+    types = [t for t in (d.fetchone()[0] or []) if t and "'" not in t]
+    quoted = ",".join("'" + t + "'" for t in types) or "''"
+    with s.copy(f"copy (select d.library_id, d.wba_id, d.year, d.doc_type from public.documents d where d.doc_type in ({quoted})) to stdout") as source, \
+         d.copy("copy fresh_own from stdin") as target:
+        for block in source:
+            target.write(block)
+    d.execute(f"update {schema}.chunk_filters f set wba_id = x.wba_id, year = x.year, live = %s from fresh_own x where f.own and x.library_id = f.library_id "
+              f"and (f.wba_id, f.year, f.live) is distinct from (x.wba_id, x.year, %s)", (on, on))
+    d.execute(f"update {schema}.chunk_filters f set live = false where f.own and f.live and not exists (select 1 from fresh_own x where x.library_id = f.library_id)")
+    dst.commit(); src.rollback()
+    return n
 
 
 def refresh_report(m, schema, commit):
@@ -235,6 +275,8 @@ def refresh_report(m, schema, commit):
         lines.append(f"Copied again: {m['copied']:,}; left out for an odd name: {m['skipped']:,}. Documents that still differ: {m['left']:,}.")
         if m["left"]:
             lines.append("The copy is NOT current. The option meaning_remote " + ("was switched off: Supabase's own search carries on." if m["switched_off"] else "was already off."))
+        elif m.get("switched_on"):
+            lines.append("The copy is current again: the option meaning_remote, switched off by an earlier refresh, is on again.")
     return lines
 
 

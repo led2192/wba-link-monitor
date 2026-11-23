@@ -10,6 +10,9 @@ on:
       mode:
         description: "dry_run or commit"
         default: "commit"
+      again_known_days:
+        description: "look again at the files called known in the last N days (empty: no)"
+        default: ""
 
 concurrency:
   group: browser-uploads
@@ -29,7 +32,7 @@ jobs:
       - name: Take the files sent
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ inputs.mode }}" = "dry_run" ]; then python browser_uploads.py
-          else python browser_uploads.py --commit; fi
+          else python browser_uploads.py --commit ${{ inputs.again_known_days && format('--again-known {0}', inputs.again_known_days) || '' }}; fi
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}

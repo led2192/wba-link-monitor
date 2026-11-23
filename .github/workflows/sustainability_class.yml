@@ -11,6 +11,9 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "set by lantrNa's clock (server/clock.json): run as the nightly run does"
+        default: "false"
       commit:
         description: "WRITE the fields. Leave OFF for a dry run."
         type: boolean
@@ -33,13 +36,14 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success' ||
       github.event.workflow_run.conclusion == 'failure'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lantern]      # on lantrNa's server since the move of 22 Nov 2026 (GitHub's machines before)
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
       - run: pip install -r requirements.txt
       - name: Classify sustainability disclosure
         env:
@@ -48,7 +52,7 @@ jobs:
           TEXT_STORE_REPO: ${{ vars.TEXT_STORE_REPO }}
           TEXT_STORE_TOKEN: ${{ secrets.TEXT_STORE_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ inputs.as_scheduled }}" = "true" ]; then
             python sustainability_class.py --commit
           else
             ARGS="--limit ${{ inputs.limit }}"

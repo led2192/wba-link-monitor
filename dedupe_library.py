@@ -52,6 +52,7 @@ Env: AIRTABLE_TOKEN, AIRTABLE_BASE, AIRTABLE_LIBRARY_TABLE (default report_libra
 import argparse, collections, csv, json, os, re, sys, time
 from urllib.parse import quote, urlsplit
 
+import keepalive
 from ids import doc_id
 
 API = "https://api.airtable.com/v0"
@@ -108,7 +109,7 @@ def _request(method, url, headers, payload=None, params=None, tries=6):
     delay = 2
     for attempt in range(1, tries + 1):
         try:
-            r = requests.request(method, url, headers=headers, json=payload, params=params, timeout=60)
+            r = keepalive.session().request(method, url, headers=headers, json=payload, params=params, timeout=60)
         except requests.exceptions.RequestException:
             if attempt == tries: raise
             time.sleep(delay); delay = min(delay * 2, 30); continue

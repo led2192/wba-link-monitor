@@ -76,7 +76,8 @@ class AskEval(unittest.TestCase):
         import pathlib
         sql = pathlib.Path(__file__).resolve().parent.parent.joinpath("supabase", "search.sql").read_text()
         self.assertIn("alter table public.ask_log add column if not exists search jsonb;", sql)
-        self.assertIn("jsonb_build_object('q', search_q, 'company', company_filter, 'from', year_from, 'to', year_to, 'type', type_filter, 'vector', qvec is not null))", sql)
+        self.assertIn("jsonb_build_object('q', search_q, 'company', company_filter, 'from', year_from, 'to', year_to, 'type', type_filter, 'vector', qvec is not null,", sql)
+        self.assertIn("'ms_find', round(extract(epoch from t_read - t0)::numeric * 1000), 'ms_read', round(extract(epoch from t_done - t_read)::numeric * 1000)))", sql)   # where the seconds go
 
 
 class SearchTimingLevels(unittest.TestCase):

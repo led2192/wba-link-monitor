@@ -30,8 +30,8 @@ class ServerMeaning(unittest.TestCase):
         low = SCRIPT.lower()
         for word in ("insert into public", "drop table", "alter table public", "truncate public", "create index if not exists chunks_embedding on public", "delete from public"):
             self.assertNotIn(word, low)
-        self.assertEqual(low.count("update public"), 1)                                  # one row, ever: the option switched off when the copy is not current
-        self.assertIn("update public.search_options set is_on = false where name = 'meaning_remote' and is_on", SCRIPT)
+        self.assertEqual(low.count("update public"), 2)                                  # one row, ever: the option, switched off when the copy is not current and on again when it is
+        self.assertIn("update public.search_options set is_on = false, changed = now(), note = note || ' [off by the refresh]' where name = 'meaning_remote' and is_on", SCRIPT)
         self.assertEqual(low.count("delete from"), 1)                                    # the server's own copy of a document, before it is copied again
         self.assertIn('d.execute(f"delete from {schema}.chunks where library_id = any(%s)"', SCRIPT)
         self.assertEqual(SCRIPT.count("truncate {schema}.chunks, {schema}.chunk_filters"), 1)        # the server's copy, and only with --reload

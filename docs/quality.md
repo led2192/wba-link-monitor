@@ -26,12 +26,12 @@ Nothing depends on a person working through failure rows: there are tens of thou
 
 | Code | Automatic owner | Built? |
 | --- | --- | --- |
-| PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane | yes |
+| PAGE_UNREACHABLE | the monitors retry every night; pages that need a browser move to the browser lane; an address that turns out to be a PDF download is marked is_pdf by the browser lane and filed as a document (since 23 Nov 2026) | yes |
 | PAGE_GONE | nightly (Suggest missing report pages): searches the company's site, adds a clear replacement automatically and stops monitoring the gone page; the weekly review handles what stays ambiguous. Gone web-report pages (type sustainability_report) had no owner until 2 Nov 2026 | yes (#54; sustainability_report pages since 2 Nov 2026) |
 | PAGE_BLOCKED, DOC_FETCH_FAIL (blocked) | the office-network runner on the owner's computer, every 2 hours (pc_fetch.py, [pc_runner.md](pc_runner.md)): refused files and refused report pages | yes (#60, once set up) |
 | PAGE_EMPTY, PAGE_UNHARVESTED, DOC_DROPPED | the weekly review fixes the collection rules in code (one fix closes every page on the same platform) | yes |
 | PAGE_WRONG_TYPE | the weekly review fixes the page type and ticks scan_now (up to 20 High pages a week, with PAGE_GONE) | yes (weekly review, since 26 Oct 2026) |
-| DOC_FETCH_FAIL (too_big) | read from the document's link | yes (#47) |
+| DOC_FETCH_FAIL (too_big) | read from the document's link; once its text is read (cover_status ok) the row is only counted (`too_big_read_from_link`), so an open too_big row means the text could not be read either | yes (#47; counted since 23 Nov 2026) |
 | DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every day (OCR scanned covers); broken files stay counted | yes (#57) |
 | DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
 | TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
@@ -101,6 +101,18 @@ Rule changes to the year (`fiscal_year.py`, `date_documents.py`) are gated by `y
 
 ## The ship rule
 A change to a rule or a prompt merges only when, on the evaluation labels, overall accuracy does not fall, accuracy on the classes that move a completeness check does not fall, and no regression case flips from right to wrong. The measurement on a pull request is still its comment (`year_eval.py`, coverage comparison, the reader and element evaluations); the manual and scheduled runs of the evaluators write their scores to `evals` (since 3 Nov 2026), which is the scoreboard to read for trends.
+
+
+## Snapshot: week of 23 Nov 2026 (fifth weekly review)
+Open failures: 72,771 distinct rows (73,781 a week ago): High 51,450, Medium 15,643, Low 5,678. LABEL_CORRECTION 20,033, TYPE_DISAGREE 16,423, DOC_FETCH_FAIL 6,772, DOC_DUPLICATE 5,678, PAGE_UNREACHABLE 5,483, TYPE_MISSING 5,168, PAGE_EMPTY 4,035, CO_GAP 3,558, DOC_UNREADABLE 1,723, DOC_WRONG_ROW 1,565, PAGE_GONE 1,451, PAGE_BLOCKED 555 domains, PAGE_UNHARVESTED 223, DATA_CHECK 79, DOC_FLAGGED 20 (no new flag this week; the 16 checked on 16 Nov close by themselves), RUN_FAILED 5. The first silent closes came this week: 3,464 rows resolved after 30 days unseen (DOC_DUPLICATE 1,300, TYPE_MISSING 841, PAGE_UNREACHABLE 479, CO_GAP 260, DOC_WRONG_ROW 223). Fixed 22, expected 18. No failure marked fixed or resolved came back.
+
+Opened 17 to 23 Nov: 2,457 rows, 472 High (a quiet week; the LABEL_CORRECTION flood stopped after 16 Nov, 32 new). DOC_DUPLICATE 1,058 (Low), PAGE_EMPTY 347 (283 on 18 Nov alone, investor sites read empty for two or three nights, then read again), PAGE_UNREACHABLE 400 (112 High), DOC_WRONG_ROW 168, DOC_FETCH_FAIL 178 (62 High: 39 too_big, 20 of them Gold Fields), TYPE_MISSING 89, PAGE_GONE 61 (53 High), CO_GAP 42, PAGE_BLOCKED 34, TYPE_DISAGREE 27, DATA_CHECK 10.
+
+Two causes found in the open rows, both fixed as pull requests: 842 High DOC_FETCH_FAIL too_big rows are mostly documents whose text was read from the link (27 of 30 sampled), so they are not losses (#736); 1,924 PAGE_UNREACHABLE rows (719 High) carry the detail "200" because a failed browser read kept an old code, and about 200 of the High ones are PDF files watched as pages (#738). Page-level work: 9 High PAGE_GONE rows seen this week reviewed (4 replaced through add_link, 2 expected for a site that refuses robots, 3 left: the pages still open for a person); 2 pages typed "other" retyped and scanned (Kellanova, MN).
+
+Runs: 672 recorded since 16 Nov, 22 failed and 7 partial. 21 of the failures are the fast lane's full-text step on the morning of 18 Nov (09:38 to 12:31 UTC, then fine); 1 is the server's copy of the passages found 3 documents behind (22 Nov). The partial runs are One hop at its time budget. base_health: Problem on 19, 20 and 23 Nov (1 to 2 failed jobs), Check the other days because the Disclosure Library passed 80%: 406,008 records of 500,000 (81.2%, 397,237 on 16 Nov). Model calls cost 0.23 USD in 7 days. Average completeness 82.4%.
+
+Labels this week: 71 cards (16 to 20 Nov), 33 settled. Where the address type and the AI type disagreed (15 settled), the AI was right 10 times, the address once (a GRI index the AI called an annual report), neither 4 (two "not a disclosure", two financial statements). Agreement controls: 5 of 6 right (a one-topic social report both called an Impact Report). Year: wrong on 2 of 25 cards with a true year (92% right). Titles: wrong on 8 of 33 settled cards. No single pair has 10 sure labels yet, so no new proposal; over five weeks the AI's choice keeps winning the disagreements (38 of 63), the address almost never (3), neither 22.
 
 ## Snapshot: week of 16 Nov 2026 (fourth weekly review)
 Open failures: 73,781 distinct rows (46,764 a week ago). LABEL_CORRECTION 20,001, TYPE_DISAGREE 16,456, DOC_FETCH_FAIL 6,735, DOC_DUPLICATE 5,920, TYPE_MISSING 5,920, PAGE_UNREACHABLE 5,572, CO_GAP 3,776, PAGE_EMPTY 3,730, DOC_UNREADABLE 1,784, DOC_WRONG_ROW 1,620, PAGE_GONE 1,432, PAGE_BLOCKED 523 domains, PAGE_UNHARVESTED 220, DATA_CHECK 69, DOC_FLAGGED 20 (16 new, all checked and cleared on 16 Nov), RUN_FAILED 3. Fixed 22, expected 16. No failure marked fixed came back.

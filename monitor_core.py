@@ -23,6 +23,8 @@ import re, time, hashlib
 from urllib.parse import urljoin, urlsplit, parse_qsl, urlencode, quote
 
 import requests
+
+import keepalive
 from bs4 import BeautifulSoup
 import tldextract
 
@@ -441,7 +443,7 @@ def airtable_request(method, url, headers, payload=None, params=None, timeout=60
     delay = 2
     for attempt in range(1, tries + 1):
         try:
-            r = requests.request(method, url, headers=headers, json=payload, params=params, timeout=timeout)
+            r = keepalive.session().request(method, url, headers=headers, json=payload, params=params, timeout=timeout)   # one connection for the run: keepalive.py
         except requests.exceptions.Timeout:
             if attempt == tries:
                 raise

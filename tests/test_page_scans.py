@@ -94,7 +94,8 @@ class AlreadySent(unittest.TestCase):
         known = SQL[SQL.index("create or replace function public.upload_known("):SQL.index("create or replace function public.upload_done(")]
         self.assertIn("insert into public.browser_upload_urls (wba_id, url, upload_id) values (co, left(src, 1000), row.id) on conflict do nothing;", begin)
         self.assertLess(begin.index("insert into public.browser_upload_urls"), begin.index("return jsonb_build_object('again', true);"))
-        self.assertIn("from public.browser_upload_urls a where a.wba_id = co and a.url = x.u", known)
+        self.assertIn("from public.browser_upload_urls a join public.browser_uploads b on b.id = a.upload_id where a.wba_id = co and a.url = x.u", known)
+        self.assertEqual(known.count("b.at > now() - interval '2 days'"), 2)                  # held, unless the document it became is still unread two days later
         self.assertIn("alter table public.browser_upload_urls enable row level security;", SQL)
         self.assertLess(SQL.index("create table if not exists public.browser_upload_urls"), SQL.index("create or replace function public.upload_begin("))
 
