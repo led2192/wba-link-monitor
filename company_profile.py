@@ -107,10 +107,11 @@ def tsquery(words):
 def told(company, question, pages):
     """What the model reads: the question, the answer's shape, and the excerpts numbered from 1."""
     q = QUESTIONS[question]
-    excerpts = "\n\n".join(f"[{n}] {text}" for n, (_, _, text) in enumerate(pages, 1))
+    excerpts = "\n\n".join(f"[{n}] {text}" for n, (_, _, text) in enumerate(pages, 1)); first = next(iter(q["fields"]))
     return (f"These are excerpts of the reports of the company {company}. Answer about {company} itself, from the excerpts only, never from memory. "
             f"{q['ask']} Use null, or an empty list, for anything the excerpts do not state. In \"from\", give for each field you filled the "
-            f"number of the excerpt that states it. Reply with JSON only, with exactly these fields: {', '.join(q['fields'])}, from.\n\nExcerpts:\n\n{excerpts}")
+            f"number of the excerpt that states it. Reply with JSON only, with exactly these fields: {', '.join(q['fields'])}, from. "
+            f'"from" is an object of field name to excerpt number, for example {{"{first}": 2}}.' + f"\n\nExcerpts:\n\n{excerpts}")
 
 
 def clean(kind, value, year_now):
@@ -134,6 +135,29 @@ def clean(kind, value, year_now):
     return v[:260] if v and v.lower() not in blank else None
 
 
+def excerpt_number(n):
+    """The excerpt a field was read on, as the models write it: 2, "2", "[2]", [2, 3] (the first). None when it is none of these."""
+    if isinstance(n, list) and n:
+        n = n[0]
+    if isinstance(n, bool):
+        return None
+    if isinstance(n, int):
+        return n
+    m = re.fullmatch(r"\s*\[?\s*(\d{1,3})\s*\]?\s*", n) if isinstance(n, str) else None
+    return int(m.group(1)) if m else None
+
+
+def why_nothing(reply):
+    """Why a reply gave no field, for the run's counters (never the reply itself): 'not JSON', 'no from', or 'no field with its excerpt'."""
+    try:
+        data = json.loads(reply)
+    except (TypeError, ValueError):
+        return "not JSON"
+    if not isinstance(data, dict) or not isinstance(data.get("from"), dict) or not data.get("from"):
+        return "no from"
+    return "no field with its excerpt"
+
+
 def rows_of(question, reply, pages, year_now):
     """[(field, value, library_id, page)] for the fields the reply fills from an excerpt that exists. A field with no
     excerpt named, or an excerpt number that was not shown, is left out: a value with no page cannot be checked."""
@@ -147,8 +171,8 @@ def rows_of(question, reply, pages, year_now):
     out = []
     for name, kind in QUESTIONS[question]["fields"].items():
         value = clean(kind, data.get(name), year_now)
-        n = src.get(name)
-        if value is None or not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= len(pages):
+        n = excerpt_number(src.get(name))
+        if value is None or n is None or not 1 <= n <= len(pages):
             continue
         out.append((name, value, pages[n - 1][0], pages[n - 1][1]))
     return out
@@ -183,7 +207,7 @@ def paid_model():
     system = "You read excerpts of a company's own reports and reply with one JSON object and nothing else. You use only what the excerpts state."
 
     def ask(text, sch):
-        return json_of(model_reader.call([{"role": "user", "content": text}], usage, system=system, max_tokens=900))
+        return json_of(model_reader.call([{"role": "user", "content": text}], usage, system=system, max_tokens=1800))
     return ask, lambda: model_reader.cost(usage)
 
 
@@ -257,7 +281,7 @@ def main():
                     c[f"model failed: {type(e).__name__}"] += 1; continue
                 got = rows_of(question, reply, pages, year_now)
                 if not got:
-                    c[f"{question}: nothing read"] += 1
+                    c[f"{question}: nothing read"] += 1; c[f"nothing read: {why_nothing(reply)}"] += 1
                 rows += got
             c["companies"] += 1; c["fields"] += len(rows)
             for f, *_ in rows:
