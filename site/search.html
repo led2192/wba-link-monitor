@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v154 2026-11-23";
+  const CLIENT = "lantern v155 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -779,6 +779,21 @@
       strip.appendChild(b);
     }
     if (items.length > 12) strip.append(el("span", "lbl", `and ${items.length - 12} more`));
+    groupStrip();
+  }
+  // v155 (23 Nov 2026, the owner: sub-sectors that are not in the list of industries): when the search names no company and
+  // no industry, a word of it that several companies' own reports use for what they are names a group. One press searches
+  // those companies only. The groups come from the profiles (profile_groups), not from a list.
+  async function groupStrip() {
+    if (state.company || state.industry || !state.q) return;
+    const asked = state.q; let groups = []; try { groups = await rpc("profile_groups", { key, q: asked }) || []; } catch (e) { return; }
+    if (!groups.length || state.q !== asked || state.company) return;
+    const strip = $("strip"), line = el("div"); line.style.cssText = "flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px";
+    line.append(el("span", "lbl", "By what companies say they are:"));
+    for (const g of groups.slice(0, 4)) { const b = el("button", "co", `${g.word} · ${g.companies} companies`); b.title = (g.says || []).join(" · ");
+      b.onclick = () => { state.company = g.ids.join(";"); state.companyName = `${g.companies} companies, ${g.word}`; $("fCompany").value = ""; search(true); };
+      line.append(b); }
+    strip.append(line);
   }
 
   // The company's own site icon beside a result, as a web search shows the source's (10 Nov 2026). It comes from an icon
