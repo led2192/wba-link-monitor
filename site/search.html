@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v153 2026-11-23";
+  const CLIENT = "lantern v154 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2803,7 +2803,12 @@
                                             : "Not enforced yet: every browser that opens a link is noted here, and none is refused. When the rule is switched on, a browser marked as waiting stops working until you allow it."));
       const limitOut = el("span"); limitOut.style.cssText = "font-size:13px;margin-left:8px";
       body.appendChild(adminTable(["Link", "Allowed", "Waiting", "Limit", ""], lb.links.map(l => { const inp = document.createElement("input"); inp.type = "number"; inp.min = 1; inp.max = 20; inp.value = l.limit; inp.style.cssText = "font:inherit;width:60px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:var(--box);color:var(--fg)";
-        return [l.name, l.allowed, l.waiting || "", inp, adminBtn("Set limit", async () => { const r = await authed("admin_link_browser_set", { key, name: l.name, max_browsers: parseInt(inp.value, 10) }); limitOut.textContent = r && r.ok ? `Limit of ${l.name} set.` : "A number from 1 to 20."; })]; })));
+        // v154 (the owner: "I press Set limit and nothing happens"): it was saved, and said so in a small line under the table, out of sight. Now the word is beside the button.
+        const act = el("div"), say = el("span", "what", ""); act.style.cssText = "display:flex;gap:8px;align-items:center";
+        act.append(adminBtn("Set limit", async () => { const n = parseInt(inp.value, 10); if (!(n >= 1 && n <= 20)) { say.textContent = "a number from 1 to 20"; return; } say.textContent = "saving…";
+          let r = null; try { r = await authed("admin_link_browser_set", { key, name: l.name, max_browsers: n }); } catch (e) { r = null; }
+          say.textContent = r && r.ok ? `saved: ${n} browser${n === 1 ? "" : "s"}` : "not saved: sign in again and retry"; }), say);
+        return [l.name, l.allowed, l.waiting || "", inp, act]; })));
       body.appendChild(limitOut);
       if (lb.browsers.length) body.appendChild(adminTable(["Link", "Browser", "First seen", "Last used", "State", ""], lb.browsers.map(b => [b.name, b.label || "?", adminWhen(b.first_seen), adminWhen(b.last_seen), b.allowed ? "allowed" : "waiting",
         adminBtn(b.allowed ? "Stop" : "Allow", async () => { await authed("admin_link_browser_set", { key, browser: b.id, allowed: !b.allowed }); adminPeople(body); })])));
