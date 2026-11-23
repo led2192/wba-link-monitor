@@ -8050,10 +8050,8 @@ create table if not exists public.reference_worked (
   primary key (job, entry)
 );
 alter table public.reference_worked enable row level security;
--- The counts made before the acronym check (reference_use.py, 23 Nov 2026 midday) are made again: their marks go.
-delete from public.reference_worked where job = 'use' and at < timestamptz '2026-11-23 11:15:00+00';
--- and once more for the counts made before documents of no known kind were left out (the same day, 12:15 UTC)
-delete from public.reference_worked where job = 'use' and at < timestamptz '2026-11-23 12:15:00+00';
+-- (The marks of the counts made before the acronym check and before untyped documents were left out were removed
+-- here on 23 Nov 2026, twice; the two statements ran on every install and are gone: the recount goes on from its marks.)
 -- The first runs (23 Nov 2026) left no mark: an entry they gave counts or examples is marked here once, so that the
 -- next run goes to the entries they did not reach. Harmless when repeated (an entry already marked keeps its mark).
 do $$
