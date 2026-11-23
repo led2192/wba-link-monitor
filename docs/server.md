@@ -82,6 +82,16 @@ Only with the option `meaning_remote` on. It is on since 17 Nov 2026 (the owner'
 - An evaluation that rolls its searches back leaves no count there. Whether the server answered during one is read on the server: **Server service**, mode `check`, prints the searches answered and failed in the last hour.
 - `server_meaning.py --switch N` compares Supabase's own search with the option off and on for searches with no company (no filter, two years, a type), each judged against the exact search on the server with the same filter.
 
+### The documentation, for the owner's panel (21 Nov 2026)
+The door has a second path, `/docs`, behind the same shared secret and rate limit: an empty request lists the documents of `/srv/lantern/docs` (name, first heading, size, time changed), a request with a name gives that document. Only a plain file name ending in `.md` is opened; a link in the folder is never followed; the database is not touched. The folder is filled by the workflow **Server docs** and is not under the web server's folder. In Supabase, `admin_docs(key, name)` calls it for the owner alone (`admin_ok`), with a timeout of six seconds. After a change to `server/meaning_service.py`, run **Server service** with mode `install`: it copies the new file and restarts the service (the search falls back to Supabase's own index for the seconds in between).
+
+### Documents kept on the server only (21 Nov 2026)
+Policies, codes of conduct and human rights policies of every year (42,673 documents, 568,792 pages on 20 Nov 2026) have their passages on the server and nowhere else: Supabase's disk has no room for them. **Server own index** (Actions, manual) runs `server_own_index.py`: pages read from Supabase, cut and embedded on the server with the same model, written to `meaning.chunks`, and the document to `meaning.chunk_filters` with `own = true`. A run stops after its minutes and the next continues; two runs can share the work with `partition` 0/2 and 1/2.
+- They are not live until switched on (`live: on` with `commit`), and can be switched off again. The setting is the row `own_live` of `meaning.settings`.
+- The nightly refresh does not compare them with Supabase (it holds none of their passages) and does not retire them; it brings their company and year up to date and takes out of the search a document Supabase no longer holds.
+- The search shows the page's own text for them (the first 600 characters), since the passage's text is not kept. `--load --reload` of Server meaning empties them with everything else: they are then computed again.
+- Before the switch the search exam is run, and again after it; the switch is kept only if no kind of question gets worse by more than 3 points.
+
 ## Checking it
 The workflow **Server check** (Actions, manual, and every Monday) runs on the server and fails if the firewall, fail2ban or the automatic updates are off, or if the first-boot token is still on disk. It also shows the cores, memory and free disk, and installs the repository's packages the way a job does.
 

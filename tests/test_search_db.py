@@ -232,7 +232,8 @@ class SearchOnPostgres(unittest.TestCase):
             cur = c.cursor()
             topic = lambda t: (cur.execute("select public.topic_of(%s)", (t,)), cur.fetchone()[0])[1]
             env = topic("environmental impact"); water = topic("overview of the Water data"); spanish = topic("Impacto ambiental")
-            none = [topic(t) for t in ("biodiversity approach", "steel production", "", "trees plants")]
+            none = [topic(t) for t in ("biodiversity approach", "steel production", "", "trees plants", "business model", "What is the business model of")]      # 22 Nov 2026: a business model is searched, it is not the overview of the business
+            self.assertEqual(topic("main business")["key"], "business")
             cur.execute("select public.find_topics('k')"); names = cur.fetchone()[0]
             # each search gives the pages of its words: three a metric, the metric's name in the excerpt
             cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
@@ -250,7 +251,7 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((env["key"], [g["key"] for g in env["groups"]]), ("environment", ["e1", "e3", "e5", "e2", "e4"]))
         self.assertTrue(all(1 <= len(g["metrics"]) <= 3 for g in env["groups"]))               # five parts: one metric each, so that eight searches cover them
         self.assertEqual((water["key"], [g["key"] for g in water["groups"]], spanish["key"]), ("e3", ["e3"], "environment"))      # a group is a topic too; no accents, any language held
-        self.assertEqual(none, [None] * 4)                                                      # the text must be the topic and nothing else
+        self.assertEqual(none, [None] * 6)                                                      # the text must be the topic and nothing else
         self.assertIn("environmental impact", names); self.assertIn("water", names); self.assertIn("derechos humanos", names)
         self.assertEqual(len(pages), 8); self.assertEqual(len({p for p, _ in pages}), 8)        # eight pages, none twice
         first_five = [e.split(" / ")[0] for _, e in pages[:5]]
@@ -632,6 +633,7 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("insert into public.browser_uploads (uploader, wba_id, source_url, filename, bytes, sha256, path, status) values ('a@x.org', 'WA', 'https://x.example/a.pdf', 'a.pdf', 10, 'h', 'WA/h.pdf', 'stored')")
             cur.execute("select public.admin_unread_docs('k')"); r2 = cur.fetchone()[0]
             self.assertEqual((r2["rows"][0]["note"], r2["rows"][0]["traits"], r2["rows"][0]["sent"]["status"]), ("reports sit behind a form", ["no_annual"], "stored"))
+            self.assertEqual((r2["rows"][0]["company_sent"]["n"], r2["rows"][0]["company_sent"]["waiting"], r2["rows"][2]["company_sent"]), (1, 1, None))   # 22 Nov 2026: what was sent for the company, at once
             self.assertIsNone(r2["rows"][2]["sent"])                                                            # another company, same address: not its sending
             # which company first: one that lacks the main reports of both last years, then the one in more benchmarks
             import datetime; y = datetime.date.today().year - 1
@@ -642,10 +644,9 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.admin_unread_docs('k')"); r3 = cur.fetchone()[0]; seen = []
             for d in r3["rows"]:
                 if d["wba_id"] not in seen: seen.append(d["wba_id"])
-            self.assertEqual((seen[0], seen[-1]), ("WD", "WC"))                                                 # nothing read and the largest revenue first; nothing missing last
+            self.assertEqual(seen[0], "WD"); self.assertNotIn("WC", seen); self.assertEqual(r3["covered"], 1)      # nothing read and the largest revenue first; an address whose year and kind the library already reads is counted, not listed (22 Nov 2026)
             first = r3["rows"][0]; self.assertEqual((first["revenue_usd"], first["missing"]), (5e9, f"no main report read for {y} or {y - 1}"))
             self.assertNotIn("benchmarks", first)                                                               # the order does not rest on WBA's benchmarks
-            self.assertIsNone([d for d in r3["rows"] if d["wba_id"] == "WC"][0]["missing"])
             cur.execute("insert into public.company_notes (wba_id, traits, by) values ('WD', '{in_parent}', 'a@x.org')")
             cur.execute("select public.admin_unread_docs('k')"); r4 = cur.fetchone()[0]
             self.assertNotEqual(r4["rows"][0]["wba_id"], "WD")                                                  # ticked as reporting inside its parent: not first any more
@@ -723,6 +724,20 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("update public.ask_cache set at = now() - interval '15 days'")
             self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))                                    # too old: documents arrive
             cur.execute("update public.ask_cache set at = now()")
+            # the library moved (22 Nov 2026): a document with text arrives for the company, the kept answer is not given; it leaves, it is
+            cur.execute("select library, public.ask_library_state('W1') from public.ask_cache where ask_id = 7"); was, now_ = cur.fetchone()
+            self.assertEqual(was, now_); self.assertRegex(was, r"^\d+:\d+:\d+$")
+            cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, pages, text_status) values ('L-late', 'W1', 'Acme', 'Integrated Report', 2023, 250, 'ok')")
+            self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))
+            cur.execute("delete from public.documents where library_id = 'L-late'")
+            self.assertEqual(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1))["ask_id"], 7)
+            cur.execute("update public.ask_cache set library = null where ask_id = 7")                                          # kept before the rule: not given
+            self.assertIsNone(ask("W1", 2023, 2023, None, "scope 1 emissions", vec(1, 0.1)))
+            cur.execute("update public.ask_cache set library = public.ask_library_state('W1') where ask_id = 7")
+            # "Not stated" is never given again
+            cur.execute("select public.ask_keep(10, 'W1', 2023, 2023, null, 'water withdrawal', null, %s::jsonb)", (psycopg.types.json.Jsonb({"answer": "Not stated in these pages. They cover governance.", "sources": []}),))
+            self.assertIsNone(ask("W1", 2023, 2023, None, "water withdrawal", None))
+            cur.execute("delete from public.ask_cache where ask_id = 10")
             # through ask itself: given again before anything is counted or paid, logged as reused, never as an answer
             cur.execute("select public.ask('k', 'Acme scope 1 emissions 2023', 'scope 1 emissions', 'W1', 2023, 2023)"); got = cur.fetchone()[0]
             self.assertEqual((got["answer"], got["reused"]["same"], got["left"], got["per_day"]), ("Scope 1 was 10 [1].", True, got["per_day"], got["per_day"]))
@@ -1232,6 +1247,12 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(len(cur.fetchall()), 2)
             cur.execute(q, (None, None, None, None, None, 5))
             self.assertEqual(cur.fetchall(), [])
+            # a document whose passages are kept on the server only: no passage here, the page's own text is shown
+            cur.execute("insert into public.pages (library_id, page, body) values ('RC', 1, 'the policy as its page prints it')")
+            cur.execute(q, (remote, None, None, None, None, 10))
+            got = cur.fetchall()
+            self.assertEqual((got[0][0], got[0][1], got[0][3]), ("RC", 1, "the policy as its page prints it"))
+            self.assertEqual([(g[0], g[1]) for g in got[1:]], [("RA", 1), ("RB", 9), ("RA", 2), ("RA", 3)])
             c.rollback()
 
     def test_a_survey_asks_each_company_and_counts_honestly(self):
@@ -1801,6 +1822,84 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertIsNone(explained)
         self.assertEqual(bad, [])                                                        # only the answers of the list, for a company that exists
 
+    def test_the_reference_list_answers_a_name_an_acronym_and_a_question(self):
+        """22 Nov 2026: a search that is the name or the acronym of an entry of the reference list gets its card; the
+        loader upserts by id and marks gone what left the file. Invented entries: the list itself is private."""
+        import psycopg, load_reference as R
+        entries = [{"id": "norm:t1", "kind": "norm", "name": "Invented Reporting Rule (IRR)", "aliases": ["IRR"], "year": 2019, "url": "https://rule.example/irr", "text_en": "A rule invented for a test.", "issuers": ["Invented Board"]},
+                   {"id": "term:t2", "kind": "term", "name": "Made-up Materiality", "text_en": "A term invented for a test.", "text_es": "Un término inventado."},
+                   {"id": "organisation:t3", "kind": "organisation", "name": "IRR", "text_en": "An organisation that shares the acronym."},
+                   {"id": "term:t4", "kind": "term", "name": "Imaginary Targets", "text_en": "Plural name."}]
+        with psycopg.connect(URL) as c:
+            rows, skipped = R.entry_rows(entries); p = R.plan(c, rows); R.write(c)
+            self.assertEqual((skipped, p["new"], p["changed"], p["gone"]), (0, 4, 0, 0))
+            p2 = R.plan(c, rows); c.rollback(); self.assertEqual((p2["new"], p2["changed"], p2["same"]), (0, 0, 4))      # run again: nothing to do
+        cur = self.conn.cursor()
+        look = lambda q: (cur.execute("select public.reference_lookup('', %s)", (q,)), cur.fetchone()[0])[1]
+        self.assertEqual([e["name"] for e in look("made-up materiality")], ["Made-up Materiality"])
+        self.assertEqual([e["name"] for e in look("What is Made-Up Materiality?")], ["Made-up Materiality"])
+        self.assertEqual([e["name"] for e in look("¿Qué es la made up materiality?")], ["Made-up Materiality"])
+        self.assertEqual([e["name"] for e in look("what does IRR stand for")], ["Invented Reporting Rule (IRR)", "IRR"])        # the norm first, then the organisation
+        # one thing listed under two kinds is shown once, the norm; a term whose name begins with the words asked answers them
+        with psycopg.connect(URL) as c:
+            more = entries + [{"id": "term:t5", "kind": "term", "name": "Invented Reporting Rule", "text_en": "The same rule, listed as a term."},
+                              {"id": "term:t6", "kind": "term", "name": "Pretend Scope Emissions", "text_en": "Begins with the words asked."},
+                              {"id": "norm:t7", "kind": "norm", "name": "Pretend Scope Standard of Somewhere", "text_en": "A norm that begins alike."}]
+            rows, _ = R.entry_rows(more); R.plan(c, rows); R.write(c)
+        self.assertEqual([(e["kind"], e["name"]) for e in look("invented reporting rule")], [("norm", "Invented Reporting Rule (IRR)")])
+        self.assertEqual([e["name"] for e in look("pretend scope")], ["Pretend Scope Emissions"])
+        # asked and not in the list: counted for the owner, as compared, questions marked
+        cur.execute("delete from public.reference_misses")
+        cur.execute("insert into public.search_vocab (word, n) values ('fanciful', 9), ('stewardship', 9) on conflict do nothing")           # words the library knows
+        self.assertEqual(look("What is Fanciful Stewardship?"), []); self.assertEqual(look("fanciful  stewardship"), []); self.assertEqual(look("one two three four five six"), [])
+        self.assertEqual(look("zyntharix stewardship"), [])                                                                                 # a name no page holds: not a term to add
+        cur.execute("select asked_key, asked, question, times from public.reference_misses"); self.assertEqual(cur.fetchall(), [("fanciful stewardship", "fanciful stewardship", True, 2)])
+        cur.execute("select public.admin_reference_asked_set('k', 'fanciful stewardship', true)"); self.assertTrue(cur.fetchone()[0]["ok"])
+        cur.execute("select public.admin_reference('k')"); adm = cur.fetchone()[0]
+        self.assertEqual([(m["asked"], m["times"], m["dismissed"]) for m in adm["asked"]], [("fanciful stewardship", 2, True)]); self.assertGreaterEqual(adm["kinds"]["term"], 3)
+        cur.execute("delete from public.reference_misses"); cur.execute("delete from public.search_vocab where word in ('fanciful', 'stewardship')")
+        with psycopg.connect(URL) as c:
+            rows, _ = R.entry_rows(entries); R.plan(c, rows); R.write(c); c.execute("delete from public.reference_entries where id in ('term:t5', 'term:t6', 'norm:t7')")
+        self.assertEqual([e["name"] for e in look("Invented Reporting Rule")], ["Invented Reporting Rule (IRR)"])               # the name without its bracket
+        self.assertEqual([e["name"] for e in look("imaginary target")], ["Imaginary Targets"])                                # singular asked of a plural entry
+        self.assertEqual(look("made-up materiality of Acme in 2023"), []); self.assertEqual(look(""), []); self.assertEqual(look(None), [])
+        # a text that names lantrNa is about lantrNa: the entry whose own words it uses, else the general one; the loader leaves these alone
+        self.assertEqual([e["id"] for e in look("What is lantrNa?")], ["about:lantrna"]); self.assertEqual([e["id"] for e in look("lantrna")], ["about:lantrna"])
+        self.assertEqual([e["id"] for e in look("how does lantrNa work?")], ["about:how"]); self.assertEqual([e["id"] for e in look("can I trust lantrna answers")], ["about:answers"])
+        self.assertEqual([e["id"] for e in look("how do I add a company to lantrna")], ["about:add"]); self.assertEqual([e["id"] for e in look("¿Qué es lantrNa?")], ["about:lantrna"])
+        self.assertFalse(look("lantrna")[0]["ai"]); self.assertEqual(look("irr lantern"), [])
+        cur.execute("select count(*) from public.reference_entries where kind = 'about' and not gone"); self.assertEqual(cur.fetchone()[0], 4)
+        got = look("irr")[0]; self.assertEqual((got["kind"], got["year"], got["url"], got["issuers"], got["ai"]), ("norm", 2019, "https://rule.example/irr", ["Invented Board"], True))
+        # an entry that left the file is kept and no longer shown; one that comes back is shown again
+        with psycopg.connect(URL) as c:
+            rows, _ = R.entry_rows(entries[:3]); p = R.plan(c, rows); R.write(c); self.assertEqual((p["gone"], p["same"]), (1, 3))
+        self.assertEqual(look("imaginary targets"), [])
+        cur.execute("select count(*), count(*) filter (where gone) from public.reference_entries where id like '%:t_'"); self.assertEqual(cur.fetchone(), (4, 1))
+        with psycopg.connect(URL) as c:
+            rows, _ = R.entry_rows(entries); p = R.plan(c, rows); R.write(c); self.assertEqual(p["changed"], 1)
+        self.assertEqual(len(look("imaginary targets")), 1)
+        with psycopg.connect(URL) as c:
+            c.execute("delete from public.reference_entries where id like '%:t_'")
+
+    def test_option_reader_asked_form_changes_two_sentences_and_only_when_on(self):
+        """22 Nov 2026: Yes or No only to a question; a part of an overview named only when the pages do not cover it."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            cur.execute("select is_on from public.search_options where name = 'reader_asked_form'"); self.assertEqual(cur.fetchone(), (True,))       # on after its comparison (run 45073687451)
+            cur.execute("select set_config('lantern.reader_asked_form', 'off', true)")
+            topic = '{"label": "the business", "groups": [{"label": "Identity"}, {"label": "Structure"}]}'
+            cur.execute("select public.ask_instructions(false), public.ask_overview_note(%s::jsonb)", (topic,)); plain, note = cur.fetchone()
+            self.assertNotIn("not always a question", plain); self.assertIn("Then say in one line which of these parts the excerpts do not cover.", note)
+            self.assertIn("an overview of the business for this company", note); self.assertIn("Identity, Structure", note)
+            cur.execute("select set_config('lantern.reader_asked_form', 'on', true)")
+            cur.execute("select public.ask_instructions(false), public.ask_overview_note(%s::jsonb)", (topic,)); on, note_on = cur.fetchone()
+            self.assertTrue(on.startswith(plain)); self.assertIn("Begin with Yes or No only when they are a question", on)
+            self.assertIn("when they cover all of them, say nothing about the parts", note_on); self.assertNotIn("Then say in one line", note_on)
+            cur.execute("select public.ask_option_trial(1, 'card_scores'), public.ask_option_trial(1, null)")           # not an option of the reader: nothing is called
+            self.assertEqual([x["skipped"] for x in cur.fetchone()], ["not an option of the reader"] * 2)
+            c.rollback()
+
     def test_did_you_mean(self):
         import psycopg, load_supabase as L
         with psycopg.connect(URL) as c:
@@ -1813,6 +1912,16 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertTrue(unknown("unilver")); self.assertTrue(unknown(" Severestal "))
         self.assertFalse(unknown("unilever"))                                     # a word of a title or a company's name
         self.assertFalse(unknown("x1")); self.assertFalse(unknown(None))          # not a word
+        # a name the library does not hold (22 Nov 2026): not a word of the vocabulary, not a word typed wrong; counted for the owner
+        cur.execute("delete from public.company_misses")
+        held = lambda ws: (cur.execute("select public.names_not_held('', %s::text[])", (ws,)), cur.fetchone()[0])[1]
+        self.assertEqual(held(["Zyntharix", "scope", "unilver", "x1", "zyntharix"]), ["zyntharix"])     # "unilver" is Unilever typed wrong; "scope" is a word
+        self.assertEqual(held(["zyntharix"]), ["zyntharix"]); self.assertEqual(held(None), [])
+        cur.execute("select word, times, cardinality(people), dismissed from public.company_misses"); self.assertEqual(cur.fetchall(), [("zyntharix", 2, 1, False)])
+        cur.execute("select public.admin_name_not_held_set('k', 'Zyntharix', true)"); done = cur.fetchone()[0]
+        cur.execute("select public.admin_names_not_held('k')"); rows = cur.fetchone()[0]
+        self.assertTrue(done["ok"]); self.assertEqual([(r["word"], r["times"], r["people"], r["dismissed"]) for r in rows], [("zyntharix", 2, 1, True)])
+        cur.execute("delete from public.company_misses")
 
     def test_the_review_card_lists_every_reading_and_carries_the_page_when_there_is_no_link(self):
         """12 Nov 2026: the card said "1 give another" and not which figure or where; and a document with no address

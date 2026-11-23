@@ -24,7 +24,7 @@ from urllib import robotparser
 from urllib.parse import urlsplit
 
 BOT_NAME = "lanterN-bot"
-BOT_PAGE = "https://led2192.github.io/wba-link-monitor/bot.html"
+BOT_PAGE = "https://lantrna.com/bot.html"      # the server's own address since 21 Nov 2026 (the github.io one before)
 BOT_UA = f"Mozilla/5.0 (compatible; {BOT_NAME}/1.0; +{BOT_PAGE})"
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
               "Chrome/126.0 Safari/537.36")

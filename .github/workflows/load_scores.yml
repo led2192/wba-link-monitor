@@ -20,14 +20,14 @@ jobs:
   load:
     # after a load, only the scheduled night one (a manual functions-only load during the day does not need it)
     if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, lantern]      # on lantrNa's server since the move of 22 Nov 2026 (GitHub's machines before)
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
       - run: pip install -r requirements.txt
       - name: Load
         run: |

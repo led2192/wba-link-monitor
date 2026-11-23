@@ -27,6 +27,8 @@ from urllib.parse import quote
 
 import requests
 
+import keepalive
+
 API = "https://api.airtable.com/v0"
 TOKEN = os.environ.get("AIRTABLE_TOKEN"); BASE = os.environ.get("AIRTABLE_BASE")
 H = {"Authorization": f"Bearer {TOKEN}"}
@@ -51,7 +53,7 @@ def req(method, url, **kw):
     delay = 2
     for attempt in range(6):
         try:
-            r = requests.request(method, url, headers=H, timeout=60, **kw)
+            r = keepalive.session().request(method, url, headers=H, timeout=60, **kw)
         except requests.exceptions.RequestException:
             if attempt == 5: raise
             time.sleep(delay); delay = min(delay * 2, 30); continue
@@ -177,7 +179,7 @@ def qa_stats():
             params.append(("filterByFormula", formula))
         while True:
             p = [x for x in params if x[1] != ""] + ([("offset", offset)] if offset else [])
-            r = requests.get(f"{API}/{base}/{quote(table)}", headers=h, params=p, timeout=60)
+            r = keepalive.session().get(f"{API}/{base}/{quote(table)}", headers=h, params=p, timeout=60)
             r.raise_for_status(); j = r.json()
             n += len(j.get("records", [])); offset = j.get("offset"); time.sleep(0.12)
             if not offset:
@@ -235,7 +237,7 @@ def model_spend(now, get=None):
     if not (tok and repo):
         return None
     h = {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}
-    get = get or (lambda url, **kw: requests.get(url, headers=h, timeout=120, **kw))
+    get = get or (lambda url, **kw: keepalive.session().get(url, headers=h, timeout=120, **kw))   # one connection for the run
     since = now - timedelta(days=7)
     out = {"24h": 0.0, "7d": 0.0, "by": collections.Counter()}
     try:
@@ -345,6 +347,15 @@ def previous_avg(today):
     return rows[-1]["fields"].get("completeness_avg") if rows else None
 
 
+def timed(label, fn):
+    """Run one part of the snapshot and print how long it took (22 Nov 2026: on the server the parts after
+    ">>> companies" took 27 minutes against 10 on GitHub's machines, and the log could not say which one)."""
+    t0 = time.time()
+    out = fn()
+    print(f"    {label}: {time.time() - t0:.0f} s", flush=True)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -364,13 +375,13 @@ def main():
     pages_check = sum(1 for _ in sweep("monitored_links", ["monitor"],
                                        formula="{possible_issue}='Document links not in the library'"))
     print(">>> companies ...", flush=True)
-    co = company_stats()
-    fails = failed_jobs(now)
-    prev = previous_avg(today)
-    qs = qa_stats()
-    eb = evidence_backlog()
-    spend = model_spend(now)
-    ai = ai_typing(now)
+    co = timed("companies", company_stats)
+    fails = timed("failed jobs", lambda: failed_jobs(now))
+    prev = timed("previous average", lambda: previous_avg(today))
+    qs = timed("quality base", qa_stats)
+    eb = timed("evidence backlog", evidence_backlog)
+    spend = timed("model spend", lambda: model_spend(now))
+    ai = timed("AI typing", lambda: ai_typing(now))
 
     total = sum(counts.values())
     full = total / RECORD_LIMIT

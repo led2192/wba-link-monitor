@@ -20,3 +20,14 @@ class DayWindow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Timed(unittest.TestCase):
+    def test_a_part_is_run_once_and_its_time_printed(self):
+        import io, contextlib
+        import base_health as B
+        buf = io.StringIO(); calls = []
+        with contextlib.redirect_stdout(buf):
+            out = B.timed("companies", lambda: calls.append(1) or {"avg": 0.5})
+        self.assertEqual((out, len(calls)), ({"avg": 0.5}, 1))
+        self.assertRegex(buf.getvalue(), r"^    companies: \d+ s\n$")

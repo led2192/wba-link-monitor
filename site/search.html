@@ -170,7 +170,7 @@
   .values .subhead { font-size: 12px; color: var(--muted); text-transform: none; padding: 10px 0 2px; border-top: 1px solid var(--line); margin-top: 6px; }
   /* While a card is up it is the page: the search box, its chips and the status line step aside (11 Nov 2026: the
      card began halfway down the screen). "Back to search" on the card, or the lamp, brings them back. */
-  body.playing .boxwrap, body.playing #chips, body.playing #filters, body.playing #answer, body.playing #status, body.playing #strip, body.playing #homebtns { display: none !important; }
+  body.playing .boxwrap, body.playing #chips, body.playing #filters, body.playing #answer, body.playing #reference, body.playing #status, body.playing #strip, body.playing #homebtns { display: none !important; }
   .lucky .top a { color: var(--accent); text-decoration: none; }
   .lucky { max-width: 760px; margin: 8px auto 0; padding: 26px 30px 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--box); box-shadow: 0 6px 24px rgba(0, 25, 75, .06); }
   .lucky .top { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
@@ -300,6 +300,7 @@
       <select id="fType"><option value="">Any document type</option></select>
     </div>
   </div>
+  <div id="reference"></div>
   <div id="answer"></div>
   <div class="status" id="status"></div>
   <details class="values" id="values" hidden open></details>
@@ -310,9 +311,9 @@
 </div>
 
 <script>
-(() => {
+(async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v130 2026-11-21";
+  const CLIENT = "lantern v142 2026-11-22";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -366,6 +367,24 @@
     if (m) { localStorage.setItem("find_key", m[1]); history.replaceState(null, "", location.pathname + location.search); }
     key = localStorage.getItem("find_key");
   } catch (e) { key = null; }
+  // v132 (21 Nov 2026): a link is one person's. This browser gets a random id of its own, kept here, and the key
+  // travels with it ("key~id") so that the owner can see in how many browsers a link is used and allow or stop
+  // each. Nothing about the machine is read. The id can come with the link from the old address (&d=), so that
+  // the two addresses count as one browser.
+  const rawKey = key;
+  let device = null;
+  try {
+    const d = location.hash.match(/[#&]d=([A-Za-z0-9_-]{16,64})/);
+    device = localStorage.getItem("find_device");
+    if (!device && d) device = d[1];
+    if (!device) { const b = new Uint8Array(18); crypto.getRandomValues(b); device = Array.from(b, x => x.toString(16).padStart(2, "0")).join(""); }
+    localStorage.setItem("find_device", device);
+  } catch (e) {}
+  if (key && device) key = key + "~" + device;
+  const browserLabel = () => { const u = navigator.userAgent || "";
+    const b = /Edg\//.test(u) ? "Edge" : /OPR\//.test(u) ? "Opera" : /Firefox\//.test(u) ? "Firefox" : /Chrome\//.test(u) ? "Chrome" : /Safari\//.test(u) ? "Safari" : "Browser";
+    const s = /Windows/.test(u) ? "Windows" : /Android/.test(u) ? "Android" : /iPhone|iPad/.test(u) ? "iOS" : /Mac OS X/.test(u) ? "macOS" : /Linux/.test(u) ? "Linux" : "";
+    return s ? `${b} on ${s}` : b; };
   if (!key) {
     $("notice").innerHTML = '<div class="notice"><b>Open the link you were given.</b><br>This page works from a shared link that carries its key; ask the person who shared lantrNa with you for it. On the address you used before, the line at the foot of the page opens this one with your key. Nothing else is needed, no account and no password.</div>';
     $("boxwrap").style.display = "none"; $("filters").hidden = true;
@@ -387,6 +406,19 @@
       throw new Error(msg);
     }
     return r.json();
+  }
+
+  // Say once that this browser opens this link. A browser beyond the link's limit waits for the owner (only when the
+  // owner switched the rule on); nothing else is asked of the database then, so the key stays in this browser.
+  if (device) {
+    let entered = null;
+    try { const r = await fetch(`${CONFIG.url}/rest/v1/rpc/link_enter`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${CONFIG.key}`, "Content-Type": "application/json" },
+                                 body: JSON.stringify({ key: rawKey, device, label: browserLabel() }) }); if (r.ok) entered = await r.json(); } catch (e) {}
+    if (entered && entered.waiting) {
+      $("notice").innerHTML = '<div class="notice"><b>This link is already in use in other browsers.</b><br>A link is personal and works in a small number of browsers. Ask the person who gave it to you to allow this one; then reload this page.</div>';
+      $("boxwrap").style.display = "none"; $("filters").hidden = true;
+      return;
+    }
   }
 
   async function loadCompanies() {
@@ -481,7 +513,14 @@
       if (WORD_NAMES.has(name)) {
         const typed = q.slice(m.index + 1, m.index + 2), first = fold(text.trim()).toLowerCase().startsWith(name);
         const strong = (typed !== typed.toLowerCase() && !first) || /[;,]$/.test(m[0]);
-        if (!strong) { if (first) weak.push({ c, name }); else found.maybe = found.maybe || { id: c.id, name: c.name, word: name }; continue; }
+        // v139 (22 Nov 2026, the owner typed "reports from apple", "reports apple", "sources from apple" and got pages that
+        // hold the word): the word is the company when the text says so. It follows "from" or "by"; or it ends the text
+        // and every other word asks for documents ("reports", "sources", "the", "all": the catalogue's own words).
+        const before = (fq.slice(0, m.index + 1).trim().split(/\s+/).pop() || "").toLowerCase();
+        const others = fold(text).toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(w => w && w !== name);
+        const last = !fq.slice(m.index + m[0].length).trim();
+        const asked = /^(from|by)$/.test(before) || (last && others.some(w => CATALOGUE_NOUNS.has(w)) && others.every(w => CATALOGUE_NOUNS.has(w) || CATALOGUE_FILLER.has(w)));
+        if (!strong && !asked) { if (first) weak.push({ c, name }); else found.maybe = found.maybe || { id: c.id, name: c.name, word: name }; continue; }
       }
       hits.push(c);
       q = q.slice(0, m.index) + " " + q.slice(m.index + m[0].length);
@@ -804,7 +843,7 @@
   async function search(fromChips, more) {
     document.body.classList.remove("playing");                    // a search ends the card game
     if (typeof closeHistory === "function") closeHistory();          // and the suggestions step aside for the results (they stayed open over them when the page opened on a search)
-    if (!more) { state.cited = []; state.facts = []; state.confirmed = []; state.earlier = false; state.answered = false; }                                 // the pages an answer cited belong to that question
+    if (!more) { state.cited = []; state.facts = []; state.confirmed = []; state.earlier = false; state.answered = false; $("reference").innerHTML = ""; }                                 // the pages an answer cited belong to that question
     if (!fromChips) {
       const parsed = parse($("q").value);
       state.fixed = null;
@@ -928,6 +967,9 @@
         const d = el("div", "dym"); d.append(document.createTextNode(`Searching the company ${fx.name}: “${fx.word}” is on no page. `), a); $("status").appendChild(d);
       }
       if (!more && state.q && !state.fixed) didYouMean($("q").value.trim());
+      const refHit = !state.company && refSeen.typed === $("q").value.trim() && refSeen.found.length > 0;                              // v140: the reference list answers this text
+      if (!more && !fromChips && state.q && !state.company && !state.fixed && !refHit) notHeld($("q").value.trim(), state.q);          // v136: a name the library does not hold
+      if (!more && !fromChips && !state.company) referenceCard($("q").value.trim());                                                // v137: a term, a norm, a regulation or an organisation of the reference list
       if (!more && !fromChips) offerAsk();
       const params = new URLSearchParams(); params.set("q", $("q").value); history.replaceState(null, "", "?" + params.toString());
       if (!more && $("q").value.trim()) history_.add($("q").value.trim());
@@ -1021,6 +1063,7 @@
     // a figure or a fact? Ask it as a question"). What is asked as a question, a fact or the catalogue is not a
     // search made again: it is neither counted in the run nor offered Ask.
     const asked = intent($("q").value, parse($("q").value));
+    if (refSeen.typed === $("q").value.trim() && refSeen.found.length) return;                  // v140: answered by the reference list
     if (asked !== "search" || $("answer").textContent.trim()) return;
     trail.push({ t: Date.now(), company: state.company, opened: false, words: !!state.q });
     const last = trail.slice(-3);
@@ -1052,6 +1095,63 @@
   }
   // "Did you mean": a word typed wrong, set right from the words the library knows (did_you_mean). Asked after the
   // results are shown; the person decides whether to take it.
+  // v136 (22 Nov 2026, the owner): someone asks about a company lantrNa does not follow. The search that named no
+  // company sends its words; for one that no page holds (and that is not a word typed wrong) the page says so and
+  // offers to add the company. The server counts the word for the owner (Admin, "Names not held").
+  // v137 (22 Nov 2026): the reference list. A search that is the name or the acronym of a term, a norm, a regulation or
+  // an organisation of sustainability ("double materiality", "CSRD", "what is the GHG Protocol") gets a card from the
+  // list above the pages. No model is called. The descriptions were mostly drafted with AI help: the card says so and
+  // links the entry's own address.
+  // v140: what the reference list holds for a text, asked once a text (go() asks before it decides what the text is,
+  // and the card shows the same answer). A text that names a company is never asked of the list.
+  let refSeen = { typed: null, found: [] };
+  async function referenceFound(typed) {
+    if (!typed || typed.length > 120) return [];
+    if (refSeen.typed === typed) return refSeen.found;
+    let found = []; try { found = (await rpc("reference_lookup", { key, q: typed })) || []; } catch (e) { return []; }
+    refSeen = { typed, found }; return found;
+  }
+  async function referenceCard(typed) {
+    const box = $("reference"); box.innerHTML = "";
+    const found = await referenceFound(typed);
+    if (!found.length || $("q").value.trim() !== typed) return;
+    const KIND = { term: "Term", norm: "Norm or framework", regulation: "Regulation", organisation: "Organisation", about: "About lantrNa" };
+    for (const e of found) {
+      const card = el("div", "answer");
+      card.append(el("div", "dym", e.kind === "about" ? "About lantrNa · no model was asked" : "From lantrNa's reference list · no model was asked"));
+      const h = el("p"); h.style.cssText = "margin:6px 0 2px;font-size:17px;font-weight:600"; h.textContent = e.name + ((e.aliases || []).length ? ` (${e.aliases.join(", ")})` : ""); card.append(h);
+      const facts = e.kind === "about" ? [] : [KIND[e.kind] || e.kind, e.type, e.category, e.geography, e.year && (e.kind === "organisation" ? `founded ${e.year}` : String(e.year)), (e.issuers || []).length && `by ${e.issuers.slice(0, 3).join(", ")}`].filter(Boolean);
+      card.append(el("div", "what", [...new Set(facts)].join(" · ")));
+      const full = e.text || "", cut = full.length > 520 ? full.slice(0, full.lastIndexOf(" ", 480)) + "…" : full;
+      const body = el("p", null, cut); body.style.cssText = "margin:8px 0 6px;white-space:pre-line"; card.append(body);
+      const foot = el("div", "what");
+      if (full.length > cut.length) { const more = el("a", null, "Read more"); more.href = "#"; more.onclick = ev => { ev.preventDefault(); body.textContent = full; more.remove(); }; foot.append(more, document.createTextNode(" · ")); }
+      if (e.text_es) { const es = el("a", null, "En español"); es.href = "#"; es.onclick = ev => { ev.preventDefault(); body.textContent = e.text_es; es.remove(); }; foot.append(es, document.createTextNode(" · ")); }
+      if (e.url && /^https?:\/\//i.test(e.url)) { const a = el("a", null, e.url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")); a.href = e.url; a.target = "_blank"; a.rel = "noopener"; foot.append(document.createTextNode("Its own page: "), a, document.createTextNode(" · ")); }
+      if (e.kind === "about") { const t = el("a", null, "Terms of use"); t.href = "terms.html"; foot.append(t); }
+      else foot.append(document.createTextNode(e.ai ? "The description was drafted with AI help and is not yet reviewed: check it against the source." : "From the reference list."));
+      card.append(foot);
+      if ((e.related || []).length) card.append(el("div", "what", `Related: ${e.related.slice(0, 6).join(" · ")}`));
+      box.append(card);
+    }
+  }
+  async function notHeld(typed, q) {
+    const words = [...new Set(q.split(/\s+/).filter(w => /^[A-Za-z\u00C0-\u024F]{4,30}$/.test(w)))].slice(0, 6);
+    if (!words.length) return;
+    try {
+      const miss = await rpc("names_not_held", { key, words, client: CLIENT });
+      if (!miss || !miss.length || $("q").value.trim() !== typed) return;
+      for (const w of miss.slice(0, 2)) {
+        const as = (typed.match(new RegExp("(?:^|\\s)(" + w + ")(?=$|[\\s,;.?!'])", "i")) || [])[1] || w;      // as the person wrote it
+        const name = as === as.toLowerCase() ? as.charAt(0).toUpperCase() + as.slice(1) : as;
+        const a = el("a", null, "add it"); a.href = "#"; a.title = "A company lantrNa does not follow yet: its website is searched for its reports within minutes";
+        const d = el("div", "dym"); const hold = el("div", "values");
+        a.onclick = ev => { ev.preventDefault(); askCompanyForm(hold, name); };
+        d.append(document.createTextNode(`No page in the library holds “${as}”. If it is a company lantrNa does not follow yet, you can `), a, document.createTextNode("."), hold);
+        $("status").appendChild(d);
+      }
+    } catch (e) {}
+  }
   async function didYouMean(typed) {
     try {
       const better = await rpc("did_you_mean", { key, q: typed });
@@ -1169,9 +1269,9 @@
     holder.appendChild(f); (co.value ? links : co).focus();
   }
   // "Missing a company? Add it": a request, read by a person before the company is added and its pages searched for
-  function askCompanyForm(holder) {
+  function askCompanyForm(holder, named) {
     if (holder.querySelector(".askco")) return; const f = el("div", "fix add askco"); const lab = t => el("label", "lab", t);
-    const nm = el("input"); nm.placeholder = "The company's name"; nm.maxLength = 120;
+    const nm = el("input"); nm.placeholder = "The company's name"; nm.maxLength = 120; if (named) nm.value = named;
     const site = el("input"); site.placeholder = "https://… (optional)";
     const lei = el("input"); lei.placeholder = "20 characters (optional)"; lei.maxLength = 24;
     const why = el("textarea"); why.rows = 2; why.placeholder = "Optional: why it matters, where its reports are";
@@ -1192,7 +1292,7 @@
     const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
     const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
     f.append(el("div", "what", "A company lantrNa does not follow yet"), lab("Company"), nm, lab("Website"), site, lab("LEI"), lei, lab("A note for the team"), why, msg, acts);
-    holder.appendChild(f); nm.focus();
+    holder.appendChild(f); (named ? site : nm).focus();
   }
   function addValueLink(panel, attrs) {
     const wrap = el("div", "addrow"); const a = el("a", "addlink", "+ Add a value"); a.href = "#"; a.title = "Add a value the robot does not hold, with its source";
@@ -1641,6 +1741,9 @@
     const text = $("q").value, parsed = parse(text);
     if (typoWanted(parsed) && await wordUnknown(parsed.typo.word)) applyTypo(parsed);          // v108: the near name first, then what is asked
     if ($("q").value !== text) return;                                                            // the box changed while the word was looked up
+    // v140 (22 Nov 2026, "What is lantrNa?" was offered a survey of 150 companies): a text that names no company and that the
+    // reference list answers is not sent to the reader. The card is the answer, and the pages are listed under it.
+    if (!parsed.company && !$("fCompany").value && (await referenceFound(text.trim())).length) { if ($("q").value !== text) return; search(false); return; }
     const i = intent(text, parsed); (i === "question" || i === "fact" || i === "overview") ? ask(true) : search(false);
   };
   // The pages an answer cites, first in the list: the person reads the answer and its proof together.
@@ -1999,17 +2102,16 @@
   $("lucky").onclick = ev => { ev.preventDefault(); $("head").classList.remove("home"); $("q").value = ""; contribute(); window.scrollTo(0, 0); };
   $("foot").style.cssText = "margin-top:8px;padding-top:0"; showMine(false);
   // v126 (20 Nov 2026): the page also lives at lantrna.com. A browser keeps the key for each address apart, so the old
-  // address offers the way over with the key in the link, as "Copy the link to share" does. Nothing is sent anywhere.
+  // address offers the way over with the key in the link. Nothing is sent anywhere.
   if (location.hostname !== "lantrna.com" && /^https?:$/.test(location.protocol)) {
     const d = el("div"); d.style.cssText = "text-align:center;font-size:13px;margin-top:10px";
     const a = el("a", null, "Open it there with your key"); a.href = "#"; a.rel = "noopener";
-    a.onclick = ev => { ev.preventDefault(); window.open("https://lantrna.com/#k=" + key, "_blank", "noopener"); };
+    a.onclick = ev => { ev.preventDefault(); window.open("https://lantrna.com/#k=" + rawKey + (device ? "&d=" + device : ""), "_blank", "noopener"); };
     d.append(document.createTextNode("lantrNa has a new address, lantrna.com. "), a, document.createTextNode(". This address keeps working."));
     $("foot").insertAdjacentElement("beforebegin", d);
   }
-  $("foot").innerHTML = 'Every page of every report in the library, in any language · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · <a href="#" id="share">Copy the link to share lantrNa</a>';
-  $("share").onclick = async ev => { ev.preventDefault(); const link = location.origin + location.pathname + "#k=" + key;       // the same key on another device or for a colleague: searching needs only the link; reviews, Ask and adding need a WBA sign-in
-    try { await navigator.clipboard.writeText(link); ev.target.textContent = "Link copied: paste it to a colleague or open it on your other device"; } catch (e) { ev.target.textContent = link; } };
+  $("foot").innerHTML = 'Every page of every report in the library, in any language · Searches, the pages opened and the ✓ ✗ marks are logged, without names, to improve the ranking. · Your link is personal: please do not pass it on. · <a href="terms.html" target="_blank" rel="noopener">Terms of use</a>';
+  // v131 (21 Nov 2026, the owner): the footer no longer offers to copy the link "for a colleague". A link is one person's; a new person gets a link of their own from the owner.
   // A link to a page of a document (v113): its public address when it has one, else the page shown here. Before, a
   // document with no address (sent by hand or with the extension) got href "#" in a new tab: lantrNa opened again.
   function docLink(a, s, find) {
@@ -2317,7 +2419,7 @@
       document.body.appendChild(d);
       document.addEventListener("keydown", ev => { if (ev.key === "Escape" && $("admin") && !$("admin").hidden && !document.querySelector("dialog[open]")) closeAdmin(); });
     }
-    d.hidden = false; d.innerHTML = ""; document.body.style.overflow = "hidden";
+    d.hidden = false; d.style.display = "flex"; d.innerHTML = ""; document.body.style.overflow = "hidden";
     const head = el("div"); head.style.cssText = "display:flex;align-items:center;gap:14px;padding:12px 24px;border-bottom:1px solid var(--line)";
     const back = el("a", null, "← Back to the search"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); closeAdmin(); };
     const title = el("b", null, "lantrNa · admin"); title.style.fontSize = "17px";
@@ -2326,7 +2428,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2337,7 +2439,9 @@
     (nav.querySelector(`[data-view="${first || "Companies"}"]`) || nav.firstChild).click();
     adminWaiting(nav); adminJobsMark(nav);
   }
-  function closeAdmin() { const d = $("admin"); if (d) d.hidden = true; document.body.style.overflow = ""; }
+  // v141: the panel is laid out with display:flex in its own style, and that wins over the hidden attribute: "Back to
+  // the search" did nothing (the owner, 22 Nov 2026). The display itself is switched.
+  function closeAdmin() { const d = $("admin"); if (d) { d.hidden = true; d.style.display = "none"; } document.body.style.overflow = ""; }
   // the number of companies not looked at yet, beside the section's name
   async function adminWaiting(nav) {
     try { const rows = await authed("admin_companies", { key }); const n = (rows || []).filter(c => !c.review).length;
@@ -2346,6 +2450,28 @@
   // Companies people added (v69). A company exists from the moment a person adds it; here the owner reads who added
   // it, the doubts the database noted (a name close to another company's, the same documents under another company)
   // and accepts or rejects. Rejecting asks twice: the company leaves the list and its documents are discarded.
+  // v136: the words people searched that no page holds and that are no word typed wrong: often a company lantrNa does not follow.
+  async function adminNotHeld(body) {
+    const rows = await authed("admin_names_not_held", { key }); if (!rows) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    body.innerHTML = "";
+    body.appendChild(el("p", "what", "Words of searches that named no company, that no page in the library holds and that are not a known word typed wrong. Many are companies lantrNa does not follow: the person was told so and offered to add the company. Add the ones worth following yourself (search page, \"Missing a company?\"), and set aside what is not a company."));
+    if (!rows.length) { body.appendChild(el("p", null, "Nothing yet.")); return; }
+    const line = m => { const act = el("div"); const say = el("span", "what", "");
+      act.append(adminBtn(m.dismissed ? "Bring back" : "Set aside", async () => { const r = await authed("admin_name_not_held_set", { key, word: m.word, dismissed: !m.dismissed }); if (r && r.ok) adminNotHeld(body); else say.textContent = " not saved"; }), say);
+      return [m.word, m.times, m.people, adminWhen(m.last_at), m.dismissed ? "set aside" : "", act]; };
+    body.appendChild(adminTable(["Word", "Searches", "Links", "Last", "", ""], rows.map(line)));
+  }
+  // v138: the reference list, and what people asked of it that it does not hold
+  async function adminReference(body) {
+    const r = await authed("admin_reference", { key }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    body.innerHTML = ""; const k = r.kinds || {};
+    body.appendChild(el("p", "what", `The reference list answers a search that is the name or the acronym of an entry, with no model. It shows ${Object.values(k).reduce((a, b) => a + b, 0).toLocaleString()} entries: ${["term", "norm", "regulation", "organisation"].map(x => `${(k[x] || 0).toLocaleString()} ${x}s`).join(", ")}${r.loaded_at ? `; loaded ${adminWhen(r.loaded_at)}` : ""}. Below: short searches that named no company and found no entry, questions first. They are the candidates for the list.`));
+    const rows = r.asked || []; if (!rows.length) { body.appendChild(el("p", null, "Nothing asked and not found yet.")); return; }
+    const line = m => { const act = el("div"); const say = el("span", "what", "");
+      act.append(adminBtn(m.dismissed ? "Bring back" : "Set aside", async () => { const x = await authed("admin_reference_asked_set", { key, asked_key: m.key, dismissed: !m.dismissed }); if (x && x.ok) adminReference(body); else say.textContent = " not saved"; }), say);
+      return [m.asked, m.question ? "asked as a question" : "", m.times, adminWhen(m.last_at), m.dismissed ? "set aside" : "", act]; };
+    body.appendChild(adminTable(["Asked", "", "Searches", "Last", "", ""], rows.map(line)));
+  }
   async function adminCompanies(body) {
     const rows = await authed("admin_companies", { key }); if (!rows) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
     body.innerHTML = "";
@@ -2406,6 +2532,73 @@
     return t;
   };
   const adminWhen = t => t ? new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "never";
+  // v133 (21 Nov 2026, the owner): the project's documentation, read here. The files are on lantrNa's server; the
+  // database fetches them for the owner alone. Markdown is shown with a small renderer that escapes everything first:
+  // headings, lists, tables, code, bold, and links (a link to another document opens it here).
+  const mdInline = s => escH(s)
+    .replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => /^[a-z0-9][a-z0-9_-]*\.md(#.*)?$/i.test(u) ? `<a href="#" data-doc="${u.split("#")[0]}">${t}</a>`
+                                                  : /^https?:\/\/[^"'<>`\s]+$/i.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t);
+  function mdRender(text) {
+    const out = []; const lines = String(text || "").replace(/\r/g, "").split("\n"); let i = 0, para = [];
+    const flush = () => { if (para.length) { out.push(`<p>${mdInline(para.join(" "))}</p>`); para = []; } };
+    while (i < lines.length) {
+      const l = lines[i];
+      if (/^```/.test(l)) { flush(); const lang = l.slice(3).trim().toLowerCase(); const code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; out.push(`<pre${lang === "mermaid" ? ' class="mmd"' : ""} style="overflow:auto;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px">${escH(code.join("\n"))}</pre>`); continue; }
+      const h = l.match(/^(#{1,4})\s+(.*)$/);
+      if (h) { flush(); const n = h[1].length; out.push(`<h${n + 1} style="margin:18px 0 6px">${mdInline(h[2])}</h${n + 1}>`); i++; continue; }
+      if (/^\s*\|.*\|\s*$/.test(l)) { flush(); const rows = []; while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(lines[i++]);
+        const cells = r => r.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+        const body = rows.filter(r => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+        out.push(`<div style="overflow:auto"><table style="border-collapse:collapse;font-size:14px;margin:8px 0">` + body.map((r, k) => "<tr>" + cells(r).map(c => `<${k ? "td" : "th"} style="border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top">${mdInline(c)}</${k ? "td" : "th"}>`).join("") + "</tr>").join("") + "</table></div>"); continue; }
+      if (/^\s*([-*]|\d+\.)\s+/.test(l)) { flush(); const ordered = /^\s*\d+\./.test(l); const items = [];
+        while (i < lines.length && (/^\s*([-*]|\d+\.)\s+/.test(lines[i]) || (/^\s{2,}\S/.test(lines[i]) && items.length))) { if (/^\s*([-*]|\d+\.)\s+/.test(lines[i])) items.push(lines[i].replace(/^\s*([-*]|\d+\.)\s+/, "")); else items[items.length - 1] += " " + lines[i].trim(); i++; }
+        out.push(`<${ordered ? "ol" : "ul"} style="margin:6px 0 6px 22px">` + items.map(x => `<li style="margin:3px 0">${mdInline(x)}</li>`).join("") + `</${ordered ? "ol" : "ul"}>`); continue; }
+      if (!l.trim()) { flush(); i++; continue; }
+      para.push(l.trim()); i++;
+    }
+    flush(); return out.join("\n");
+  }
+  // A diagram written as text (a ```mermaid block) is drawn (page v134: the owner saw the text of the diagrams, not the
+  // diagrams). The drawing library is fetched only when a document has one; if it cannot be fetched or a diagram
+  // cannot be drawn, the text stays as it was.
+  async function mdDiagrams(art) {
+    const blocks = Array.from(art.querySelectorAll("pre.mmd")); if (!blocks.length) return;
+    try {
+      const mermaid = (await import("https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.esm.min.mjs")).default;
+      mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
+      let n = 0;
+      for (const pre of blocks) {
+        try {
+          const { svg } = await mermaid.render("mmd" + Date.now() + "_" + (n++), pre.textContent);
+          const box = el("div"); box.style.cssText = "overflow:auto;margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px"; box.innerHTML = svg; pre.replaceWith(box);
+          // At its natural size (v135): the library shrinks a drawing to the width of the column, and a wide map became unreadable. A wide one scrolls sideways.
+          const pic = box.querySelector("svg"), vb = pic && pic.viewBox && pic.viewBox.baseVal;
+          if (pic && vb && vb.width) { pic.style.maxWidth = "none"; pic.style.width = Math.round(vb.width) + "px"; pic.style.height = "auto"; }
+        } catch (e) { /* this one stays as text */ }
+      }
+    } catch (e) { /* no library: the text stays */ }
+  }
+  async function adminDocs(body, open) {
+    body.innerHTML = "";
+    const r = await authed("admin_docs", { key, name: open || null });
+    if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    if (r.error) { body.textContent = `The documentation could not be read (${r.error}).`; return; }
+    if (!open) {
+      body.append(el("h3", null, "Documentation"));
+      const note = el("p", null, "Kept on lantrNa's server and shown to the owner alone."); note.style.color = "var(--muted, #667)"; body.appendChild(note);
+      const docs = (r.docs || []).slice().sort((a, b) => (a.name === "README.md" ? -1 : b.name === "README.md" ? 1 : a.name.localeCompare(b.name)));
+      if (!docs.length) { body.append(el("p", null, "No document on the server yet: the workflow Server docs copies them at the next change.")); return; }
+      body.appendChild(adminTable(["Document", "File", "Size", "Changed"], docs.map(d => { const a = el("a", null, d.title || d.name); a.href = "#"; a.onclick = ev => { ev.preventDefault(); adminDocs(body, d.name); };
+        return [a, d.name, `${Math.max(1, Math.round(d.size / 1024))} KB`, adminWhen(d.changed * 1000)]; })));
+      return;
+    }
+    const back = el("a", null, "← All documents"); back.href = "#"; back.onclick = ev => { ev.preventDefault(); adminDocs(body); }; body.appendChild(back);
+    if (r.missing) { body.append(el("p", null, `There is no document named ${open}.`)); return; }
+    const art = el("div"); art.style.cssText = "max-width:900px;line-height:1.55"; art.innerHTML = mdRender(r.text); body.appendChild(art); mdDiagrams(art);
+    art.querySelectorAll("a[data-doc]").forEach(a => { a.onclick = ev => { ev.preventDefault(); adminDocs(body, a.dataset.doc); body.scrollTop = 0; }; });
+  }
   const adminBtn = (text, fn) => { const b = el("button", null, text); b.type = "button"; b.style.cssText = "font:inherit;font-size:13px;padding:2px 10px;border-radius:999px;border:1px solid var(--line);background:var(--box);color:var(--fg);cursor:pointer;margin-right:4px"; b.onclick = fn; return b; };
   async function adminPeople(body) {
     const o = await authed("admin_overview", { key }); if (!o) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
@@ -2430,6 +2623,19 @@
     body.appendChild(adminTable(["Link", "State", "Searches, 7 days", "30 days", "Answers, 7 days", "Last used", "", ""], o.links.map(l => [opener(l.name, { link: l.name }, "See what this link searched"), l.active ? "on" : "off", l.searches_7d, l.searches_30d, l.answers_7d || "", adminWhen(l.last_used),
       l.name === "owner" ? "" : adminBtn(l.active ? "Switch off" : "Switch on", async () => { await authed("admin_link_set", { key, name: l.name, active: !l.active }); adminPeople(body); }),
       l.name === "owner" || l.name === "team" ? "" : adminBtn(l.may_ask ? "Stop Ask" : "Allow Ask", async () => { await authed("admin_link_ask", { key, name: l.name, may: !l.may_ask }); adminPeople(body); })])));
+    // v132: the browsers of each link. The first ones up to the link's limit are allowed as they arrive; one more waits here.
+    const lb = await authed("admin_link_browsers", { key });
+    if (lb) {
+      body.append(el("h3", null, "Browsers of each link"));
+      body.append(el("p", null, lb.enforced ? "A link works only in the browsers allowed here. A new browser beyond the link's limit waits until you allow it."
+                                            : "Not enforced yet: every browser that opens a link is noted here, and none is refused. When the rule is switched on, a browser marked as waiting stops working until you allow it."));
+      const limitOut = el("span"); limitOut.style.cssText = "font-size:13px;margin-left:8px";
+      body.appendChild(adminTable(["Link", "Allowed", "Waiting", "Limit", ""], lb.links.map(l => { const inp = document.createElement("input"); inp.type = "number"; inp.min = 1; inp.max = 20; inp.value = l.limit; inp.style.cssText = "font:inherit;width:60px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:var(--box);color:var(--fg)";
+        return [l.name, l.allowed, l.waiting || "", inp, adminBtn("Set limit", async () => { const r = await authed("admin_link_browser_set", { key, name: l.name, max_browsers: parseInt(inp.value, 10) }); limitOut.textContent = r && r.ok ? `Limit of ${l.name} set.` : "A number from 1 to 20."; })]; })));
+      body.appendChild(limitOut);
+      if (lb.browsers.length) body.appendChild(adminTable(["Link", "Browser", "First seen", "Last used", "State", ""], lb.browsers.map(b => [b.name, b.label || "?", adminWhen(b.first_seen), adminWhen(b.last_seen), b.allowed ? "allowed" : "waiting",
+        adminBtn(b.allowed ? "Stop" : "Allow", async () => { await authed("admin_link_browser_set", { key, browser: b.id, allowed: !b.allowed }); adminPeople(body); })])));
+    }
     body.append(el("h3", null, "People who signed in"));
     // v82 (the owner): answers today against the person's limit, and the limit set here (50 a day unless changed).
     const limitNote = el("span"); limitNote.style.cssText = "font-size:13px;margin-left:8px";
@@ -2555,10 +2761,11 @@
     box.onkeydown = ev => { if (ev.key === "Enter") again(); };
     const mainB = adminBtn(st.main ? "Main reports only" : "Every kind of document", () => { st.main = !st.main; again(); }); mainB.title = "Switch between the main reports and every document";
     const yearB = adminBtn(st.from ? `From ${st.from}` : "Every year", () => { st.from = st.from === 2023 ? 2020 : st.from === 2020 ? null : 2023; again(); }); yearB.title = "From 2023, from 2020, or every year";
-    bar.append(box, adminBtn("Search", again), mainB, yearB); body.appendChild(bar);
+    const fresh = adminBtn("Refresh", again); fresh.title = "Read the list again: what you sent in the meantime shows at once";
+    bar.append(box, adminBtn("Search", again), mainB, yearB, fresh); body.appendChild(bar);
     body.appendChild(latestMissing(st));
     const why = Object.entries(r.by_status || {}).map(([k, n]) => `${n} ${UNREAD[k] ? k.replace(/_/g, " ") : k}`).join(", ");
-    body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.`));
+    body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.${r.covered ? ` ${r.covered} more ${r.covered === 1 ? "address is" : "addresses are"} not listed: the library already reads a document of the same company, year and kind.` : ""}`));
     // v121 (the owner's screenshot: one company, sixteen rows with the same title): rows of a company with the same
     // year, type and title are one document held under several addresses. The first is shown, the others fold under
     // "+N more addresses"; a row already sent is put first, so that the group shows it.
@@ -2574,6 +2781,9 @@
         const usd = v => v >= 1e9 ? `${(v / 1e9).toFixed(v >= 1e10 ? 0 : 1)} bn USD` : `${Math.round(v / 1e6)} m USD`;
         const why = [d.missing, d.revenue_usd ? `revenue about ${usd(Number(d.revenue_usd))} (as the robot read it)` : ""].filter(Boolean).join(" · ");
         if (why) { const w = el("div", null, why); w.style.cssText = "font-size:13px;margin:0 0 4px;color:" + (d.missing ? "#B4540A" : "var(--muted, #667)"); body.append(w); }
+        // v142: what was sent for this company in the last two days, whatever row each file became
+        if (d.company_sent) { const cs = d.company_sent, bits = [cs.taken && `${cs.taken} taken`, cs.known && `${cs.known} already held`, cs.waiting && `${cs.waiting} being checked`].filter(Boolean).join(", ");
+          const sl = el("div", null, `Sent in the last two days: ${cs.n} file${cs.n === 1 ? "" : "s"}${bits ? ` (${bits})` : ""}, the last ${adminWhen(cs.last)}. A row leaves once the library reads a document of its year and kind.`); sl.style.cssText = "font-size:13px;margin:0 0 4px;color:#2E8B1F"; body.append(sl); }
         body.append(unreadNote(d)); table = el("div"); body.append(table);
       }
       const row = el("div"); row.style.cssText = "display:flex;gap:10px;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--line)";

@@ -8,6 +8,15 @@ Lessons that cost time to learn. Read before changing the area they name.
 ## The reader
 - **A model given room to think may hand back its thinking as the answer.** The step that chooses an answer's search words has 800 tokens so the model can reason first; one reply was a single line of words followed by its own doubts, and all of it was searched and shown to the person (19 Nov 2026). Whatever a model returns for use as data is cut to the shape asked for (`ask_keywords_clean`) before it is used.
 
+## The server's door
+- **A new path of the service needs the web server's rule too.** 22 Nov 2026: `/docs` was added to the service and tested against the service; from outside it answered 404, because Caddy passes on only the paths its rule names. The check that would have caught it is one request from outside after the install (Server service, mode `check`, prints the door's answer without the secret: 401 means it arrives).
+
+## The server's copy of the passages
+- **Two owners for one document switched the remote search off.** 22 Nov 2026: the policies index (server only) took three documents that Supabase's index also held, because their type had changed. The nightly refresh skipped "server only" documents when counting, so those three looked missing after every copy, the copy was judged not current, and `meaning_remote` was switched off for the night; the search went on from Supabase's own index. A rule that exempts rows from a comparison must say what happens to a row that is on both sides. And a switch that a job turns off by itself needs the same job to turn it on again, or it stays off until someone reads a log.
+
+## The server's runners
+- **Long jobs can take every runner.** 21 Nov 2026: three eleven-hour runs of the policies index, with the clock, the scan watch and the hourly labelling, used all six runners; a one-minute run waited seven minutes, and a person's upload would have waited the same. Before starting several long runs on the server, count what already holds a runner all day (the clock and the scan watch always do) and leave one free.
+
 ## Who may sign in
 - **One listed address let every signed-in address in.** `email_may_search(email)` compared `lower(a.email) = lower(email)` inside an SQL function: the bare `email` is the column of the table, not the argument, so the line was true for every row and any signed-in address passed once `search_access` held one row. Found 21 Nov 2026 while removing the mail domain rule; the argument is now written `email_may_search.email` and a test lists one address and checks another is refused. In an SQL function, never give an argument the name of a column it is compared with (the same trap as `survey_option`).
 
@@ -27,6 +36,10 @@ Lessons that cost time to learn. Read before changing the area they name.
 - **A link with `href="#"` and `target="_blank"` opens the page itself in a new tab.** The answer's sources and a result's title did that for every document with no public address: to the person, clicking a source reloaded lanterN (19 Nov 2026). A link that has nowhere to go must do something on click (`docLink` opens the reader) or not be a link.
 
 ## SQL
+- **A job started with the repository's own token starts no follow-up job.** `on: workflow_run` does not fire after a run that `gh workflow run` started with `github.token`, which is how lantrNa's clock starts jobs. Moving a job to the clock silently cut every job chained after it (two nights, 21 and 22 Nov 2026). When a job moves to the clock, the jobs that follow it move too, each with its own time.
+- **rjsmin does not know a template literal inside another one.** In `` `a ${list.map(x => `${x} ${y}`)} b` `` the inner template is treated as code and loses its spaces: the page still runs and its sentences read wrong. Nothing failed for a day (22 Nov 2026). `build_page.compact_js` keeps template literals out of the compactor; a test checks that every template of the search page is served as written.
+- **`requests.request` opens a new connection for every call.** Unnoticed on GitHub's machines, close to Airtable; from a server in Europe each TLS handshake crosses the Atlantic and a sweep of 2,800 calls took twice as long (22 Nov 2026). Use `keepalive.session()` for anything called in a loop.
+- **A kept result must carry the state of what it was made from.** Kept answers were reused for 14 days by company and words alone; a company whose main reports arrived the night after a question kept answering "Not stated" (22 Nov 2026). `documents.loaded_at` cannot tell when a document arrived: every load rewrites it. The kept row now holds a count of the company's library and is reused only while the count is equal.
 - **A parameter of an SQL-language function named like a column is read as the column.** `ask_reusable(company text, ...)` with `where c.company = company` compared the column with itself: every company's kept answer would have been given for any company. The function's own test caught it before it was installed (19 Nov 2026). Name such parameters apart (`for_company`) or use `$1`.
 
 ## Checking a change where it is not used
