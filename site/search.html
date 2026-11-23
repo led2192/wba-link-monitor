@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v147 2026-11-23";
+  const CLIENT = "lantern v148 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2550,6 +2550,15 @@
       found.append(adminTable(["Name", "Kind", "", ""], list.map(e => [e.name + ((e.aliases || []).length ? ` (${e.aliases.join(", ")})` : ""), e.kind, e.gone ? "hidden" : e.edited_at ? "reviewed" : e.ai ? "AI draft" : "", adminBtn("Open", () => form(e, () => adminReference(body)))]))); };
     fq.onkeydown = ev => { if (ev.key === "Enter") find(); };
     bar.append(fq, adminBtn("Find", find), adminBtn("Add an entry", () => form({}, () => adminReference(body)))); body.append(bar, editor, found);
+    // v148: what the reports name and the list does not hold (reference_candidates.py): a full name with its acronym that several companies write
+    const cand = el("div"); body.append(cand);
+    authed("admin_reference_candidates", { key }).then(c => { if (!c || !(c.rows || []).length) return;
+      cand.append(el("h3", null, "Named in the reports, not in the list"), el("p", "what", `Full names with their acronym that several companies write in recent reports and the list does not hold, most companies first (${c.found.toLocaleString()} in all, from a sample of pages, found ${adminWhen(c.found_at)}). Add the ones worth an entry; set the rest aside and they do not come back.`));
+      cand.append(adminTable(["Name", "Acronym", "Looks like", "Companies", "Documents", ""], c.rows.map(x => { const act = el("div"), say = el("span", "what", "");
+        act.append(adminBtn("Add it", () => { form({ kind: x.kind, name: x.name, aliases: x.acronym ? [x.acronym] : [] }, () => adminReference(body)); editor.scrollIntoView({ block: "center" }); }),
+          adminBtn("Set aside", async () => { const s = await authed("admin_reference_candidate_set", { key, candidate: x.key, dismissed: true }); if (s && s.ok) adminReference(body); else say.textContent = " not saved"; }), say);
+        return [x.name, x.acronym || "", x.kind, x.companies, x.documents, act]; }))); }).catch(() => {});
+    body.append(el("h3", null, "Asked and not found"));
     const rows = r.asked || []; if (!rows.length) { body.appendChild(el("p", null, "Nothing asked and not found yet.")); return; }
     const line = m => { const act = el("div"); const say = el("span", "what", "");
       if (!m.dismissed) act.append(adminBtn("Add it", () => form({ kind: "term", name: m.asked.replace(/\b\w/, c => c.toUpperCase()) }, () => adminReference(body))));
