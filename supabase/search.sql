@@ -8160,6 +8160,49 @@ $$;
 revoke all on function public.admin_reference_candidate_set(text, text, boolean) from public, anon;
 grant execute on function public.admin_reference_candidate_set(text, text, boolean) to authenticated;
 
+-- The words reports use most, by reporting year (23 Nov 2026; keywords_by_year.py on the job server counts, on a sample
+-- of the pages of main reports, how many companies write each pair of neighbouring words). sampled: the companies
+-- sampled that year, so that a share can be shown and two years compared. For the owner only.
+create table if not exists public.keyword_use (
+  year      int not null,
+  phrase    text not null,
+  companies int not null,
+  sampled   int not null,
+  counted_at timestamptz not null default now(),
+  primary key (year, phrase)
+);
+alter table public.keyword_use enable row level security;
+
+-- A year's words: the most used, or those that rose or fell most against the year before, in points of the share of
+-- the companies sampled each year. A phrase with no count the year before is compared with nought.
+create or replace function public.admin_keyword_use(key text, of_year int default null, sort text default 'most') returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  y int := coalesce(of_year, (select max(k.year) from public.keyword_use k where k.sampled >= 200), (select max(k.year) from public.keyword_use k));
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object('year', y,
+    'years', (select coalesce(jsonb_agg(s.year order by s.year desc), '[]'::jsonb) from (select distinct k.year from public.keyword_use k) s),
+    'sampled', (select max(k.sampled) from public.keyword_use k where k.year = y),
+    'sampled_before', (select max(k.sampled) from public.keyword_use k where k.year = y - 1),
+    'counted_at', (select max(k.counted_at) from public.keyword_use k),
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('phrase', r.phrase, 'companies', r.companies, 'share', r.share, 'before', r.before, 'moved', r.moved)
+                                      order by case sort when 'rising' then -r.moved when 'falling' then r.moved else -r.share end, r.phrase), '[]'::jsonb)
+             from (select x.* from (select k.phrase, k.companies, round(100.0 * k.companies / nullif(k.sampled, 0), 1) as share,
+                                           (select round(100.0 * b.companies / nullif(b.sampled, 0), 1) from public.keyword_use b where b.year = y - 1 and b.phrase = k.phrase) as before,
+                                           round(100.0 * k.companies / nullif(k.sampled, 0), 1)
+                                             - coalesce((select round(100.0 * b.companies / nullif(b.sampled, 0), 1) from public.keyword_use b where b.year = y - 1 and b.phrase = k.phrase), 0) as moved
+                                    from public.keyword_use k where k.year = y) x
+                   order by case sort when 'rising' then -x.moved when 'falling' then x.moved else -x.share end, x.phrase limit 120) r));
+end;
+$$;
+revoke all on function public.admin_keyword_use(text, int, text) from public, anon;
+grant execute on function public.admin_keyword_use(text, int, text) to authenticated;
+
 -- One entry over the years (23 Nov 2026, the owner: "it is important to see how a concept moves over the years"):
 -- the companies and documents that name it each reporting year, and the companies with a typed, read document that
 -- year, so that the page shows the share.

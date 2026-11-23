@@ -27,9 +27,9 @@ class QuietHours(unittest.TestCase):
 
     def test_the_heavy_jobs_ask_the_clock(self):
         root = os.path.join(os.path.dirname(__file__), "..")
-        for name in ("reference_use.py", "reference_examples.py", "reference_candidates.py", "company_short_names.py", "company_profile.py"):
+        for name in ("reference_use.py", "reference_examples.py", "reference_candidates.py", "company_short_names.py", "company_profile.py", "keywords_by_year.py"):
             self.assertIn("quiet_hours.held(", open(os.path.join(root, name), encoding="utf-8").read(), name)
-        for name in ("reference_use.yml", "reference_examples.yml", "reference_candidates.yml", "company_short_names.yml"):
+        for name in ("reference_use.yml", "reference_examples.yml", "reference_candidates.yml", "company_short_names.yml", "keywords_by_year.yml"):
             self.assertIn("group: heavy-database", open(os.path.join(root, ".github", "workflows", name), encoding="utf-8").read(), name)
 
 

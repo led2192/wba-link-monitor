@@ -2084,6 +2084,27 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_reference_example_set('k', 'term:zm', 'RX9', 3, 'approved')"); self.assertFalse(cur.fetchone()[0]["ok"])
         cur.execute("delete from public.reference_examples where entry = 'term:zm'"); cur.execute("delete from public.documents where library_id = 'RX1'"); cur.execute("delete from public.companies where wba_id = 'RXA'")
 
+    def test_the_words_of_a_year_and_those_that_rose(self):
+        """23 Nov 2026: which words recur most in a year's reports. Pairs of content words, once a company a year, on
+        pages in English; the owner sees a year's most used and what rose against the year before, in points."""
+        import keywords_by_year as K
+        eng = ("We are a company and the supply chain is important to our business in this year. The supply chain was reviewed and it is in line with "
+               "our double materiality assessment for the year. ")
+        self.assertEqual(K.pairs("The supply chain is important. Supply chain; and the Supply Chain!"), {"supply chain"})
+        self.assertFalse(K.english("nous sommes une entreprise et la chaine est importante".split() * 10))
+        rows = ([(f"W{i}", 2025, eng * 2) for i in range(10)] + [(f"W{i}", 2024, eng.replace("double materiality", "supply resilience") * 2) for i in range(8)]
+                + [("X", 2025, "Nous sommes une entreprise et la chaîne est importante. " * 20), ("Y", None, eng * 2)])
+        firms, got = K.count(rows, keep=3, min_companies=8)
+        self.assertEqual(firms, {2025: 10, 2024: 8})
+        self.assertIn((2025, "double materiality", 10), got); self.assertIn((2024, "supply chain", 8), got); self.assertNotIn("entreprise", " ".join(p for _, p, _ in got))
+        cur = self.conn.cursor()
+        cur.executemany("insert into public.keyword_use (year, phrase, companies, sampled) values (%s, %s, %s, %s)", [(y, p, n, firms[y]) for y, p, n in got])
+        cur.execute("select public.admin_keyword_use('k', 2025, 'rising')"); r = cur.fetchone()[0]
+        self.assertEqual((r["year"], r["sampled"], r["sampled_before"]), (2025, 10, 8))
+        top = r["rows"][0]; self.assertEqual((top["phrase"] in ("double materiality", "materiality assessment"), top["before"], float(top["moved"])), (True, None, 100.0))
+        cur.execute("select public.admin_keyword_use('k', 2025, 'most')"); most = {x["phrase"]: float(x["moved"]) for x in cur.fetchone()[0]["rows"]}; self.assertEqual(most["supply chain"], 0.0)
+        cur.execute("delete from public.keyword_use")
+
     def test_a_word_of_the_search_names_a_group_by_what_companies_say_they_are(self):
         """23 Nov 2026: sub-sectors that are in no list. A word that several companies' profiles use for their sector,
         industry or sub-sector names a group, plural or singular; a word of every business does not, nor one of a single company."""

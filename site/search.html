@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v155 2026-11-23";
+  const CLIENT = "lantern v156 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2538,7 +2538,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Standards in use": adminUse, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Standards in use": adminUse, "Words of the year": adminWords, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2570,6 +2570,21 @@
       act.append(adminBtn(m.dismissed ? "Bring back" : "Set aside", async () => { const r = await authed("admin_name_not_held_set", { key, word: m.word, dismissed: !m.dismissed }); if (r && r.ok) adminNotHeld(body); else say.textContent = " not saved"; }), say);
       return [m.word, m.times, m.people, adminWhen(m.last_at), m.dismissed ? "set aside" : "", act]; };
     body.appendChild(adminTable(["Word", "Searches", "Links", "Last", "", ""], rows.map(line)));
+  }
+  // v156: the pairs of words most companies write in the main reports of a year, and those rising or falling (keyword_use). The owner's only.
+  async function adminWords(body, year, sort) {
+    const r = await authed("admin_keyword_use", { key, of_year: year || null, sort: sort || "most" }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    body.innerHTML = "";
+    body.appendChild(el("p", "what", "The pairs of words that most companies write in their main reports, by reporting year, and the ones that rose or fell against the year before. Counted on a sample of pages in English with no model, so it ranks and does not measure: a share here is lower than the true one, and comparable only between years. Only you see this."));
+    if (!(r.years || []).length) { body.appendChild(el("p", null, "Nothing counted yet: the count runs on the server once a week (workflow \"Words of the year\").")); return; }
+    const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 12px";
+    const pick = (opts, cur, on) => { const s = el("select"); s.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)"; for (const [v, t] of opts) { const o = el("option", null, t); o.value = v; s.appendChild(o); } s.value = cur; s.onchange = () => on(s.value); return s; };
+    bar.append(pick(r.years.map(y => [String(y), `Reporting year ${y}`]), String(r.year), v => adminWords(body, Number(v), sort)),
+               pick([["most", "Most used"], ["rising", `Rising against ${r.year - 1}`], ["falling", `Falling against ${r.year - 1}`]], sort || "most", v => adminWords(body, r.year, v)),
+               el("span", "what", `${(r.sampled || 0).toLocaleString()} companies sampled in ${r.year}${r.sampled_before ? `, ${r.sampled_before.toLocaleString()} in ${r.year - 1}` : ""}; counted ${adminWhen(r.counted_at)}`));
+    body.appendChild(bar);
+    const pts = x => x.before == null ? "new" : `${x.moved > 0 ? "+" : ""}${x.moved} pt`;
+    body.appendChild(adminTable(["", "Words", "Companies", "Of the companies sampled", `Against ${r.year - 1}`], (r.rows || []).map((x, i) => [i + 1, x.phrase, x.companies.toLocaleString(), `${x.share}%`, pts(x)])));
   }
   // v145: which norms and regulations the reports of a year name most (reference_use, counted on the server). The owner's only.
   async function adminUse(body, year, kind) {
