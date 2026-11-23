@@ -3,7 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
-- 2026-11-23 Docs, fifth weekly review: quality.md snapshot of the week (72,771 open failures; 2,457 opened, 472 High; the first 3,464 silent closes; 33 cards settled, AI right on 10 of 15 disagreements, year right on 23 of 25, titles wrong on 8 of 33). The causes found are in #736 and #738. (#PR_DOCS)
+- 2026-11-23 Docs, fifth weekly review: quality.md snapshot of the week (72,771 open failures; 2,457 opened, 472 High; the first 3,464 silent closes; 33 cards settled, AI right on 10 of 15 disagreements, year right on 23 of 25, titles wrong on 8 of 33). The causes found are in #736 and #738. (#739)
 - 2026-11-19 Extension 0.6.4 opened a second time with the same change as #678; nothing more. (#679)
 - 2026-11-16 Docs, fourth weekly review: quality.md snapshot of the week (73,781 open failures; 27,015 opened, 19,571 of them false LABEL_CORRECTION rows fixed at the source by #586; 16 analyst flags checked and fixed; 36 cards settled, AI right on 9 of 15 disagreements, year right on 24 of 27, titles wrong on 12 of 36) (#587)
 - 2026-11-16 The server gets a database of its own for the search by meaning: `server/db_install.sh` and the manual workflow "Server database" (`check`, `install`, `stop`). PostgreSQL 17 and pgvector 0.8 from the PostgreSQL project's package source, listening on the machine itself only, passwords for every network connection, a ceiling of 28 GB and six cores, an empty database `lantern`. No tables, roles or data yet; nothing in Supabase changes. The Monday Server check now reads it too. Step 2 of the move approved by the owner on 16 Nov. (#586)
