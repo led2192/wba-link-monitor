@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v143 2026-11-23";
+  const CLIENT = "lantern v144 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2428,7 +2428,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2460,6 +2460,26 @@
       act.append(adminBtn(m.dismissed ? "Bring back" : "Set aside", async () => { const r = await authed("admin_name_not_held_set", { key, word: m.word, dismissed: !m.dismissed }); if (r && r.ok) adminNotHeld(body); else say.textContent = " not saved"; }), say);
       return [m.word, m.times, m.people, adminWhen(m.last_at), m.dismissed ? "set aside" : "", act]; };
     body.appendChild(adminTable(["Word", "Searches", "Links", "Last", "", ""], rows.map(line)));
+  }
+  // v144: what the reader made of each company from its own reports (company_profile), for the owner to judge
+  async function adminProfiles(body, search) {
+    const r = await authed("admin_company_profiles", { key, search: search || null }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    body.innerHTML = ""; const st = r.status || {}, total = Object.values(st).reduce((a, b) => a + b, 0);
+    body.appendChild(el("p", "what", `A company's profile is read from its own reports: where it is, who owns it, what it does, its sector, industry and sub-sector. Read so far: ${(r.companies || 0).toLocaleString()} of ${(r.of || 0).toLocaleString()} companies, ${total.toLocaleString()} fields (${["confirmed", "corrected", "rejected"].map(x => `${st[x] || 0} ${x}`).join(", ")}). Nobody else sees a profile yet. Confirm what is right, reject what is wrong, or write the right value: the reader never changes a field you touched.`));
+    const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 12px"; const fq = document.createElement("input"); fq.placeholder = "a company, by a word of its name"; fq.value = search || ""; fq.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:320px;background:var(--bg);color:var(--fg)";
+    fq.onkeydown = ev => { if (ev.key === "Enter") adminProfiles(body, fq.value); }; bar.append(fq, adminBtn("Find", () => adminProfiles(body, fq.value)), adminBtn("Last read", () => adminProfiles(body))); body.appendChild(bar);
+    if (!(r.shown || []).length) { body.appendChild(el("p", null, search ? "No company read with that word in its name." : "No company read yet.")); return; }
+    const show = v => Array.isArray(v) ? v.join(", ") : String(v), label = f => f.replace(/_/g, " ");
+    for (const c of r.shown) { body.appendChild(el("h3", null, `${c.name}${c.industry ? ` (listed under ${c.industry})` : ""}`));
+      const line = f => { const act = el("div"), say = el("span", "what", ""), val = el("div", null, show(f.value)); act.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;align-items:center";
+        const set = async (status, value) => { say.textContent = " saving…"; const x = await authed("admin_company_profile_set", { key, company: c.id, field: f.field, status, value: value === undefined ? null : value }); if (x && x.ok) adminProfiles(body, search); else say.textContent = " not saved"; };
+        const fix = () => { const i = document.createElement("input"); i.value = show(f.value); i.style.cssText = "font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:8px;width:100%;box-sizing:border-box;background:var(--bg);color:var(--fg)"; val.innerHTML = ""; val.append(i); i.focus();
+          const save = () => { const t = i.value.trim(); if (!t) return; set("corrected", Array.isArray(f.value) ? t.split(",").map(s => s.trim()).filter(Boolean) : typeof f.value === "number" && /^\d+$/.test(t) ? Number(t) : t); };
+          i.onkeydown = ev => { if (ev.key === "Enter") save(); }; act.innerHTML = ""; act.append(adminBtn("Save", save), adminBtn("Cancel", () => adminProfiles(body, search)), say); };
+        if (f.status === "read") act.append(adminBtn("Right", () => set("confirmed")), adminBtn("Wrong", () => set("rejected")), adminBtn("Correct it", fix)); else act.append(adminBtn("Correct it", fix), adminBtn("Undo", () => set("read")));
+        act.append(say);
+        return [label(f.field), val, f.model === "person" ? "written by you" : [f.doc, f.page ? `p. ${f.page}` : ""].filter(Boolean).join(", "), f.status === "read" ? "" : f.status, act]; };
+      body.appendChild(adminTable(["Field", "Value", "Read on", "", ""], (c.fields || []).map(line))); }
   }
   // v138: the reference list, and what people asked of it that it does not hold
   async function adminReference(body) {

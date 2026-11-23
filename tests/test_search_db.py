@@ -1939,6 +1939,27 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertTrue(done["ok"]); self.assertEqual([(r["word"], r["times"], r["people"], r["dismissed"]) for r in rows], [("zyntharix", 2, 1, True)])
         cur.execute("delete from public.company_misses")
 
+    def test_the_owner_sees_and_judges_a_company_profile(self):
+        """23 Nov 2026: the profile read from a company's reports is shown to the owner first, field by field with
+        where it was read; what the owner confirms, rejects or corrects is kept, and a correction carries a value."""
+        import psycopg
+        cur = self.conn.cursor()
+        cur.execute("insert into public.companies (wba_id, name, industry) values ('PF1', 'Profiled One', 'Testing industry'), ('PF2', 'Other Two', null) on conflict do nothing")
+        cur.execute("insert into public.company_profile (wba_id, field, value, library_id, page, model) values ('PF1', 'headquarters_city', '\"Lima\"', 'none', 4, 'm'), "
+                    "('PF1', 'countries', '[\"Peru\", \"Chile\"]', null, null, 'm'), ('PF2', 'year_founded', '1950', null, null, 'm')")
+        ask = lambda s=None: (cur.execute("select public.admin_company_profiles('k', %s)", (s,)), cur.fetchone()[0])[1]
+        r = ask(); mine = [c for c in r["shown"] if c["id"] == "PF1"][0]
+        self.assertGreaterEqual(r["companies"], 2); self.assertEqual([(f["field"], f["value"], f["page"], f["status"]) for f in mine["fields"]], [("countries", ["Peru", "Chile"], None, "read"), ("headquarters_city", "Lima", 4, "read")])
+        self.assertEqual([c["id"] for c in ask("profiled")["shown"]], ["PF1"]); self.assertEqual(ask("no such name")["shown"], [])
+        put = lambda *a: (cur.execute("select public.admin_company_profile_set('k', %s, %s, %s, %s::jsonb)", a), cur.fetchone()[0])[1]
+        self.assertTrue(put("PF1", "headquarters_city", "confirmed", None)["ok"]); self.assertTrue(put("PF1", "countries", "corrected", '["Peru"]')["ok"]); self.assertFalse(put("PF1", "no_field", "rejected", None)["ok"])
+        cur.execute("select field, value, status, model from public.company_profile where wba_id = 'PF1' order by field")
+        self.assertEqual(cur.fetchall(), [("countries", ["Peru"], "corrected", "person"), ("headquarters_city", "Lima", "confirmed", "m")])
+        for bad in (("PF1", "countries", "corrected", None), ("PF1", "countries", "corrected", "[]"), ("PF1", "countries", "liked", None)):
+            with self.assertRaises(psycopg.Error): put(*bad)
+        self.assertEqual(ask()["status"].get("corrected"), 1)
+        cur.execute("delete from public.company_profile where wba_id in ('PF1', 'PF2')"); cur.execute("delete from public.companies where wba_id in ('PF1', 'PF2')")
+
     def test_the_review_card_lists_every_reading_and_carries_the_page_when_there_is_no_link(self):
         """12 Nov 2026: the card said "1 give another" and not which figure or where; and a document with no address
         could not be opened at all."""
