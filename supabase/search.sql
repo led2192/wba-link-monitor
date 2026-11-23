@@ -3038,6 +3038,43 @@ insert into public.search_options (name, is_on, note) values ('ask_latest', fals
 -- withdrawal 0 -> 3), none fewer, ten unchanged, seconds unchanged.
 update public.search_options set is_on = true, changed = now(), note = note || ' (on since 15 Nov 2026, run 43710164737)' where name = 'ask_latest' and not is_on and note not like '%on since%';
 
+-- Option ask_report_words (23 Nov 2026). The owner asked "main difficulties porsche in 2025" and the answer began "The
+-- excerpts give no management commentary on difficulties": the eight pages were notes to the accounts. A report
+-- does not say "difficulties". It says risks, challenges, headwinds, uncertainties, outlook, and it says so in its
+-- risk report and its outlook, which the question's own words do not find. A question's everyday word for a kind of
+-- content is named here once with the words reports use for it (ask_concepts: rows the owner can change, not rules
+-- in the code). With the option, when the question holds such a word and names a company, the search is asked once
+-- more with the reports' words, and up to three of those pages are read after the search's best five.
+create table if not exists public.ask_concepts (
+  key   text primary key,
+  asks  text[] not null,      -- what a person types, lower case, in any language held
+  says  text not null         -- the words reports use for it, as one search
+);
+alter table public.ask_concepts enable row level security;
+insert into public.ask_concepts (key, asks, says) values
+  ('difficulties', '{difficulties,difficulty,challenges,challenge,problems,problem,headwinds,obstacles,setbacks,struggles,troubles,weaknesses,dificultades,retos,problemas,desafios,desafíos}',
+   'risks challenges headwinds uncertainties adverse decline challenging outlook'),
+  ('risks', '{risks,risk,threats,exposure,riesgos,amenazas}', 'principal risks uncertainties risk factors risk report mitigation'),
+  ('strategy', '{strategy,strategic,priorities,plans,plan,ambition,roadmap,estrategia,prioridades,planes}', 'strategy strategic priorities objectives ambition roadmap pillars'),
+  ('outlook', '{outlook,expectations,expects,forecast,guidance,future,prospects,perspectivas,previsiones,futuro}', 'outlook guidance expects forecast anticipate coming year'),
+  ('reasons', '{why,reason,reasons,causes,cause,drivers,explains,explanation,porque,razones,causas,motivos}', 'due to driven by attributable result of mainly because'),
+  ('changes', '{changed,changes,change,restated,restatement,recalculated,methodology,boundary,cambios,cambio,metodologia,metodología}', 'restated recalculated methodology change boundary comparability previously reported'),
+  ('achievements', '{achievements,successes,highlights,milestones,progress,logros,hitos,avances}', 'highlights achievements milestones progress achieved delivered'),
+  ('opportunities', '{opportunities,opportunity,potential,growth,oportunidades}', 'opportunities growth potential expansion demand')
+on conflict (key) do nothing;
+insert into public.search_options (name, is_on, note) values ('ask_report_words', false, 'Ask about a company with an everyday word for a kind of content (difficulties, strategy, outlook, why): read pages found by the words reports use for it too')
+on conflict (name) do nothing;
+
+-- The reports' words for the first concept a question names, or null. Whole words, whatever the case.
+create or replace function public.ask_concept_says(asked text) returns text
+language sql stable security definer set search_path = public
+as $$
+  select c.says from public.ask_concepts c
+  where exists (select 1 from unnest(c.asks) a where (' ' || regexp_replace(lower(coalesce(asked, '')), '[^[:alnum:]]+', ' ', 'g') || ' ') like '% ' || a || ' %')
+  order by (c.key = 'reasons'), c.key limit 1      -- "why" is in many questions: any other concept named with it comes first
+$$;
+revoke all on function public.ask_concept_says(text) from public, anon, authenticated;
+
 -- 16 Nov 2026: the industry, country and region of the box travel with the question too. Before, an answer asked
 -- with "Industry: Oil & Gas" was written from pages of any industry, while the list under it showed oil and gas.
 drop function if exists public.ask_pages(text, text, real[], text, int, int, text, text);
@@ -3054,7 +3091,11 @@ declare
   latest int;
   later_from int;         -- the second search's first year: the newest report's year or the year before (no year asked), or the year after the years asked (ask_later)
   later boolean := false;
+  says text;              -- option ask_report_words: the reports' words for the kind of content the question asks about
 begin
+  if nullif(btrim(coalesce(company_filter, '')), '') is not null and public.survey_option('ask_report_words') then
+    says := public.ask_concept_says(coalesce(asked, q));
+  end if;
   -- Option ask_doc_pages (16 Nov 2026). The search gives three pages a document, right for a list a person reads. An
   -- answer about one company is often in one report, on its fourth or tenth best page: of 12 questions whose
   -- confirmed page the search did not find, 8 had the page's document among the 24 and in 6 of those the document
@@ -3097,16 +3138,26 @@ begin
          newest as (select max(c.year) as y from c),
          r as materialized (select * from public.find_blend(key, q, qvec, company_filter, later_from, null, type_filter, 8, case when later then 'ask later' else 'ask latest' end, industry_filter, country_filter, region_filter, asked)
                             where later_from is not null),
+         -- ask_report_words: the same company and years, searched by the reports' words; its best three, in main reports first
+         w as materialized (select f.*, row_number() over (order by (f.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', '10K Form', 'Registration Document')) desc, f.rank) as rk
+                            from public.find_pages(key, says, company_filter, coalesce(year_from, later_from), year_to, type_filter, 12, 'ask concept', industry_filter, country_filter, region_filter, asked) f
+                            where says is not null and not exists (select 1 from c where c.library_id = f.library_id and c.page = f.page and c.rank <= 5)),
          u as (select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt, c.rank, 0 as src from c
                union all
                select r.library_id, r.company, r.wba_id, r.year, r.doc_type, r.label, r.url, r.page, r.excerpt, r.rank, 1 from r
-               where not exists (select 1 from c where c.library_id = r.library_id and c.page = r.page))
+               where not exists (select 1 from c where c.library_id = r.library_id and c.page = r.page)
+               union all
+               select w.library_id, w.company, w.wba_id, w.year, w.doc_type, w.label, w.url, w.page, w.excerpt, w.rk::int, 2 from w
+               where w.rk <= 3),
+         -- a page the reports' words found and the search ranked sixth or lower is read as the former
+         u2 as (select distinct on (u.library_id, u.page) u.*, newest.y as newest_y from u, newest order by u.library_id, u.page, (u.src = 2) desc)
     select u.library_id, u.company, u.wba_id, u.year, u.doc_type, u.label, u.url, u.page, u.excerpt
-    from u, newest
+    from u2 u
     order by case when u.src = 0 and u.rank <= 5 then 0
-                  when later and u.src = 1 then 1                                                    -- after the best five of the years asked, the later reports' pages (three at most: eight in all)
-                  when not later and u.year is not null and u.year >= coalesce(latest, newest.y) - 1 then 1
-                  else 2 end, u.src, u.rank
+                  when u.src = 2 then 1                                                              -- the pages found by the reports' words (three at most: eight in all)
+                  when later and u.src = 1 then 2                                                    -- after the best five of the years asked, the later reports' pages (three at most: eight in all)
+                  when not later and u.year is not null and u.year >= coalesce(latest, u.newest_y) - 1 then 2
+                  else 3 end, u.src, u.rank
     limit 8;
   perform set_config('lantern.per_doc', '', true);
 end;
@@ -4853,6 +4904,69 @@ begin
 end;
 $$;
 revoke all on function public.ask_option_trial(bigint, text) from public, anon, authenticated;
+
+-- An option of the pages an answer reads, beside today's (23 Nov 2026, ask_report_words). The question is asked of
+-- one company twice, with the option off and on: the pages are found (ask_pages, with the question's vector when the
+-- service gives one), read by the reader, and the two answers are described, never returned: their length, whether
+-- they begin by saying the pages do not hold it, the figures they give, and the pages read. CALLS THE PAID READER,
+-- two calls a question. Keeps nothing: no log row, no kept answer.
+create or replace function public.ask_pages_trial(words text, company text, year_from int, year_to int, option text)
+returns jsonb
+language plpgsql security definer
+set search_path = public, extensions
+set statement_timeout = '170s'
+as $$
+#variable_conflict use_variable
+declare
+  model constant text := 'claude-haiku-5-5';
+  api_key text;
+  http_schema text;
+  v jsonb;
+  qvec real[];
+  arm text;
+  r record;
+  n int;
+  context text;
+  pages jsonb;
+  got jsonb;
+  said text;
+  out jsonb := '{}'::jsonb;
+  tok_in int := 0;
+  tok_out int := 0;
+begin
+  if option is null or not exists (select 1 from public.search_options o where o.name = option and o.name like 'ask\_%') then
+    return jsonb_build_object('skipped', 'not an option of the pages an answer reads');
+  end if;
+  select d.decrypted_secret into api_key from vault.decrypted_secrets d where d.name = 'anthropic_api_key' limit 1;
+  select ns.nspname into http_schema from pg_extension e join pg_namespace ns on ns.oid = e.extnamespace where e.extname = 'http';
+  if api_key is null or http_schema is null then return jsonb_build_object('skipped', 'the reader is not switched on'); end if;
+  begin
+    v := public.query_vector_made(words);
+    if jsonb_typeof(v -> 'vec') = 'array' and jsonb_array_length(v -> 'vec') = 384 then qvec := array(select x::real from jsonb_array_elements_text(v -> 'vec') x); end if;
+  exception when others then qvec := null; end;
+  foreach arm in array array['off', 'on'] loop
+    perform set_config('lantern.' || option, arm, true);
+    context := ''; pages := '[]'::jsonb; n := 0;
+    for r in select * from public.ask_pages('', words, qvec, company, year_from, year_to, null, words) loop
+      n := n + 1;
+      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page,
+                                   coalesce((select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) from public.pages pg where pg.library_id = r.library_id and pg.page = r.page), ''));
+      pages := pages || to_jsonb(r.library_id || '|' || r.page);
+    end loop;
+    if n = 0 then perform set_config('lantern.' || option, '', true); return jsonb_build_object('skipped', 'no page found'); end if;
+    got := public.ask_model(api_key, http_schema, model, public.ask_instructions(false), public.ask_message(words, '', '', '', context), 3500);
+    if got ? 'error' then perform set_config('lantern.' || option, '', true); return jsonb_build_object('skipped', 'the model did not answer', 'arm', arm); end if;
+    tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
+    said := coalesce(public.ask_split(got ->> 'text') ->> 'answer', '');
+    out := out || jsonb_build_object(arm, jsonb_build_object('pages', pages, 'chars', length(said), 'cites', (select count(distinct m[1]) from regexp_matches(said, '\[(\d+)\]', 'g') m),
+             'not_stated', said ~* '^\W*not stated',
+             'hedged', left(said, 220) ~* '(excerpts?|pages?|documents?|reports?) (give|gives|provide|provides|contain|contains|hold|holds|include|includes|offer|offers|have|has) (no|little|only limited)|do(es)? not (state|say|discuss|describe|address|explain|mention|cover)|no (management )?(commentary|discussion|explanation|statement|mention)|not (directly |explicitly )?(stated|discussed|addressed|described|explained)'));
+  end loop;
+  perform set_config('lantern.' || option, '', true);
+  return out || jsonb_build_object('vector', qvec is not null, 'tokens_in', tok_in, 'tokens_out', tok_out);
+end;
+$$;
+revoke all on function public.ask_pages_trial(text, text, int, int, text) from public, anon, authenticated;
 
 -- The stage of the semantic fill (15 Nov 2026, semantic_index.py --stage): passages of the older years wait here, with
 -- no index on their embeddings, while the search reads public.chunks as before. They are moved into public.chunks and

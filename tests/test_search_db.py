@@ -1700,6 +1700,40 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(newest, [(g, 2025, "ask") for g in range(1, 9)])                            # no main report after 2025 (two pages, or statutory, do not count)
         self.assertEqual(no_company, eight)                                                         # no company named: whose later reports?
 
+    def test_a_question_about_a_kind_of_content_reads_pages_found_by_the_reports_words(self):
+        """23 Nov 2026: "main difficulties <company> in 2025" was answered from notes to the accounts. With option
+        ask_report_words the answer reads up to three pages found by the words reports use (risks, challenges,
+        outlook) after the search's best five; off by default; never without a company or a concept in the question."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            says = lambda t: (cur.execute("select public.ask_concept_says(%s)", (t,)), cur.fetchone()[0])[1]
+            self.assertIn("headwinds", says("Main DIFFICULTIES, in 2025?")); self.assertIn("risk factors", says("key risks")); self.assertIn("priorities", says("why this strategy"))
+            self.assertIsNone(says("scope 1 emissions")); self.assertIsNone(says("risky")); self.assertIsNone(says(None))
+            cur.execute("""create or replace function public.find_blend(key text, q text, qvec real[] default null, company_filter text default null, year_from int default null, year_to int default null,
+                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null,
+                             region_filter text default null, typed text default null)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$ select null::bigint, g, 'DOC', 'C', 'W', 2025, 'Annual Report', 'l', null::text, g, 0::real, client from generate_series(1, least(max_rows, 24)) g $f$""")
+            cur.execute("""create or replace function public.find_pages(key text, q text, company_filter text default null, year_from int default null, year_to int default null,
+                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null,
+                             region_filter text default null, typed text default null)
+                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
+                           language sql as $f$ select null::bigint, g, 'DOC', 'C', 'W', 2025, case when g = 1 then 'Policy Documents' else 'Annual Report' end, 'l', null::text,
+                                                       (array[90, 3, 7, 91, 92])[g], 0::real, q from generate_series(1, 5) g $f$""")
+            ask = "select page, excerpt from public.ask_pages('k', %s, null, %s, 2025, 2025, null, %s)"
+            cur.execute("select set_config('lantern.ask_later', 'off', true)")
+            cur.execute(ask, ("main difficulties", "C", "main difficulties in 2025")); default = cur.fetchall()
+            cur.execute("select set_config('lantern.ask_report_words', 'on', true)")
+            cur.execute(ask, ("main difficulties", "C", "main difficulties in 2025")); on = cur.fetchall()
+            cur.execute(ask, ("scope 1", "C", "scope 1 in 2025")); no_concept = cur.fetchall()
+            cur.execute(ask, ("main difficulties", None, "main difficulties in 2025")); no_company = cur.fetchall()
+            c.rollback()
+        eight = [(g, "ask") for g in range(1, 9)]
+        self.assertEqual(default, eight); self.assertEqual(no_concept, eight); self.assertEqual(no_company, eight)
+        # the best five stay; then the reports' words' best three, main reports first: page 3 is already among the five, so 7, 91 and 92; the policy's page 90 waits
+        self.assertEqual([p for p, _ in on], [1, 2, 3, 4, 5, 7, 91, 92]); self.assertTrue(all("headwinds" in e for p, e in on if p in (7, 91, 92)))
+
     def test_a_fiscal_period_gets_wbas_year_and_is_one_period_however_written(self):
         import json, psycopg
         with psycopg.connect(URL) as c:

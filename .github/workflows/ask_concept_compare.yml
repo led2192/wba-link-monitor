@@ -1,0 +1,37 @@
+# An option of the pages an answer reads, beside today's answers (ask_concept_compare.py). Manual only. CALLS THE PAID
+# READER: two calls a question, about 0.4 US cents a question; the owner allowed it on 23 Nov 2026 (ask_report_words,
+# about 0.35 USD). Keeps nothing in the database. Prints counts only.
+name: Ask concept comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "questions at most (two reader calls each)"
+        default: "40"
+      option:
+        description: "the option of the pages an answer reads"
+        default: "ask_report_words"
+
+concurrency:
+  group: ask-concept-compare
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Compare
+        run: python ask_concept_compare.py --limit "${{ inputs.limit || '40' }}" --option "${{ inputs.option || 'ask_report_words' }}"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          QA_COMMIT: "true"
