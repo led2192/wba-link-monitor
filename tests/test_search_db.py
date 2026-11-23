@@ -1857,6 +1857,22 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_reference_asked_set('k', 'fanciful stewardship', true)"); self.assertTrue(cur.fetchone()[0]["ok"])
         cur.execute("select public.admin_reference('k')"); adm = cur.fetchone()[0]
         self.assertEqual([(m["asked"], m["times"], m["dismissed"]) for m in adm["asked"]], [("fanciful stewardship", 2, True)]); self.assertGreaterEqual(adm["kinds"]["term"], 3)
+        # 23 Nov 2026: the database is the master copy. The owner adds an entry and corrects one; the loader leaves both as they are
+        cur.execute("select public.admin_reference_save('k', null, 'term', ' Fanciful  Stewardship ', array['FS', ' '], 'Looking after things that do not exist.', null, 'https://fs.example')"); made = cur.fetchone()[0]
+        self.assertTrue(made["ok"]); self.assertEqual([e["name"] for e in look("what is fanciful stewardship")], ["Fanciful Stewardship"]); self.assertEqual([e["name"] for e in look("FS")], ["Fanciful Stewardship"])
+        self.assertFalse(look("fs")[0]["ai"])
+        cur.execute("select dismissed from public.reference_misses where asked_key = 'fanciful stewardship'"); self.assertEqual(cur.fetchone(), (True,))      # the candidate is answered now
+        cur.execute("select public.admin_reference_find('k', 'made-up')"); hit = cur.fetchone()[0]; self.assertEqual([(e["id"], e["origin"]) for e in hit], [("term:t2", "list")])
+        cur.execute("select public.admin_reference_save('k', 'term:t2', 'term', 'Made-up Materiality', array['MUM'], 'Corrected by a person.', null, null)")
+        for bad in ("select public.admin_reference_save('k', null, 'term', 'Fanciful Stewardship')", "select public.admin_reference_save('k', null, 'thing', 'X')", "select public.admin_reference_save('k', null, 'term', '  ')",
+                    "select public.admin_reference_save('k', 'about:lantrna', 'term', 'X')", "select public.admin_reference_save('k', null, 'term', 'Y', null, null, null, 'ftp://x')"):
+            with self.assertRaises(psycopg.Error): cur.execute(bad)
+        with psycopg.connect(URL) as c:
+            rows, _ = R.entry_rows(entries); p = R.plan(c, rows); R.write(c); self.assertEqual((p["changed"], p["gone"]), (0, 3))       # t5..t7 left the file; the corrected and the added entries are not touched
+        self.assertEqual(look("made up materiality")[0]["text"], "Corrected by a person."); self.assertEqual(len(look("fanciful stewardship")), 1)
+        cur.execute("select public.admin_reference_save('k', %s, 'term', 'Fanciful Stewardship', null, null, null, null, null, true)", (made["id"],)); self.assertEqual(look("fanciful stewardship"), [])   # hidden, not deleted
+        cur.execute("select count(*) from public.reference_entries where id = %s and gone", (made["id"],)); self.assertEqual(cur.fetchone()[0], 1)
+        cur.execute("delete from public.reference_entries where id = %s", (made["id"],)); cur.execute("update public.reference_entries set edited_at = null, edited_by = null where id = 'term:t2'")
         cur.execute("delete from public.reference_misses"); cur.execute("delete from public.search_vocab where word in ('fanciful', 'stewardship')")
         with psycopg.connect(URL) as c:
             rows, _ = R.entry_rows(entries); R.plan(c, rows); R.write(c); c.execute("delete from public.reference_entries where id in ('term:t5', 'term:t6', 'norm:t7')")
