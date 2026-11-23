@@ -187,13 +187,47 @@ def process(rec):
         if OWN_PAGES or f.get(F_BROWSER):
             upd[F_BROWSER] = True                    # browser owns this page from now on
         return rec["id"], upd, changed, high, docs, True, time.time() - t0
-    except Exception:
-        upd[F_STATUS] = "error"
-        return rec["id"], upd, False, False, [], False, time.time() - t0
+    except Exception as e:
+        upd.update(failed_read(u, e))
+        return rec["id"], upd, False, False, [], upd[F_STATUS] == "ok", time.time() - t0
     finally:
         if page:
             try: page.close()
             except Exception: pass
+
+
+F_IS_PDF = "is_pdf"
+DOWNLOAD_MARK = "Download is starting"   # what Chromium raises when an address sends a file
+
+
+def file_head(u):
+    """(HTTP status, first bytes) of an address read with the browser's own request client (same
+    user agent and cookies as the page that refused to render)."""
+    r = get_page().request.get(u, timeout=NAV_TIMEOUT_MS)
+    try:
+        return r.status, (r.body() or b"")[:8]
+    finally:
+        try: r.dispose()
+        except Exception: pass
+
+
+def failed_read(u, exc, head=file_head):
+    """The fields a failed browser read writes.
+
+    The HTTP code is cleared: until 23 Nov 2026 it kept the code of an earlier, successful read, so
+    1,924 open PAGE_UNREACHABLE rows said "200" and hid why they failed. An address that starts a
+    download is a file watched as a page (Volkswagen's .../download?disposition=attachment, Punjab
+    National Bank's downloadprocess.aspx): when the file is a PDF the row is marked is_pdf and read,
+    so the harvester files the address itself as a document instead of the page failing every night."""
+    upd = {F_STATUS: "error", F_HTTP: None}
+    if DOWNLOAD_MARK in str(exc):
+        try:
+            code, first = head(u)
+        except Exception:
+            code, first = None, b""
+        if code == 200 and first.startswith(b"%PDF"):
+            upd = {F_STATUS: "ok", F_HTTP: 200, F_IS_PDF: True}
+    return upd
 
 
 CHUNK_GRACE_S = 15 * 60     # a chunk may run this long past the budget before its stragglers are left

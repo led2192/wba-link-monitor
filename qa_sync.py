@@ -177,7 +177,8 @@ def derive_page(f):
     elif status in ("dead", "error"):
         out.append(("PAGE_UNREACHABLE", code_s or "no_response", url, "High" if hub else "Medium", ctx))
     issue = (f.get("possible_issue") or "").strip()
-    if issue == "No document links found on the page":
+    if issue == "No document links found on the page" and not f.get("is_pdf"):
+        # an address marked is_pdf is a document, not a list: it has no links by nature
         out.append(("PAGE_EMPTY", "no_links", url, "Medium", dict(ctx, stage="monitor")))
     n = f.get("unharvested_links")
     if isinstance(n, (int, float)) and n >= 3:
@@ -390,7 +391,7 @@ def main():
         print(">>> monitored_links ...", flush=True)
         for f in sweep(token, base, "monitored_links",
                        ["url", "wba_id", "company_name", "type", "monitor", "status", "http_status",
-                        "possible_issue", "unharvested_links", "unharvested_sample"],
+                        "possible_issue", "unharvested_links", "unharvested_sample", "is_pdf"],
                        "AND({monitor}, OR(" + ",".join(f"{{type}}='{t}'" for t in sorted(HARVESTED_TYPES)) + "))",
                        "monitored_links"):
             swept["pages"] += 1
