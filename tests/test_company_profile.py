@@ -22,6 +22,8 @@ class Reply(unittest.TestCase):
                          [("headquarters_city", "Lyon", "L1", 5), ("headquarters_country", "France", "L1", 5), ("year_founded", 1921, "L1", 5),
                           ("subsidiaries", ["Acme GmbH", "Acme Inc"], "L2", 9)])
         no_page = json.dumps({"headquarters_city": "Lyon", "year_founded": 1921, "from": {"headquarters_city": 7, "year_founded": True}})
+        self.assertEqual([C.excerpt_number(x) for x in (2, "2", "[3]", [1, 2], True, "two", None, [])], [2, 2, 3, 1, None, None, None, None])     # as the paid model writes them
+        self.assertEqual((C.why_nothing("no"), C.why_nothing('{"a": 1}'), C.why_nothing('{"from": {"a": 9}}')), ("not JSON", "no from", "no field with its excerpt"))
         self.assertEqual(C.rows_of("identity", no_page, PAGES, 2026), [])                      # an excerpt that was not shown: the value cannot be checked
         for bad in ("not json", "[]", None, ""):
             self.assertEqual(C.rows_of("identity", bad, PAGES, 2026), [])
