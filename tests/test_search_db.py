@@ -1513,9 +1513,12 @@ class SearchOnPostgres(unittest.TestCase):
                         "('hard', 'd', 'rebaseline acme', 'PT_1', 0, 5, 5, 'used', 50, now() - interval '6 minutes'), "
                         "('hard', 'e', 'other company', 'PT_2', 20, 20, 0, 'used', 50, now() - interval '5 minutes'), "
                         "('hard', 'f', 'old search', null, 0, null, null, null, 50, now() - interval '30 days')")
+            # a comparison's own searches (client marked trial) are not a person's: never in the review
+            cur.execute("insert into public.search_log (key_name, q, typed, company, n, shown, ms, client, at) select 'hard', 'z', 'a trial question', 'PT_9', 0, 0, 40, 'ask trial', now() - make_interval(secs => g) from generate_series(1, 4) g")
             cur.execute("select public.admin_hard_searches('k', 7)"); hard = cur.fetchone()[0]
             self.assertEqual([(x["key_name"], x["company"], x["searches"], x["typed"][0], x["typed"][-1]) for x in hard["runs"] if x["key_name"] == "hard"], [("hard", "PT_1", 4, "baseline acme", "rebaseline acme")])
             self.assertIn("base year acme", [x["typed"] for x in hard["nothing"]])
+            self.assertNotIn("a trial question", [x["typed"] for x in hard["nothing"]])
             self.assertNotIn("rebaseline acme", [x["typed"] for x in hard["nothing"]])              # no page by words, five by meaning: something was shown
             self.assertNotIn("old search", [x["typed"] for x in hard["nothing"]])                   # outside the days asked
             self.assertEqual([x["typed"] for x in hard["few"] if x["key_name"] == "hard"], ["base year target acme"])

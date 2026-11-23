@@ -1199,7 +1199,9 @@ begin
   end loop;
   insert into public.search_log (key_name, q, company, year_from, year_to, doc_type, n, ms, client, relaxed, terms, profile, typed)
     values (k, left(q, 500), left(company_filter, 200), year_from, year_to, left(type_filter, 200), got,
-            extract(epoch from clock_timestamp() - t0)::numeric * 1000, left(client, 60), drop_n,
+            extract(epoch from clock_timestamp() - t0)::numeric * 1000,
+            left(client || case when current_setting('lantern.trial', true) = 'on' then ' trial' else '' end, 60), drop_n,   -- a comparison's own searches are marked, and left out of what people searched
+
             left(array_to_string(words, ' ') || case when coalesce(array_length(phrases, 1), 0) > 0 then ' "' || array_to_string(phrases, '" "') || '"' else '' end, 300),
             left(concat_ws(' | ', industry_filter, country_filter, region_filter), 200), left(typed, 500))
     returning id into lid;
@@ -4064,8 +4066,8 @@ begin
     'links', (select coalesce(jsonb_agg(to_jsonb(x) order by x.name), '[]'::jsonb) from (
         select k.name, k.active, k.created, k.may_ask,
                (select count(*) from public.ask_log a where a.asker = 'link:' || k.name and a.answered and a.at > now() - interval '7 days') as answers_7d,
-               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '7 days' and coalesce(l.client, '') not like '% +years') as searches_7d,
-               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '30 days' and coalesce(l.client, '') not like '% +years') as searches_30d,
+               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '7 days' and coalesce(l.client, '') not like '% +years' and coalesce(l.client, '') not like '% trial') as searches_7d,
+               (select count(*) from public.search_log l where l.key_name = k.name and l.at > now() - interval '30 days' and coalesce(l.client, '') not like '% +years' and coalesce(l.client, '') not like '% trial') as searches_30d,
                (select max(l.at) from public.search_log l where l.key_name = k.name) as last_used
         from public.search_keys k) x),
     'people', (select coalesce(jsonb_agg(to_jsonb(x) order by x.last_seen desc nulls last), '[]'::jsonb) from (
@@ -4976,6 +4978,7 @@ begin
     v := public.query_vector_made(words);
     if jsonb_typeof(v -> 'vec') = 'array' and jsonb_array_length(v -> 'vec') = 384 then qvec := array(select x::real from jsonb_array_elements_text(v -> 'vec') x); end if;
   exception when others then qvec := null; end;
+  perform set_config('lantern.trial', 'on', true);      -- these searches are a comparison's, not a person's (23 Nov 2026: 40 questions filled the owner's review of hard searches)
   foreach arm in array array['off', 'on'] loop
     perform set_config('lantern.' || option, arm, true);
     context := ''; pages := '[]'::jsonb; n := 0;
@@ -5084,7 +5087,7 @@ begin
          select l.at, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.typed is not null as as_typed, l.q, l.company, l.year_from, l.year_to,
                 l.doc_type, l.profile, l.n, l.ms, l.shown, l.by_meaning, l.meaning,
                 (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
-         from public.search_log l where l.key_name = link and coalesce(l.client, '') not like '% +years'      -- not the page's second call for a year typed (v127)
+         from public.search_log l where l.key_name = link and coalesce(l.client, '') not like '% +years' and coalesce(l.client, '') not like '% trial'      -- not the page's second call for a year typed (v127)
          order by l.at desc limit least(greatest(coalesce(max_rows, 200), 1), 1000)) x) end,
     'questions', case when nullif(btrim(coalesce(person, '')), '') is null then '[]'::jsonb else
       (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (
@@ -5417,7 +5420,7 @@ begin
       select l.id, l.at, l.key_name, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.company, l.n, l.shown, l.by_meaning, l.meaning, l.ms,
              (select count(*) from public.search_clicks c where c.log_id = l.id) as clicks
         from public.search_log l
-       where l.at > since and l.key_name is not null and l.terms is distinct from '(documents only)' and coalesce(l.client, '') not like '% +years'),
+       where l.at > since and l.key_name is not null and l.terms is distinct from '(documents only)' and coalesce(l.client, '') not like '% +years' and coalesce(l.client, '') not like '% trial'),
     stepped as (
       select l.*, case when lag(l.at) over w is null or l.at - lag(l.at) over w > interval '3 minutes' or l.company is distinct from lag(l.company) over w then 1 else 0 end as starts
         from l window w as (partition by l.key_name order by l.at, l.id)),
