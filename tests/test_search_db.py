@@ -1962,6 +1962,12 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((r["year"], r["documents"], r["companies"], r["years"]), (2025, 3, 2, [2025, 2024]))
         self.assertEqual([(x["name"], x["documents"], x["companies"], x["before"]) for x in r["rows"]], [("Invented Zebra Standard", 2, 1, 1)])
         self.assertEqual(r["companies_before"], 1)
+        cur.execute("select public.admin_reference_use_series('k', 'norm:izs')"); s = {v["year"]: (v["companies"], v["of"]) for v in cur.fetchone()[0]}
+        self.assertEqual((s[2024], s[2025]), ((1, 1), (1, 2)))
+        cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, label, pages, text_status) values ('RU5', 'RUC', 'C', 'UNKNOWN', 2025, 'e', 1, 'ok')")
+        cur.execute("insert into public.pages (library_id, page, body) values ('RU5', 1, 'Invented Zebra Standard, in a file of no known kind')")
+        self.assertEqual(sorted(U.count_entry(cur, ["Invented Zebra Standard"])), [(2024, 1, 1), (2025, 1, 1)])       # the untyped file is not counted
+        cur.execute("select public.admin_reference_use('k')"); self.assertEqual(cur.fetchone()[0]["companies"], 2)
         cur.execute("insert into public.reference_entries (id, kind, name, name_key) values ('regulation:izs2', 'regulation', 'Invented Zebra Standards', 'invented zebra standards')")      # the same norm held twice
         cur.execute("insert into public.reference_use (entry, year, documents, companies) values ('regulation:izs2', 2025, 2, 1)")
         cur.execute("select public.admin_reference_use('k')"); self.assertEqual([x["kind"] for x in cur.fetchone()[0]["rows"]], ["norm"])
@@ -1999,7 +2005,10 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(sorted((g[1], g[2], g[3], g[4], g[5]) for g in got), [("Task Force on Zebra-related Financial Disclosures", "TZFD", "term", 4, 8), ("zebrahouse gas", "ZHG", "term", 4, 8)])
         cur = self.conn.cursor()
         cur.executemany("insert into public.reference_candidates (key, name, acronym, kind, companies, documents, library_id) values (%s, %s, %s, %s, %s, %s, %s)", got)
+        cur.execute("insert into public.reference_entries (id, kind, name, name_key) values ('organisation:tzfd', 'organisation', 'TZFD Secretariat', 'tzfd secretariat')")
         cur.execute("select public.admin_reference_candidates('k')"); r = cur.fetchone()[0]; self.assertEqual((r["found"], len(r["rows"])), (2, 2))
+        self.assertEqual({x["acronym"]: x["near"] for x in r["rows"]}, {"TZFD": ["TZFD Secretariat (organisation)"], "ZHG": []})      # what the list holds that looks like it
+        cur.execute("delete from public.reference_entries where id = 'organisation:tzfd'")
         cur.execute("select public.admin_reference_candidate_set('k', 'zebrahouse gas', true)"); self.assertTrue(cur.fetchone()[0]["ok"])
         cur.execute("select public.admin_reference_save('k', null, 'norm', 'Task Force on Zebra-related Financial Disclosures', array['TZFD'], 'Invented.')"); made = cur.fetchone()[0]["id"]
         cur.execute("select key, status from public.reference_candidates order by key"); self.assertEqual(cur.fetchall(), [("task force on zebra related financial disclosures", "added"), ("zebrahouse gas", "dismissed")])

@@ -6,7 +6,10 @@ for each entry and each reporting year, the documents and the companies with at 
 entry's name, or one of its acronyms, as a phrase. No model, no cost: one indexed search an entry.
 
 Rules:
-  - Kinds counted: norm and regulation (the entries whose name is something a report cites). Hidden entries are left out.
+  - Kinds counted: norm, regulation and term (the owner, 23 Nov 2026: "it is important to see how a concept moves over
+    the years"). Hidden entries are left out.
+  - Documents counted: those of a known kind (annual and sustainability reports, presentations, policies and the
+    rest of the list of types); a document typed UNKNOWN or not typed is left out.
   - A name or acronym shorter than 3 characters is not searched, nor an acronym that is an everyday word of the
     library (it appears on more than COMMON_SHARE of all pages' vocabulary count): "ACT" or "CARE" would count every
     page that says act or care. The count is then by the full name only.
@@ -23,11 +26,11 @@ Writes public.reference_use only with --commit. Prints counts only, never names.
 import argparse, os, re, sys, time
 
 FIRST_YEAR = 2018
-KINDS = ("norm", "regulation")
+KINDS = ("norm", "regulation", "term")
 MIN_CHARS = 3
 COMMON_WORD_N = 200000          # a single-word acronym the library's vocabulary counts on more pages than this is an everyday word
 ENTRIES_SQL = ("select e.id, e.name, e.aliases from public.reference_entries e left join public.reference_worked w on w.job = 'use' and w.entry = e.id "
-               "where e.kind = any(%s) and not e.gone order by w.at nulls first, e.id desc")  # never counted first (from the end of the list: the first runs stopped before it), then the oldest count
+               "where e.kind = any(%s) and not e.gone order by w.at nulls first, (e.kind = 'term'), e.id desc")  # never counted first (from the end of the list: the first runs stopped before it), then the oldest count
 WORKED_SQL = "insert into public.reference_worked (job, entry) values (%s, %s) on conflict (job, entry) do update set at = now()"
 COUNT_SQL = """
 with q as (select (select string_agg('(' || phraseto_tsquery('simple', t)::text || ')', ' | ') from unnest(%s::text[]) t
@@ -36,6 +39,7 @@ with q as (select (select string_agg('(' || phraseto_tsquery('simple', t)::text 
 select p.year, count(distinct p.library_id), count(distinct nullif(p.wba_id, ''))
 from public.pages p, q
 where q.tsq is not null and p.words @@ q.tsq and p.year >= %s and p.year <= extract(year from now())::int + 1
+  and coalesce(p.doc_type, '') not in ('', 'UNKNOWN')        -- documents of a known kind only (reports, presentations, policies...), not what nobody could type
 group by 1"""
 
 
