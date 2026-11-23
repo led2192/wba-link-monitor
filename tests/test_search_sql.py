@@ -603,7 +603,7 @@ def test_the_reader_is_given_the_names_in_use_only_when_the_option_is_on():
     assert "names := public.ask_metric_names(concat_ws(' ', asked, keywords));" in ask
     assert "|| case when with_names then ' The message may also list metric names already in use." in ask      # the instructions are unchanged while it is off
     assert "|| case when names <> '' then E'\\n\\nMetric names in use:\\n' || names else '' end" in ask
-    assert "got := public.ask_model(api_key, http_schema, model, public.ask_instructions(names <> '')," in ask and "known, fiscal, names, context), 3500);" in ask
+    assert "else public.ask_instructions(names <> '') end," in ask and "known, fiscal, names, context), 3500);" in ask
     assert "revoke all on function public.ask_metric_names(text, int) from public, anon, authenticated;" in SQL
 
 
