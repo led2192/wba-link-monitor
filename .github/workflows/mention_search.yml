@@ -30,6 +30,9 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "set by lantrNa's clock (server/clock.json): run as the nightly run does"
+        default: "false"
       mode:
         description: "dry-run prints the answer here; commit also writes the hits to Airtable"
         type: choice
@@ -111,7 +114,7 @@ jobs:
           # inputs arrive through the environment and are passed as quoted array items, never
           # pasted into the command line: search terms contain spaces, quotes and asterisks
           ARGS=()
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ inputs.as_scheduled }}" = "true" ]; then
             ARGS+=(--commit)                        # nightly: every active search, written to Airtable
           else
             [ "$IN_MODE" = "commit" ] && ARGS+=(--commit)

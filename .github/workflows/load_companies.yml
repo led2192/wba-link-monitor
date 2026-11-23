@@ -8,6 +8,9 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "set by lantrNa's clock (server/clock.json): run as the nightly run does"
+        default: "false"
       mode:
         description: "dry_run or commit"
         default: "commit"
