@@ -1953,10 +1953,19 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(U.phrases("Invented Zebra Standard", ["IZS", "ACT", "IZ", "izs"], {"act"}), ["Invented Zebra Standard", "IZS"])
         got = sorted(U.count_entry(cur, ["Invented Zebra Standard", "IZS"])); self.assertEqual(got, [(2024, 1, 1), (2025, 2, 1)])
         self.assertEqual(U.count_entry(cur, []), [])
+        # an acronym that is an everyday word: "ACT" is on the page as "act", "IZS" as written
+        self.assertEqual((U.is_acronym("IZS"), U.is_acronym("SBTi"), U.is_acronym("Invented Zebra Standard"), U.is_acronym("Act")), (True, True, False, False))
+        self.assertEqual((U.written_share(cur, "IZS"), U.written_share(cur, "ACT"), U.written_share(cur, "QQQZ")), (1.0, 0.0, 1.0))
+        self.assertEqual(U.checked(cur, ["Invented Zebra Standard", "IZS", "ACT"]), ["Invented Zebra Standard", "IZS"])
         cur.executemany("insert into public.reference_use (entry, year, documents, companies) values ('norm:izs', %s, %s, %s)", got)
         cur.execute("select public.admin_reference_use('k')"); r = cur.fetchone()[0]
         self.assertEqual((r["year"], r["documents"], r["companies"], r["years"]), (2025, 3, 2, [2025, 2024]))
         self.assertEqual([(x["name"], x["documents"], x["companies"], x["before"]) for x in r["rows"]], [("Invented Zebra Standard", 2, 1, 1)])
+        self.assertEqual(r["companies_before"], 1)
+        cur.execute("insert into public.reference_entries (id, kind, name, name_key) values ('regulation:izs2', 'regulation', 'Invented Zebra Standards', 'invented zebra standards')")      # the same norm held twice
+        cur.execute("insert into public.reference_use (entry, year, documents, companies) values ('regulation:izs2', 2025, 2, 1)")
+        cur.execute("select public.admin_reference_use('k')"); self.assertEqual([x["kind"] for x in cur.fetchone()[0]["rows"]], ["norm"])
+        cur.execute("delete from public.reference_entries where id = 'regulation:izs2'")
         cur.execute("select public.admin_reference_use('k', 2024, 'regulation')"); self.assertEqual(cur.fetchone()[0]["rows"], [])
         cur.execute("delete from public.reference_use"); cur.execute("delete from public.reference_entries where id = 'norm:izs'")
         cur.execute("delete from public.pages where library_id like 'RU_'"); cur.execute("delete from public.documents where library_id like 'RU_'")

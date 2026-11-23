@@ -10,6 +10,9 @@ Rules:
   - A name or acronym shorter than 3 characters is not searched, nor an acronym that is an everyday word of the
     library (it appears on more than COMMON_SHARE of all pages' vocabulary count): "ACT" or "CARE" would count every
     page that says act or care. The count is then by the full name only.
+  - An acronym is counted only when the pages that hold the word mostly write it as the acronym: of a sample of 200
+    such pages, 70% or more print it with its capitals. "EDGE", "STAR", "ART" are norms' acronyms and everyday words,
+    and the word index does not know capitals. Such an entry is counted by its full name only.
   - Pages are matched whole-word, whatever the case. An acronym shared with something else is counted too: the
     numbers say "names it", not "applies it".
   - Counts replace the entry's earlier counts (delete and insert in one transaction an entry). An entry whose search
@@ -17,7 +20,7 @@ Rules:
 
 Writes public.reference_use only with --commit. Prints counts only, never names.
 """
-import argparse, os, sys, time
+import argparse, os, re, sys, time
 
 FIRST_YEAR = 2018
 KINDS = ("norm", "regulation")
@@ -47,6 +50,32 @@ def phrases(name, aliases, common):
             continue
         out.append(t)
     return out
+
+
+WRITTEN_SQL = """
+select count(*) filter (where s.body ~ %s), count(*)
+from (select p.body from public.pages p where p.words @@ plainto_tsquery('simple', %s) limit %s) s"""
+SAMPLE = 200
+AS_WRITTEN = 0.7
+
+
+def is_acronym(text):
+    """One word with two capitals or more ("TCFD", "SBTi", "EDGE"): the index does not know capitals, so it is checked."""
+    return " " not in text and sum(ch.isupper() for ch in text) >= 2
+
+
+def written_share(cur, acronym, sample=SAMPLE):
+    """The share of a sample of the pages that hold the word where it is written as the acronym, capitals and all.
+    "EDGE", "STAR", "ART" or "TREES" are acronyms of norms and everyday words: most pages that hold the word write
+    "edge" or "star", and counting them made those norms the most used of all (23 Nov 2026). 1.0 when no page holds it."""
+    cur.execute(WRITTEN_SQL, (r"\m" + re.escape(acronym) + r"\M", acronym, sample))
+    hit, seen = cur.fetchone()
+    return 1.0 if not seen else hit / seen
+
+
+def checked(cur, texts, floor=AS_WRITTEN):
+    """The texts without the acronyms that the pages mostly write as an everyday word."""
+    return [t for t in texts if not is_acronym(t) or written_share(cur, t) >= floor]
 
 
 def count_entry(cur, texts, first_year=FIRST_YEAR):
@@ -84,7 +113,7 @@ def main():
                     break
                 try:
                     cur.execute("select set_config('statement_timeout', %s, true)", (f"{a.seconds_an_entry}s",))
-                    got = count_entry(cur, phrases(name, aliases, common))
+                    got = count_entry(cur, checked(cur, phrases(name, aliases, common)))
                 except psycopg.errors.QueryCanceled:
                     conn.rollback(); slow += 1
                     if a.commit:                                      # marked too: a slow entry must not be the first of every run
