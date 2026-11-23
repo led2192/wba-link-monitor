@@ -201,7 +201,9 @@ def test_longer_documents_first_within_a_year_and_type():
 
 def test_no_sideways_scroll_and_the_panel_fits():
     assert "html, body { overflow-x: hidden; }" in PAGE
-    assert ".wrap:has(> #values:not([hidden])) { margin-left: max(0px, calc((100vw - 1120px) / 2)); }" in PAGE
+    # v153: the column beside the results holds the company's profile and the values; the results make room when either shows
+    assert ".wrap:has(> #side > .values:not([hidden])) { margin-left: max(0px, calc((100vw - 1120px) / 2)); }" in PAGE
+    assert '<div id="side"><details class="values about" id="profile" hidden></details><details class="values" id="values" hidden open></details></div>' in PAGE
 
 
 def test_the_lucky_card_takes_the_screen():
@@ -500,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v152 2026-11-23";' in PAGE
+    assert 'const CLIENT = "lantern v153 2026-11-23";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
