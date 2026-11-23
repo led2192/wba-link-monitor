@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v149 2026-11-23";
+  const CLIENT = "lantern v150 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2516,7 +2516,8 @@
     const pick = (opts, cur, on) => { const s = el("select"); s.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)"; for (const [v, t] of opts) { const o = el("option", null, t); o.value = v; s.appendChild(o); } s.value = cur; s.onchange = () => on(s.value); return s; };
     bar.append(pick(r.years.map(y => [String(y), `Reporting year ${y}`]), String(r.year), v => adminUse(body, Number(v), kind)), pick([["", "Norms and regulations"], ["norm", "Norms and frameworks"], ["regulation", "Regulations"]], kind || "", v => adminUse(body, r.year, v)));
     bar.append(el("span", "what", `${(r.companies || 0).toLocaleString()} companies and ${(r.documents || 0).toLocaleString()} read documents in ${r.year}; ${(r.counted || 0).toLocaleString()} entries named at least once; counted ${adminWhen(r.counted_at)}`)); body.appendChild(bar);
-    const pct = (n, d) => d ? `${Math.round(100 * n / d)}%` : "", move = x => x.before == null ? "new" : x.before === x.companies ? "" : `${x.companies > x.before ? "+" : ""}${x.companies - x.before}`;
+    // v150: against the year before as a share of that year's companies, in points (a year with fewer reports read had every norm "down")
+    const pct = (n, d) => d ? `${Math.round(100 * n / d)}%` : "", move = x => { if (x.before == null) return "new"; if (!r.companies || !r.companies_before) return ""; const d = Math.round(100 * x.companies / r.companies - 100 * x.before / r.companies_before); return d ? `${d > 0 ? "+" : ""}${d} pt` : "="; };
     body.appendChild(adminTable(["", "Entry", "Kind", "Companies", "Of the year's companies", `Against ${r.year - 1}`, "Documents"], (r.rows || []).map((x, i) => [i + 1, x.name, x.kind, x.companies.toLocaleString(), pct(x.companies, r.companies), move(x), x.documents.toLocaleString()])));
   }
   // v144: what the reader made of each company from its own reports (company_profile), for the owner to judge

@@ -7911,13 +7911,17 @@ begin
   return jsonb_build_object('year', y, 'documents', total, 'companies', firms,
     'years', (select coalesce(jsonb_agg(s.year order by s.year desc), '[]'::jsonb) from (select distinct u.year from public.reference_use u) s),
     'counted', (select count(distinct u.entry) from public.reference_use u), 'counted_at', (select max(u.counted_at) from public.reference_use u),
+    'companies_before', (select count(distinct d.wba_id) from public.documents d where d.year = y - 1 and d.text_status = 'ok'),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'name', r.name, 'kind', r.kind, 'documents', r.documents, 'companies', r.companies, 'before', r.before)
                                       order by r.companies desc, r.documents desc, r.name), '[]'::jsonb)
-             from (select e.id, e.name, e.kind, u.documents, u.companies,
-                          (select b.companies from public.reference_use b where b.entry = u.entry and b.year = y - 1) as before
-                   from public.reference_use u join public.reference_entries e on e.id = u.entry
-                   where u.year = y and not e.gone and (of_kind is null or e.kind = of_kind)
-                   order by u.companies desc, u.documents desc, e.name limit 80) r));
+             from (select * from (
+                     -- the list holds some norms twice (once as a norm, once as a regulation, or singular and plural): one row a name
+                     select distinct on (rtrim(public.reference_key(e.name), 's')) e.id, e.name, e.kind, u.documents, u.companies,
+                            (select b.companies from public.reference_use b where b.entry = u.entry and b.year = y - 1) as before
+                     from public.reference_use u join public.reference_entries e on e.id = u.entry
+                     where u.year = y and not e.gone and (of_kind is null or e.kind = of_kind)
+                     order by rtrim(public.reference_key(e.name), 's'), u.companies desc, e.kind) one
+                   order by one.companies desc, one.documents desc, one.name limit 80) r));
 end;
 $$;
 revoke all on function public.admin_reference_use(text, int, text) from public, anon;
@@ -7932,6 +7936,8 @@ create table if not exists public.reference_worked (
   primary key (job, entry)
 );
 alter table public.reference_worked enable row level security;
+-- The counts made before the acronym check (reference_use.py, 23 Nov 2026 midday) are made again: their marks go.
+delete from public.reference_worked where job = 'use' and at < timestamptz '2026-11-23 11:15:00+00';
 -- The first runs (23 Nov 2026) left no mark: an entry they gave counts or examples is marked here once, so that the
 -- next run goes to the entries they did not reach. Harmless when repeated (an entry already marked keeps its mark).
 do $$
