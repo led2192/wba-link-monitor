@@ -7907,11 +7907,11 @@ begin
   if not public.admin_ok(key) then
     raise exception 'not allowed' using errcode = '42501';
   end if;
-  select count(*), count(distinct d.wba_id) into total, firms from public.documents d where d.year = y and d.text_status = 'ok';
+  select count(*), count(distinct d.wba_id) into total, firms from public.documents d where d.year = y and d.text_status = 'ok' and coalesce(d.doc_type, '') not in ('', 'UNKNOWN');
   return jsonb_build_object('year', y, 'documents', total, 'companies', firms,
     'years', (select coalesce(jsonb_agg(s.year order by s.year desc), '[]'::jsonb) from (select distinct u.year from public.reference_use u) s),
     'counted', (select count(distinct u.entry) from public.reference_use u), 'counted_at', (select max(u.counted_at) from public.reference_use u),
-    'companies_before', (select count(distinct d.wba_id) from public.documents d where d.year = y - 1 and d.text_status = 'ok'),
+    'companies_before', (select count(distinct d.wba_id) from public.documents d where d.year = y - 1 and d.text_status = 'ok' and coalesce(d.doc_type, '') not in ('', 'UNKNOWN')),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'name', r.name, 'kind', r.kind, 'documents', r.documents, 'companies', r.companies, 'before', r.before)
                                       order by r.companies desc, r.documents desc, r.name), '[]'::jsonb)
              from (select * from (
@@ -7919,7 +7919,7 @@ begin
                      select distinct on (rtrim(public.reference_key(e.name), 's')) e.id, e.name, e.kind, u.documents, u.companies,
                             (select b.companies from public.reference_use b where b.entry = u.entry and b.year = y - 1) as before
                      from public.reference_use u join public.reference_entries e on e.id = u.entry
-                     where u.year = y and not e.gone and (of_kind is null or e.kind = of_kind)
+                     where u.year = y and not e.gone and ((of_kind is null and e.kind in ('norm', 'regulation')) or e.kind = of_kind)
                      order by rtrim(public.reference_key(e.name), 's'), u.companies desc, e.kind) one
                    order by one.companies desc, one.documents desc, one.name limit 80) r));
 end;
@@ -7938,6 +7938,8 @@ create table if not exists public.reference_worked (
 alter table public.reference_worked enable row level security;
 -- The counts made before the acronym check (reference_use.py, 23 Nov 2026 midday) are made again: their marks go.
 delete from public.reference_worked where job = 'use' and at < timestamptz '2026-11-23 11:15:00+00';
+-- and once more for the counts made before documents of no known kind were left out (the same day, 12:15 UTC)
+delete from public.reference_worked where job = 'use' and at < timestamptz '2026-11-23 12:15:00+00';
 -- The first runs (23 Nov 2026) left no mark: an entry they gave counts or examples is marked here once, so that the
 -- next run goes to the entries they did not reach. Harmless when repeated (an entry already marked keeps its mark).
 do $$
@@ -7977,7 +7979,16 @@ begin
   return jsonb_build_object(
     'found', (select count(*) from public.reference_candidates c where c.status = 'found'),
     'found_at', (select max(c.found_at) from public.reference_candidates c),
-    'rows', (select coalesce(jsonb_agg(jsonb_build_object('key', c.key, 'name', c.name, 'acronym', c.acronym, 'kind', c.kind, 'companies', c.companies, 'documents', c.documents)
+    -- near: what the list already holds that looks like it (the owner, 23 Nov 2026: "how do I know whether these exist already?").
+    -- A candidate is not in the list by its exact name or acronym; an entry whose name holds the candidate's name, or its
+    -- acronym as a word, is shown beside it ("IFRS Foundation" beside "International Financial Reporting Standards (IFRS)").
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('key', c.key, 'name', c.name, 'acronym', c.acronym, 'kind', c.kind, 'companies', c.companies, 'documents', c.documents,
+                                                          'near', (select coalesce(jsonb_agg(n.label), '[]'::jsonb)
+                                                                   from (select e.name || ' (' || e.kind || ')' as label from public.reference_entries e
+                                                                         where not e.gone and e.kind <> 'about'
+                                                                           and (e.name_key like '%' || c.key || '%'
+                                                                                or (coalesce(c.acronym, '') <> '' and (' ' || e.name_key || ' ') like '% ' || public.reference_key(c.acronym) || ' %'))
+                                                                         order by length(e.name_key), e.name limit 3) n))
                                       order by c.companies desc, c.documents desc, c.key), '[]'::jsonb)
              from (select * from public.reference_candidates c where c.status = 'found' order by c.companies desc, c.documents desc, c.key limit 150) c));
 end;
@@ -8002,6 +8013,27 @@ end;
 $$;
 revoke all on function public.admin_reference_candidate_set(text, text, boolean) from public, anon;
 grant execute on function public.admin_reference_candidate_set(text, text, boolean) to authenticated;
+
+-- One entry over the years (23 Nov 2026, the owner: "it is important to see how a concept moves over the years"):
+-- the companies and documents that name it each reporting year, and the companies with a typed, read document that
+-- year, so that the page shows the share.
+create or replace function public.admin_reference_use_series(key text, entry text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('year', y.year, 'companies', coalesce(u.companies, 0), 'documents', coalesce(u.documents, 0), 'of', y.firms) order by y.year), '[]'::jsonb)
+          from (select d.year, count(distinct d.wba_id) as firms from public.documents d
+                where d.text_status = 'ok' and coalesce(d.doc_type, '') not in ('', 'UNKNOWN') and d.year between 2018 and extract(year from now())::int
+                group by 1) y
+          left join public.reference_use u on u.entry = entry and u.year = y.year);
+end;
+$$;
+revoke all on function public.admin_reference_use_series(text, text) from public, anon;
+grant execute on function public.admin_reference_use_series(text, text) to authenticated;
 
 -- Entries by a word of their name or acronym, for the owner to open one (the whole text, both languages).
 create or replace function public.admin_reference_find(key text, q text) returns jsonb
