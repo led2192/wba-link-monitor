@@ -1979,7 +1979,8 @@ create index if not exists reference_entries_alias on public.reference_entries u
 -- sector, industry, subsector, description. The value is text, a number or a list; library_id and page are where it
 -- was read. status: 'read' (by the model), or what a person made of it ('confirmed', 'corrected', 'rejected'); the
 -- reader never overwrites a row a person touched. company_profile_runs: one line a company read, so that it is not
--- read again for months. No function reads these tables yet: the profile is measured before it is shown.
+-- read again for months. Only the owner's panel reads these tables (admin_company_profiles, 23 Nov 2026): the profile
+-- is judged by a person before it is shown to anyone else.
 create table if not exists public.company_profile (
   wba_id     text not null,
   field      text not null,
@@ -7889,6 +7890,66 @@ grant execute on function public.admin_reference_asked_set(text, text, boolean) 
 -- What people looked for and lantrNa does not follow (company_misses, 22 Nov 2026): the words, most searched
 -- first, with how many times and by how many links. A word the owner set aside stays in the table, so that it is
 -- not listed again, and is shown last.
+-- The company profiles (23 Nov 2026), for the owner to judge before anyone else sees them: how many companies were
+-- read and which fields, and the profile of the companies a word of the name finds (or the last ones read). Each
+-- field with the document and page it was read on.
+create or replace function public.admin_company_profiles(key text, search text default null) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  q text := nullif(btrim(replace(replace(coalesce(search, ''), '%', ''), '_', ' ')), '');
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'companies', (select count(distinct p.wba_id) from public.company_profile p),
+    'of', (select count(*) from public.companies c where c.name is not null),
+    'fields', (select coalesce(jsonb_object_agg(f.field, f.n), '{}'::jsonb) from (select p.field, count(*) n from public.company_profile p group by 1) f),
+    'status', (select coalesce(jsonb_object_agg(f.status, f.n), '{}'::jsonb) from (select p.status, count(*) n from public.company_profile p group by 1) f),
+    'shown', (select coalesce(jsonb_agg(jsonb_build_object('id', s.wba_id, 'name', s.name, 'industry', s.industry, 'read_at', s.read_at,
+                 'fields', (select jsonb_agg(jsonb_build_object('field', p.field, 'value', p.value, 'page', p.page, 'status', p.status, 'model', p.model,
+                                                                'doc', (select concat_ws(' ', d.doc_type, d.year::text) from public.documents d where d.library_id = p.library_id limit 1))
+                                             order by p.field)
+                            from public.company_profile p where p.wba_id = s.wba_id)) order by s.read_at desc), '[]'::jsonb)
+              from (select c.wba_id, c.name, c.industry, max(p.read_at) read_at
+                    from public.company_profile p join public.companies c on c.wba_id = p.wba_id
+                    where q is null or c.name ilike '%' || q || '%'
+                    group by 1, 2, 3 order by max(p.read_at) desc limit 12) s));
+end;
+$$;
+revoke all on function public.admin_company_profiles(text, text) from public, anon;
+grant execute on function public.admin_company_profiles(text, text) to authenticated;
+
+-- What a person makes of one field: 'confirmed', 'rejected', 'corrected' (with the right value: a text, a number or
+-- a list), or 'read' to hand it back to the reader. The reader never overwrites a row whose status is not 'read'.
+create or replace function public.admin_company_profile_set(key text, company text, field text, status text, value jsonb default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  done int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if status is null or status not in ('read', 'confirmed', 'rejected', 'corrected') then
+    raise exception 'confirmed, rejected, corrected or read' using errcode = '22023';
+  end if;
+  if status = 'corrected' and (value is null or jsonb_typeof(value) not in ('string', 'number', 'array') or value in ('""'::jsonb, '[]'::jsonb) or length(value::text) > 4000) then
+    raise exception 'a correction carries the right value' using errcode = '22023';
+  end if;
+  update public.company_profile p set status = status, value = case when status = 'corrected' then value else p.value end,
+         model = case when status = 'corrected' then 'person' else p.model end, read_at = case when status = 'corrected' then now() else p.read_at end
+    where p.wba_id = company and p.field = field;
+  get diagnostics done = row_count;
+  return jsonb_build_object('ok', done = 1);
+end;
+$$;
+revoke all on function public.admin_company_profile_set(text, text, text, text, jsonb) from public, anon;
+grant execute on function public.admin_company_profile_set(text, text, text, text, jsonb) to authenticated;
+
 create or replace function public.admin_names_not_held(key text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
 as $$
