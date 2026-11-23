@@ -8242,6 +8242,33 @@ grant execute on function public.admin_reference_asked_set(text, text, boolean) 
 -- What people looked for and lantrNa does not follow (company_misses, 22 Nov 2026): the words, most searched
 -- first, with how many times and by how many links. A word the owner set aside stays in the table, so that it is
 -- not listed again, and is shown last.
+-- The profile on the search page (23 Nov 2026, the owner: "can we add the profiling?"): what a company is, under its
+-- name when a search names one company. The fields the owner rejected are left out; each field carries the page it
+-- was read on. To the owner only until option company_profiles is switched on.
+insert into public.search_options (name, is_on, note) values ('company_profiles', false, 'the profile read from a company''s reports is shown under its name to everyone (off: to the owner only)')
+on conflict (name) do nothing;
+create or replace function public.company_profile_of(key text, company text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+set statement_timeout = '3s'
+as $$
+#variable_conflict use_variable
+declare
+  who text := public.search_key_name(key);
+begin
+  if who is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if who <> 'owner' and not public.survey_option('company_profiles') then
+    return null;
+  end if;
+  return (select jsonb_object_agg(p.field, jsonb_build_object('value', p.value, 'page', p.page, 'status', p.status,
+                                                               'url', (select d.url from public.documents d where d.library_id = p.library_id limit 1)))
+          from public.company_profile p where p.wba_id = company and p.status <> 'rejected');
+end;
+$$;
+revoke all on function public.company_profile_of(text, text) from public;
+grant execute on function public.company_profile_of(text, text) to anon, authenticated;
+
 -- The company profiles (23 Nov 2026), for the owner to judge before anyone else sees them: how many companies were
 -- read and which fields, and the profile of the companies a word of the name finds (or the last ones read). Each
 -- field with the document and page it was read on.

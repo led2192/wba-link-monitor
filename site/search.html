@@ -291,6 +291,7 @@
   </div>
   <div class="chips" id="chips"></div>
   <div class="gaps" id="gaps"></div>
+  <div class="gaps" id="profile"></div>
   <div class="filters" id="filters" hidden>
     <div class="row">
       <input id="fCompany" list="companies" placeholder="Company">
@@ -313,7 +314,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v151 2026-11-23";
+  const CLIENT = "lantern v152 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -643,7 +644,7 @@
     if (state.industry) add("Industry", state.industry.replace(/;/g, ", "), () => { state.industry = null; });
     if (state.country) add("Country", state.countryName || state.country, () => { state.country = state.countryName = null; });
     if (state.region) add("Region", state.region, () => { state.region = null; });
-    showGaps();
+    showGaps(); showProfile();
   }
   // v81 (the owner, 16 Nov 2026): with one company chosen, a quiet line under the filters says which main reports of
   // the last three years the library does not hold, so a reader knows what a search or an answer could not have read.
@@ -689,6 +690,34 @@
     if (miss.length) card.append(el("p", null, `Not in the library: ${miss.join(" · ")}.`));
     card.append(el("p", null, "Every document is listed below, newest first."));
     box.append(card);
+  }
+  // v152 (23 Nov 2026, the owner: "can we add the profiling?"): what the company is, under its name, when the search names
+  // one company. Read from its own reports (company_profile.py); one line, and the rest behind "more"; each field links to
+  // the page it was read on. To the owner only until option company_profiles is on.
+  const profilesSeen = new Map();
+  async function showProfile() {
+    const box = $("profile"), id = state.company && !state.company.includes(";") ? state.company : null; box.innerHTML = "";
+    if (!id) return;
+    if (!profilesSeen.has(id)) { let p = null; try { p = await rpc("company_profile_of", { key, company: id }); } catch (e) { p = null; } profilesSeen.set(id, p || null); }
+    const p = profilesSeen.get(id);
+    if (!p || state.company !== id) return;
+    const v = f => p[f] && p[f].value, txt = x => Array.isArray(x) ? x.join(", ") : x == null ? "" : String(x);
+    const where = [v("headquarters_city"), v("headquarters_country")].filter(Boolean).join(", "), line = [v("sector"), v("industry"), v("subsector")].filter(Boolean).join(" › ");
+    const owned = v("listing") && !/^not listed$/i.test(v("listing")) ? `listed (${v("listing")})` : v("ownership");
+    const short = [line, where && `based in ${where}`, owned, v("countries_count") && `${v("countries_count")} countries`, v("year_founded") && `founded ${v("year_founded")}`].filter(Boolean).join(" · ");
+    if (!short && !v("description")) return;
+    box.innerHTML = ""; if (v("description")) box.append(el("div", null, txt(v("description"))));
+    const top = el("div"); top.append(document.createTextNode(short ? short + " · " : ""));
+    const more = el("a", null, "more"); more.href = "#"; top.append(more); box.append(top);
+    const LABEL = { headquarters_city: "Head office", headquarters_country: "Country of the head office", country_of_incorporation: "Registered in", year_founded: "Founded", listing: "Listing", ownership: "Ownership", parent: "Parent",
+      subsidiaries: "Main subsidiaries", countries: "Countries", countries_count: "Number of countries", segments: "Segments", products: "Products and services", customers: "Customers", sector: "Sector", industry: "Industry", subsector: "Sub-sector" };
+    more.onclick = ev => { ev.preventDefault(); if (box.querySelector(".values")) { box.querySelector(".values").remove(); more.textContent = "more"; return; } more.textContent = "less";
+      const all = el("div", "values"); all.style.marginTop = "6px";
+      for (const f of Object.keys(LABEL)) { if (!p[f] || v(f) == null || txt(v(f)) === "") continue; const row = el("div"); row.append(el("b", null, LABEL[f] + ": "), document.createTextNode(txt(v(f)) + " "));
+        const u = p[f].url; if (/^https?:\/\//i.test(u || "") && p[f].page) { const a = el("a", null, `p. ${p[f].page}`); a.href = /\.pdf(\?|$)/i.test(u) || !/#/.test(u) ? `${u}#page=${p[f].page}` : u; a.target = "_blank"; a.rel = "noopener"; row.append(a); }
+        all.append(row); }
+      all.append(el("div", "what", "Read by a model from the company's own reports. Check the page before using it."));
+      box.append(all); };
   }
   async function showGaps() {
     const box = $("gaps"), id = state.company && !state.company.includes(";") ? state.company : null; box.innerHTML = "";

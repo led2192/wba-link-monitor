@@ -2088,6 +2088,11 @@ class SearchOnPostgres(unittest.TestCase):
         for bad in (("PF1", "countries", "corrected", None), ("PF1", "countries", "corrected", "[]"), ("PF1", "countries", "liked", None)):
             with self.assertRaises(psycopg.Error): put(*bad)
         self.assertEqual(ask()["status"].get("corrected"), 1)
+        # the page's profile: what was not rejected, each field with its page
+        put("PF1", "headquarters_city", "rejected", None)
+        cur.execute("select public.company_profile_of('k', 'PF1')"); card = cur.fetchone()[0]
+        self.assertEqual({f: (x["value"], x["status"]) for f, x in card.items()}, {"countries": (["Peru"], "corrected")})
+        cur.execute("select public.company_profile_of('k', 'no-such')"); self.assertIsNone(cur.fetchone()[0])
         cur.execute("delete from public.company_profile where wba_id in ('PF1', 'PF2')"); cur.execute("delete from public.companies where wba_id in ('PF1', 'PF2')")
 
     def test_the_review_card_lists_every_reading_and_carries_the_page_when_there_is_no_link(self):
