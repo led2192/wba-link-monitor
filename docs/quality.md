@@ -104,6 +104,7 @@ Rule changes to the year (`fiscal_year.py`, `date_documents.py`) are gated by `y
 ## The ship rule
 A change to a rule or a prompt merges only when, on the evaluation labels, overall accuracy does not fall, accuracy on the classes that move a completeness check does not fall, and no regression case flips from right to wrong. The measurement on a pull request is still its comment (`year_eval.py`, coverage comparison, the reader and element evaluations); the manual and scheduled runs of the evaluators write their scores to `evals` (since 3 Nov 2026), which is the scoreboard to read for trends.
 
+
 ## Snapshot: week of 23 Nov 2026 (fifth weekly review)
 Open failures: 72,771 distinct rows (73,781 a week ago): High 51,450, Medium 15,643, Low 5,678. LABEL_CORRECTION 20,033, TYPE_DISAGREE 16,423, DOC_FETCH_FAIL 6,772, DOC_DUPLICATE 5,678, PAGE_UNREACHABLE 5,483, TYPE_MISSING 5,168, PAGE_EMPTY 4,035, CO_GAP 3,558, DOC_UNREADABLE 1,723, DOC_WRONG_ROW 1,565, PAGE_GONE 1,451, PAGE_BLOCKED 555 domains, PAGE_UNHARVESTED 223, DATA_CHECK 79, DOC_FLAGGED 20 (no new flag this week; the 16 checked on 16 Nov close by themselves), RUN_FAILED 5. The first silent closes came this week: 3,464 rows resolved after 30 days unseen (DOC_DUPLICATE 1,300, TYPE_MISSING 841, PAGE_UNREACHABLE 479, CO_GAP 260, DOC_WRONG_ROW 223). Fixed 22, expected 18. No failure marked fixed or resolved came back.
 
