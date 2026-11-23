@@ -8303,6 +8303,47 @@ $$;
 revoke all on function public.company_profile_of(text, text) from public;
 grant execute on function public.company_profile_of(text, text) to anon, authenticated;
 
+-- Groups of companies by what their own reports say they are (23 Nov 2026). The owner: "people will ask for
+-- industries or sub-sectors that are not in our list of industries, which is WBA's; we need to deal with that", and a
+-- classification of lantrNa's own "is essential". The profiles hold each company's sector, industry and sub-sector in
+-- the words of its reports. A word of the search that those words hold for several companies ("semiconductor",
+-- "airline", "fertiliser") names a group: the companies, how many, and the three commonest ways they put it. No list
+-- to keep: the groups are whatever the reports say. Left out: a word shorter than five letters, a word of every
+-- business (services, products, group), and a word that fits more than a fifth of the companies read.
+create or replace function public.profile_groups(key text, q text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+set statement_timeout = '3s'
+as $$
+#variable_conflict use_variable
+declare
+  total int;
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if not public.survey_option('company_profiles') and public.search_key_name(key) <> 'owner' then
+    return '[]'::jsonb;
+  end if;
+  select count(distinct p.wba_id) into total from public.company_profile p;
+  return (
+    with w as (select distinct case when x ~ 'ies$' then left(x, length(x) - 3) when x ~ 's$' then left(x, length(x) - 1) else x end as stem, x as word
+               from regexp_split_to_table(lower(coalesce(q, '')), '[^[:alnum:]]+') x
+               where length(x) >= 5 and x not in ('services', 'service', 'products', 'product', 'company', 'companies', 'group', 'groups', 'other', 'others', 'general', 'global', 'international',
+                                                  'management', 'solutions', 'sector', 'sectors', 'industry', 'industries', 'business', 'businesses', 'firms', 'which', 'their', 'about', 'emissions',
+                                                  'report', 'reports', 'annual', 'targets', 'target', 'policy', 'policies', 'scope', 'disclose', 'discloses', 'number', 'total')),
+    hit as (select w.word, p.wba_id, p.value #>> '{}' as says
+            from w join public.company_profile p on p.field in ('subsector', 'industry', 'sector') and p.status <> 'rejected' and jsonb_typeof(p.value) = 'string'
+                 and to_tsvector('simple', p.value #>> '{}') @@ to_tsquery('simple', quote_literal(w.stem) || ':*')),
+    g as (select h.word, count(distinct h.wba_id) as n, array_agg(distinct h.wba_id) as ids from hit h group by h.word)
+    select coalesce(jsonb_agg(jsonb_build_object('word', g.word, 'companies', g.n, 'ids', g.ids[1:150],
+                                                 'says', (select jsonb_agg(s.says) from (select h.says from hit h where h.word = g.word group by h.says order by count(*) desc, h.says limit 3) s))
+                              order by g.n), '[]'::jsonb)
+    from g where g.n >= 3 and g.n <= greatest(12, total / 5));
+end;
+$$;
+revoke all on function public.profile_groups(text, text) from public;
+grant execute on function public.profile_groups(text, text) to anon, authenticated;
+
 -- The company profiles (23 Nov 2026), for the owner to judge before anyone else sees them: how many companies were
 -- read and which fields, and the profile of the companies a word of the name finds (or the last ones read). Each
 -- field with the document and page it was read on.

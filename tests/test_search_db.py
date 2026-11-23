@@ -2084,6 +2084,23 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_reference_example_set('k', 'term:zm', 'RX9', 3, 'approved')"); self.assertFalse(cur.fetchone()[0]["ok"])
         cur.execute("delete from public.reference_examples where entry = 'term:zm'"); cur.execute("delete from public.documents where library_id = 'RX1'"); cur.execute("delete from public.companies where wba_id = 'RXA'")
 
+    def test_a_word_of_the_search_names_a_group_by_what_companies_say_they_are(self):
+        """23 Nov 2026: sub-sectors that are in no list. A word that several companies' profiles use for their sector,
+        industry or sub-sector names a group, plural or singular; a word of every business does not, nor one of a single company."""
+        cur = self.conn.cursor()
+        rows = [("PG1", "subsector", "Zebra semiconductors"), ("PG2", "industry", "Semiconductor manufacturing"), ("PG3", "subsector", "Semiconductor equipment"), ("PG3", "sector", "Technology services"),
+                ("PG4", "subsector", "Zebra airlines"), ("PG5", "sector", "Technology services"), ("PG6", "sector", "Technology services")]
+        cur.executemany("insert into public.company_profile (wba_id, field, value, model) values (%s, %s, to_jsonb(%s::text), 'm')", rows)
+        cur.execute("update public.company_profile set status = 'rejected' where wba_id = 'PG2'")
+        ask = lambda q: (cur.execute("select public.profile_groups('k', %s)", (q,)), cur.fetchone()[0])[1]
+        self.assertEqual(ask("semiconductors water use"), [])                                   # PG2's line was rejected: two companies are not a group
+        cur.execute("update public.company_profile set status = 'read' where wba_id = 'PG2'")
+        g = ask("Semiconductors water use"); self.assertEqual([(x["word"], x["companies"], sorted(x["ids"])) for x in g], [("semiconductors", 3, ["PG1", "PG2", "PG3"])])
+        self.assertEqual(len(g[0]["says"]), 3)
+        self.assertEqual(ask("airline services emissions"), [])                                 # one airline; "services" is a word of every business
+        self.assertEqual([x["word"] for x in ask("technology companies")], ["technology"])
+        cur.execute("delete from public.company_profile where wba_id like 'PG_'")
+
     def test_the_owner_sees_and_judges_a_company_profile(self):
         """23 Nov 2026: the profile read from a company's reports is shown to the owner first, field by field with
         where it was read; what the owner confirms, rejects or corrects is kept, and a correction carries a value."""
