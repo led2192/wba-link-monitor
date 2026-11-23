@@ -1344,6 +1344,19 @@ grant execute on function public.find_judge(text, bigint, text, int, int, boolea
 
 -- The companies, for the page to recognise a company name typed in the box: one JSON value (the web
 -- interface caps set-returning functions at 1,000 rows).
+-- The name a company is called by (23 Nov 2026; company_short_names.py on the job server): the listed name without
+-- its legal form, "Porsche" for "Porsche AG", and whether the page may read it as the company (safe). pages and
+-- own_pages are the counts a one-word name was judged on. find_companies gives the safe ones as "short".
+create table if not exists public.company_short_names (
+  wba_id    text primary key,
+  short     text not null,
+  pages     int,
+  own_pages int,
+  safe      boolean not null default false,
+  at        timestamptz not null default now()
+);
+alter table public.company_short_names enable row level security;
+
 create or replace function public.find_companies(key text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
 set statement_timeout = '20s'
@@ -1354,7 +1367,8 @@ begin
   end if;
   if to_regclass('public.companies') is not null and (select count(*) from public.companies) > 0 then
     -- the profiles (load_companies.py): 2,000 rows, instant; industry, country and region for the box's filters
-    return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.name, 'industry', c.industry, 'country', c.country, 'region', c.region, 'website', c.website) order by c.name), '[]'::jsonb)
+    return (select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', c.wba_id, 'name', c.name, 'industry', c.industry, 'country', c.country, 'region', c.region, 'website', c.website,
+                                                                           'short', (select s.short from public.company_short_names s where s.wba_id = c.wba_id and s.safe))) order by c.name), '[]'::jsonb)
             from public.companies c where c.name is not null);
   end if;
   return (select coalesce(jsonb_agg(jsonb_build_object('id', c.wba_id, 'name', c.company, 'documents', c.documents) order by c.company), '[]'::jsonb)

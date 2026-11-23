@@ -1961,6 +1961,22 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("delete from public.reference_use"); cur.execute("delete from public.reference_entries where id = 'norm:izs'")
         cur.execute("delete from public.pages where library_id like 'RU_'"); cur.execute("delete from public.documents where library_id like 'RU_'")
 
+    def test_a_company_is_known_by_its_name_without_the_legal_form(self):
+        """23 Nov 2026: "porsche" did not name "Porsche AG". The short name is worked out by rule, a one-word one is
+        judged on the pages, and the company list gives the safe ones to the page."""
+        import company_short_names as C
+        self.assertEqual([C.short_of(n) for n in ("Zuffenhaus AG", "Northern Zebra Motors Company", "Bank of Zebra Limited", "The Zebra-Cola Company", "Zebra", "Zeb Inc.")],
+                         ["Zuffenhaus", "Northern Zebra Motors", "Bank of Zebra", "Zebra-Cola", None, None])
+        self.assertEqual(C.plan([("A", "Zuffenhaus AG"), ("B", "Zuffenhaus Automobil Holding SE"), ("C", "Striped Corporation"), ("D", "Striped"), ("E", "Twin plc"), ("F", "Twin Inc.")]),
+                         [("A", "Zuffenhaus", 1), ("B", "Zuffenhaus Automobil", 2)])       # a short name another company has, as short or listed name, is nobody's
+        self.assertEqual([C.one_word_safe(*x) for x in ((900, 0), (30000, 9000), (30000, 300), (70000, 60000), (0, 0))], [True, True, False, False, True])
+        cur = self.conn.cursor()
+        cur.execute("insert into public.companies (wba_id, name) values ('SN1', 'Zuffenhaus AG'), ('SN2', 'Everyday Corporation') on conflict do nothing")
+        cur.execute("insert into public.company_short_names (wba_id, short, pages, own_pages, safe) values ('SN1', 'Zuffenhaus', 900, 400, true), ('SN2', 'Everyday', 70000, 10, false)")
+        cur.execute("select public.find_companies('k')"); got = {c["id"]: c.get("short") for c in cur.fetchone()[0] if c["id"] in ("SN1", "SN2")}
+        self.assertEqual(got, {"SN1": "Zuffenhaus", "SN2": None})
+        cur.execute("delete from public.company_short_names"); cur.execute("delete from public.companies where wba_id in ('SN1', 'SN2')")
+
     def test_what_the_reports_name_and_the_list_lacks_becomes_a_candidate(self):
         """23 Nov 2026: reports write a full name and its acronym in brackets. A pair several companies write and the
         list does not hold is a candidate; a company's own name is not; adding the entry closes the candidate."""
