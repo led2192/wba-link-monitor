@@ -7909,6 +7909,59 @@ $$;
 revoke all on function public.admin_reference_use(text, int, text) from public, anon;
 grant execute on function public.admin_reference_use(text, int, text) to authenticated;
 
+-- What the reports name and the list does not hold (23 Nov 2026; reference_candidates.py on the job server reads a
+-- sample of recent pages for "full name (ACRONYM)" and keeps the pairs several companies write). The owner adds one
+-- to the list (status 'added', set by admin_reference_save) or sets it aside ('dismissed'); the script replaces
+-- only the rows still 'found'.
+create table if not exists public.reference_candidates (
+  key        text primary key,
+  name       text not null,
+  acronym    text,
+  kind       text not null default 'term',
+  companies  int not null default 0,
+  documents  int not null default 0,
+  library_id text,
+  status     text not null default 'found',
+  found_at   timestamptz not null default now()
+);
+alter table public.reference_candidates enable row level security;
+
+create or replace function public.admin_reference_candidates(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'found', (select count(*) from public.reference_candidates c where c.status = 'found'),
+    'found_at', (select max(c.found_at) from public.reference_candidates c),
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('key', c.key, 'name', c.name, 'acronym', c.acronym, 'kind', c.kind, 'companies', c.companies, 'documents', c.documents)
+                                      order by c.companies desc, c.documents desc, c.key), '[]'::jsonb)
+             from (select * from public.reference_candidates c where c.status = 'found' order by c.companies desc, c.documents desc, c.key limit 150) c));
+end;
+$$;
+revoke all on function public.admin_reference_candidates(text) from public, anon;
+grant execute on function public.admin_reference_candidates(text) to authenticated;
+
+create or replace function public.admin_reference_candidate_set(key text, candidate text, dismissed boolean) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  done int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  update public.reference_candidates c set status = case when dismissed then 'dismissed' else 'found' end where c.key = candidate and c.status <> 'added';
+  get diagnostics done = row_count;
+  return jsonb_build_object('ok', done = 1);
+end;
+$$;
+revoke all on function public.admin_reference_candidate_set(text, text, boolean) from public, anon;
+grant execute on function public.admin_reference_candidate_set(text, text, boolean) to authenticated;
+
 -- Entries by a word of their name or acronym, for the owner to open one (the whole text, both languages).
 create or replace function public.admin_reference_find(key text, q text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
@@ -7977,6 +8030,7 @@ begin
       edited_at = now(), edited_by = lower(auth.jwt() ->> 'email')
     where e.id = the_id;
   update public.reference_misses m set dismissed = true where not m.dismissed and (m.asked_key = public.reference_key(nm) or m.asked_key = any(select public.reference_key(a) from unnest(al) a));
+  update public.reference_candidates c set status = 'added' where c.status <> 'added' and (c.key = public.reference_key(nm) or c.key = any(select public.reference_key(a) from unnest(al) a));
   return jsonb_build_object('ok', true, 'id', the_id);
 end;
 $$;

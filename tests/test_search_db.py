@@ -1961,6 +1961,26 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("delete from public.reference_use"); cur.execute("delete from public.reference_entries where id = 'norm:izs'")
         cur.execute("delete from public.pages where library_id like 'RU_'"); cur.execute("delete from public.documents where library_id like 'RU_'")
 
+    def test_what_the_reports_name_and_the_list_lacks_becomes_a_candidate(self):
+        """23 Nov 2026: reports write a full name and its acronym in brackets. A pair several companies write and the
+        list does not hold is a candidate; a company's own name is not; adding the entry closes the candidate."""
+        import reference_candidates as C
+        page = ("We follow the Task Force on Zebra-related Financial Disclosures (TZFD) and count zebrahouse gas (ZHG) emissions. Zebra Motors AG (ZM) and the "
+                "Invented Zebra Reporting Directive (IZRD) apply; the Zebra Advisory Council (ZAC) agrees. See NOTE (AB).")
+        self.assertEqual(C.pairs(page), [("Task Force on Zebra-related Financial Disclosures", "TZFD"), ("zebrahouse gas", "ZHG"), ("Zebra Motors AG", "ZM"), ("Invented Zebra Reporting Directive", "IZRD"), ("Zebra Advisory Council", "ZAC")])     # the company's own name is left out by candidates()
+        self.assertEqual([C.guess(n) for n in ("Invented Zebra Reporting Directive", "Zebra Advisory Council", "Zebra Accounting Standard", "zebrahouse gas")], ["regulation", "organisation", "norm", "term"])
+        rows = [(f"L{i}", f"W{i % 4}", page) for i in range(8)] + [("L9", "W9", "Our own Zebra Excellence Programme (ZEP) is ours alone.")]
+        got = C.candidates(rows, held={"izrd"}, company_keys={"zebra advisory council"})
+        self.assertEqual(sorted((g[1], g[2], g[3], g[4], g[5]) for g in got), [("Task Force on Zebra-related Financial Disclosures", "TZFD", "term", 4, 8), ("zebrahouse gas", "ZHG", "term", 4, 8)])
+        cur = self.conn.cursor()
+        cur.executemany("insert into public.reference_candidates (key, name, acronym, kind, companies, documents, library_id) values (%s, %s, %s, %s, %s, %s, %s)", got)
+        cur.execute("select public.admin_reference_candidates('k')"); r = cur.fetchone()[0]; self.assertEqual((r["found"], len(r["rows"])), (2, 2))
+        cur.execute("select public.admin_reference_candidate_set('k', 'zebrahouse gas', true)"); self.assertTrue(cur.fetchone()[0]["ok"])
+        cur.execute("select public.admin_reference_save('k', null, 'norm', 'Task Force on Zebra-related Financial Disclosures', array['TZFD'], 'Invented.')"); made = cur.fetchone()[0]["id"]
+        cur.execute("select key, status from public.reference_candidates order by key"); self.assertEqual(cur.fetchall(), [("task force on zebra related financial disclosures", "added"), ("zebrahouse gas", "dismissed")])
+        cur.execute("select public.admin_reference_candidates('k')"); self.assertEqual(cur.fetchone()[0]["rows"], [])
+        cur.execute("delete from public.reference_candidates"); cur.execute("delete from public.reference_entries where id = %s", (made,))
+
     def test_a_term_gets_examples_from_the_reports(self):
         """23 Nov 2026: a term's card shows how reports write about it. The sentence is cut from the page with no model:
         prose that explains or applies the term, not a line of a contents page; one a company; a rejected one is gone."""
