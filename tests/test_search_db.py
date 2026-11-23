@@ -1715,12 +1715,10 @@ class SearchOnPostgres(unittest.TestCase):
                              region_filter text default null, typed text default null)
                            returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
                            language sql as $f$ select null::bigint, g, 'DOC', 'C', 'W', 2025, 'Annual Report', 'l', null::text, g, 0::real, client from generate_series(1, least(max_rows, 24)) g $f$""")
-            cur.execute("""create or replace function public.find_pages(key text, q text, company_filter text default null, year_from int default null, year_to int default null,
-                             type_filter text default null, max_rows int default 50, client text default null, industry_filter text default null, country_filter text default null,
-                             region_filter text default null, typed text default null)
-                           returns table (log_id bigint, rank int, library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, score real, excerpt text)
-                           language sql as $f$ select null::bigint, g, 'DOC', 'C', 'W', 2025, case when g = 1 then 'Policy Documents' else 'Annual Report' end, 'l', null::text,
-                                                       (array[90, 3, 7, 91, 92])[g], 0::real, q from generate_series(1, 5) g $f$""")
+            # the pages inside the company's main reports that hold most of the reports' words: page 3 is one of the best five already
+            cur.execute("""create or replace function public.ask_concept_pages(company_filter text, year_from int, year_to int, says text, max_rows int default 3)
+                           returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text, held int)
+                           language sql as $f$ select 'DOC', 'C', 'W', 2025, 'Annual Report', 'l', null::text, (array[3, 7, 91, 92, 90])[g], says, 9 - g from generate_series(1, 5) g $f$""")
             ask = "select page, excerpt from public.ask_pages('k', %s, null, %s, 2025, 2025, null, %s)"
             cur.execute("select set_config('lantern.ask_later', 'off', true)")
             cur.execute(ask, ("main difficulties", "C", "main difficulties in 2025")); default = cur.fetchall()
@@ -1731,8 +1729,25 @@ class SearchOnPostgres(unittest.TestCase):
             c.rollback()
         eight = [(g, "ask") for g in range(1, 9)]
         self.assertEqual(default, eight); self.assertEqual(no_concept, eight); self.assertEqual(no_company, eight)
-        # the best five stay; then the reports' words' best three, main reports first: page 3 is already among the five, so 7, 91 and 92; the policy's page 90 waits
+        # the best five stay; then the three pages that hold most of the reports' words: page 3 is already among the five, so 7, 91 and 92
         self.assertEqual([p for p, _ in on], [1, 2, 3, 4, 5, 7, 91, 92]); self.assertTrue(all("headwinds" in e for p, e in on if p in (7, 91, 92)))
+
+    def test_the_pages_of_a_company_that_hold_most_of_a_concepts_words(self):
+        """23 Nov 2026, the second try: inside the company's own main reports, the pages that hold most of the reports'
+        words for what is asked, two a document at most; a policy and another company's report are not looked at."""
+        cur = self.conn.cursor()
+        cur.execute("insert into public.companies (wba_id, name) values ('CP1', 'Concept One'), ('CP2', 'Concept Two') on conflict do nothing")
+        cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, label, pages, text_status) values "
+                    "('CPA', 'CP1', 'Concept One', 'Annual Report', 2025, 'a', 9, 'ok'), ('CPP', 'CP1', 'Concept One', 'Policy Documents', 2025, 'p', 2, 'ok'), ('CPB', 'CP2', 'Concept Two', 'Annual Report', 2025, 'b', 2, 'ok')")
+        cur.execute("insert into public.pages (library_id, page, body) values "
+                    "('CPA', 1, 'Revenue and risks only.'), ('CPA', 2, 'Principal risks and uncertainties: headwinds, an adverse and challenging market, the outlook.'), "
+                    "('CPA', 3, 'Risks, challenges and the outlook for the year.'), ('CPA', 4, 'Risks, headwinds and a decline in the outlook, with challenges.'), "
+                    "('CPP', 1, 'Risks challenges headwinds uncertainties adverse decline outlook.'), ('CPB', 1, 'Risks challenges headwinds uncertainties adverse decline outlook.')")
+        cur.execute("select library_id, page, held from public.ask_concept_pages('CP1', 2025, 2025, 'risks challenges headwinds uncertainties adverse decline challenging outlook', 3)")
+        self.assertEqual(cur.fetchall(), [("CPA", 2, 6), ("CPA", 4, 5)])            # the two best of the report; page 1 holds one word, page 3 would be a third of one document
+        cur.execute("select count(*) from public.ask_concept_pages('CP1', 2025, 2025, null, 3)"); self.assertEqual(cur.fetchone()[0], 0)
+        cur.execute("select count(*) from public.ask_concept_pages('CP1', null, null, 'risks challenges outlook', 3)"); self.assertEqual(cur.fetchone()[0], 2)   # no year asked: the newest reports; pages 3 and 4 hold all three
+        cur.execute("delete from public.pages where library_id in ('CPA', 'CPP', 'CPB')"); cur.execute("delete from public.documents where library_id in ('CPA', 'CPP', 'CPB')"); cur.execute("delete from public.companies where wba_id in ('CP1', 'CP2')")
 
     def test_a_fiscal_period_gets_wbas_year_and_is_one_period_however_written(self):
         import json, psycopg
