@@ -5,15 +5,18 @@ name: Reference use
 
 on:
   schedule:
-    - cron: "43 5 * * 1"
+    - cron: "10 1 * * *"
   workflow_dispatch:
     inputs:
       mode:
         description: "dry_run or commit"
         default: "dry_run"
+      by_day:
+        description: "yes: a commit run may start in the hours people search (it loads the database)"
+        default: "no"
 
 concurrency:
-  group: reference-use
+  group: heavy-database      # one of the jobs that load the database at a time
   cancel-in-progress: false
 
 permissions:
@@ -32,7 +35,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Load
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then python reference_use.py --commit
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then python reference_use.py --commit ${{ inputs.by_day == 'yes' && '--by-day' || '' }}
           else python reference_use.py --limit 40; fi
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}

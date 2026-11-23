@@ -24,6 +24,10 @@ on:
       as_scheduled:
         description: "set by lantrNa's clock (server/clock.json): commit"
         default: "false"
+      by_day:
+        description: "paid, more than 50 companies: may start in the hours people search (it loads the database)"
+        type: boolean
+        default: false
       limit:
         description: "companies this run"
         default: "20"
@@ -82,6 +86,7 @@ jobs:
         run: |
           ARGS=(--model paid --limit "${{ inputs.limit || '20' }}" --minutes 280 --max-usd "${{ inputs.max_usd || '3' }}" --partition "${{ inputs.partition || '0/1' }}")
           if [ "${{ inputs.commit }}" = "true" ]; then ARGS+=(--commit); fi
+          if [ "${{ inputs.by_day }}" = "true" ]; then ARGS+=(--by-day); fi
           python company_profile.py "${ARGS[@]}"
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
