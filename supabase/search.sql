@@ -7947,6 +7947,8 @@ alter table public.reference_examples enable row level security;
 insert into public.search_options (name, is_on, note) values ('reference_examples', false, 'the examples from the reports are shown under a term''s card to everyone (off: to the owner only)')
 on conflict (name) do nothing;
 
+-- The owner opened the examples to everyone on 23 Nov 2026.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 23 Nov 2026, the owner''s word)' where name = 'reference_examples' and not is_on and note not like '%on since%';
 create or replace function public.reference_examples_of(key text, entry text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
 set statement_timeout = '3s'
@@ -8245,6 +8247,8 @@ grant execute on function public.admin_reference_asked_set(text, text, boolean) 
 -- was read on. To the owner only until option company_profiles is switched on.
 insert into public.search_options (name, is_on, note) values ('company_profiles', false, 'the profile read from a company''s reports is shown under its name to everyone (off: to the owner only)')
 on conflict (name) do nothing;
+-- The owner opened the profiles to everyone on 23 Nov 2026 ("open them now to all users").
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 23 Nov 2026, the owner''s word)' where name = 'company_profiles' and not is_on and note not like '%on since%';
 create or replace function public.company_profile_of(key text, company text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
 set statement_timeout = '3s'

@@ -229,13 +229,24 @@
      wide window the results move left to make the room, so nothing ever runs off the side (11 Nov 2026: the panel
      was cut and the page scrolled sideways on a 1,220-pixel window). Narrower, the panel sits above the results. */
   html, body { overflow-x: hidden; }
+  /* v153 (23 Nov 2026): the column beside the results holds two cards, the company's profile and the values held. */
   @media (min-width: 1120px) {
-    .values { position: absolute; top: 96px; left: calc(50% + 396px); width: 310px; margin: 0; max-height: 80vh; overflow: auto; }
+    #side { position: absolute; top: 96px; left: calc(50% + 396px); width: 310px; max-height: 84vh; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+    #side > .values { margin: 0 0 12px; }
     .wrap { position: relative; }
   }
   @media (min-width: 1120px) and (max-width: 1459px) {
-    .wrap:has(> #values:not([hidden])) { margin-left: max(0px, calc((100vw - 1120px) / 2)); }
+    .wrap:has(> #side > .values:not([hidden])) { margin-left: max(0px, calc((100vw - 1120px) / 2)); }
   }
+  .about > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  .about .lead { margin: 8px 0 10px; line-height: 1.45; }
+  .about .path { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .about dl { display: grid; grid-template-columns: 92px 1fr; gap: 5px 10px; margin: 0; }
+  .about dt { color: var(--muted); font-size: 12px; padding-top: 1px; }
+  .about dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .about dd a, .about .note a { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .about .tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .about .tags span { border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; font-size: 12px; }
   .strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; font-size: 13px; }
   .strip .lbl { color: var(--muted); margin-right: 4px; }
   .strip .co { font: inherit; font-size: 13px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--box); color: var(--fg); cursor: pointer; }
@@ -291,7 +302,6 @@
   </div>
   <div class="chips" id="chips"></div>
   <div class="gaps" id="gaps"></div>
-  <div class="gaps" id="profile"></div>
   <div class="filters" id="filters" hidden>
     <div class="row">
       <input id="fCompany" list="companies" placeholder="Company">
@@ -304,7 +314,7 @@
   <div id="reference"></div>
   <div id="answer"></div>
   <div class="status" id="status"></div>
-  <details class="values" id="values" hidden open></details>
+  <div id="side"><details class="values about" id="profile" hidden></details><details class="values" id="values" hidden open></details></div>
   <div class="strip" id="strip"></div>
   <div id="results"></div>
   <div id="notice"></div>
@@ -314,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v152 2026-11-23";
+  const CLIENT = "lantern v153 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -695,29 +705,40 @@
   // one company. Read from its own reports (company_profile.py); one line, and the rest behind "more"; each field links to
   // the page it was read on. To the owner only until option company_profiles is on.
   const profilesSeen = new Map();
+  // v153 (the owner: "open it to everyone, and make it look better, at the side perhaps"): a card of its own in the column
+  // beside the results (above them on a narrow window, closed until pressed): what the company is in one paragraph, its
+  // sector, industry and sub-sector, then a short table; long lists as small tags, the first eight and "more".
   async function showProfile() {
-    const box = $("profile"), id = state.company && !state.company.includes(";") ? state.company : null; box.innerHTML = "";
+    const box = $("profile"), id = state.company && !state.company.includes(";") ? state.company : null; box.hidden = true; box.innerHTML = "";
     if (!id) return;
     if (!profilesSeen.has(id)) { let p = null; try { p = await rpc("company_profile_of", { key, company: id }); } catch (e) { p = null; } profilesSeen.set(id, p || null); }
     const p = profilesSeen.get(id);
     if (!p || state.company !== id) return;
-    const v = f => p[f] && p[f].value, txt = x => Array.isArray(x) ? x.join(", ") : x == null ? "" : String(x);
-    const where = [v("headquarters_city"), v("headquarters_country")].filter(Boolean).join(", "), line = [v("sector"), v("industry"), v("subsector")].filter(Boolean).join(" › ");
-    const owned = v("listing") && !/^not listed$/i.test(v("listing")) ? `listed (${v("listing")})` : v("ownership");
-    const short = [line, where && `based in ${where}`, owned, v("countries_count") && `${v("countries_count")} countries`, v("year_founded") && `founded ${v("year_founded")}`].filter(Boolean).join(" · ");
-    if (!short && !v("description")) return;
-    box.innerHTML = ""; if (v("description")) box.append(el("div", null, txt(v("description"))));
-    const top = el("div"); top.append(document.createTextNode(short ? short + " · " : ""));
-    const more = el("a", null, "more"); more.href = "#"; top.append(more); box.append(top);
-    const LABEL = { headquarters_city: "Head office", headquarters_country: "Country of the head office", country_of_incorporation: "Registered in", year_founded: "Founded", listing: "Listing", ownership: "Ownership", parent: "Parent",
-      subsidiaries: "Main subsidiaries", countries: "Countries", countries_count: "Number of countries", segments: "Segments", products: "Products and services", customers: "Customers", sector: "Sector", industry: "Industry", subsector: "Sub-sector" };
-    more.onclick = ev => { ev.preventDefault(); if (box.querySelector(".values")) { box.querySelector(".values").remove(); more.textContent = "more"; return; } more.textContent = "less";
-      const all = el("div", "values"); all.style.marginTop = "6px";
-      for (const f of Object.keys(LABEL)) { if (!p[f] || v(f) == null || txt(v(f)) === "") continue; const row = el("div"); row.append(el("b", null, LABEL[f] + ": "), document.createTextNode(txt(v(f)) + " "));
-        const u = p[f].url; if (/^https?:\/\//i.test(u || "") && p[f].page) { const a = el("a", null, `p. ${p[f].page}`); a.href = /\.pdf(\?|$)/i.test(u) || !/#/.test(u) ? `${u}#page=${p[f].page}` : u; a.target = "_blank"; a.rel = "noopener"; row.append(a); }
-        all.append(row); }
-      all.append(el("div", "what", "Read by a model from the company's own reports. Check the page before using it."));
-      box.append(all); };
+    const v = f => p[f] && p[f].value, txt = x => Array.isArray(x) ? x.join(", ") : x == null ? "" : String(x), has = f => v(f) != null && txt(v(f)) !== "";
+    const src = f => { const u = p[f] && p[f].url; if (!/^https?:\/\//i.test(u || "") || !p[f].page) return null; const a = el("a", null, `p. ${p[f].page}`); a.href = /\.pdf(\?|$)/i.test(u) || !/#/.test(u) ? `${u}#page=${p[f].page}` : u; a.target = "_blank"; a.rel = "noopener"; a.title = "The page it was read on"; return a; };
+    const path = ["sector", "industry", "subsector"].filter(has).map(f => txt(v(f))).filter((x, n, all) => all.indexOf(x) === n).join(" › ");
+    if (!path && !has("description")) return;
+    box.innerHTML = ""; box.append(el("summary", null, `About ${state.companyName || "the company"}`));
+    if (has("description")) { const d = el("div", "lead", txt(v("description")) + " "); const a = src("description"); if (a) d.append(a); box.append(d); }
+    if (path) { const d = el("div", "path", path + " "); const a = src("industry") || src("sector"); if (a) d.append(a); box.append(d); }
+    const dl = el("dl"), row = (label, node, f) => { const dd = el("dd"); dd.append(node); const a = f && src(f); if (a) dd.append(document.createTextNode(" "), a); dl.append(el("dt", null, label), dd); };
+    const words = s => document.createTextNode(s);
+    const tags = f => { const all = v(f), wrap = el("div", "tags"), show = n => { wrap.innerHTML = ""; for (const x of all.slice(0, n)) wrap.append(el("span", null, String(x)));
+        if (all.length > n) { const m = el("a", null, `${all.length - n} more`); m.href = "#"; m.onclick = ev => { ev.preventDefault(); show(all.length); }; wrap.append(m); } }; show(8); return wrap; };
+    const where = [v("headquarters_city"), v("headquarters_country")].filter(Boolean).join(", ");
+    if (where) row("Head office", words(where), has("headquarters_city") ? "headquarters_city" : "headquarters_country");
+    if (has("country_of_incorporation") && v("country_of_incorporation") !== v("headquarters_country")) row("Registered in", words(txt(v("country_of_incorporation"))), "country_of_incorporation");
+    const listed = has("listing") && !/^not listed$/i.test(v("listing"));
+    if (listed || has("ownership")) row("Ownership", words(listed ? `Listed, ${txt(v("listing"))}` : txt(v("ownership")).replace(/^./, c => c.toUpperCase())), listed ? "listing" : "ownership");
+    if (has("parent")) row("Parent", words(txt(v("parent"))), "parent");
+    if (has("year_founded")) row("Founded", words(txt(v("year_founded"))), "year_founded");
+    if (Array.isArray(v("countries")) && v("countries").length) row(has("countries_count") && v("countries_count") > v("countries").length ? `Countries (${v("countries_count")})` : "Countries", tags("countries"), "countries");
+    else if (has("countries_count")) row("Countries", words(txt(v("countries_count"))), "countries_count");
+    for (const [f, label] of [["segments", "Segments"], ["products", "Products"], ["subsidiaries", "Subsidiaries"]]) if (Array.isArray(v(f)) && v(f).length) row(label, tags(f), f); else if (has(f)) row(label, words(txt(v(f))), f);
+    if (has("customers")) row("Customers", words({ both: "Businesses and consumers", business: "Businesses", consumer: "Consumers", businesses: "Businesses", consumers: "Consumers" }[String(v("customers")).toLowerCase()] || txt(v("customers"))), "customers");
+    if (dl.children.length) box.append(dl);
+    box.append(el("div", "note", "Read by a model from the company's own reports. Check the page before using it."));
+    box.open = window.innerWidth >= 1120; box.hidden = false;
   }
   async function showGaps() {
     const box = $("gaps"), id = state.company && !state.company.includes(";") ? state.company : null; box.innerHTML = "";
@@ -1632,7 +1653,7 @@
   }
   function luckyClose() { deck.at = -1; document.body.classList.remove("playing"); $("results").innerHTML = ""; setStatus(""); }
   async function lucky(move) {
-    const box = $("results"); $("values").hidden = true; $("chips").innerHTML = ""; setStatus("");
+    const box = $("results"); $("values").hidden = true; $("profile").hidden = true; $("chips").innerHTML = ""; setStatus("");
     $("head").classList.remove("home"); document.body.classList.add("playing");
     if (!(await token())) {
       box.innerHTML = ""; const c = el("div", "lucky"); c.append(el("h2", null, "Review a value"), el("p", "what", "One value the robot read, with the page it came from. Say whether it is right. Each review counts."));
@@ -2381,7 +2402,7 @@
   // value the robot read, as before, or look at a company whose main reports of the last years are not all in the
   // library and add a link when one is known.
   function contribute() {
-    const box = $("results"); $("values").hidden = true; $("chips").innerHTML = ""; $("answer").innerHTML = ""; $("strip").innerHTML = ""; setStatus("");
+    const box = $("results"); $("values").hidden = true; $("profile").hidden = true; $("chips").innerHTML = ""; $("answer").innerHTML = ""; $("strip").innerHTML = ""; setStatus("");
     $("head").classList.remove("home"); document.body.classList.add("playing");
     box.innerHTML = ""; const c = el("div", "lucky");
     const back = el("a", null, "← Back to search"); back.href = "#"; back.onclick = e => { e.preventDefault(); luckyClose(); };
@@ -2404,7 +2425,7 @@
                            local_language: "Reports only in its own language", web_pages: "Reports on web pages, not in documents", filings_only: "Only files with a regulator",
                            irregular: "Publishes late or not every year", refuses_robot: "Its website refuses the robot" };
   async function gapCard() {
-    const box = $("results"); $("values").hidden = true; setStatus(""); document.body.classList.add("playing");
+    const box = $("results"); $("values").hidden = true; $("profile").hidden = true; setStatus(""); document.body.classList.add("playing");
     box.innerHTML = ""; const c = el("div", "lucky"); box.appendChild(c);
     const back = el("a", null, "← Contribute"); back.href = "#"; back.onclick = e => { e.preventDefault(); contribute(); }; c.appendChild(back);
     const wait = el("p", "what", "Looking for a company with a gap…"); c.appendChild(wait);
