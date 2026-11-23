@@ -7798,6 +7798,49 @@ $$;
 revoke all on function public.admin_reference(text) from public, anon;
 grant execute on function public.admin_reference(text) to authenticated;
 
+-- How much each norm and regulation is used in the reports, by reporting year (23 Nov 2026; reference_use.py on the
+-- job server counts the documents and companies with a page that prints the entry's name or acronym). For the owner
+-- only: admin_reference_use gives the years counted and, for one year, the entries most named, with the share of
+-- that year's read documents.
+create table if not exists public.reference_use (
+  entry      text not null,
+  year       int not null,
+  documents  int not null,
+  companies  int not null,
+  counted_at timestamptz not null default now(),
+  primary key (entry, year)
+);
+alter table public.reference_use enable row level security;
+create index if not exists reference_use_year on public.reference_use (year, documents desc);
+
+create or replace function public.admin_reference_use(key text, of_year int default null, of_kind text default null) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  y int := coalesce(of_year, (select u.year from public.reference_use u group by 1 order by sum(u.documents) desc limit 1));
+  total int;
+  firms int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select count(*), count(distinct d.wba_id) into total, firms from public.documents d where d.year = y and d.text_status = 'ok';
+  return jsonb_build_object('year', y, 'documents', total, 'companies', firms,
+    'years', (select coalesce(jsonb_agg(s.year order by s.year desc), '[]'::jsonb) from (select distinct u.year from public.reference_use u) s),
+    'counted', (select count(distinct u.entry) from public.reference_use u), 'counted_at', (select max(u.counted_at) from public.reference_use u),
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'name', r.name, 'kind', r.kind, 'documents', r.documents, 'companies', r.companies, 'before', r.before)
+                                      order by r.companies desc, r.documents desc, r.name), '[]'::jsonb)
+             from (select e.id, e.name, e.kind, u.documents, u.companies,
+                          (select b.companies from public.reference_use b where b.entry = u.entry and b.year = y - 1) as before
+                   from public.reference_use u join public.reference_entries e on e.id = u.entry
+                   where u.year = y and not e.gone and (of_kind is null or e.kind = of_kind)
+                   order by u.companies desc, u.documents desc, e.name limit 80) r));
+end;
+$$;
+revoke all on function public.admin_reference_use(text, int, text) from public, anon;
+grant execute on function public.admin_reference_use(text, int, text) to authenticated;
+
 -- Entries by a word of their name or acronym, for the owner to open one (the whole text, both languages).
 create or replace function public.admin_reference_find(key text, q text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
