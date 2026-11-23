@@ -23,7 +23,9 @@ FIRST_YEAR = 2018
 KINDS = ("norm", "regulation")
 MIN_CHARS = 3
 COMMON_WORD_N = 200000          # a single-word acronym the library's vocabulary counts on more pages than this is an everyday word
-ENTRIES_SQL = "select id, name, aliases from public.reference_entries where kind = any(%s) and not gone order by id"
+ENTRIES_SQL = ("select e.id, e.name, e.aliases from public.reference_entries e left join public.reference_worked w on w.job = 'use' and w.entry = e.id "
+               "where e.kind = any(%s) and not e.gone order by w.at nulls first, e.id")       # never counted first, then the oldest count
+WORKED_SQL = "insert into public.reference_worked (job, entry) values (%s, %s) on conflict (job, entry) do update set at = now()"
 COUNT_SQL = """
 with q as (select (select string_agg('(' || phraseto_tsquery('simple', t)::text || ')', ' | ') from unnest(%s::text[]) t
                    where phraseto_tsquery('simple', t)::text <> '')::tsquery as tsq)
@@ -84,10 +86,14 @@ def main():
                     cur.execute("select set_config('statement_timeout', %s, true)", (f"{a.seconds_an_entry}s",))
                     got = count_entry(cur, phrases(name, aliases, common))
                 except psycopg.errors.QueryCanceled:
-                    conn.rollback(); slow += 1; continue
+                    conn.rollback(); slow += 1
+                    if a.commit:                                      # marked too: a slow entry must not be the first of every run
+                        cur.execute(WORKED_SQL, ("use", eid)); conn.commit()
+                    continue
                 if a.commit:
                     cur.execute("delete from public.reference_use where entry = %s", (eid,))
                     cur.executemany("insert into public.reference_use (entry, year, documents, companies) values (%s, %s, %s, %s)", [(eid, y, n, c) for y, n, c in got])
+                    cur.execute(WORKED_SQL, ("use", eid))
                     conn.commit()
                 else:
                     conn.rollback()

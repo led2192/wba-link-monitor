@@ -25,7 +25,9 @@ MIN_SCORE = 3
 MAIN_TYPES = {"Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "Universal Registration Document", "Climate Report", "Impact Report"}
 CUES = re.compile(r"\b(is|are|refers? to|means?|defined as|definition|describes?|we (?:assess|use|apply|define|consider|conduct|carried out|identif\w+|measure|report)|"
                   r"in line with|in accordance with|based on|approach to|process|principle|concept|so-called|known as|i\.e\.)\b", re.I)
-ENTRIES_SQL = "select id, name from public.reference_entries where kind = 'term' and not gone order by id"
+ENTRIES_SQL = ("select e.id, e.name from public.reference_entries e left join public.reference_worked w on w.job = 'examples' and w.entry = e.id "
+               "where e.kind = 'term' and not e.gone order by w.at nulls first, e.id")        # never looked for first, then the oldest
+WORKED_SQL = "insert into public.reference_worked (job, entry) values (%s, %s) on conflict (job, entry) do update set at = now()"
 PAGES_SQL = """
 select p.library_id, p.page, p.wba_id, p.year, coalesce(p.doc_type, ''), p.body
 from public.pages p
@@ -110,11 +112,15 @@ def main():
                     cur.execute("select set_config('statement_timeout', %s, true)", (f"{a.seconds_a_term}s",))
                     cur.execute(PAGES_SQL, (name, FIRST_YEAR, PAGES_READ)); got = pick(cur.fetchall(), name)
                 except psycopg.errors.QueryCanceled:
-                    conn.rollback(); slow += 1; continue
+                    conn.rollback(); slow += 1
+                    if a.commit:
+                        cur.execute(WORKED_SQL, ("examples", eid)); conn.commit()
+                    continue
                 if a.commit:
                     cur.execute("delete from public.reference_examples where entry = %s and status = 'found'", (eid,))
                     cur.executemany("insert into public.reference_examples (entry, library_id, page, wba_id, year, excerpt, score) values (%s, %s, %s, %s, %s, %s, %s) "
                                     "on conflict (entry, library_id, page) do nothing", [(eid,) + g for g in got])
+                    cur.execute(WORKED_SQL, ("examples", eid))
                     conn.commit()
                 else:
                     conn.rollback()

@@ -7909,6 +7909,16 @@ $$;
 revoke all on function public.admin_reference_use(text, int, text) from public, anon;
 grant execute on function public.admin_reference_use(text, int, text) to authenticated;
 
+-- When a job of the reference list last worked an entry (reference_use.py, reference_examples.py): a run that stops
+-- at its time limit leaves the rest, and the next run begins with the entries never worked, then the oldest.
+create table if not exists public.reference_worked (
+  job   text not null,
+  entry text not null,
+  at    timestamptz not null default now(),
+  primary key (job, entry)
+);
+alter table public.reference_worked enable row level security;
+
 -- What the reports name and the list does not hold (23 Nov 2026; reference_candidates.py on the job server reads a
 -- sample of recent pages for "full name (ACRONYM)" and keeps the pairs several companies write). The owner adds one
 -- to the list (status 'added', set by admin_reference_save) or sets it aside ('dismissed'); the script replaces
