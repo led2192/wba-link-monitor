@@ -1939,6 +1939,28 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertTrue(done["ok"]); self.assertEqual([(r["word"], r["times"], r["people"], r["dismissed"]) for r in rows], [("zyntharix", 2, 1, True)])
         cur.execute("delete from public.company_misses")
 
+    def test_the_use_of_a_norm_is_counted_by_year_from_the_pages(self):
+        """23 Nov 2026: which standards the reports of a year name. Counted from the pages' words by the entry's name
+        or acronym as a phrase; an everyday word is not searched as an acronym; the owner sees the year's ranking."""
+        import reference_use as U
+        cur = self.conn.cursor()
+        cur.execute("insert into public.documents (library_id, wba_id, company, doc_type, year, label, pages, text_status) values "
+                    "('RU1', 'RUA', 'A', 'Annual Report', 2025, 'a', 2, 'ok'), ('RU2', 'RUA', 'A', 'Sustainability Report', 2025, 'b', 1, 'ok'), "
+                    "('RU3', 'RUB', 'B', 'Annual Report', 2025, 'c', 1, 'ok'), ('RU4', 'RUB', 'B', 'Annual Report', 2024, 'd', 1, 'ok')")
+        cur.execute("insert into public.pages (library_id, page, body) values ('RU1', 1, 'Prepared under the Invented Zebra Standard.'), ('RU1', 2, 'The IZS applies. We act.'), "
+                    "('RU2', 1, 'In line with IZS.'), ('RU3', 1, 'A zebra, and a standard, but not the phrase.'), ('RU4', 1, 'invented zebra standard, in small letters')")
+        cur.execute("insert into public.reference_entries (id, kind, name, name_key, aliases) values ('norm:izs', 'norm', 'Invented Zebra Standard', 'invented zebra standard', array['IZS', 'ACT', 'IZ'])")
+        self.assertEqual(U.phrases("Invented Zebra Standard", ["IZS", "ACT", "IZ", "izs"], {"act"}), ["Invented Zebra Standard", "IZS"])
+        got = sorted(U.count_entry(cur, ["Invented Zebra Standard", "IZS"])); self.assertEqual(got, [(2024, 1, 1), (2025, 2, 1)])
+        self.assertEqual(U.count_entry(cur, []), [])
+        cur.executemany("insert into public.reference_use (entry, year, documents, companies) values ('norm:izs', %s, %s, %s)", got)
+        cur.execute("select public.admin_reference_use('k')"); r = cur.fetchone()[0]
+        self.assertEqual((r["year"], r["documents"], r["companies"], r["years"]), (2025, 3, 2, [2025, 2024]))
+        self.assertEqual([(x["name"], x["documents"], x["companies"], x["before"]) for x in r["rows"]], [("Invented Zebra Standard", 2, 1, 1)])
+        cur.execute("select public.admin_reference_use('k', 2024, 'regulation')"); self.assertEqual(cur.fetchone()[0]["rows"], [])
+        cur.execute("delete from public.reference_use"); cur.execute("delete from public.reference_entries where id = 'norm:izs'")
+        cur.execute("delete from public.pages where library_id like 'RU_'"); cur.execute("delete from public.documents where library_id like 'RU_'")
+
     def test_the_owner_sees_and_judges_a_company_profile(self):
         """23 Nov 2026: the profile read from a company's reports is shown to the owner first, field by field with
         where it was read; what the owner confirms, rejects or corrects is kept, and a correction carries a value."""
