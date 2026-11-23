@@ -88,12 +88,18 @@ def pick(rows, name, examples=EXAMPLES, min_score=MIN_SCORE):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--by-day", action="store_true", help="start a writing run in the hours people search too (quiet_hours.py)")
     ap.add_argument("--limit", type=int, default=0, help="terms at most (0: all)")
     ap.add_argument("--minutes", type=float, default=100)
     ap.add_argument("--seconds-a-term", type=int, default=60)
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
+    import quiet_hours
+    wait = quiet_hours.held(a.commit, a.by_day)
+    if wait:
+        print(wait, flush=True)
+        return 0
     import psycopg, qa, evidence_db
     if a.commit:
         os.environ["QA_COMMIT"] = "true"

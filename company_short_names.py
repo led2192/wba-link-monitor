@@ -70,9 +70,15 @@ def one_word_safe(pages, own, common=COMMON, rare=RARE, own_share=OWN_SHARE):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--by-day", action="store_true", help="start a writing run in the hours people search too (quiet_hours.py)")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
+    import quiet_hours
+    wait = quiet_hours.held(a.commit, a.by_day)
+    if wait:
+        print(wait, flush=True)
+        return 0
     import psycopg, qa, evidence_db
     if a.commit:
         os.environ["QA_COMMIT"] = "true"

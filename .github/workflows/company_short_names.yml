@@ -10,9 +10,12 @@ on:
       mode:
         description: "dry_run or commit"
         default: "dry_run"
+      by_day:
+        description: "yes: a commit run may start in the hours people search (it loads the database)"
+        default: "no"
 
 concurrency:
-  group: company-short-names
+  group: heavy-database      # one of the jobs that load the database at a time
   cancel-in-progress: false
 
 permissions:
@@ -31,7 +34,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Load
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then python company_short_names.py --commit
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then python company_short_names.py --commit ${{ inputs.by_day == 'yes' && '--by-day' || '' }}
           else python company_short_names.py; fi
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}

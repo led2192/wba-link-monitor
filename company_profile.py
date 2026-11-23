@@ -237,9 +237,15 @@ def main():
     ap.add_argument("--partition", default="0/1", help="k/n: this run takes the companies of slice k of n")
     ap.add_argument("--redo-days", type=int, default=180, help="a company read less than this many days ago is not read again")
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--by-day", action="store_true", help="start a paid writing run of many companies in the hours people search too (quiet_hours.py)")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
+    import quiet_hours
+    wait = quiet_hours.held(a.commit and a.model == "paid" and a.limit > 50, a.by_day)      # a trial of a few companies is not held
+    if wait:
+        print(wait, flush=True)
+        return 0
     import qa, evidence_db
     if a.commit:
         os.environ["QA_COMMIT"] = "true"

@@ -93,12 +93,18 @@ def count_entry(cur, texts, first_year=FIRST_YEAR):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--by-day", action="store_true", help="start a writing run in the hours people search too (quiet_hours.py)")
     ap.add_argument("--limit", type=int, default=0, help="entries at most (0: all)")
     ap.add_argument("--minutes", type=float, default=100, help="stop cleanly after this many minutes")
     ap.add_argument("--seconds-an-entry", type=int, default=90)
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
+    import quiet_hours
+    wait = quiet_hours.held(a.commit, a.by_day)
+    if wait:
+        print(wait, flush=True)
+        return 0
     import psycopg, qa, evidence_db
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
