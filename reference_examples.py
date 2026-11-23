@@ -26,7 +26,7 @@ MAIN_TYPES = {"Annual Report", "Integrated Report", "Sustainability Report", "ES
 CUES = re.compile(r"\b(is|are|refers? to|means?|defined as|definition|describes?|we (?:assess|use|apply|define|consider|conduct|carried out|identif\w+|measure|report)|"
                   r"in line with|in accordance with|based on|approach to|process|principle|concept|so-called|known as|i\.e\.)\b", re.I)
 ENTRIES_SQL = ("select e.id, e.name from public.reference_entries e left join public.reference_worked w on w.job = 'examples' and w.entry = e.id "
-               "where e.kind = 'term' and not e.gone order by w.at nulls first, e.id")        # never looked for first, then the oldest
+               "where e.kind = 'term' and not e.gone order by w.at nulls first, e.id desc")   # never looked for first (from the end of the list: the first run stopped before it), then the oldest
 WORKED_SQL = "insert into public.reference_worked (job, entry) values (%s, %s) on conflict (job, entry) do update set at = now()"
 PAGES_SQL = """
 select p.library_id, p.page, p.wba_id, p.year, coalesce(p.doc_type, ''), p.body
