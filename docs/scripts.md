@@ -9,7 +9,7 @@ Known silent failures per script were inventoried on 21 Oct 2026 (commit aa278c6
 | Script | Workflow, trigger | What it does | Writes |
 | --- | --- | --- | --- |
 | `airtable_monitor.py` | Monitor links (daily), 02:23 | Reads pages due today with plain requests; diffs document links; hands JavaScript pages to the browser lane; also writes link_texts (every document link's text) | `monitored_links`: status, http_status, last_checked, seen_links, new_links, last_change, alert_status, page_language, needs_browser |
-| `playwright_monitor.py` | Browser monitor, 00:03 and 12:03 | Renders the browser lane in Chromium, oldest first, 4,000 pages, 180-minute budget | same fields plus final_url |
+| `playwright_monitor.py` | Browser monitor, 00:03 and 12:03 | Renders the browser lane in Chromium, oldest first, 4,000 pages, 180-minute budget. A failed read clears http_status; an address that starts a PDF download is marked is_pdf (since 23 Nov 2026) | same fields plus final_url, is_pdf |
 | `keepalive.py` | library | `session()`: one connection to Airtable kept open for a run, one a thread. Used by `monitor_core.airtable_request`, `base_health.py`, `dedupe_library.py` | |
 | `monitor_core.py` | library | Which links count as documents (`doc_links`, `DOC_ENDPOINTS`, `DAM_SUFFIXES`, Google Drive file links, framework hosts), the diff, Airtable retries | |
 | `reporting_year.py` | library | The one rule for the WBA reporting year (`from_end_date`, `from_end_month`), used by the SEC and ESEF routes, both readers, the narrative evaluation and web search | |
