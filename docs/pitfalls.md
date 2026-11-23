@@ -2,6 +2,9 @@
 
 Lessons that cost time to learn. Read before changing the area they name.
 
+## The search page
+- **The page tells a company from a word with a list it must have loaded.** When the one call for the company list (`find_companies`) failed on 23 Nov 2026, every name was a plain word and the page offered a survey for a question about one company. The database was busy with jobs started by hand that morning: the search exam, two catch-up jobs and a count over every page, at once. Since v146 the list is kept in the browser, loaded with retries, and a search waits for it. The other half: jobs that search or rewrite many pages are started at night, never in the owner's working hours, and never several at once.
+
 ## Facts and their names
 - **A word left out of a name's key changes what the name means.** On 15 Nov 2026 "restated" and "restatement" were both left out of `fact_key` so that a restated figure would find its metric. "Restatement of 2023 Scope 1 emissions" (a yes or no) then had the same key as "Scope 1 emissions" and was filed under the tonnes, on the live page, within the hour. Before a word joins the list of words left out, look for names where it is the subject rather than a qualifier; and a metric that is a number takes figures only.
 
