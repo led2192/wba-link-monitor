@@ -3075,6 +3075,38 @@ as $$
 $$;
 revoke all on function public.ask_concept_says(text) from public, anon, authenticated;
 
+-- The pages of a company's main reports that hold most of the reports' words for a concept (23 Nov 2026, second try
+-- of ask_report_words). The first try asked the general search for the eight words: it wants all of them on a page
+-- and drops few, so it rarely found a page (30 of 40 questions read the same eight pages) and, when it did, a poor
+-- one. This looks only inside the company's own main reports of the years asked (the newest two years when none is
+-- asked), counts how many different words of the concept each page holds, and gives the pages that hold most, at
+-- most two a document: the risk report, the outlook, the strategy pages. It is how the company profiles pick their
+-- pages. No log row.
+create or replace function public.ask_concept_pages(company_filter text, year_from int, year_to int, says text, max_rows int default 3)
+returns table (library_id text, company text, wba_id text, year int, doc_type text, label text, url text, page int, excerpt text, held int)
+language sql stable security definer set search_path = public, extensions
+set statement_timeout = '4s'
+as $$
+  with ids as (select unnest(public.find_company_ids(company_filter)) as id),
+  d as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url
+        from public.documents d join ids on ids.id = d.wba_id
+        where d.text_status = 'ok' and d.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', '10K Form', 'Registration Document', 'Impact Report')
+          and d.year between coalesce(year_from, (select max(x.year) - 1 from public.documents x join ids on ids.id = x.wba_id where x.text_status = 'ok' and x.doc_type in ('Annual Report', 'Integrated Report', '10K Form')))
+                         and coalesce(year_to, 9999)),
+  w as (select distinct lower(x) as word from regexp_split_to_table(coalesce(says, ''), '\s+') x where length(x) >= 3),
+  q as (select string_agg(quote_literal(word), ' | ')::tsquery as any_word from w),
+  hit as (select p.library_id, p.page, p.words, (select count(*) from w where p.words @@ quote_literal(w.word)::tsquery)::int as held
+          from public.pages p join d on d.library_id = p.library_id, q
+          where q.any_word is not null and p.words @@ q.any_word),
+  best as (select h.*, row_number() over (partition by h.library_id order by h.held desc, h.page) as in_doc from hit h where h.held >= 3)
+  select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, b.page, null::text, b.held
+  from best b join d on d.library_id = b.library_id
+  where b.in_doc <= 2
+  order by b.held desc, d.year desc nulls last, b.page
+  limit greatest(1, least(coalesce(max_rows, 3), 12))
+$$;
+revoke all on function public.ask_concept_pages(text, int, int, text, int) from public, anon, authenticated;
+
 -- 16 Nov 2026: the industry, country and region of the box travel with the question too. Before, an answer asked
 -- with "Industry: Oil & Gas" was written from pages of any industry, while the list under it showed oil and gas.
 drop function if exists public.ask_pages(text, text, real[], text, int, int, text, text);
@@ -3138,9 +3170,9 @@ begin
          newest as (select max(c.year) as y from c),
          r as materialized (select * from public.find_blend(key, q, qvec, company_filter, later_from, null, type_filter, 8, case when later then 'ask later' else 'ask latest' end, industry_filter, country_filter, region_filter, asked)
                             where later_from is not null),
-         -- ask_report_words: the same company and years, searched by the reports' words; its best three, in main reports first
-         w as materialized (select f.*, row_number() over (order by (f.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', '10K Form', 'Registration Document')) desc, f.rank) as rk
-                            from public.find_pages(key, says, company_filter, coalesce(year_from, later_from), year_to, type_filter, 12, 'ask concept', industry_filter, country_filter, region_filter, asked) f
+         -- ask_report_words: the pages of the company's main reports that hold most of the reports' words (ask_concept_pages); its best three
+         w as materialized (select f.*, row_number() over (order by f.held desc, f.year desc nulls last, f.page) as rk
+                            from public.ask_concept_pages(company_filter, year_from, year_to, says, 8) f
                             where says is not null and not exists (select 1 from c where c.library_id = f.library_id and c.page = f.page and c.rank <= 5)),
          u as (select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt, c.rank, 0 as src from c
                union all
