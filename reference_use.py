@@ -24,7 +24,7 @@ KINDS = ("norm", "regulation")
 MIN_CHARS = 3
 COMMON_WORD_N = 200000          # a single-word acronym the library's vocabulary counts on more pages than this is an everyday word
 ENTRIES_SQL = ("select e.id, e.name, e.aliases from public.reference_entries e left join public.reference_worked w on w.job = 'use' and w.entry = e.id "
-               "where e.kind = any(%s) and not e.gone order by w.at nulls first, e.id")       # never counted first, then the oldest count
+               "where e.kind = any(%s) and not e.gone order by w.at nulls first, e.id desc")  # never counted first (from the end of the list: the first runs stopped before it), then the oldest count
 WORKED_SQL = "insert into public.reference_worked (job, entry) values (%s, %s) on conflict (job, entry) do update set at = now()"
 COUNT_SQL = """
 with q as (select (select string_agg('(' || phraseto_tsquery('simple', t)::text || ')', ' | ') from unnest(%s::text[]) t
