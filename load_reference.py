@@ -13,7 +13,8 @@ reference/reference.jsonl.gz, one entry a line:
 
 This script reads the file and upserts public.reference_entries by id. An entry that is no longer in the file is
 never deleted: it is marked gone and no longer shown. A file with fewer than half the entries the database shows
-is refused (a cut or wrong file must not empty the list).
+is refused (a cut or wrong file must not empty the list). Since 23 Nov 2026 the database is the master copy: an
+entry the owner added or corrected in the admin panel (origin 'added', or edited_at set) is left exactly as it is.
 
     python load_reference.py [--commit]
 
@@ -105,8 +106,10 @@ def plan(conn, rows):
     """{"new", "changed", "same", "gone", "held"}: what a commit would do, from the ids and contents the database holds."""
     with conn.cursor() as c:
         c.execute("select id, md5(row(kind, name, aliases, category, subcategory, type, geography, year, url, text_en, text_es, issuers, related, ai)::text), gone "
-                  "from public.reference_entries where kind <> 'about'")              # the entries about lantrNa itself are written in search.sql, not in the list
+                  "from public.reference_entries where kind <> 'about' and origin = 'list'")     # not the entries about lantrNa (search.sql), not those added in the admin panel
         held = {r[0]: (r[1], r[2]) for r in c.fetchall()}
+        c.execute("select id from public.reference_entries where edited_at is not null"); edited = {r[0] for r in c.fetchall()}
+        rows = [r for r in rows if r[0] not in edited]                                # a row a person corrected stays as they left it
         c.execute("create temp table if not exists reference_in (like public.reference_entries including defaults) on commit drop")
         c.execute("truncate reference_in")
         c.executemany("insert into reference_in (id, kind, name, name_key, aliases, category, subcategory, type, geography, year, url, text_en, text_es, issuers, related, ai) "
@@ -114,7 +117,7 @@ def plan(conn, rows):
                       [(r[0], r[1], r[2]) + r[3:] for r in rows])
         c.execute("select id, md5(row(kind, name, aliases, category, subcategory, type, geography, year, url, text_en, text_es, issuers, related, ai)::text) from reference_in")
         new = dict(c.fetchall())
-    live = {i for i, (_, gone) in held.items() if not gone}
+    live = {i for i, (_, gone) in held.items() if not gone and i not in edited}
     return {"new": sum(1 for i in new if i not in held), "changed": sum(1 for i, h in new.items() if i in held and (held[i][0] != h or held[i][1])),
             "same": sum(1 for i, h in new.items() if i in held and held[i][0] == h and not held[i][1]), "gone": len(live - set(new)), "held": len(live)}
 
@@ -132,7 +135,8 @@ def write(conn):
                        alias_keys = excluded.alias_keys, category = excluded.category, subcategory = excluded.subcategory, type = excluded.type,
                        geography = excluded.geography, year = excluded.year, url = excluded.url, text_en = excluded.text_en, text_es = excluded.text_es,
                        issuers = excluded.issuers, related = excluded.related, ai = excluded.ai, gone = false, loaded_at = now()""")
-        c.execute("update public.reference_entries e set gone = true where not e.gone and e.kind <> 'about' and not exists (select 1 from reference_in i where i.id = e.id)")
+        c.execute("update public.reference_entries e set gone = true where not e.gone and e.kind <> 'about' and e.origin = 'list' and e.edited_at is null "
+                  "and not exists (select 1 from reference_in i where i.id = e.id)")
     conn.commit()
 
 

@@ -2027,6 +2027,15 @@ on conflict (id) do update set name = excluded.name, name_key = excluded.name_ke
   where (public.reference_entries.name, public.reference_entries.aliases, public.reference_entries.text_en, public.reference_entries.text_es, public.reference_entries.gone)
         is distinct from (excluded.name, excluded.aliases, excluded.text_en, excluded.text_es, false);
 
+-- The database is the list's master copy (23 Nov 2026, the owner: "can we not keep these terms in Supabase, and
+-- structured?"). The owner adds an entry or corrects one in the admin panel (admin_reference_save); such a row
+-- carries edited_at and who, and load_reference.py leaves it as the person left it: the file in the private store
+-- is where the list came from and its backup, not what decides. origin: 'list' (from the file) or 'added' (made in
+-- the panel; the loader never marks it gone).
+alter table public.reference_entries add column if not exists origin text not null default 'list';
+alter table public.reference_entries add column if not exists edited_at timestamptz;
+alter table public.reference_entries add column if not exists edited_by text;
+
 -- What was asked of the list and is not in it (22 Nov 2026): the list's first day answered "CSRD" and "living wage"
 -- and had no entry for "double materiality", "net zero" or "scope 3". A search of at most five words that names no
 -- company and finds no entry is counted here, as compared (reference_key), with one spelling as typed. It is the
@@ -7787,6 +7796,80 @@ end;
 $$;
 revoke all on function public.admin_reference(text) from public, anon;
 grant execute on function public.admin_reference(text) to authenticated;
+
+-- Entries by a word of their name or acronym, for the owner to open one (the whole text, both languages).
+create or replace function public.admin_reference_find(key text, q text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+declare
+  k text := public.reference_key(q);
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if length(k) < 2 then
+    return '[]'::jsonb;
+  end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('id', e.id, 'kind', e.kind, 'name', e.name, 'aliases', e.aliases, 'category', e.category, 'type', e.type,
+                                                       'geography', e.geography, 'year', e.year, 'url', e.url, 'text_en', e.text_en, 'text_es', e.text_es, 'ai', e.ai,
+                                                       'gone', e.gone, 'origin', e.origin, 'edited_at', e.edited_at)
+                                    order by (e.name_key = k) desc, (e.alias_keys @> array[k]) desc, length(e.name_key), e.name), '[]'::jsonb)
+          from (select * from public.reference_entries e
+                where e.kind <> 'about' and (e.name_key like '%' || replace(replace(k, '%', ''), '_', '') || '%' or e.alias_keys @> array[k])
+                order by (e.name_key = k) desc, (e.alias_keys @> array[k]) desc, length(e.name_key), e.name limit 30) e);
+end;
+$$;
+revoke all on function public.admin_reference_find(text, text) from public, anon;
+grant execute on function public.admin_reference_find(text, text) to authenticated;
+
+-- Add an entry (entry null) or correct one. What a person writes is no longer "drafted with AI help" unless they say
+-- so. An entry is hidden with hide, never deleted. A candidate of reference_misses with the new entry's name is set
+-- aside: it is answered now.
+create or replace function public.admin_reference_save(key text, entry text, kind text, name text, aliases text[] default null, text_en text default null,
+                                                       text_es text default null, url text default null, category text default null, hide boolean default false,
+                                                       ai boolean default false) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  nm text := nullif(btrim(regexp_replace(coalesce(name, ''), '\s+', ' ', 'g')), '');
+  al text[] := coalesce((select array_agg(distinct btrim(a)) from unnest(coalesce(aliases, '{}')) a where btrim(coalesce(a, '')) <> '' and length(btrim(a)) <= 120), '{}');
+  link text := nullif(btrim(coalesce(url, '')), '');
+  the_id text := entry;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if kind is null or kind not in ('term', 'norm', 'regulation', 'organisation') then
+    raise exception 'a term, a norm, a regulation or an organisation' using errcode = '22023';
+  end if;
+  if nm is null or public.reference_key(nm) = '' or length(nm) > 300 then
+    raise exception 'give the entry a name' using errcode = '22023';
+  end if;
+  if link is not null and link !~* '^https?://' then
+    raise exception 'the address begins with http' using errcode = '22023';
+  end if;
+  if the_id is null then
+    the_id := kind || ':' || left(md5(public.reference_key(nm)), 10);
+    if exists (select 1 from public.reference_entries e where e.id = the_id) then
+      raise exception 'the list already holds an entry of that kind and name: correct it instead' using errcode = '23505';
+    end if;
+    insert into public.reference_entries (id, kind, name, name_key, origin) values (the_id, kind, nm, public.reference_key(nm), 'added');
+  elsif not exists (select 1 from public.reference_entries e where e.id = the_id and e.kind <> 'about') then
+    raise exception 'no such entry' using errcode = '22023';
+  end if;
+  update public.reference_entries e set kind = kind, name = nm, name_key = public.reference_key(nm), aliases = al,
+      alias_keys = coalesce((select array_agg(distinct public.reference_key(a)) from unnest(al) a where public.reference_key(a) <> ''), '{}'),
+      text_en = nullif(left(btrim(coalesce(text_en, '')), 12000), ''), text_es = nullif(left(btrim(coalesce(text_es, '')), 12000), ''), url = left(link, 500),
+      category = coalesce(nullif(btrim(coalesce(category, '')), ''), e.category), gone = coalesce(hide, false), ai = coalesce(ai, false),
+      edited_at = now(), edited_by = lower(auth.jwt() ->> 'email')
+    where e.id = the_id;
+  update public.reference_misses m set dismissed = true where not m.dismissed and (m.asked_key = public.reference_key(nm) or m.asked_key = any(select public.reference_key(a) from unnest(al) a));
+  return jsonb_build_object('ok', true, 'id', the_id);
+end;
+$$;
+revoke all on function public.admin_reference_save(text, text, text, text, text[], text, text, text, text, boolean, boolean) from public, anon;
+grant execute on function public.admin_reference_save(text, text, text, text, text[], text, text, text, text, boolean, boolean) to authenticated;
 
 create or replace function public.admin_reference_asked_set(key text, asked_key text, dismissed boolean) returns jsonb
 language plpgsql security definer set search_path = public, extensions

@@ -313,7 +313,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v142 2026-11-22";
+  const CLIENT = "lantern v143 2026-11-23";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2466,8 +2466,31 @@
     const r = await authed("admin_reference", { key }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
     body.innerHTML = ""; const k = r.kinds || {};
     body.appendChild(el("p", "what", `The reference list answers a search that is the name or the acronym of an entry, with no model. It shows ${Object.values(k).reduce((a, b) => a + b, 0).toLocaleString()} entries: ${["term", "norm", "regulation", "organisation"].map(x => `${(k[x] || 0).toLocaleString()} ${x}s`).join(", ")}${r.loaded_at ? `; loaded ${adminWhen(r.loaded_at)}` : ""}. Below: short searches that named no company and found no entry, questions first. They are the candidates for the list.`));
+    // v143: the database is the list's master copy. Find an entry to correct it, or add one (also from a candidate below).
+    const KINDS = ["term", "norm", "regulation", "organisation"], inp = (ph, w) => { const i = document.createElement("input"); i.placeholder = ph; i.style.cssText = `font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:${w}px;background:var(--bg);color:var(--fg)`; return i; };
+    const editor = el("div"); editor.style.cssText = "margin:10px 0 18px";
+    const form = (e, then) => { editor.innerHTML = ""; const f = el("div"); f.style.cssText = "display:grid;gap:8px;max-width:820px;padding:12px;border:1px solid var(--line);border-radius:10px";
+      const kind = el("select"); for (const k2 of KINDS) { const o = el("option", null, k2); o.value = k2; kind.appendChild(o); } kind.value = e.kind || "term";
+      const nm = inp("Name", 520), al = inp("Acronyms and other names, separated by commas", 520), url = inp("Its own page: https://…", 520);
+      const area = ph => { const t = document.createElement("textarea"); t.placeholder = ph; t.rows = 6; t.style.cssText = "font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);width:100%;box-sizing:border-box"; return t; };
+      const en = area("Description in English"), es = area("Descripción en español (optional)");
+      nm.value = e.name || ""; al.value = (e.aliases || []).join(", "); url.value = e.url || ""; en.value = e.text_en || ""; es.value = e.text_es || "";
+      const say = el("span", "what", ""), row = el("div"); row.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap";
+      const save = async hide => { say.textContent = " saving…"; let x = null, why = "";
+        try { x = await authed("admin_reference_save", { key, entry: e.id || null, kind: kind.value, name: nm.value, aliases: al.value.split(",").map(s => s.trim()).filter(Boolean), text_en: en.value, text_es: es.value, url: url.value || null, hide: !!hide, ai: false }); } catch (err) { why = String(err && err.message || err); }
+        if (x && x.ok) { then(); } else say.textContent = " not saved" + (why ? `: ${why}` : ": sign in again and retry"); };
+      row.append(adminBtn(e.id ? "Save the correction" : "Add to the list", () => save(false)));
+      if (e.id) row.append(adminBtn(e.gone ? "Show it again" : "Hide this entry", () => save(!e.gone)));
+      row.append(adminBtn("Cancel", () => { editor.innerHTML = ""; }), say);
+      f.append(el("b", null, e.id ? `Correct “${e.name}”${e.ai ? " (its description was drafted with AI help; saving marks it as reviewed)" : ""}` : "A new entry"), kind, nm, al, url, en, es, row); editor.append(f); nm.focus(); };
+    const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0"; const fq = inp("find an entry by a word of its name or acronym", 360), found = el("div");
+    const find = async () => { found.innerHTML = ""; const list = await authed("admin_reference_find", { key, q: fq.value }); if (!list || !list.length) { found.append(el("p", "what", "No entry with that word.")); return; }
+      found.append(adminTable(["Name", "Kind", "", ""], list.map(e => [e.name + ((e.aliases || []).length ? ` (${e.aliases.join(", ")})` : ""), e.kind, e.gone ? "hidden" : e.edited_at ? "reviewed" : e.ai ? "AI draft" : "", adminBtn("Open", () => form(e, () => adminReference(body)))]))); };
+    fq.onkeydown = ev => { if (ev.key === "Enter") find(); };
+    bar.append(fq, adminBtn("Find", find), adminBtn("Add an entry", () => form({}, () => adminReference(body)))); body.append(bar, editor, found);
     const rows = r.asked || []; if (!rows.length) { body.appendChild(el("p", null, "Nothing asked and not found yet.")); return; }
     const line = m => { const act = el("div"); const say = el("span", "what", "");
+      if (!m.dismissed) act.append(adminBtn("Add it", () => form({ kind: "term", name: m.asked.replace(/\b\w/, c => c.toUpperCase()) }, () => adminReference(body))));
       act.append(adminBtn(m.dismissed ? "Bring back" : "Set aside", async () => { const x = await authed("admin_reference_asked_set", { key, asked_key: m.key, dismissed: !m.dismissed }); if (x && x.ok) adminReference(body); else say.textContent = " not saved"; }), say);
       return [m.asked, m.question ? "asked as a question" : "", m.times, adminWhen(m.last_at), m.dismissed ? "set aside" : "", act]; };
     body.appendChild(adminTable(["Asked", "", "Searches", "Last", "", ""], rows.map(line)));
