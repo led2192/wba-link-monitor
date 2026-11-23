@@ -33,7 +33,7 @@ Nothing depends on a person working through failure rows: there are tens of thou
 | PAGE_WRONG_TYPE | the weekly review fixes the page type and ticks scan_now (up to 20 High pages a week, with PAGE_GONE) | yes (weekly review, since 26 Oct 2026) |
 | DOC_FETCH_FAIL (too_big) | read from the document's link; once its text is read (cover_status ok) the row is only counted (`too_big_read_from_link`), so an open too_big row means the text could not be read either | yes (#47; counted since 23 Nov 2026) |
 | DOC_UNREADABLE | scanned PDFs: first pages read by text recognition every day (OCR scanned covers); broken files stay counted | yes (#57) |
-| DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done | |
+| DOC_DUPLICATE, DOC_WRONG_ROW, LABEL_CORRECTION | nobody: they record something already done (LABEL_CORRECTION is Low since 16 Nov 2026) | |
 | TYPE_DISAGREE | rule fixes measured against the Source Library labels and the daily cards | yes |
 | TYPE_MISSING (pending, English) | the Airtable AI types it; base_health turns Check when the AI typed under half of the English arrivals of 2 to 9 days ago (since 9 Nov 2026); the address, file name and cover title type what they can nightly (Dedupe) | yes (watch only: restarting the AI is the owner's) |
 | TYPE_MISSING (non-English) | cover-title phrases in other languages (cover_terms.json), nightly in Dedupe, measured on every change | yes (#55) |
@@ -61,7 +61,7 @@ A code whose owner is "to build" is a gap in the design, not a job for a person:
 | DOC_WRONG_ROW | the row should not exist (misattributed, not a disclosure, out of scope) | discard_reason |
 | TYPE_DISAGREE | URL type and AI type differ and the choice moves a completeness check | type_mismatch + stakes rule |
 | TYPE_MISSING | no effective type 7+ days after arrival (non_english, no_cover, pending) | qa_sync |
-| LABEL_CORRECTION | a person changed what the robot wrote | robot_* snapshots |
+| LABEL_CORRECTION | a person changed what the robot wrote (a type change the pipeline made itself is not one, since 16 Nov 2026) | robot_* snapshots |
 | DOC_FLAGGED | an analyst flagged a document in the Analysts interface (wrong_type, wrong_year, wrong_company, part_of_report, not_disclosure, duplicate, file_broken, other) | report_library.analyst_flag |
 | CO_GAP | a completeness check fails or a report is overdue | gap_pages, overdue_reports |
 | CO_MISSED_KNOWN | a document known to exist is not in the library | Source Library matching, research, audits (to build) |
@@ -82,7 +82,9 @@ run.finish("ok", rows_in=n, rows_out=m, counters={"changed": c})
 Writes only with `QA_COMMIT=true` and `AIRTABLE_QA_TOKEN` set; never raises into the host script (except under `QA_STRICT=true`, which the tests use).
 
 ## Corrections
-`report_library.robot_type`, `robot_year`, `robot_title` hold what the pipeline settled on the first time `qa_sync.py` saw a value. When `source_type_check` or `curated_doc_title` later differs, that is a person's correction: it becomes a LABEL_CORRECTION failure and a `labels` row with `labelled_by = correction`. Never edit the robot_* fields by hand.
+`report_library.robot_type`, `robot_year`, `robot_title` hold what the pipeline settled on the first time `qa_sync.py` saw a value. When `source_type_check` or `curated_doc_title` later differs, that is a person's correction: it becomes a LABEL_CORRECTION failure (Low) and a `labels` row with `labelled_by = correction`. Never edit the robot_* fields by hand.
+
+Since 16 Nov 2026 the type snapshot is taken from `source_type_check` only, and a type change counts as a correction only when a person can have made it (`qa_sync.type_change_not_a_person`). Not a person: UNKNOWN on an unverified row of one or two pages (the short-reports rule, which now moves `robot_type` itself), and any change of a row whose snapshot was the address rule's own type, unless the row is verified or carries an analyst's flag or note. In those cases `robot_type` moves to the new type and the run counts `type_change_short_rule` or `type_change_first_model_type`. Why: on 10 and 16 Nov about 19,000 changes made by the AI field and by `short_reports.py` were written as corrections by hand, High failures and sure labels. The labels already written stay (labels are never rewritten); `type_eval.py` already leaves all `correction` labels out (see pitfalls).
 
 ## The review loop
 - **Analyst flags** (Analysts interface in the Disclosure Library; a bonus signal, nothing depends on it): analysts who use the reports may flag a document with `analyst_flag` (and say what they saw in `analyst_flag_note`), or describe a page problem in `scan_concern`. A flag changes nothing by itself. `qa_sync.py` turns each flag into a DOC_FLAGGED failure (High when a report-shaped document is flagged for type, year, company, scope or not being a disclosure). The owner fixes the document with the usual tools (type, `curated_doc_title`, discard) and clears the flag; the fix becomes a correction label whose reason records the flag, and the failure closes. The interface's Flagged documents page lists every open flag.

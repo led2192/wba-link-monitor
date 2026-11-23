@@ -6,6 +6,8 @@ The AI field that types documents from their first pages called 7,443 documents 
 integrated or sustainability report, a 10-K or a registration document (15 Nov 2026; executive biographies of one
 page came up as "Annual Report 2026"). This script sets `source_type_check` to UNKNOWN on those rows of
 report_library, so that the effective type, the coverage numbers and every reader stop counting them as reports.
+It sets robot_type (the pipeline's type snapshot) to UNKNOWN too, so that Pipeline QA does not take the change for a
+person's correction.
 
 Which rows: live (not discarded), not verified by a person, page_count 1 or 2, effective type one of REPORT_TYPES.
 A row a person has verified is never touched. What the type was is kept in lanterN's database
@@ -22,6 +24,9 @@ from urllib.parse import quote
 from load_supabase import REPORT_TYPES, SHORT_PAGES
 
 UNKNOWN = "UNKNOWN"
+# robot_type moves with the type: the change is the pipeline's own, not a person's correction. Writing only
+# source_type_check made qa_sync record 5,043 corrections by hand on 16 Nov 2026 (Pipeline QA, LABEL_CORRECTION).
+WRITE = {"source_type_check": UNKNOWN, "robot_type": UNKNOWN}
 FIELDS = ["library_id", "source_type_check", "source_type", "page_count", "verified", "discard"]
 
 
@@ -98,7 +103,7 @@ def main(argv=None):
                 cur.executemany("insert into public.type_corrections (library_id, record_id, was, was_from, became, why) values (%s, %s, %s, %s, %s, %s)",
                                 [(lid, rid, t, s, UNKNOWN, f"{SHORT_PAGES} pages or fewer") for rid, lid, t, s in part])
                 conn.commit()
-                airtable_request("PATCH", url, headers, payload={"records": [{"id": rid, "fields": {"source_type_check": UNKNOWN}} for rid, _, _, _ in part]})
+                airtable_request("PATCH", url, headers, payload={"records": [{"id": rid, "fields": WRITE} for rid, _, _, _ in part]})
                 written += len(part)
                 time.sleep(0.22)
                 if (i // 10) % 100 == 99:
