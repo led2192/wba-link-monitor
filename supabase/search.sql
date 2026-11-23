@@ -7918,6 +7918,17 @@ create table if not exists public.reference_worked (
   primary key (job, entry)
 );
 alter table public.reference_worked enable row level security;
+-- The first runs (23 Nov 2026) left no mark: an entry they gave counts or examples is marked here once, so that the
+-- next run goes to the entries they did not reach. Harmless when repeated (an entry already marked keeps its mark).
+do $$
+begin
+  if to_regclass('public.reference_use') is not null then
+    insert into public.reference_worked (job, entry) select distinct 'use', u.entry from public.reference_use u on conflict do nothing;
+  end if;
+  if to_regclass('public.reference_examples') is not null then
+    insert into public.reference_worked (job, entry) select distinct 'examples', x.entry from public.reference_examples x on conflict do nothing;
+  end if;
+end $$;
 
 -- What the reports name and the list does not hold (23 Nov 2026; reference_candidates.py on the job server reads a
 -- sample of recent pages for "full name (ACRONYM)" and keeps the pairs several companies write). The owner adds one
