@@ -992,6 +992,12 @@ What stays as it was: the file is read from the library row's attachment, so the
 Rejected: reading the text in the browser extension (two readers of PDFs to keep equal); a database trigger that calls a worker (nothing on the server listens, by design: only port 22 is open).
 
 
+## Who changed a type: a person, or the pipeline (16 Nov 2026, weekly review)
+Pipeline QA recorded every change of `source_type_check` away from the `robot_type` snapshot as a person's correction. On 10 and 16 Nov about 19,000 such changes were the pipeline's own (the Airtable AI field answering after a snapshot of the address rule's type; `short_reports.py` setting one- and two-page files to UNKNOWN). Airtable does not say who wrote a field through the API (the token's owner is shown for every script), so the rule has to be read from the row.
+Chosen: the snapshot is taken from `source_type_check` only; scripts that rewrite a type move `robot_type` in the same write; a change counts as a person's only when it can be one. Not a person: UNKNOWN on an unverified row of one or two pages, and any change of a row whose snapshot was the address rule's own type, unless the row is verified or carries an analyst's flag or note.
+The price: a person who corrects a row whose AI and address types agreed, without ticking `verified`, is not recorded (the guide now says to tick it). The AI field changing its own earlier answer is still taken for a person; no case of it has been seen.
+Rejected: a "last modified by" field on `source_type_check` (every script writes as the owner); rewriting or deleting the labels already written (labels are never rewritten; `type_eval.py` already leaves all `correction` labels out); keeping the rule and lowering only the severity (the labels would keep growing with every AI answer).
+
 ## What the page says comes from the documents and from its own users (21 Nov 2026, owner)
 Three things that came from outside the documents left the page on one day, each behind a switch rather than deleted: a whole mail domain as a way in (`email_may_search` reads the list `search_access` only), the benchmark results on the company card (option `card_scores`), and the validated answers (option `validated_answers`, read through `truth_rows()`). All three options are off.
 
