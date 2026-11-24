@@ -138,9 +138,9 @@ def main():
             print(f"{len(rows):,} pages sampled; {len(got):,} names with their acronym that the list does not hold and {MIN_COMPANIES} companies or more write "
                   f"({', '.join(f'{k} {n}' for k, n in sorted(kinds.items()))})" + ("" if a.commit else " (dry run: nothing written)"), flush=True)
             if a.commit:
-                cur.execute("delete from public.reference_candidates where status = 'found'")
+                cur.execute("delete from public.reference_candidates where status = 'found' and source = 'reports'")      # the standard-setters' candidates are standards_watch.py's
                 cur.executemany("insert into public.reference_candidates (key, name, acronym, kind, companies, documents, library_id) values (%s, %s, %s, %s, %s, %s, %s) "
-                                "on conflict (key) do update set companies = excluded.companies, documents = excluded.documents, found_at = now()", got)
+                                "on conflict (key) do update set companies = excluded.companies, documents = excluded.documents, library_id = excluded.library_id, source = 'reports', found_at = now()", got)
                 conn.commit()
             else:
                 conn.rollback()
