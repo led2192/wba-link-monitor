@@ -839,6 +839,8 @@ insert into public.search_options (name, is_on, note) values ('pairs', false, 'a
 -- word but one, eight words with their longer forms) took 24 to 27 s in the word index, which lists every page of the
 -- library holding the words (5,784) before the company's 5 are kept, while the company's 7,522 pages are listed in
 -- 0.2 s. That was the long question about one company that ran into the timeout.
+insert into public.search_options (name, is_on, note) values ('group_first', false, 'a search within a group of 6 to 80 companies reads the group''s own pages and checks the words on them, in place of asking the word index for every page of the library that holds the words; measure with search_timing.py (the group rows) before switching on')
+on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('company_first', false, 'four words or more within a company: read the company''s pages, not the word index') on conflict (name) do nothing;
 -- On since 13 Nov 2026: measured beside the default (run 43495398192): the same pages in the four searches tried,
 -- 12.2 s to 1.5 s and 9.8 s to 0.3 s for questions within one company, 2.1 s to 1.3 s for a large one, 0.8 s to 0.6 s for three words.
@@ -1093,6 +1095,13 @@ begin
                    and (coalesce(current_setting('lantern.company_first', true), '') = 'on'
                         or (coalesce(current_setting('lantern.company_first', true), '') <> 'off'
                             and exists (select 1 from public.search_options o where o.name = 'company_first' and o.is_on)));
+  -- Option group_first (24 Nov 2026). A group of companies picked on the page (6 to 80 of them) searched with everyday
+  -- words ("water use" within 22 companies) ran into the time limit on an idle database: the word index gathers every
+  -- page of the library that holds the words before the companies are looked at. With the option the group's own pages
+  -- are read and the words checked on them, as company_first does for one company, whatever the number of words.
+  if not company_first and ids is not null and cardinality(ids) between 6 and 80 and nw >= 1 and public.survey_option('group_first') then
+    company_first := true;
+  end if;
   <<levels>>
   for drop_n in 0..least(case when nw >= 5 then 1 else 2 end, greatest(nw - 1, 0)) loop
     exit levels when via_pairs >= need;                -- the pair index filled the list (documents, not pages): the word index is not asked

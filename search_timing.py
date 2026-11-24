@@ -10,6 +10,7 @@ page's word vector), the same pool in one statement, the ranking of the pool, an
 lengths. It prints counts and seconds, never page text (the logs are public).
 
     python search_timing.py
+    python search_timing.py --group      (only: a search within a group of companies, the usual way and group_first)
 
 Run by hand through the Search check workflow (input mode = timing). Env: SUPABASE_DB_URL.
 """
@@ -52,6 +53,33 @@ def usual_pages(cur, question, company):
     got = cur.fetchone()[0]
     cur.execute("select set_config('lantern.company_first', 'on', false)")
     return got
+
+
+def group_search(cur, conn, md):
+    """A search within a group of companies, as the page asks it after a group's button is pressed (24 Nov 2026: one of
+    22 companies with everyday words ran into the time limit). The usual way and the option group_first, on groups of
+    companies with many documents. Seconds, row counts and how many pages the two lists share."""
+    md += ["", "### A search within a group of companies (option group_first)", "", "| Group | Words | Way | Rows | Seconds | Pages shared with the usual way |", "| --- | --- | --- | --: | --: | --: |"]
+    for size in (8, 22, 60):
+        cur.execute("select string_agg(wba_id, ';') from (select wba_id from public.documents where wba_id <> '' and coalesce(text_status, '') = 'ok' "
+                    "group by 1 order by count(*) desc offset 30 limit %s) x", (size,))
+        group = cur.fetchone()[0]
+        conn.commit()
+        for words in ("water use", "water withdrawal 2024", "supplier audit"):
+            usual = None
+            for way in ("off", "on"):
+                t0 = time.time()
+                try:
+                    cur.execute("select set_config('lantern.group_first', %s, false)", (way,))
+                    cur.execute("select coalesce(array_agg(library_id || '|' || page), '{}') from public.find_pages('timing', %s, %s, null, null, null, 50, 'timing')", (words, group))
+                    got = set(cur.fetchone()[0]); conn.commit()
+                    shared = "" if way == "off" or usual is None else str(len(got & usual))
+                    usual = got if way == "off" else usual
+                    md.append(f"| {size} companies | {words} | {'group_first' if way == 'on' else 'usual'} | {len(got)} | {time.time() - t0:.2f} | {shared} |")
+                except Exception as e:
+                    conn.rollback()
+                    md.append(f"| {size} companies | {words} | {'group_first' if way == 'on' else 'usual'}: failed after {time.time() - t0:.1f} s ({type(e).__name__}) | | | |")
+    cur.execute("select set_config('lantern.group_first', '', false)"); conn.commit()
 
 
 def whole_function(cur, conn, md):
@@ -148,6 +176,14 @@ def main():
         cur = conn.cursor()
         cur.execute("set statement_timeout = '90s'")
         cur.execute("set work_mem = '128MB'")
+        if "--group" in sys.argv:                 # only the searches within a group of companies (option group_first)
+            group_search(cur, conn, md)
+            out = "\n".join(md) + "\n"
+            open("search_timing.md", "w").write(out)
+            print(out, flush=True)
+            if os.environ.get("GITHUB_STEP_SUMMARY"):
+                open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(out)
+            return 0
         _, s = timed(cur, "select 1")
         md.append(f"- a round trip: {s:.3f} s")
         (n,), s = timed(cur, "select count(*) from (select distinct coalesce(year, 0) from public.documents) x")

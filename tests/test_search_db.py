@@ -105,6 +105,23 @@ class SearchOnPostgres(unittest.TestCase):
                                (None, None)])
         self.assertTrue(listed)
 
+    def test_group_first_finds_the_same_pages_for_a_group(self):
+        """Option group_first (24 Nov 2026): a search within a picked group of six companies or more reads the group's own
+        pages; the list is the same as through the word index, and nothing changes while the option is off."""
+        cur = self.conn.cursor()
+        cur.execute("select is_on from public.search_options where name = 'group_first'"); self.assertEqual(cur.fetchone(), (False,))
+        cur.execute("select string_agg(wba_id, ';' order by wba_id) from (select distinct wba_id from public.documents where wba_id <> '' order by wba_id limit 8) x"); group = cur.fetchone()[0]
+        self.assertGreaterEqual(group.count(";"), 5)
+        cur.execute("select set_config('lantern.group_first', 'off', false)")
+        usual = self.find("zebra target", group)
+        cur.execute("select set_config('lantern.group_first', 'on', false)")
+        try:
+            first = self.find("zebra target", group)
+        finally:
+            cur.execute("select set_config('lantern.group_first', '', false)")
+        self.assertTrue(usual)
+        self.assertEqual(sorted((r[0], r[1]) for r in first), sorted((r[0], r[1]) for r in usual))
+
     def test_company_first_finds_the_same_pages(self):
         """Option company_first: four words or more within a company read the company's pages; the list is the same."""
         cur = self.conn.cursor()
