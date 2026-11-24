@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v161 2026-11-24";
+  const CLIENT = "lantern v162 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2541,7 +2541,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Standards in use": adminUse, "Words of the year": adminWords, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Register": adminRegister, "Standards in use": adminUse, "Words of the year": adminWords, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2613,6 +2613,16 @@
       over.append(row); over.scrollIntoView({ block: "center" }); }
   }
   // v144: what the reader made of each company from its own reports (company_profile), for the owner to judge
+  // v162: what the public register of legal entities (GLEIF) says about the companies that carry an LEI (gleif_register.py). The owner's only.
+  async function adminRegister(body) {
+    const r = await authed("admin_register", { key }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
+    body.innerHTML = "";
+    body.appendChild(el("p", "what", "The public register of legal entities (GLEIF, open data) asked about each company that carries an LEI: is the LEI known, is the entity active, is its registration current, and does it have a parent. It is the first step towards a list of companies of lantrNa's own, and towards telling a group's documents from its subsidiaries'. Read on the server once a week. Only you see this."));
+    if (!r.checked) { body.appendChild(el("p", null, `${(r.with_lei || 0).toLocaleString()} of ${(r.companies || 0).toLocaleString()} companies carry an LEI. The register has not been read yet (workflow "Register").`)); return; }
+    body.appendChild(el("p", null, `${r.with_lei.toLocaleString()} of ${r.companies.toLocaleString()} companies carry an LEI; ${r.checked.toLocaleString()} asked, last ${adminWhen(r.checked_at)}. ${r.fine.toLocaleString()} are active, current and their own ultimate parent. The ${(r.rows || []).length.toLocaleString()} below are worth a look.`));
+    if (!(r.rows || []).length) return;
+    body.appendChild(adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], r.rows.map(x => [x.company || x.wba_id, x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", x.lei])));
+  }
   async function adminProfiles(body, search) {
     const r = await authed("admin_company_profiles", { key, search: search || null }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
     body.innerHTML = ""; const st = r.status || {}, total = Object.values(st).reduce((a, b) => a + b, 0);
