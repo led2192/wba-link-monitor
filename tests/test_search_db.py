@@ -2317,8 +2317,9 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("insert into public.documents (library_id, wba_id, company, label, text_status) values ('DE1', 'WX', 'Banco Zebra', 'Annual Report', 'ok'), ('DE2', 'WX', 'Banco Zebra', 'Annual Report', 'ok')")
         cur.execute("select public.doc_facts('k', array['DE1', 'DE2'])"); f = cur.fetchone()[0]; self.assertEqual((f["DE1"]["entity"], f["DE2"]["entity"]), ("Zebra Leasing Ltd", None))   # the page says it on the row and under an answer
         # option ask_source_entity: the reader is told so in the page's heading, only with the option on
+        cur.execute("select set_config('lantern.ask_source_entity', 'off', false)")
         cur.execute("select public.ask_doc_note('DE1')"); self.assertEqual(cur.fetchone()[0], "")
-        cur.execute("select set_config('lantern.ask_source_entity', 'on', false)")
+        cur.execute("select set_config('lantern.ask_source_entity', '', false)")          # on by default since 24 Nov 2026
         cur.execute("select public.ask_doc_note('DE1'), public.ask_doc_note('DE2')")
         self.assertEqual(cur.fetchone(), (" (report of Zebra Leasing Ltd, a subsidiary of the company)", ""))
         cur.execute("select set_config('lantern.ask_source_entity', '', false)")
