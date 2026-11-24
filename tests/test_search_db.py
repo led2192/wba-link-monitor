@@ -1323,11 +1323,11 @@ class SearchOnPostgres(unittest.TestCase):
             eps = next(r for r in cur.fetchone()[0]["rows"] if r["company"] == "Epsilon")
             self.assertEqual((eps["status"], eps["library_id"], eps["page"]), ("yes", None, None))        # and no page at all rather than one chosen for it
             self.assertGreater(float(got["counts"]["usd"]), 0)
-            cur.execute("select has_function_privilege('anon', 'public.survey_start(text, text, real[], text, text, text, int, int, text)', 'execute'), "
+            cur.execute("select has_function_privilege('anon', 'public.survey_start(text, text, real[], text, text, text, int, int, text, text, text)', 'execute'), "
                         "has_function_privilege('authenticated', 'public.reader_ready()', 'execute'), "
                         "has_function_privilege('authenticated', 'public.survey_read(text, text, text, real[], text, text, int, int, int)', 'execute'), "
                         "has_function_privilege('authenticated', 'public.survey_words(text)', 'execute'), "
-                        "has_function_privilege('anon', 'public.survey_offer(text, text, text, text, text, int, int)', 'execute')")
+                        "has_function_privilege('anon', 'public.survey_offer(text, text, text, text, text, int, int, text, text)', 'execute')")
             self.assertEqual(cur.fetchone(), (False, False, False, False, False))
             cur.execute("update public.pages set body = 'Epsilon page text, long enough to be found by its start' where library_id = 'DS6'")
             # option survey_again: after "not stated", the next pages of the wider search are read, numbered on from the first
@@ -1428,6 +1428,19 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.survey_get('k', %s)", (top["id"],)); got = cur.fetchone()[0]
             self.assertEqual((sorted(r["company"] for r in got["rows"]), got["cohort"]), (["Delta", "Gamma", "S9"], "the top 3 of the Gender Benchmark 2025"))   # a company the library does not know keeps its place
             cur.execute("select public.survey_more('k', %s)", (top["id"],)); self.assertTrue(cur.fetchone()[0]["none"])        # a ranking has no rest
+            # 24 Nov 2026: a group picked on the page (its ids joined by ";") is the scope, exactly those companies; one id, or ids the library does not know, are no group
+            cur.execute("select string_agg(wba_id, ';' order by wba_id) from public.companies where name in ('Delta', 'Gamma')"); two = cur.fetchone()[0]
+            asked = "Do these companies have an incentive tied to emissions?"
+            cur.execute("select public.survey_picked(%s, null), public.survey_picked(%s, 'x'), public.survey_picked('NOPE_1;NOPE_2', 'x')", (two.split(";")[0], two + ";NOPE_1"))
+            one, known, none = cur.fetchone(); self.assertEqual((one, known["n"], known["label"], none), (None, 2, "x", None))
+            cur.execute("select public.survey_offer('k', %s, null, null, null, null, null, %s, '2 companies, testing')", (asked, two)); o = cur.fetchone()[0]
+            self.assertEqual((o["cohort"], o["companies"], o["in_scope"], o["up_to"], o["have"]), ("2 companies, testing", 2, 2, False, None))
+            cur.execute("select public.survey_start('k', %s, null, null, null, null, null, null, 'test', %s, '2 companies, testing')", (asked, two)); grp = cur.fetchone()[0]
+            self.assertEqual((grp["companies"], grp["cohort"]), (2, "2 companies, testing"))
+            cur.execute("select public.survey_get('k', %s)", (grp["id"],)); self.assertEqual(sorted(r["company"] for r in cur.fetchone()[0]["rows"]), ["Delta", "Gamma"])
+            cur.execute("select public.survey_offer('k', %s, null, null, null, null, null, %s, 'another name')", (asked, two)); self.assertEqual(cur.fetchone()[0]["have"]["id"], grp["id"])   # the same group again: the survey already run
+            cur.execute("select public.survey_offer('k', %s)", (asked,)); self.assertIsNone(cur.fetchone()[0]["have"])           # the same question with no group is another survey
+            cur.execute("select public.survey_more('k', %s)", (grp["id"],)); self.assertTrue(cur.fetchone()[0]["none"])        # a picked group has no rest
             # the model refuses the reader (no credit): the survey stops, and no company is marked "not read"
             cur.execute("""create or replace function public.ask_model(api_key text, http_schema text, model text, system_text text, user_text text, max_tokens int) returns jsonb language sql as $f$
                              select jsonb_build_object('error', 'the model answered HTTP 400: Your credit balance is too low to access the API.') $f$""")

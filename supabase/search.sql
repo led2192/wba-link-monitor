@@ -5987,9 +5987,29 @@ end;
 $$;
 revoke all on function public.survey_read(text, text, text, real[], text, text, int, int, int) from public, anon, authenticated;
 
+-- A survey of a group the person picked on the page (24 Nov 2026): the companies a group's button named ("by what
+-- companies say they are", profile_groups), sent as the page holds them, their ids joined by ";". Two or more ids the
+-- library knows make the scope, exactly those companies, like a group named by a ranking; the filters are not looked
+-- at. Never picked from the question's words by the database: a word of a question ("water") is not a choice of
+-- scope, the press of a button is. {label, ids, n}, or null.
+alter table public.surveys add column if not exists picked text[];
+create or replace function public.survey_picked(company_filter text, group_label text) returns jsonb
+language sql stable security definer set search_path = public
+as $$
+  with i as (select array(select c.wba_id from public.companies c
+                          where c.wba_id = any(string_to_array(coalesce(company_filter, ''), ';')) order by c.wba_id limit 150) as ids)
+  select case when position(';' in coalesce(company_filter, '')) > 0 and coalesce(array_length(i.ids, 1), 0) >= 2
+              then jsonb_build_object('label', coalesce(nullif(left(btrim(regexp_replace(coalesce(group_label, ''), '[[:cntrl:]]+', ' ', 'g')), 80), ''), array_length(i.ids, 1) || ' companies picked'),
+                                      'ids', to_jsonb(i.ids), 'n', array_length(i.ids, 1)) end
+  from i
+$$;
+revoke all on function public.survey_picked(text, text) from public, anon, authenticated;
+
+drop function if exists public.survey_start(text, text, real[], text, text, text, int, int, text);
 create or replace function public.survey_start(
   key text, question text, qvec real[] default null, industry_filter text default null, country_filter text default null,
-  region_filter text default null, year_from int default null, year_to int default null, client text default null)
+  region_filter text default null, year_from int default null, year_to int default null, client text default null,
+  company_filter text default null, group_label text default null)
 returns jsonb
 language plpgsql security definer
 set search_path = public, extensions
@@ -6008,6 +6028,7 @@ declare
   got jsonb;
   words text;
   ids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
+  picked jsonb := public.survey_picked(company_filter, group_label);
   coh jsonb;
   in_scope int := 0;
   new_id bigint;
@@ -6032,10 +6053,11 @@ begin
     return jsonb_build_object('limit', true, 'per_day', allowed);
   end if;
   words := public.survey_words(asked);
-  coh := public.question_cohort(asked, ids);
-  insert into public.surveys (asker, question, words, qvec, industry, country, region, year_from, year_to, pages, client)
+  coh := coalesce(picked, public.question_cohort(asked, ids));
+  insert into public.surveys (asker, question, words, qvec, industry, country, region, year_from, year_to, pages, client, picked)
     values (who, asked, words, case when coalesce(array_length(qvec, 1), 0) = 384 then qvec end, nullif(btrim(industry_filter), ''), nullif(btrim(country_filter), ''),
-            nullif(btrim(region_filter), ''), year_from, year_to, st.pages_a_company, left(client, 60))
+            nullif(btrim(region_filter), ''), year_from, year_to, st.pages_a_company, left(client, 60),
+            case when picked is not null then array(select jsonb_array_elements_text(picked -> 'ids')) end)
     returning id into new_id;
   update public.surveys s set cohort = coh ->> 'label' where s.id = new_id and coh is not null;
   if coh is not null then
@@ -6067,8 +6089,8 @@ begin
     'usd', round(made * (st.pages_a_company * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3), 'left_today', allowed - used - 1);
 end;
 $$;
-revoke all on function public.survey_start(text, text, real[], text, text, text, int, int, text) from public, anon;
-grant execute on function public.survey_start(text, text, real[], text, text, text, int, int, text) to authenticated;
+revoke all on function public.survey_start(text, text, real[], text, text, text, int, int, text, text, text) from public, anon;
+grant execute on function public.survey_start(text, text, real[], text, text, text, int, int, text, text, text) to authenticated;
 
 create or replace function public.survey_get(key text, survey bigint)
 returns jsonb
@@ -6110,8 +6132,10 @@ grant execute on function public.survey_get(text, bigint) to authenticated;
 -- day's surveys are used ("why" says which). With no filter the companies are those a search will find, so the
 -- number is the ceiling ("up_to": true). "have": this person's latest survey of the same question in the same scope
 -- (id, at, status), to be opened again and not paid for twice. Calls no model and writes nothing.
+drop function if exists public.survey_offer(text, text, text, text, text, int, int);
 create or replace function public.survey_offer(key text, question text, industry_filter text default null, country_filter text default null,
-                                               region_filter text default null, year_from int default null, year_to int default null)
+                                               region_filter text default null, year_from int default null, year_to int default null,
+                                               company_filter text default null, group_label text default null)
 returns jsonb
 language plpgsql stable security definer
 set search_path = public, extensions
@@ -6124,6 +6148,7 @@ declare
   allowed int;
   used int;
   ids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
+  picked jsonb := public.survey_picked(company_filter, group_label);
   coh jsonb;
   in_scope int;
   n int;
@@ -6137,6 +6162,7 @@ begin
    where x.asker = who and lower(x.question) = lower(asked)
      and x.industry is not distinct from nullif(btrim(industry_filter), '') and x.country is not distinct from nullif(btrim(country_filter), '')
      and x.region is not distinct from nullif(btrim(region_filter), '') and x.year_from is not distinct from year_from and x.year_to is not distinct from year_to
+     and x.picked is not distinct from case when picked is not null then array(select jsonb_array_elements_text(picked -> 'ids')) end      -- the same group picked, or none
      and exists (select 1 from public.survey_rows r where r.survey_id = x.id)
    order by x.at desc limit 1;
   if allowed <= 0 then
@@ -6147,7 +6173,7 @@ begin
   if ids is not null then
     select count(*) into in_scope from public.companies c where c.wba_id = any(ids) and exists (select 1 from public.documents d where d.wba_id = c.wba_id);
   end if;
-  coh := public.question_cohort(asked, ids);
+  coh := coalesce(picked, public.question_cohort(asked, ids));
   if coh is not null then
     in_scope := (coh ->> 'n')::int;
   end if;
@@ -6157,8 +6183,8 @@ begin
     'usd', round(n * (st.pages_a_company * 750 * 0.10 + 800 * 0.50) / 1000000.0, 3), 'have', have);
 end;
 $$;
-revoke all on function public.survey_offer(text, text, text, text, text, int, int) from public, anon;
-grant execute on function public.survey_offer(text, text, text, text, text, int, int) to authenticated;
+revoke all on function public.survey_offer(text, text, text, text, text, int, int, text, text) from public, anon;
+grant execute on function public.survey_offer(text, text, text, text, text, int, int, text, text) to authenticated;
 
 -- A survey that stopped at the ceiling, carried on: the companies of its scope not asked yet are added (by name, up
 -- to the ceiling again) and the survey is open once more; survey_step then reads them. Only a survey with a filter
