@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v160 2026-11-24";
+  const CLIENT = "lantern v161 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2993,15 +2993,21 @@
     bar.append(box, adminBtn("Search", again), mainB, yearB, fresh); body.appendChild(bar);
     // v160 (the owner: "a check box, and a button, so that the extension downloads all this"): rows are ticked and
     // sent to a queue (fetch_queue); the extension's window then downloads them one after another with this browser
-    const ticked = new Set(), boxes = new Map(); let waiting = new Set(), tried = {};
+    const ticked = new Set(), boxes = new Map(), lines = new Map(); let waiting = new Set(), tried = {}, hideTried = false;
     const qbar = el("div"); qbar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px;padding:8px 10px;border:1px solid var(--line);border-radius:10px";
     const qsay = el("span", "what", ""), qgo = adminBtn("Send the ticked to the extension", async () => { const ids = [...ticked]; if (!ids.length) return; qsay.textContent = " saving…";
         const q = await authed("admin_fetch_queue_set", { key, library_ids: ids, queued: true }).catch(() => null); if (!q) { qsay.textContent = " not saved"; return; } ticked.clear(); shown(q); }),
       qclear = adminBtn("Empty the queue", async () => { const q = await authed("admin_fetch_queue_set", { key, library_ids: [...waiting], queued: false }).catch(() => null); if (q) shown(q); });
-    const shown = q => { waiting = new Set(q.ids || []); tried = q.tried || {}; for (const [id, b] of boxes) { b.checked = ticked.has(id) || waiting.has(id); b.title = waiting.has(id) ? "Waiting in the extension's queue" : tried[id] ? `Tried by the extension: ${tried[id]}` : ""; }
+    const shown = q => { waiting = new Set(q.ids || []); tried = q.tried || {}; for (const [id, b] of boxes) { b.checked = ticked.has(id) || waiting.has(id); b.title = waiting.has(id) ? "Waiting in the extension's queue" : tried[id] ? `Tried by the extension: ${tried[id].result}` : ""; }
+      // v161 (the owner: "so as to know that they've been tried through the extension"): the row says so, with what came of it
+      let failed = 0; for (const [id, l] of lines) { const t = tried[id], no = t && /^not sent/.test(t.result || ""); if (no) failed++;
+        if (t && !waiting.has(id)) { l.stt.textContent = `tried with the extension ${adminWhen(t.at)}: ${t.result}`; l.stt.title = "Downloaded with your own browser by the extension's queue. Tick it and send it again to try once more."; l.stt.style.color = no ? "#B4540A" : "#2E8B1F"; }
+        l.row.dataset.failed = no && !waiting.has(id) ? "1" : ""; if (l.row.dataset.failed) l.row.style.display = hideTried ? "none" : l.shown; }
+      qhide.hidden = !failed; qhide.textContent = hideTried ? `Show the ${failed} the extension could not get` : `Hide the ${failed} the extension could not get`;
       qgo.textContent = ticked.size ? `Send the ${ticked.size} ticked to the extension` : "Send the ticked to the extension"; qclear.hidden = !waiting.size;
       qsay.textContent = waiting.size ? ` ${waiting.size.toLocaleString()} waiting. Open the extension on any page and press "Fetch my queue": it downloads them one after another with your browser; keep that window open.` : " Tick documents (or a whole company) and send them: the extension then downloads them one after another with your browser."; };
-    qbar.append(qgo, qclear, qsay); body.appendChild(qbar);
+    const qhide = adminBtn("", () => { hideTried = !hideTried; for (const l of lines.values()) if (l.row.dataset.failed) l.row.style.display = hideTried ? "none" : l.shown; shown({ ids: [...waiting], tried }); }); qhide.hidden = true;
+    qbar.append(qgo, qclear, qhide, qsay); body.appendChild(qbar);
     authed("admin_fetch_queue_set", { key, library_ids: [], queued: true }).then(q => { if (q) shown(q); }).catch(() => {});
     const tick = (d, on) => { if (on && !waiting.has(d.library_id)) ticked.add(d.library_id); else ticked.delete(d.library_id); };
     body.appendChild(latestMissing(st));
@@ -3055,7 +3061,7 @@
       });
       const qb = document.createElement("input"); qb.type = "checkbox"; qb.style.cssText = "flex:none;margin:0"; qb.setAttribute("aria-label", "queue this document for the extension"); boxes.set(d.library_id, qb);
       qb.onchange = () => { if (waiting.has(d.library_id)) { qb.checked = true; return; } tick(d, qb.checked); shown({ ids: [...waiting], tried }); };
-      row.append(qb, meta, a, stt, acts);
+      row.append(qb, meta, a, stt, acts); lines.set(d.library_id, { row, stt, shown: d._more ? "flex" : "none" });
       if (d._more) { groups.set(d, { rows: [], open: false }); table.append(row);
         if (d._more.length) { const more = el("a", null, `+${d._more.length} more address${d._more.length === 1 ? "" : "es"}`); more.href = "#"; more.title = "The same year, type and title under other addresses: most likely the same document"; more.style.cssText = "flex:none;font-size:12px;margin-left:8px";
           const g = groups.get(d); more.onclick = ev => { ev.preventDefault(); g.open = !g.open; for (const x of g.rows) x.style.display = g.open ? "flex" : "none"; more.textContent = g.open ? "fewer" : `+${d._more.length} more address${d._more.length === 1 ? "" : "es"}`; };

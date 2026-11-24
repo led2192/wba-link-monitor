@@ -645,7 +645,7 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.fetch_queue_done('Q1', %s)", ("sent (1.2 MB)" + "x" * 400,)); self.assertTrue(cur.fetchone()[0]["ok"])
             cur.execute("select public.fetch_queue_done('NOPE', 'x')"); self.assertFalse(cur.fetchone()[0]["ok"])
             cur.execute("select public.admin_fetch_queue_set('k')"); q = cur.fetchone()[0]
-            self.assertEqual((q["waiting"], sorted(q["ids"]), len(q["tried"]["Q1"])), (2, ["Q2", "Q4"], 200))
+            self.assertEqual((q["waiting"], sorted(q["ids"]), len(q["tried"]["Q1"]["result"]), q["tried"]["Q1"]["at"] is not None), (2, ["Q2", "Q4"], 200, True))
             cur.execute("select public.admin_fetch_queue_set('k', array['Q2', 'Q1'], false)"); q = cur.fetchone()[0]     # taken out; what was tried stays as a record
             self.assertEqual((q["waiting"], list(q["tried"])), (1, ["Q1"]))
             cur.execute("select public.admin_fetch_queue_set('k', array['Q1'])"); self.assertEqual(sorted(cur.fetchone()[0]["ids"]), ["Q1", "Q4"])   # queued again: it waits again

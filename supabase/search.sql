@@ -5269,7 +5269,7 @@ begin
   end if;
   return jsonb_build_object('waiting', (select count(*) from public.fetch_queue q where q.tried_at is null),
                             'ids', (select coalesce(jsonb_agg(q.library_id), '[]'::jsonb) from public.fetch_queue q where q.tried_at is null),
-                            'tried', (select coalesce(jsonb_object_agg(q.library_id, q.result), '{}'::jsonb) from public.fetch_queue q where q.tried_at > now() - interval '7 days'));
+                            'tried', (select coalesce(jsonb_object_agg(q.library_id, jsonb_build_object('result', q.result, 'at', q.tried_at)), '{}'::jsonb) from public.fetch_queue q where q.tried_at is not null));      -- what the extension tried, and when: shown on the row (the owner, 24 Nov 2026)
 end;
 $$;
 revoke all on function public.admin_fetch_queue_set(text, text[], boolean) from public, anon;
