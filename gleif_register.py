@@ -188,6 +188,11 @@ def main():
                       r.get("ultimate_lei"), r.get("ultimate_name"),
                       "declared no parent record" if r.get("ultimate_kind") == "exception" else None, r.get("name_latin"), r.get("former") or []) for w, r in rows.items()])
             conn.commit()
+    if a.commit:
+        with evidence_db.connect() as conn2:            # the names a company is also reached by, from what the register now says
+            with conn2.cursor() as cur:
+                cur.execute("select public.register_names_refresh()"); print(f"{cur.fetchone()[0]:,} names lead to a company held", flush=True)
+            conn2.commit()
     run.finish("ok", rows_in=len(todo), rows_out=len(rows) if a.commit else 0, counters={"requests": asker.calls, **dict(c)}, notes="written" if a.commit else "dry run")
     return 0
 

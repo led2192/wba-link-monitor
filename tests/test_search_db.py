@@ -2242,6 +2242,20 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([(x["name"], x["depth"], x["parent"] == A or x["parent"] == k2) for x in tr], [("Mitsu Zebra KK", 1, True), ("Zebra Leasing Ltd", 1, True), ("Zebra Deep Ltd", 2, True)])   # the branches: a child of a child
         cur.execute("select public.admin_register_group('k', %s)", (P,)); top = cur.fetchone()[0]
         self.assertEqual((top["company"]["held"], top["company"]["name"], sorted(k["name"] for k in top["children"])), (True, "Zebra Fine", ["Zebra Bank UK plc", "Zebra Brasil SA"]))
+        # the names a company is also reached by: a subsidiary's, a former one, the legal one; two words at least; a search with no company is offered the company
+        cur.execute("update public.company_register set former_names = array['Old Zebra Banking Corporation', 'Zebra'], legal_name = 'Zebra Fine Trading SA' where wba_id = 'RG4'")
+        cur.execute("update public.register_entities set former_names = array['Stripe Lease Partners'] where lei = %s", (k2,))
+        cur.execute("select public.register_names_refresh()"); self.assertGreaterEqual(cur.fetchone()[0], 5)
+        cur.execute("select key, wba_id, kind from public.register_names order by key")
+        got = {k: (w, kind) for k, w, kind in cur.fetchall()}
+        self.assertEqual(got["zebra leasing"], ("RG4", "a subsidiary")); self.assertEqual(got["stripe lease partners"], ("RG4", "a former name of a subsidiary"))
+        self.assertEqual(got["old zebra banking"], ("RG4", "a former name")); self.assertEqual(got["zebra fine trading"], ("RG4", "its legal name"))
+        self.assertNotIn("zebra", got); self.assertNotIn("zebra bank uk", got)                      # one word; and a subsidiary lantrNa holds is its own company, reached by its own name
+        ask_e = lambda q: (cur.execute("select public.find_entity('k', %s)", (q,)), cur.fetchone()[0])[1]
+        self.assertEqual(ask_e("scope 1 emissions of Zebra Leasing Ltd in 2024"), {"id": "RG4", "company": "Zebra Fine", "name": "Zebra Leasing Ltd", "kind": "a subsidiary"})
+        self.assertEqual(ask_e("Old Zebra Banking Corporation revenue")["kind"], "a former name")
+        self.assertIsNone(ask_e("water use in 2024")); self.assertIsNone(ask_e("zebra")); self.assertIsNone(ask_e(""))
+        cur.execute("delete from public.register_names")
         cur.execute("select public.admin_register_group('k', 'no such company')"); self.assertEqual(cur.fetchone()[0], {"found": False})
         cur.execute("delete from public.register_entities"); cur.execute("delete from public.register_groups")
         cur.execute("select public.admin_register_all('k')"); al = {x["wba_id"]: x for x in cur.fetchone()[0]}

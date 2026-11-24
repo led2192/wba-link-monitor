@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v169 2026-11-24";
+  const CLIENT = "lantern v170 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1026,6 +1026,16 @@
         const a = el("a", null, `Only ${kind}`); a.href = "#";
         a.onclick = ev => { ev.preventDefault(); state.type = state.typeHint; state.typeHint = state.typeWords = null; search(true); };
         st.append(document.createTextNode(vague ? " · Every type of document searched · " : ` · Every type of document searched, ${kind} first · `), a);
+      }
+      // v170 (the owner: people do not search by the official name; a subsidiary's or a former name should lead to the
+      // company held): with no company named, the words are looked up among the names of the register. An offer beside
+      // the results, asked after they are shown: the search is not held for it, and nothing is applied by itself.
+      if (!state.company && !state.maybe && !more && !fromChips && !state.industry && !state.country && !state.region && /\S\s+\S/.test($("q").value)) {
+        const asked = $("q").value, mine = seq;
+        rpc("find_entity", { key, q: asked }).then(e => { if (!e || mine !== searchSeq || $("q").value !== asked) return;
+          const st = $("status"), a = el("a", null, `search ${e.company}`); a.href = "#"; a.onclick = ev => { ev.preventDefault(); $("q").value = `${e.company}; ${asked}`; search(false); };
+          const how = e.kind === "its legal name" ? `“${e.name}” is the legal name of ${e.company}` : e.kind === "a former name" ? `“${e.name}” is a former name of ${e.company}` : e.kind === "a subsidiary" ? `“${e.name}” is part of ${e.company}` : `“${e.name}” is a former name of a company that is part of ${e.company}`;
+          st.append(document.createTextNode(` · ${how}: `), a); }).catch(() => {});
       }
       if (state.maybe && !state.company && !more && !fromChips) {             // a word that is also a company's name was read as the word: offer the company
         const st = $("status"), mb = state.maybe; const a = el("a", null, `Search the company ${mb.name} instead`); a.href = "#";

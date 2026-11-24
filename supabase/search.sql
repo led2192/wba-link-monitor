@@ -5388,6 +5388,91 @@ begin
                    order by 16, c.name limit 600) x));      -- 16: ord, the kind of trouble
 end;
 $$;
+-- The names a company of lantrNa is also reached by (24 Nov 2026). The owner: the register brings legal names, "and
+-- people, when they search, will not search by the official name"; and a subsidiary's or a former name should lead to
+-- the company held. One row a name: the legal name of a company held, its former names, and the names and former
+-- names of the entities of its group (register_entities), each under public.name_key (no legal form). Kept: a name of
+-- two words or more and eight characters or more, that is not the company's own listed name, and that leads to one
+-- company only. Rebuilt whole by register_names_refresh(), which the register's scripts call after writing.
+create table if not exists public.register_names (
+  key    text not null,
+  wba_id text not null,
+  name   text not null,
+  kind   text not null,
+  primary key (key, wba_id)
+);
+create index if not exists register_names_key on public.register_names (key);
+alter table public.register_names enable row level security;
+
+create or replace function public.register_names_refresh() returns int
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  n int;
+begin
+  delete from public.register_names;
+  insert into public.register_names (key, wba_id, name, kind)
+  with held as (select r.wba_id, r.lei, c.name as company, public.name_key(c.name) as own from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.found),
+  raw as (
+    select h.wba_id, coalesce(r.name_latin, r.legal_name) as name, 'its legal name' as kind, h.own from held h join public.company_register r on r.wba_id = h.wba_id
+    union all
+    select h.wba_id, f, 'a former name', h.own from held h join public.company_register r on r.wba_id = h.wba_id, unnest(r.former_names) f
+    union all
+    select h.wba_id, coalesce(e.name_latin, e.name), 'a subsidiary', h.own from public.register_entities e join held h on h.lei = coalesce(e.ultimate_parent_lei, e.direct_parent_lei)
+      where not exists (select 1 from held x where x.lei = e.lei)                          -- a subsidiary lantrNa holds is a company of its own
+    union all
+    select h.wba_id, f, 'a former name of a subsidiary', h.own from public.register_entities e join held h on h.lei = coalesce(e.ultimate_parent_lei, e.direct_parent_lei), unnest(e.former_names) f
+      where not exists (select 1 from held x where x.lei = e.lei)),
+  keyed as (select distinct on (k.key, k.wba_id) k.key, k.wba_id, k.name, k.kind
+            from (select public.name_key(r.name) as key, r.wba_id, r.name, r.kind, r.own from raw r where r.name is not null) k
+            where k.key <> k.own and length(k.key) >= 8 and k.key like '% %'
+            order by k.key, k.wba_id, case k.kind when 'its legal name' then 0 when 'a former name' then 1 when 'a subsidiary' then 2 else 3 end)
+  select k.key, k.wba_id, k.name, k.kind from keyed k
+  where (select count(*) from keyed o where o.key = k.key) = 1
+    and not exists (select 1 from held h where h.own = k.key);                             -- another company's listed name is that company's
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.register_names_refresh() from public, anon, authenticated;
+
+-- A search that named no company of the list: do its words hold one of those names? The longest name wins. An offer
+-- for the page to show beside the results ("Santander UK ... is part of Banco Santander: search it"), never applied
+-- by itself: a subsidiary's name of two everyday words can be in a question by chance.
+create or replace function public.find_entity(key text, q text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+set statement_timeout = '3s'
+as $$
+#variable_conflict use_variable
+declare
+  toks text[] := (select array_agg(w) from (select w from regexp_split_to_table(lower(left(coalesce(q, ''), 300)), '[^[:alnum:]&.''-]+') w where w <> '' limit 24) x);
+  keys text[];
+  hit record;
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if coalesce(array_length(toks, 1), 0) < 2 then
+    return null;
+  end if;
+  select array_agg(distinct k) into keys from (
+    select public.name_key(array_to_string(toks[i:i + len - 1], ' ')) as k
+    from generate_series(1, array_length(toks, 1)) i, generate_series(2, 6) len where i + len - 1 <= array_length(toks, 1)) x
+  where length(k) >= 8 and k like '% %';
+  if keys is null then
+    return null;
+  end if;
+  select n.key, n.wba_id, n.name, n.kind, c.name as company into hit from public.register_names n join public.companies c on c.wba_id = n.wba_id
+    where n.key = any(keys) order by length(n.key) desc, n.key limit 1;
+  if hit.wba_id is null then
+    return null;
+  end if;
+  return jsonb_build_object('id', hit.wba_id, 'company', hit.company, 'name', hit.name, 'kind', hit.kind);
+end;
+$$;
+revoke all on function public.find_entity(text, text) from public;
+grant execute on function public.find_entity(text, text) to anon, authenticated;
+
 -- One company's whole group, to draw (the owner, 24 Nov 2026: "the draw could be simply to see the relations of one
 -- complete company"): its parents, itself, the entities one level below it, how many more lie further down, and its
 -- sisters (the other entities one level below its own parent). A name in Latin script is shown when the legal one is
