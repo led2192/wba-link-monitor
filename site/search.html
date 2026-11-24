@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v162 2026-11-24";
+  const CLIENT = "lantern v163 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2619,7 +2619,7 @@
     body.innerHTML = "";
     body.appendChild(el("p", "what", "The public register of legal entities (GLEIF, open data) asked about each company that carries an LEI: is the LEI known, is the entity active, is its registration current, and does it have a parent. It is the first step towards a list of companies of lantrNa's own, and towards telling a group's documents from its subsidiaries'. Read on the server once a week. Only you see this."));
     if (!r.checked) { body.appendChild(el("p", null, `${(r.with_lei || 0).toLocaleString()} of ${(r.companies || 0).toLocaleString()} companies carry an LEI. The register has not been read yet (workflow "Register").`)); return; }
-    body.appendChild(el("p", null, `${r.with_lei.toLocaleString()} of ${r.companies.toLocaleString()} companies carry an LEI; ${r.checked.toLocaleString()} asked, last ${adminWhen(r.checked_at)}. ${r.fine.toLocaleString()} are active, current and their own ultimate parent. The ${(r.rows || []).length.toLocaleString()} below are worth a look.`));
+    body.appendChild(el("p", null, `${r.with_lei.toLocaleString()} of ${r.companies.toLocaleString()} companies carry an LEI; ${r.checked.toLocaleString()} asked, last ${adminWhen(r.checked_at)}. ${r.fine.toLocaleString()} are active and their own ultimate parent${r.lapsed ? ` (${r.lapsed.toLocaleString()} of them did not renew their LEI this year: the entity is right, its data may be old)` : ""}. The ${(r.rows || []).length.toLocaleString()} below are worth a look.`));
     if (!(r.rows || []).length) return;
     body.appendChild(adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], r.rows.map(x => [x.company || x.wba_id, x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", x.lei])));
   }
