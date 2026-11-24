@@ -5288,6 +5288,28 @@ begin
                    order by 16, c.name limit 600) x));      -- 16: ord, the kind of trouble
 end;
 $$;
+-- Everything the register said, one row a company, for the owner to download (24 Nov 2026), and for the page to draw
+-- who belongs to whom. held_parent: the company of lantrNa that carries the ultimate parent's LEI, when there is one.
+create or replace function public.admin_register_all(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('wba_id', r.wba_id, 'company', c.name, 'lei', r.lei, 'found', r.found, 'legal_name', r.legal_name, 'country', r.country,
+                                                       'entity_status', r.entity_status, 'registration_status', r.registration_status,
+                                                       'direct_parent_lei', r.direct_parent_lei, 'direct_parent_name', r.direct_parent_name,
+                                                       'ultimate_parent_lei', r.ultimate_parent_lei, 'ultimate_parent_name', r.ultimate_parent_name, 'parent_note', r.parent_note,
+                                                       'held_parent', (select p.name from public.company_register pr join public.companies p on p.wba_id = pr.wba_id
+                                                                       where pr.lei = r.ultimate_parent_lei and pr.wba_id <> r.wba_id order by p.name limit 1),
+                                                       'checked_at', r.checked_at) order by c.name, r.wba_id), '[]'::jsonb)
+          from public.company_register r left join public.companies c on c.wba_id = r.wba_id);
+end;
+$$;
+revoke all on function public.admin_register_all(text) from public, anon;
+grant execute on function public.admin_register_all(text) to authenticated;
+
 revoke all on function public.admin_register(text) from public, anon;
 grant execute on function public.admin_register(text) to authenticated;
 
