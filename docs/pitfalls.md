@@ -3,6 +3,7 @@
 Lessons that cost time to learn. Read before changing the area they name.
 
 ## The search page
+- **A new scheduled job goes on the server's clock, never on a `schedule:` of GitHub's.** Known since 15 Nov 2026 and forgotten on 23 Nov: two nightly jobs given a cron did not start on their first night. `server/clock.json` is the only place a time is written.
 - **`search_exam.py --option` only switches a `lantern.` setting of the search's own database.** `own_live` is a row in the server's settings, so `--option own_live` ran the same search twice and printed two equal tables (24 Nov 2026). To compare it: `server_own_index.yml` with `live=on` and `commit`, a plain exam, then `live=off`.
 - **A failed Pages deploy is not re-run: a fresh run is started.** A re-run uploads a second artifact named `github-pages` and the deploy step refuses two (24 Nov 2026, three failures in a row). Start the workflow Search page by hand.
 - **A comparison that runs the real search writes the search log like a person.** The 40 questions of a comparison (two arms, two searches each) showed in Admin as the owner searching one company four times in a row (23 Nov 2026). A function that searches for a comparison sets `lantern.trial` to `on` for its transaction; the row's client then ends in ` trial` and the views of people's searches skip it.

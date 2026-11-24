@@ -29,6 +29,7 @@ STATE = os.environ.get("CLOCK_STATE", "/srv/lantern/clock.last")
 CATCH_UP = timedelta(hours=6)
 TICK = 30
 TRIES = 3
+DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
 def table(path=TABLE):
@@ -44,7 +45,10 @@ def table(path=TABLE):
             if not (0 <= h < 24 and 0 <= m < 60):
                 raise ValueError(f"not a time of day: {t}")
             times.append((h, m))
-        out.append({"workflow": wf, "name": e.get("name") or wf, "at": sorted(set(times)), "inputs": dict(e.get("inputs") or {})})
+        days = [str(d).lower()[:3] for d in (e.get("days") or [])]          # optional: only on these days of the week (UTC), for a weekly job
+        if any(d not in DAYS for d in days):
+            raise ValueError(f"not a day of the week: {e.get('days')}")
+        out.append({"workflow": wf, "name": e.get("name") or wf, "at": sorted(set(times)), "inputs": dict(e.get("inputs") or {}), "days": sorted({DAYS.index(d) for d in days})})
     return out
 
 
@@ -54,6 +58,8 @@ def due(entries, since, until):
     day = since.date()
     while day <= until.date():
         for e in entries:
+            if e.get("days") and day.weekday() not in e["days"]:
+                continue
             for h, m in e["at"]:
                 moment = datetime(day.year, day.month, day.day, h, m, tzinfo=timezone.utc)
                 if since < moment <= until:
@@ -146,7 +152,7 @@ def main(argv=None):
     now = datetime.now(timezone.utc)
     if a.list:
         for e in entries:
-            nxt = due([e], now, now + timedelta(days=1))[0][0]
+            nxt = due([e], now, now + timedelta(days=8))[0][0]          # eight days: a weekly entry has its next time too
             print(f"{e['name']}: {', '.join(f'{h:02d}:{m:02d}' for h, m in e['at'])} UTC; next {nxt:%d %b %H:%M}; inputs {e['inputs'] or 'none'}")
         return 0
     repo = os.environ.get("GITHUB_REPOSITORY")
