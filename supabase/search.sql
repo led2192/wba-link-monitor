@@ -3389,7 +3389,7 @@ language plpgsql stable security definer set search_path = public
 as $$
 begin      -- plpgsql: survey_option and document_entities are made further down this file
   if not public.survey_option('ask_source_entity') then return ''; end if;
-  return coalesce((select format(' (this document is a report of %s, %s of the company, not of the whole group)', e.name, e.kind)
+  return coalesce((select format(' (report of %s, %s of the company)', e.name, e.kind)
                    from public.document_entities e where e.library_id = doc), '');
 end;
 $$;
