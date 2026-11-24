@@ -15,6 +15,9 @@ on:
       limit:
         description: "parents read at most (a small number for a trial)"
         default: "2500"
+      deep:
+        description: "yes: place the entities below the first level under their direct parents (one request an entity, 250 a group at most)"
+        default: "no"
 
 concurrency:
   group: gleif-children
@@ -36,8 +39,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Load
         run: |
-          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python gleif_children.py --commit --limit "${{ inputs.limit || '2500' }}"
-          else python gleif_children.py --limit "${{ inputs.limit || '2500' }}"; fi
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python gleif_children.py --commit --limit "${{ inputs.limit || '2500' }}" ${{ inputs.deep == 'yes' && '--deep' || '' }}
+          else python gleif_children.py --limit "${{ inputs.limit || '2500' }}" ${{ inputs.deep == 'yes' && '--deep' || '' }}; fi
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}

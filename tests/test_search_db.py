@@ -2181,6 +2181,17 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((d_total, [(r["name_latin"], r["former"]) for r in direct]), (2, [("Mitsu Zebra KK", []), (None, ["Old Zebra Leasing"])]))
         self.assertEqual((u_total, len(deep), s2.asked), (450, 300, [("direct-children", 1), ("ultimate-children", 1), ("ultimate-children", 2)]))   # the cap stops the asking; the total is the register's
         self.assertEqual((K.latin("三菱ゼブラ株式会社"), K.latin("Société Zèbre SA")), (False, True))
+        # below the first level: each entity is asked for its own children, level by level, until all have their place or the budget is spent
+        fam = {"F1": ["G1", "G2"], "F2": [], "G1": ["H1"], "G2": [], "H1": []}
+        class Sess3:
+            def __init__(self): self.asked = []
+            def get(self, url, params=None, headers=None, timeout=None):
+                lei = url.split("/")[-2]; self.asked.append(lei)
+                return Answer(200, {"meta": {"pagination": {"total": len(fam[lei]), "lastPage": 1}}, "data": [{"id": k, "attributes": {"lei": k, "entity": {"legalName": {"name": "Zebra " + k}}}} for k in fam[lei]]})
+        s3 = Sess3(); found, used = K.walk(G.Asker(s3, "the-bot", per_minute=6000, sleep=lambda s: None), ["F1", "F2"], 5)
+        self.assertEqual(([(r["lei"], p) for r, p in found], used, s3.asked), ([("G1", "F1"), ("G2", "F1"), ("H1", "G1")], 3, ["F1", "F2", "G1"]))     # all five placed: G2 and H1 are not asked
+        s3 = Sess3(); found, used = K.walk(G.Asker(s3, "the-bot", per_minute=6000, sleep=lambda s: None), ["F1", "F2"], 5, budget=1)
+        self.assertEqual(([r["lei"] for r, _ in found], used), (["G1", "G2"], 1))                                                                    # the budget stops the walk
         cur = self.conn.cursor()
         cur.execute("create table if not exists public.companies (wba_id text primary key, name text, industry text, country text, region text, website text, lantern_id text, lei text)")
         cur.execute("alter table public.companies add column if not exists lei text")
@@ -2227,6 +2238,8 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_register_group('k', %s)", (k2.lower(),)); e = cur.fetchone()[0]
         self.assertEqual((e["company"]["name"], e["company"]["held"], e["direct_parent"]["held"], e["ultimate_parent"]["name"], [k["name"] for k in e["children"]], [s["name"] for s in e["sisters"]]),
                          ("Zebra Leasing Ltd", False, "Zebra Bank UK", "Zebra Group SA", ["Zebra Deep Ltd"], ["Mitsu Zebra KK"]))
+        cur.execute("select public.admin_register_group('k', 'zebra bank')"); tr = cur.fetchone()[0]["tree"]
+        self.assertEqual([(x["name"], x["depth"], x["parent"] == A or x["parent"] == k2) for x in tr], [("Mitsu Zebra KK", 1, True), ("Zebra Leasing Ltd", 1, True), ("Zebra Deep Ltd", 2, True)])   # the branches: a child of a child
         cur.execute("select public.admin_register_group('k', %s)", (P,)); top = cur.fetchone()[0]
         self.assertEqual((top["company"]["held"], top["company"]["name"], sorted(k["name"] for k in top["children"])), (True, "Zebra Fine", ["Zebra Bank UK plc", "Zebra Brasil SA"]))
         cur.execute("select public.admin_register_group('k', 'no such company')"); self.assertEqual(cur.fetchone()[0], {"found": False})

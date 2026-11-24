@@ -5307,6 +5307,8 @@ create table if not exists public.register_groups (
   read_at        timestamptz not null default now()
 );
 alter table public.register_groups enable row level security;
+alter table public.register_groups add column if not exists deep_at timestamptz;      -- when the levels below the first were walked (gleif_children.py --deep)
+alter table public.register_groups add column if not exists placed int;               -- entities of the group that have their direct parent
 
 create or replace function public.admin_register_lei_set(key text, company text, lei text) returns jsonb
 language plpgsql security definer set search_path = public, extensions
@@ -5446,6 +5448,18 @@ begin
                                                               'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = e.lei limit 1))
                                            order by e.name_key), '[]'::jsonb)
                  from (select e.*, lower(coalesce(e.name_latin, e.name)) as name_key from public.register_entities e where e.direct_parent_lei = lei0 order by 10 limit 60) e),
+    -- the branches (the owner: "in the detail, see all the branches"): every entity that hangs from it through direct
+    -- parents, level by level, 400 at most and six levels deep; parent: the entity it hangs from
+    'tree', (with recursive t as (
+               select e.lei, e.direct_parent_lei as parent, 1 as depth, array[e.lei] as path from public.register_entities e where e.direct_parent_lei = lei0 and e.lei <> lei0
+               union all
+               select e.lei, e.direct_parent_lei, t.depth + 1, t.path || e.lei from public.register_entities e join t on e.direct_parent_lei = t.lei
+               where t.depth < 6 and not e.lei = any(t.path))
+             select coalesce(jsonb_agg(jsonb_build_object('lei', x.lei, 'parent', x.parent, 'depth', x.depth, 'name', coalesce(e.name_latin, e.name), 'country', e.country, 'former', e.former_names,
+                                                          'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = x.lei limit 1))
+                                       order by x.depth, lower(coalesce(e.name_latin, e.name))), '[]'::jsonb)
+             from (select distinct on (t.lei) t.lei, t.parent, t.depth from t order by t.lei, t.depth limit 400) x join public.register_entities e on e.lei = x.lei),
+    'placed', (select g.placed from public.register_groups g where g.lei = lei0),
     -- every entity kept below it, for the table under the drawing and its download: one level down first
     'all', (select coalesce(jsonb_agg(jsonb_build_object('lei', e.lei, 'name', coalesce(e.name_latin, e.name), 'legal_name', e.name, 'country', e.country, 'status', e.entity_status,
                                                          'former', e.former_names, 'level', case when e.direct_parent_lei = lei0 then 'one level below' else 'further down' end,

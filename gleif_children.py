@@ -65,10 +65,59 @@ def children(asker, lei, kind, cap=CAP, seen_keys=None):
     return rows[:cap], (total if total is not None else len(rows))
 
 
+DEEP_SQL = """
+select g.lei, g.ultimate_total from public.register_groups g
+where coalesce(g.ultimate_total, 0) > coalesce(g.direct_total, 0)
+order by g.deep_at nulls first, g.lei limit %s"""
+DEEP_REQUESTS = 250          # for one group: a bank's thousands of entities are not walked to the end
+
+
+def walk(asker, first, total, budget=DEEP_REQUESTS):
+    """Who hangs from whom below the first level (24 Nov 2026, the owner: "in the detail, see all the branches"). first:
+    the LEIs one level below the parent. Each is asked for its own direct children, then those for theirs, level by
+    level, until every entity of the group has its place (total), no entity has children left, or the budget of
+    requests is spent. [(child row, its direct parent's LEI)] and how many requests it took."""
+    placed, out, queue, seen, used = len(first), [], list(first), set(first), 0
+    while queue and placed < (total or 0) and used < budget:
+        lei = queue.pop(0)
+        rows, _ = children(asker, lei, "direct-children", cap=PAGE); used += 1
+        for r in rows:
+            if r["lei"] in seen:
+                continue
+            seen.add(r["lei"]); out.append((r, lei)); queue.append(r["lei"]); placed += 1
+    return out, used
+
+
+def deep(a, conn, asker, c):
+    """The groups with entities below the first level: place them under their direct parents."""
+    with conn.cursor() as cur:
+        cur.execute(DEEP_SQL, (a.limit,)); todo = cur.fetchall()
+    conn.rollback()
+    for n, (lei, total) in enumerate(todo, 1):
+        with conn.cursor() as cur:
+            cur.execute("select lei from public.register_entities where direct_parent_lei = %s order by lei", (lei,)); first = [r[0] for r in cur.fetchall()]
+        conn.rollback()
+        found, used = walk(asker, first, total)
+        c["groups"] += 1; c["placed_below_the_first_level"] += len(found); c["groups_walked_to_the_end"] += (len(first) + len(found)) >= (total or 0)
+        if a.commit:
+            with conn.cursor() as cur:
+                for r, parent in found:
+                    cur.execute("insert into public.register_entities (lei, name, name_latin, former_names, country, entity_status, direct_parent_lei, ultimate_parent_lei, read_at) "
+                                "values (%s, %s, %s, %s, %s, %s, %s, %s, now()) on conflict (lei) do update set direct_parent_lei = excluded.direct_parent_lei, "
+                                "ultimate_parent_lei = coalesce(public.register_entities.ultimate_parent_lei, excluded.ultimate_parent_lei), read_at = now()",
+                                (r["lei"], r["name"], r["name_latin"], r["former"], r["country"], r["status"], parent, lei))
+                cur.execute("update public.register_groups set deep_at = now(), placed = %s where lei = %s", (len(first) + len(found), lei))
+            conn.commit()
+        if n % 50 == 0:
+            print(f"  {n:,} of {len(todo):,} groups, {asker.calls:,} requests", flush=True)
+    return len(todo)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int, default=LIMIT, help="parents read in this run")
+    ap.add_argument("--deep", action="store_true", help="place the entities below the first level under their direct parents, group by group")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
@@ -78,6 +127,11 @@ def main():
     run = qa.Run("gleif_children.py")
     asker, keys, c = Asker(requests.Session(), bot.BOT_UA), set(), collections.Counter()
     with evidence_db.connect() as conn:
+        if a.deep:
+            n = deep(a, conn, asker, c)
+            print(f"{n:,} groups walked in {asker.calls:,} requests: " + ", ".join(f"{k} {v}" for k, v in sorted(c.items())) + ("" if a.commit else " (dry run: nothing written)"), flush=True)
+            run.finish("ok", rows_in=n, rows_out=c["placed_below_the_first_level"] if a.commit else 0, counters={"requests": asker.calls, **dict(c)}, notes="deep, " + ("written" if a.commit else "dry run"))
+            return 0
         with conn.cursor() as cur:
             cur.execute(TODO_SQL, (a.limit,)); todo = [r[0] for r in cur.fetchall()]
         conn.rollback()
