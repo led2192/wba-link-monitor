@@ -64,7 +64,7 @@ class Watch(unittest.TestCase):
         for x in C.table():
             if x["days"]:
                 weekly[x["workflow"]] = sorted(weekly.get(x["workflow"], []) + x["days"])          # a workflow may have two entries (two days, two inputs)
-        self.assertEqual(weekly, {"keywords_by_year.yml": [0], "reference_candidates.yml": [0], "company_short_names.yml": [0], "standards_watch.yml": [0], "gleif_children.yml": [2, 3]})
+        self.assertEqual(weekly, {"keywords_by_year.yml": [0], "reference_candidates.yml": [0], "company_short_names.yml": [0], "standards_watch.yml": [0], "gleif_children.yml": [2], "gleif_relations.yml": [3]})
         self.assertIn("reference_use.yml", {x["workflow"] for x in C.table()}); self.assertIn("reference_examples.yml", {x["workflow"] for x in C.table()})
 
     def test_what_came_due_while_the_clock_was_away_is_started(self):
