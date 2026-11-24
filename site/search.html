@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v171 2026-11-24";
+  const CLIENT = "lantern v172 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -824,6 +824,7 @@
     const paint = () => document.querySelectorAll("#results .size[data-doc]").forEach(s => {
       const f = factOf[s.dataset.doc]; if (!f || s.textContent) return;
       const bits = []; if (f.pages) bits.push(`${Number(f.pages).toLocaleString("en")} pages in all`); if (dayText(f.found)) bits.push(`found ${dayText(f.found)}`);
+      if (f.entity) bits.push(`names its subsidiary ${f.entity}`);            // v172: the document may be the subsidiary's own, not the group's
       s.textContent = bits.join(" · ");
       // v102 (18 Nov 2026): a document whose text was never read. The library holds its address and title, not its
       // pages, so nothing in it can be found or answered from; the row looked like any other and a colleague took six
@@ -1997,7 +1998,10 @@
       }
       c.appendChild(t);
     }
-    const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); docLink(a, s); li.appendChild(a); ol.appendChild(li); }
+    const ol = el("ol"); for (const s of src) { const li = el("li"); const a = el("a", null, `${s.company} · ${s.year || "no year"} · ${s.doc_type || "document"} · page ${s.page}`); docLink(a, s); li.appendChild(a); li.dataset.doc = s.library_id || ""; ol.appendChild(li); }
+    // v172 (a bank's question was answered from its UK subsidiary's report, listed as the group's): a source that names a
+    // subsidiary of the company says so. Asked after the answer is shown.
+    { const ids = [...new Set(src.map(s => s.library_id).filter(Boolean))]; if (ids.length) rpc("doc_facts", { key, ids }).then(got => { for (const li of ol.children) { const f = got && got[li.dataset.doc]; if (f && f.entity) li.append(el("span", "what", ` · names its subsidiary ${f.entity}: it may be that entity's report, not the group's`)); } }).catch(() => {}); }
     c.append(ol, el("div", "what", (j.keywords ? `Pages found by searching “${j.keywords.replace(/\s+/g, " ")}”. ` : "") + "Written by a model from these pages only. Check the source before using a figure."));
     // v86, v88: with no company named, say what this answer is and, for those who may, offer the survey in its place.
     if (!state.company) {
