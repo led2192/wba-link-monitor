@@ -66,6 +66,25 @@ def group_search(cur, conn, md):
         group = cur.fetchone()[0]
         conn.commit()
         for words in ("water use", "water withdrawal 2024", "supplier audit"):
+            # the statement by itself, three ways of reaching the group's pages that hold every word (800 at most)
+            try:
+                cur.execute("select words from public.find_terms(%s)", (words,))
+                every, _ = level_queries(cur, cur.fetchone()[0]); conn.commit()
+                a = {"q": every, "ids": group.split(";")}
+                for way, sql in (("statement: the word index, then the companies (as today)", "select count(*) from (select p.library_id from public.pages p where p.words @@ %(q)s::tsquery and p.wba_id <> '' and p.wba_id = any(%(ids)s::text[]) limit 800) x"),
+                                 ("statement: one company at a time, each through the index", "select count(*) from unnest(%(ids)s::text[]) i cross join lateral (select p.library_id from public.pages p where p.words @@ %(q)s::tsquery and p.wba_id = i limit 100) x"),
+                                 ("statement: the companies' pages, then the words (group_first)", "select count(*) from (select 1 from (select p.words from public.pages p where p.wba_id = any(%(ids)s::text[]) and p.wba_id <> '' offset 0) x where x.words @@ %(q)s::tsquery limit 800) y")):
+                    t0 = time.time()
+                    try:
+                        cur.execute("set statement_timeout = '45s'"); cur.execute(sql, a); n = cur.fetchone()[0]; conn.commit()
+                        md.append(f"| {size} companies | {words} | {way} | {n} | {time.time() - t0:.2f} | |")
+                    except Exception as e:
+                        conn.rollback()
+                        md.append(f"| {size} companies | {words} | {way}: failed after {time.time() - t0:.1f} s ({type(e).__name__}) | | | |")
+                cur.execute("set statement_timeout = '90s'"); conn.commit()
+            except Exception as e:
+                conn.rollback()
+                md.append(f"| {size} companies | {words} | statements: failed ({type(e).__name__}) | | | |")
             usual = None
             for way in ("off", "on"):
                 t0 = time.time()
