@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v165 2026-11-24";
+  const CLIENT = "lantern v166 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2613,6 +2613,34 @@
       over.append(row); over.scrollIntoView({ block: "center" }); }
   }
   // v144: what the reader made of each company from its own reports (company_profile), for the owner to judge
+  // v166: one company's group, drawn as a tree: its parents above, itself filled, its sisters beside it, the entities one
+  // level below, and how many more lie further down. A box with a full line is a company lantrNa holds; dashed, it does not.
+  function drawOne(box, g) {
+    const c = g.company, lines = [], NS = "http://www.w3.org/2000/svg", mk = (t, a) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+    const W = 330, H = 30, GAP = 10, short = s => { s = String(s || ""); return s.length > 42 ? s.slice(0, 41) + "…" : s; };
+    let d = 0; const tipOf = e => [e.held ? `held in lantrNa as ${e.held}` : "not a company of lantrNa", e.country, e.lei].filter(Boolean).join(" · ");
+    if (g.ultimate_parent) { lines.push({ t: g.ultimate_parent.name || g.ultimate_parent.lei, depth: d, kind: g.ultimate_parent.held ? "held" : "out", note: "ultimate parent", title: tipOf(g.ultimate_parent) }); d++; }
+    if (g.direct_parent && (!g.ultimate_parent || g.direct_parent.lei !== g.ultimate_parent.lei)) { lines.push({ t: g.direct_parent.name || g.direct_parent.lei, depth: d, kind: g.direct_parent.held ? "held" : "out", note: "direct parent", title: tipOf(g.direct_parent) }); d++; }
+    lines.push({ t: c.name, depth: d, kind: "me", note: c.legal_name && c.legal_name !== c.name ? c.legal_name : "", title: [c.legal_name_own, c.country, c.lei, (c.former_names || []).length ? `formerly ${c.former_names.join(", ")}` : ""].filter(Boolean).join(" · ") });
+    for (const k of g.children || []) lines.push({ t: k.name || k.lei, depth: d + 1, kind: k.held ? "held" : "out", note: k.country || "", title: tipOf(k) + ((k.former || []).length ? ` · formerly ${k.former.join(", ")}` : "") });
+    const moreDirect = (g.direct_total || 0) - (g.children || []).length, deeper = (g.ultimate_total || 0) - (g.direct_total || 0);
+    if (moreDirect > 0) lines.push({ t: `and ${moreDirect.toLocaleString()} more one level below`, depth: d + 1, kind: "more" });
+    if (deeper > 0) lines.push({ t: `and ${deeper.toLocaleString()} more further down the group`, depth: d + 2, kind: "more" });
+    for (const s of g.sisters || []) lines.push({ t: s.name || s.lei, depth: d, kind: s.held ? "held" : "out", note: "sister" + (s.country ? ` · ${s.country}` : ""), title: tipOf(s) });
+    if ((g.sisters_total || 0) > (g.sisters || []).length) lines.push({ t: `and ${(g.sisters_total - g.sisters.length).toLocaleString()} more sisters`, depth: d, kind: "more" });
+    const kids = g.direct_total, state = !c.in_register ? "The register does not know this company's LEI: correct it below, and the group is read after the next reading." : g.read == null ? "Its subsidiaries have not been read yet (Register children, weekly)." : `${(kids || 0).toLocaleString()} entit${kids === 1 ? "y" : "ies"} one level below it and ${(g.ultimate_total || 0).toLocaleString()} in its whole group, as declared to the register; ${(g.sisters_total || 0).toLocaleString()} sister${g.sisters_total === 1 ? "" : "s"}. Subsidiaries read ${adminWhen(g.read)}.`;
+    box.append(el("p", null, `${c.name}${(c.former_names || []).length ? `, formerly ${c.former_names.join(", ")}` : ""}. ${state}`));
+    box.append(el("p", "what", "A full line: a company lantrNa holds. Dashed: an entity it does not. Hover a box for its country and LEI. The register holds what each entity declared: a parent by accounting control, not a minority stake."));
+    const maxD = Math.max(...lines.map(l => l.depth)), svg = mk("svg", { width: W + 24 + maxD * 22 + 170, height: lines.length * (H + GAP), role: "img", "aria-label": `The group of ${c.name}` }), last = {};
+    lines.forEach((l, i) => { const x = 2 + l.depth * 22, y = i * (H + GAP) + 2;
+      if (l.depth) { const py = (last[l.depth - 1] ?? 0) + H, px = x - 11; svg.append(mk("path", { d: `M${px} ${py} V${y + H / 2} H${x}`, fill: "none", stroke: "currentColor", "stroke-opacity": "0.4" })); }
+      last[l.depth] = y;
+      if (l.kind !== "more") { const r = mk("rect", { x, y, width: W, height: H, rx: 7, fill: l.kind === "me" ? "currentColor" : "none", "fill-opacity": "0.16", stroke: "currentColor", "stroke-width": l.kind === "me" ? "1.6" : "1", "stroke-opacity": l.kind === "out" ? "0.5" : "0.9", "stroke-dasharray": l.kind === "out" ? "4 3" : "" });
+        if (l.title) { const tip = mk("title", {}); tip.textContent = `${l.t} · ${l.title}`; r.append(tip); } svg.append(r); }
+      const t = mk("text", { x: x + 9, y: y + H / 2 + 4, "font-size": "12.5", fill: "currentColor", "font-weight": l.kind === "me" ? "700" : "400", "fill-opacity": l.kind === "more" ? "0.7" : "1" }); t.textContent = short(l.t); svg.append(t);
+      if (l.note && l.kind !== "more") { const n = mk("text", { x: x + W + 8, y: y + H / 2 + 4, "font-size": "11.5", fill: "currentColor", "fill-opacity": "0.65" }); n.textContent = short(l.note).slice(0, 26); svg.append(n); } });
+    const wrap = el("div"); wrap.style.cssText = "overflow-x:auto;margin:6px 0 14px"; wrap.append(svg); box.append(wrap);
+  }
   // v164: who belongs to whom, drawn. One small tree a group: the ultimate parent on top (filled when lantrNa holds it as a
   // company), a direct parent between when it is another entity, the companies of lantrNa below. Largest groups first.
   function drawGroups(box, rows) {
@@ -2653,8 +2681,14 @@
       const cell = v => { const s = v == null ? "" : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
       return "\ufeff" + [cols.join(","), ...rows.map(x => cols.map(k => cell(x[k])).join(","))].join("\r\n"); };
     tools.append(adminBtn("Download everything (CSV)", async () => { const rows = await load(); if (!rows) return; const a = el("a"); a.href = URL.createObjectURL(new Blob([csv(rows)], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-register-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); tsay.textContent = ` ${rows.length.toLocaleString()} rows`; }),
-      adminBtn("Draw the groups", async () => { const rows = await load(); if (!rows) return; groups.innerHTML = ""; drawGroups(groups, rows); }), tsay);
-    body.append(tools, groups);
+      adminBtn("Draw every group", async () => { const rows = await load(); if (!rows) return; groups.innerHTML = ""; drawGroups(groups, rows); }), tsay);
+    // v166 (the owner: "the draw could be simply to see the relations of one complete company"): one company's group
+    const one = el("div"); one.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px"; const pick = document.createElement("input"); pick.placeholder = "a company, to draw its group"; pick.setAttribute("aria-label", "a company, to draw its group");
+    pick.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--bg);color:var(--fg)";
+    const drawIt = async () => { if (!pick.value.trim()) return; groups.innerHTML = ""; groups.append(el("p", "what", "reading…")); const g = await authed("admin_register_group", { key, search: pick.value.trim() }).catch(() => null); groups.innerHTML = "";
+      if (!g || !g.found) { groups.append(el("p", null, g ? "No company of that name has been asked about in the register (it may have no LEI)." : "Could not be read.")); return; } drawOne(groups, g); };
+    pick.onkeydown = ev => { if (ev.key === "Enter") drawIt(); }; one.append(pick, adminBtn("Draw its group", drawIt));
+    body.append(one, tools, groups);
     // v165 (the owner: "I have to be able to correct the LEI in the admin"): the LEI of a row is corrected in place
     const leiCell = x => { const box = el("div"); box.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap"; const shown = el("span", null, x.lei || "none"), say = el("span", "what", "");
       const edit = el("a", null, x.lei ? "correct" : "add"); edit.href = "#"; edit.style.fontSize = "12px";

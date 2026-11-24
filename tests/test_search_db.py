@@ -2210,6 +2210,17 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("insert into public.companies (wba_id, name) values ('RG6', 'Zebra No Code')"); cur.execute("select public.admin_register('k')")
         self.assertIn("RG6", [x["wba_id"] for x in cur.fetchone()[0]["no_lei"]])
         cur.execute("update public.companies set lei = %s where wba_id = 'RG3'", (C,)); cur.execute("update public.company_register set lei = %s, found = false, pending = false where wba_id = 'RG3'", (C,)); cur.execute("delete from public.company_lei_fixes")
+        # one company's group: its parents, the entities one level below (a Latin name first), the totals, and its sisters
+        cur.execute("update public.company_register set direct_parent_lei = %s, direct_parent_name = 'Zebra Group SA' where wba_id = 'RG1'", (P,))
+        cur.executemany("insert into public.register_entities (lei, name, name_latin, country, direct_parent_lei, ultimate_parent_lei) values (%s, %s, %s, %s, %s, %s)",
+                        [("K1", "三菱ゼブラ株式会社", "Mitsu Zebra KK", "JP", A, P), ("K2", "Zebra Leasing Ltd", None, "GB", A, P), ("K3", "Zebra Deep Ltd", None, "GB", "K2", P), (A, "Zebra Bank UK plc", None, "GB", P, P), ("S1", "Zebra Brasil SA", None, "BR", P, P)])
+        cur.execute("insert into public.register_groups (lei, direct_total, ultimate_total, direct_kept, ultimate_kept) values (%s, 2, 3, 2, 3)", (A,))
+        cur.execute("select public.admin_register_group('k', 'zebra bank')"); g = cur.fetchone()[0]
+        self.assertEqual((g["found"], g["company"]["name"], g["ultimate_parent"]["name"], g["ultimate_parent"]["held"], g["direct_parent"]["lei"]), (True, "Zebra Bank UK", "Zebra Group SA", "Zebra Fine", P))
+        self.assertEqual(([k["name"] for k in g["children"]], g["direct_total"], g["ultimate_total"]), (["Mitsu Zebra KK", "Zebra Leasing Ltd"], 2, 3))
+        self.assertEqual(([s["name"] for s in g["sisters"]], g["sisters_total"]), (["Zebra Brasil SA"], 1))                                   # itself is not its own sister
+        cur.execute("select public.admin_register_group('k', 'no such company')"); self.assertEqual(cur.fetchone()[0], {"found": False})
+        cur.execute("delete from public.register_entities"); cur.execute("delete from public.register_groups")
         cur.execute("select public.admin_register_all('k')"); al = {x["wba_id"]: x for x in cur.fetchone()[0]}
         self.assertEqual(len(al), 5); self.assertEqual((al["RG1"]["company"], al["RG1"]["ultimate_parent_name"], al["RG1"]["held_parent"]), ("Zebra Bank UK", "Zebra Group SA", "Zebra Fine"))   # its parent is a company of lantrNa too
         self.assertEqual((al["RG4"]["held_parent"], al["RG3"]["found"], al["RG5"]["company"]), (None, False, None))
