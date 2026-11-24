@@ -88,7 +88,7 @@ def walk(asker, first, total, budget=DEEP_REQUESTS):
     return out, used
 
 
-def deep(a, conn, asker, c):
+def walk_groups(a, conn, asker, c):
     """The groups with entities below the first level: place them under their direct parents."""
     with conn.cursor() as cur:
         cur.execute(DEEP_SQL, (a.limit,)); todo = cur.fetchall()
@@ -128,8 +128,12 @@ def main():
     asker, keys, c = Asker(requests.Session(), bot.BOT_UA), set(), collections.Counter()
     with evidence_db.connect() as conn:
         if a.deep:
-            n = deep(a, conn, asker, c)
+            n = walk_groups(a, conn, asker, c)
             print(f"{n:,} groups walked in {asker.calls:,} requests: " + ", ".join(f"{k} {v}" for k, v in sorted(c.items())) + ("" if a.commit else " (dry run: nothing written)"), flush=True)
+            if a.commit:
+                with conn.cursor() as cur:
+                    cur.execute("select public.register_names_refresh()"); print(f"{cur.fetchone()[0]:,} names lead to a company held", flush=True)
+                conn.commit()
             run.finish("ok", rows_in=n, rows_out=c["placed_below_the_first_level"] if a.commit else 0, counters={"requests": asker.calls, **dict(c)}, notes="deep, " + ("written" if a.commit else "dry run"))
             return 0
         with conn.cursor() as cur:

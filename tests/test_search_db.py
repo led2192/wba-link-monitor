@@ -2188,6 +2188,10 @@ class SearchOnPostgres(unittest.TestCase):
             def get(self, url, params=None, headers=None, timeout=None):
                 lei = url.split("/")[-2]; self.asked.append(lei)
                 return Answer(200, {"meta": {"pagination": {"total": len(fam[lei]), "lastPage": 1}}, "data": [{"id": k, "attributes": {"lei": k, "entity": {"legalName": {"name": "Zebra " + k}}}} for k in fam[lei]]})
+        # 24 Nov 2026: main() named a list `deep` and so hid the function of that name: the first run of the levels died at once
+        import types
+        for mod in (K, G):
+            self.assertFalse(set(mod.main.__code__.co_varnames) & {n for n, v in vars(mod).items() if isinstance(v, types.FunctionType)}, mod.__name__)
         s3 = Sess3(); found, used = K.walk(G.Asker(s3, "the-bot", per_minute=6000, sleep=lambda s: None), ["F1", "F2"], 5)
         self.assertEqual(([(r["lei"], p) for r, p in found], used, s3.asked), ([("G1", "F1"), ("G2", "F1"), ("H1", "G1")], 3, ["F1", "F2", "G1"]))     # all five placed: G2 and H1 are not asked
         s3 = Sess3(); found, used = K.walk(G.Asker(s3, "the-bot", per_minute=6000, sleep=lambda s: None), ["F1", "F2"], 5, budget=1)

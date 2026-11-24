@@ -3,6 +3,7 @@
 Lessons that cost time to learn. Read before changing the area they name.
 
 ## The search page
+- **A script's `main()` is not run by the offline tests unless a test calls it.** `gleif_children.py --deep` passed every test and failed on its first real run, because a local variable of `main()` had the name of the function it then called (24 Nov 2026). A new mode gets its first run as a dry run with a small `limit`, read to the end, before anyone is told it is running.
 - **An LEI made of digits alone does not survive a spreadsheet.** Twenty digits are read as a number and rounded: two companies' LEIs ended in `00000` and the register did not know them (24 Nov 2026). `lei_ok` checks the two check digits; a code that fails them was damaged on the way, not issued.
 - **A new scheduled job goes on the server's clock, never on a `schedule:` of GitHub's.** Known since 15 Nov 2026 and forgotten on 23 Nov: two nightly jobs given a cron did not start on their first night. `server/clock.json` is the only place a time is written.
 - **`search_exam.py --option` only switches a `lantern.` setting of the search's own database.** `own_live` is a row in the server's settings, so `--option own_live` ran the same search twice and printed two equal tables (24 Nov 2026). To compare it: `server_own_index.yml` with `live=on` and `commit`, a plain exam, then `live=off`.
