@@ -21,5 +21,5 @@
   {"workflow": "reference_candidates.yml", "name": "Reference candidates (names in the reports the list does not hold; weekly)", "at": ["03:43"], "days": ["mon"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "company_short_names.yml", "name": "Company short names (weekly)", "at": ["04:13"], "days": ["mon"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "standards_watch.yml", "name": "Standards watch (the standard-setters' own pages; weekly)", "at": ["05:23"], "days": ["mon"], "inputs": {"as_scheduled": "true"}},
-  {"workflow": "gleif_register.yml", "name": "Register (the public register of legal entities; weekly)", "at": ["06:11"], "days": ["tue"], "inputs": {"as_scheduled": "true"}}
+  {"workflow": "gleif_register.yml", "name": "Register (the public register of legal entities; daily, a few hundred requests)", "at": ["06:11"], "inputs": {"as_scheduled": "true"}}
 ]

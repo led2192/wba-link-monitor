@@ -138,6 +138,12 @@ def upsert(conn, rows):
                          on conflict (wba_id) do update set name = excluded.name, industry = excluded.industry,
                            country = excluded.country, region = excluded.region, website = excluded.website, lei = excluded.lei, isin = excluded.isin,
                            lantern_id = coalesce(excluded.lantern_id, public.companies.lantern_id), updated = now()""", rows)
+        # an LEI the owner corrected in Admin (Register) outlives the nightly copy: it is put back (24 Nov 2026)
+        c.execute("""do $fix$ begin
+                       if to_regclass('public.company_lei_fixes') is not null then
+                         update public.companies c set lei = f.lei from public.company_lei_fixes f where f.wba_id = c.wba_id and c.lei is distinct from f.lei;
+                       end if;
+                     end $fix$""")
     conn.commit()
 
 
