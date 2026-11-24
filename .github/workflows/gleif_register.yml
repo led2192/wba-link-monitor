@@ -1,0 +1,42 @@
+# What the public register of legal entities (GLEIF, CC0) says about the companies that carry an LEI (gleif_register.py):
+# known, active, current, and their parents. Its public API, 45 requests a minute at most. Weekly (the server's clock), and
+# by hand (dry unless mode=commit). Prints counts and the names of JSON keys only.
+name: Register
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_scheduled:
+        description: "what the clock on the server starts: a commit run (server/clock.json)"
+        type: boolean
+        default: false
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+
+concurrency:
+  group: gleif-register
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: [self-hosted, lantern]      # lantrNa's server
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Load
+        run: |
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python gleif_register.py --commit
+          else python gleif_register.py; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

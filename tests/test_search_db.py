@@ -2135,6 +2135,46 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_reference_candidates('k')"); self.assertEqual(cur.fetchone()[0]["rows"], [])
         cur.execute("delete from public.reference_candidates"); cur.execute("delete from public.reference_entries where id = %s", (made,))
 
+    def test_the_register_of_legal_entities_says_who_a_company_is_and_whose(self):
+        """24 Nov 2026: GLEIF's register, asked for the companies that carry an LEI. A hundred LEIs a request, a parent
+        asked once and only where the record says one exists, never faster than the limit; the owner sees the LEIs
+        that are unknown or lapsed and the companies that are another's subsidiary."""
+        import gleif_register as G
+        rec = lambda lei, name, status="ACTIVE", reg="ISSUED", dp=None, up=None: {"id": lei, "attributes": {"lei": lei, "entity": {"legalName": {"name": name}, "legalAddress": {"country": "GB"}, "status": status},
+                                                                                         "registration": {"status": reg}}, "relationships": {"direct-parent": {"links": dp or {}}, "ultimate-parent": {"links": up or {}}}}
+        A, B, C, P = "A" * 18 + "11", "B" * 18 + "22", "C" * 18 + "33", "P" * 18 + "44"
+        book = {A: rec(A, "Zebra Bank UK plc", dp={"lei-record": "u/P"}, up={"lei-record": "u/P"}), B: rec(B, "Zebra Mills SA", reg="LAPSED", up={"reporting-exception": "u/x"})}
+        class Answer:
+            def __init__(self, code, body=None): self.status_code, self._b = code, body
+            def json(self): return self._b
+        class Sess:
+            def __init__(self): self.asked = []
+            def get(self, url, params=None, headers=None, timeout=None):
+                self.asked.append((url, dict(params or {}), headers["User-Agent"]))
+                if url.endswith("/lei-records"):
+                    return Answer(200, {"data": [book[l] for l in params["filter[lei]"].split(",") if l in book]})
+                return Answer(200, {"data": rec(P, "Zebra Group SA")}) if url == "u/P" else Answer(404)
+        waits, now = [], [0.0]
+        sess = Sess(); ask = G.Asker(sess, "the-bot", per_minute=60, sleep=lambda s: (waits.append(s), now.__setitem__(0, now[0] + s)), clock=lambda: now[0])
+        keys = set(); rows = G.read(ask, [("W1", A), ("W2", B), ("W3", C), ("W4", A)], keys)
+        self.assertEqual((rows["W1"]["name"], rows["W1"]["ultimate_lei"], rows["W1"]["ultimate_name"], rows["W1"]["direct_name"]), ("Zebra Bank UK plc", P, "Zebra Group SA", "Zebra Group SA"))
+        self.assertEqual((rows["W2"]["registration_status"], rows["W2"]["ultimate_kind"], rows["W2"].get("ultimate_lei")), ("LAPSED", "exception", None))
+        self.assertEqual((rows["W3"]["found"], rows["W4"]["lei"]), (False, A))                         # an LEI the register does not know; two companies with one LEI
+        self.assertEqual([u for u, _, _ in sess.asked], [G.API + "/lei-records", "u/P"])               # one request for the records, the parent once
+        self.assertEqual({ua for _, _, ua in sess.asked}, {"the-bot"}); self.assertTrue(all(w >= 0.99 for w in waits[1:]))   # by name, a second apart at 60 a minute
+        self.assertIn("ultimate-parent.links.reporting-exception", keys)
+        cur = self.conn.cursor()
+        cur.execute("create table if not exists public.companies (wba_id text primary key, name text, industry text, country text, region text, website text, lantern_id text, lei text)")
+        cur.execute("alter table public.companies add column if not exists lei text")
+        cur.executemany("insert into public.companies (wba_id, name, lei) values (%s, %s, %s) on conflict (wba_id) do update set name = excluded.name, lei = excluded.lei", [("RG1", "Zebra Bank UK", A), ("RG2", "Zebra Mills", B), ("RG3", "Zebra Lost", C), ("RG4", "Zebra Fine", P)])
+        put = lambda w, lei, found, name=None, st=None, reg=None, ul=None, un=None: cur.execute(
+            "insert into public.company_register (wba_id, lei, found, legal_name, entity_status, registration_status, ultimate_parent_lei, ultimate_parent_name) values (%s, %s, %s, %s, %s, %s, %s, %s)", (w, lei, found, name, st, reg, ul, un))
+        put("RG1", A, True, "Zebra Bank UK plc", "ACTIVE", "ISSUED", P, "Zebra Group SA"); put("RG2", B, True, "Zebra Mills SA", "ACTIVE", "LAPSED"); put("RG3", C, False); put("RG4", P, True, "Zebra Group SA", "ACTIVE", "ISSUED", P, "Zebra Group SA")
+        cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
+        self.assertEqual((r["checked"], r["fine"]), (4, 1))
+        self.assertEqual([(x["wba_id"], x["what"]) for x in r["rows"]], [("RG3", "the register does not know this LEI"), ("RG2", "the registration is lapsed"), ("RG1", "a subsidiary: its ultimate parent is another entity")])
+        cur.execute("delete from public.company_register"); cur.execute("delete from public.companies where wba_id like 'RG_'")
+
     def test_what_a_standard_setter_names_on_its_page_and_the_list_lacks_is_a_candidate(self):
         """24 Nov 2026: the list's entries carry the address of their own page. A full name with its acronym found there
         and not held by the list is a candidate with the site that names it; a page robots.txt forbids, or that the

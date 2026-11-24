@@ -5233,6 +5233,61 @@ $$;
 revoke all on function public.admin_doc_fix(text, text, text, text, int, text) from public, anon;
 grant execute on function public.admin_doc_fix(text, text, text, text, int, text) to authenticated;
 
+-- What the public register of legal entities (GLEIF, CC0) says about each company that carries an LEI (24 Nov 2026,
+-- gleif_register.py): is the LEI known, is the entity active and its registration current, and who its direct and
+-- ultimate parents are, where the entity declared them. The first step towards a list of companies of lantrNa's own
+-- and towards knowing whose a document is (a subsidiary's report held under its group).
+create table if not exists public.company_register (
+  wba_id               text primary key,
+  lei                  text not null,
+  found                boolean not null,
+  legal_name           text,
+  country              text,
+  entity_status        text,
+  registration_status  text,
+  direct_parent_lei    text,
+  direct_parent_name   text,
+  ultimate_parent_lei  text,
+  ultimate_parent_name text,
+  parent_note          text,
+  checked_at           timestamptz not null default now()
+);
+alter table public.company_register enable row level security;
+
+-- For the owner: the counts, and the rows worth a look. An LEI the register does not know, an entity that is not
+-- active, a registration that is not current (lapsed, merged, retired), and a company whose ultimate parent is
+-- another entity (it is a subsidiary: its group may be the company to hold).
+create or replace function public.admin_register(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'companies', (select count(*) from public.companies),
+    'with_lei', (select count(*) from public.companies c where upper(btrim(coalesce(c.lei, ''))) ~ '^[A-Z0-9]{18}[0-9]{2}$'),
+    'checked', (select count(*) from public.company_register),
+    'checked_at', (select max(r.checked_at) from public.company_register r),
+    'fine', (select count(*) from public.company_register r where r.found and r.entity_status = 'ACTIVE' and r.registration_status = 'ISSUED'
+                                                              and (r.ultimate_parent_lei is null or r.ultimate_parent_lei = r.lei)),
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('wba_id', x.wba_id, 'company', x.name, 'lei', x.lei, 'legal_name', x.legal_name, 'country', x.country, 'what', x.what,
+                                                          'parent', x.ultimate_parent_name, 'direct', x.direct_parent_name) order by x.ord, x.name), '[]'::jsonb)
+             from (select r.*, c.name,
+                          case when not r.found then 'the register does not know this LEI'
+                               when coalesce(r.entity_status, '') <> 'ACTIVE' then 'the entity is ' || lower(coalesce(r.entity_status, 'of unknown status'))
+                               when coalesce(r.registration_status, '') <> 'ISSUED' then 'the registration is ' || lower(replace(coalesce(r.registration_status, 'unknown'), '_', ' '))
+                               else 'a subsidiary: its ultimate parent is another entity' end as what,
+                          case when not r.found then 0 when coalesce(r.entity_status, '') <> 'ACTIVE' then 1 when coalesce(r.registration_status, '') <> 'ISSUED' then 2 else 3 end as ord
+                   from public.company_register r join public.companies c on c.wba_id = r.wba_id
+                   where not r.found or coalesce(r.entity_status, '') <> 'ACTIVE' or coalesce(r.registration_status, '') <> 'ISSUED'
+                      or (r.ultimate_parent_lei is not null and r.ultimate_parent_lei <> r.lei)
+                   order by 16, c.name limit 600) x));      -- 16: ord, the kind of trouble
+end;
+$$;
+revoke all on function public.admin_register(text) from public, anon;
+grant execute on function public.admin_register(text) to authenticated;
+
 -- The owner's queue for the extension (24 Nov 2026: "a check box, and a button, so that the extension downloads all
 -- this"). In Admin, Documents to fetch, rows are ticked and sent to the queue; the extension's sending window then
 -- downloads each address with the owner's browser, one after another, and sends the file as it sends any other.
