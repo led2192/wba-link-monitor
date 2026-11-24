@@ -2090,6 +2090,55 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_reference_candidates('k')"); self.assertEqual(cur.fetchone()[0]["rows"], [])
         cur.execute("delete from public.reference_candidates"); cur.execute("delete from public.reference_entries where id = %s", (made,))
 
+    def test_what_a_standard_setter_names_on_its_page_and_the_list_lacks_is_a_candidate(self):
+        """24 Nov 2026: the list's entries carry the address of their own page. A full name with its acronym found there
+        and not held by the list is a candidate with the site that names it; a page robots.txt forbids, or that the
+        site refuses, is not read and no other name is tried; the reports' weekly run leaves these candidates alone."""
+        import standards_watch as W, robot_identity as bot
+        from reference_candidates import pairs, key_of, LEGAL
+        page = ("<html><head><script>var a = 'Hidden Zebra Body (HZB)';</script><style>.x{}</style></head><body><p>The Zebra Sustainability Standards Board&nbsp;(ZSSB) "
+                "works with the <a href='/x'>Held Zebra Council (HZC)</a> and Zebra Motors AG (ZM).</p></body></html>")
+        self.assertEqual(W.found_on(page, {"hzc"}, pairs, key_of, LEGAL), {"zebra sustainability standards board": ("Zebra Sustainability Standards Board", "ZSSB")})
+        self.assertEqual((W.host_of("https://www.Example.org/a?b"), W.host_of("http://sub.example.org")), ("example.org", "sub.example.org"))
+
+        class Answer:
+            def __init__(self, code, body=b"", kind="text/html; charset=utf-8"):
+                import io
+                self.status_code, self.headers, self.encoding, self.raw, self.text = code, {"Content-Type": kind}, "utf-8", None, body.decode()
+                raw = io.BytesIO(body); self.raw = type("R", (), {"read": staticmethod(lambda n, decode_content=True: raw.read(n))})
+            def close(self): pass
+        class Sess:
+            def __init__(self): self.asked = []
+            def get(self, url, headers=None, **kw):
+                self.asked.append((url, headers["User-Agent"]))
+                if url.endswith("/robots.txt"):
+                    return Answer(200, b"User-agent: *\nDisallow: /private/\n", "text/plain") if "closed.example" in url else Answer(404)
+                return Answer(403) if "refuses.example" in url else Answer(200, b"%PDF", "application/pdf") if url.endswith(".pdf") else Answer(200, page.encode())
+        s, robots = Sess(), {}
+        self.assertEqual(W.read(s, "https://open.example/about", robots, bot)[0], "ok")
+        self.assertEqual(W.read(s, "https://closed.example/private/a", robots, bot), ("forbidden", ""))
+        self.assertEqual(W.read(s, "https://refuses.example/a", robots, bot), ("refused", ""))
+        self.assertEqual(W.read(s, "https://open.example/a.pdf", robots, bot), ("not html", ""))
+        self.assertEqual({ua for _, ua in s.asked}, {bot.BOT_UA})                                   # by its own name, always
+        self.assertNotIn("https://closed.example/private/a", [u for u, _ in s.asked])              # a forbidden page is never asked for
+        self.assertEqual(len([u for u, _ in s.asked if "refuses.example/a" in u]), 1)               # refused once, not tried again
+        self.assertEqual(len([u for u, _ in s.asked if u == "https://open.example/robots.txt"]), 1) # robots.txt once a site
+
+        cur = self.conn.cursor()
+        cur.execute("insert into public.reference_candidates (key, name, acronym, kind, companies, documents, library_id) values ('from the reports', 'From The Reports', 'FTR', 'term', 5, 9, 'L1')")
+        cur.execute("insert into public.reference_candidates (key, name, acronym, kind, source, seen_on, new_on_site) values ('zebra sustainability standards board', 'Zebra Sustainability Standards Board', 'ZSSB', 'organisation', 'setter', array['open.example'], true)")
+        cur.execute("insert into public.reference_watch (url, entry, status, names) values ('https://open.example/about', 'organisation:x', 'ok', array['zebra sustainability standards board']), ('https://closed.example/private/a', 'norm:y', 'forbidden', '{}')")
+        cur.execute("select public.admin_reference_candidates('k')"); r = cur.fetchone()[0]
+        self.assertEqual(([x["key"] for x in r["rows"]], [(x["name"], x["seen_on"], x["new"]) for x in r["setters"]]), (["from the reports"], [("Zebra Sustainability Standards Board", ["open.example"], True)]))
+        self.assertEqual((r["watch"]["pages"], r["watch"]["read"], r["watch"]["closed"]), (2, 1, 1))
+        cur.execute("delete from public.reference_candidates where status = 'found' and source = 'reports'")          # what reference_candidates.py clears each week
+        cur.execute("select key from public.reference_candidates"); self.assertEqual(cur.fetchall(), [("zebra sustainability standards board",)])
+        cur.execute("select public.admin_reference_candidate_set('k', 'zebra sustainability standards board', true)"); self.assertTrue(cur.fetchone()[0]["ok"])
+        cur.execute("select public.admin_reference_candidates('k')"); self.assertEqual(cur.fetchone()[0]["setters"], [])
+        cur.execute("delete from public.reference_candidates"); cur.execute("delete from public.reference_watch")
+        src = open(os.path.join(os.path.dirname(os.path.abspath(W.__file__)), "reference_candidates.py"), encoding="utf-8").read()
+        self.assertIn("where status = 'found' and source = 'reports'", src)
+
     def test_a_term_gets_examples_from_the_reports(self):
         """23 Nov 2026: a term's card shows how reports write about it. The sentence is cut from the page with no model:
         prose that explains or applies the term, not a line of a contents page; one a company; a rejected one is gone."""

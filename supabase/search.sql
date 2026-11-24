@@ -8185,6 +8185,21 @@ create table if not exists public.reference_candidates (
   found_at   timestamptz not null default now()
 );
 alter table public.reference_candidates enable row level security;
+-- 24 Nov 2026: a second source of candidates, the standard-setters' own pages (standards_watch.py reads the address each
+-- entry of the list carries, as lanterN-bot and where robots.txt allows). source: 'reports' or 'setter'; seen_on: the
+-- sites that name it; new_on_site: it appeared on a page after that page's first reading. reference_watch: one row a
+-- page read, with the pairs it held, so that the next reading knows what is new.
+alter table public.reference_candidates add column if not exists source text not null default 'reports';
+alter table public.reference_candidates add column if not exists seen_on text[] not null default '{}';
+alter table public.reference_candidates add column if not exists new_on_site boolean not null default false;
+create table if not exists public.reference_watch (
+  url        text primary key,
+  entry      text,
+  status     text not null,
+  names      text[] not null default '{}',
+  checked_at timestamptz not null default now()
+);
+alter table public.reference_watch enable row level security;
 
 create or replace function public.admin_reference_candidates(key text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
@@ -8196,6 +8211,19 @@ begin
   return jsonb_build_object(
     'found', (select count(*) from public.reference_candidates c where c.status = 'found'),
     'found_at', (select max(c.found_at) from public.reference_candidates c),
+    -- the standard-setters' pages: how many were read, how many could not be (the site forbids or refuses the robot), and when
+    'watch', (select jsonb_build_object('pages', count(*), 'read', count(*) filter (where w.status = 'ok'), 'closed', count(*) filter (where w.status in ('forbidden', 'refused')),
+                                        'checked_at', max(w.checked_at)) from public.reference_watch w),
+    'setters', (select coalesce(jsonb_agg(jsonb_build_object('key', c.key, 'name', c.name, 'acronym', c.acronym, 'kind', c.kind, 'seen_on', c.seen_on, 'new', c.new_on_site, 'companies', c.companies,
+                                                             'near', (select coalesce(jsonb_agg(n.label), '[]'::jsonb)
+                                                                      from (select e.name || ' (' || e.kind || ')' as label from public.reference_entries e
+                                                                            where not e.gone and e.kind <> 'about'
+                                                                              and (e.name_key like '%' || c.key || '%'
+                                                                                   or (coalesce(c.acronym, '') <> '' and (' ' || e.name_key || ' ') like '% ' || public.reference_key(c.acronym) || ' %'))
+                                                                            order by length(e.name_key), e.name limit 3) n))
+                                          order by c.new_on_site desc, cardinality(c.seen_on) desc, c.key), '[]'::jsonb)
+                from (select * from public.reference_candidates c where c.status = 'found' and cardinality(c.seen_on) > 0
+                      order by c.new_on_site desc, cardinality(c.seen_on) desc, c.key limit 150) c),
     -- near: what the list already holds that looks like it (the owner, 23 Nov 2026: "how do I know whether these exist already?").
     -- A candidate is not in the list by its exact name or acronym; an entry whose name holds the candidate's name, or its
     -- acronym as a word, is shown beside it ("IFRS Foundation" beside "International Financial Reporting Standards (IFRS)").
@@ -8207,7 +8235,7 @@ begin
                                                                                 or (coalesce(c.acronym, '') <> '' and (' ' || e.name_key || ' ') like '% ' || public.reference_key(c.acronym) || ' %'))
                                                                          order by length(e.name_key), e.name limit 3) n))
                                       order by c.companies desc, c.documents desc, c.key), '[]'::jsonb)
-             from (select * from public.reference_candidates c where c.status = 'found' order by c.companies desc, c.documents desc, c.key limit 150) c));
+             from (select * from public.reference_candidates c where c.status = 'found' and c.source = 'reports' order by c.companies desc, c.documents desc, c.key limit 150) c));
 end;
 $$;
 revoke all on function public.admin_reference_candidates(text) from public, anon;

@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v157 2026-11-24";
+  const CLIENT = "lantern v158 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2661,14 +2661,23 @@
     bar.append(fq, adminBtn("Find", find), adminBtn("Add an entry", () => form({}, () => adminReference(body)))); body.append(bar, editor, found);
     // v148: what the reports name and the list does not hold (reference_candidates.py): a full name with its acronym that several companies write
     const cand = el("div"); body.append(cand);
-    authed("admin_reference_candidates", { key }).then(c => { if (!c || !(c.rows || []).length) return;
-      cand.append(el("h3", null, "Named in the reports, not in the list"), el("p", "what", `Full names with their acronym that several companies write in recent reports and the list does not hold, most companies first (${c.found.toLocaleString()} in all, from a sample of pages, found ${adminWhen(c.found_at)}). None is in the list under this exact name or acronym; the last column shows the entries that look like it, when there are any. Add the ones worth an entry; set the rest aside and they do not come back.`));
-      cand.append(adminTable(["Name", "Acronym", "Looks like", "Companies", "Documents", "In the list, similar", ""], c.rows.map(x => { const act = el("div"), say = el("span", "what", "");
+    authed("admin_reference_candidates", { key }).then(c => { if (!c) return;
+      if ((c.rows || []).length) cand.append(el("h3", null, "Named in the reports, not in the list"), el("p", "what", `Full names with their acronym that several companies write in recent reports and the list does not hold, most companies first (${c.found.toLocaleString()} in all, from a sample of pages, found ${adminWhen(c.found_at)}). None is in the list under this exact name or acronym; the last column shows the entries that look like it, when there are any. Add the ones worth an entry; set the rest aside and they do not come back.`));
+      if ((c.rows || []).length) cand.append(adminTable(["Name", "Acronym", "Looks like", "Companies", "Documents", "In the list, similar", ""], c.rows.map(x => { const act = el("div"), say = el("span", "what", "");
         // v151 (the owner: no description is needed to add one): one press adds the entry as found; "Edit first" opens the form
         act.append(adminBtn("Add it", async () => { say.textContent = " adding…"; let s = null; try { s = await authed("admin_reference_save", { key, entry: null, kind: x.kind, name: x.name, aliases: x.acronym ? [x.acronym] : [], text_en: null, text_es: null, url: null, hide: false, ai: false }); } catch (err) {} if (s && s.ok) adminReference(body); else say.textContent = " not added (it may be in the list already)"; }),
           adminBtn("Edit first", () => { form({ kind: x.kind, name: x.name, aliases: x.acronym ? [x.acronym] : [] }, () => adminReference(body)); editor.scrollIntoView({ block: "center" }); }),
           adminBtn("Set aside", async () => { const s = await authed("admin_reference_candidate_set", { key, candidate: x.key, dismissed: true }); if (s && s.ok) adminReference(body); else say.textContent = " not saved"; }), say);
-        return [x.name, x.acronym || "", x.kind, x.companies, x.documents, (x.near || []).join(" · ") || "nothing like it", act]; }))); }).catch(() => {});
+        return [x.name, x.acronym || "", x.kind, x.companies, x.documents, (x.near || []).join(" · ") || "nothing like it", act]; })));
+      // v158: what the standard-setters name on their own pages and the list does not hold (standards_watch.py)
+      const w = c.watch || {}; if (!(c.setters || []).length && !w.pages) return;
+      cand.append(el("h3", null, "Named by the standard-setters, not in the list"), el("p", "what", `Full names with their acronym found on the pages the list's own entries point to (${(w.read || 0).toLocaleString()} of ${(w.pages || 0).toLocaleString()} pages read${w.closed ? `; ${w.closed.toLocaleString()} sites do not let the robot read them and are left alone` : ""}; last read ${adminWhen(w.checked_at)}). "New" means the name appeared on a page since it was first read.`));
+      if (!(c.setters || []).length) { cand.append(el("p", null, "Nothing the list does not hold yet.")); return; }
+      cand.append(adminTable(["Name", "Acronym", "Looks like", "Named on", "", "In the list, similar", ""], c.setters.map(x => { const act = el("div"), say = el("span", "what", "");
+        act.append(adminBtn("Add it", async () => { say.textContent = " adding…"; let s = null; try { s = await authed("admin_reference_save", { key, entry: null, kind: x.kind, name: x.name, aliases: x.acronym ? [x.acronym] : [], text_en: null, text_es: null, url: null, hide: false, ai: false }); } catch (err) {} if (s && s.ok) adminReference(body); else say.textContent = " not added (it may be in the list already)"; }),
+          adminBtn("Edit first", () => { form({ kind: x.kind, name: x.name, aliases: x.acronym ? [x.acronym] : [] }, () => adminReference(body)); editor.scrollIntoView({ block: "center" }); }),
+          adminBtn("Set aside", async () => { const s = await authed("admin_reference_candidate_set", { key, candidate: x.key, dismissed: true }); if (s && s.ok) adminReference(body); else say.textContent = " not saved"; }), say);
+        return [x.name, x.acronym || "", x.kind, (x.seen_on || []).join(", "), x.new ? "new" : "", (x.near || []).join(" · ") || "nothing like it", act]; }))); }).catch(() => {});
     body.append(el("h3", null, "Asked and not found"));
     const rows = r.asked || []; if (!rows.length) { body.appendChild(el("p", null, "Nothing asked and not found yet.")); return; }
     const line = m => { const act = el("div"); const say = el("span", "what", "");
