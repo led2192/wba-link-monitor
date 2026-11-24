@@ -2320,7 +2320,7 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.ask_doc_note('DE1')"); self.assertEqual(cur.fetchone()[0], "")
         cur.execute("select set_config('lantern.ask_source_entity', 'on', false)")
         cur.execute("select public.ask_doc_note('DE1'), public.ask_doc_note('DE2')")
-        self.assertEqual(cur.fetchone(), (" (this document is a report of Zebra Leasing Ltd, a subsidiary of the company, not of the whole group)", ""))
+        self.assertEqual(cur.fetchone(), (" (report of Zebra Leasing Ltd, a subsidiary of the company)", ""))
         cur.execute("select set_config('lantern.ask_source_entity', '', false)")
         cur.execute("delete from public.documents where library_id in ('DE1', 'DE2')")
         cur.execute("delete from public.document_entities")

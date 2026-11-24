@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v173 2026-11-24";
+  const CLIENT = "lantern v174 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2712,12 +2712,13 @@
     tools.append(adminBtn("Download everything (CSV)", async () => { const rows = await load(); if (!rows) return; const a = el("a"); a.href = URL.createObjectURL(new Blob([csv(rows)], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-register-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); tsay.textContent = ` ${rows.length.toLocaleString()} rows`; }),
       adminBtn("Draw every group", async () => { const rows = await load(); if (!rows) return; groups.innerHTML = ""; drawGroups(groups, rows); }), tsay);
     // v166 (the owner: "the draw could be simply to see the relations of one complete company"): one company's group
-    const one = el("div"); one.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px"; const pick = document.createElement("input"); pick.placeholder = "a company, to draw its group"; pick.setAttribute("aria-label", "a company, to draw its group");
+    const one = el("div"); one.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px"; const pick = document.createElement("input"); pick.placeholder = "a company: its row, and Enter draws its group"; pick.setAttribute("aria-label", "a company: filters the rows below, and Enter draws its group"); let refilter = () => {};
     pick.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--bg);color:var(--fg)";
     const drawIt = async () => { if (!pick.value.trim()) return; groups.innerHTML = ""; groups.append(el("p", "what", "reading…")); const g = await authed("admin_register_group", { key, search: pick.value.trim() }).catch(() => null); groups.innerHTML = "";
       if (!g || !g.found) { groups.append(el("p", null, g ? "No company of that name has been asked about in the register (it may have no LEI)." : "Could not be read.")); return; }
-      groups._go = lei => { pick.value = lei; drawIt().then(() => groups.scrollIntoView({ block: "start", behavior: "smooth" })); }; drawOne(groups, g); pick.value = g.company.name; };
-    pick.onkeydown = ev => { if (ev.key === "Enter") drawIt(); }; one.append(pick, adminBtn("Draw its group", drawIt));
+      groups._go = lei => { pick.value = lei; drawIt().then(() => groups.scrollIntoView({ block: "start", behavior: "smooth" })); }; drawOne(groups, g); pick.value = g.company.name; refilter(); };
+    // v174 (the owner: "when I use the search in Register I cannot filter by company, it just draws its map"): the same box filters the rows as it is typed in
+    pick.onkeydown = ev => { if (ev.key === "Enter") drawIt(); }; pick.oninput = () => refilter(); one.append(pick, adminBtn("Draw its group", drawIt));
     body.append(one, tools, groups);
     // v165 (the owner: "I have to be able to correct the LEI in the admin"): the LEI of a row is corrected in place
     const leiCell = x => { const box = el("div"); box.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap"; const shown = el("span", null, x.lei || "none"), say = el("span", "what", "");
@@ -2735,21 +2736,30 @@
     const nameCell = x => { const box = el("div"); const d = el("a", null, "draw its group"); d.href = "#"; d.style.cssText = "font-size:12px;display:block"; d.onclick = ev => { ev.preventDefault(); pick.value = x.wba_id; drawIt().then(() => groups.scrollIntoView({ block: "start", behavior: "smooth" })); }; box.append(el("span", null, x.company || x.wba_id), d); return box; };
     // v171 (the owner: "it would be good to be able to filter"): the rows by the kind of thing to look at, and by a word
     if ((r.rows || []).length) {
+      const first = s => (String(s || "").toLowerCase().normalize("NFD").replace(/[^a-z0-9 ]/g, "").trim().split(/\s+/)[0] || "");
       const KINDS = [["all", "All", () => true], ["lei", "LEI wrong", x => /^(not an LEI|the register does not know)/.test(x.what)], ["dup", "Duplicate or retired LEI", x => /^the registration is/.test(x.what)],
-                     ["off", "Entity inactive", x => /^the entity is/.test(x.what)], ["sub", "Subsidiaries", x => /^a subsidiary/.test(x.what)], ["fix", "Corrected, waiting", x => /^corrected/.test(x.what)]];
+                     ["off", "Entity inactive", x => /^the entity is/.test(x.what)], ["sub", "Subsidiaries", x => /^a subsidiary/.test(x.what)],
+                     ["same", "Subsidiary of a parent with nearly its name", x => /^a subsidiary/.test(x.what) && !!first(x.parent) && first(x.parent) === first(x.company)], ["fix", "Corrected, waiting", x => /^corrected/.test(x.what)]];
       const MEAN = { dup: "Duplicate: the register found two LEIs for one entity and kept the other one; the LEI held here is the one it set aside, and the name beside it may be another entity's. Retired: the entity no longer exists under that LEI (merged or dissolved). Either way the LEI to hold is another one: look the company up in the register and correct it here.",
                      off: "The entity under this LEI has ceased (merged, dissolved or absorbed). The company may live on under another entity and another LEI.",
                      sub: "The company's ultimate parent is another entity. It may be right to hold the subsidiary, or the group may be the company people mean.",
+                     same: "The LEI held may be a subsidiary's where the group was meant: the parent's name begins like the company's. Then the group's other entities are sisters here, and their reports are not told as a subsidiary's. Where the group is the company people mean, correct the LEI to the parent's (draw its group to see it). Where the listed subsidiary is the company meant, leave it.",
                      lei: "The code held is not a valid LEI, or the register has none like it: correct it in its row." };
       let kind = "all", word = ""; const fbar = el("div"), note = el("p", "what", ""), host = el("div"); fbar.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0";
-      const finp = document.createElement("input"); finp.placeholder = "a company, a parent or a country"; finp.setAttribute("aria-label", "filter the rows"); finp.style.cssText = "font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:8px;width:230px;background:var(--bg);color:var(--fg)";
-      const show = () => { const f = KINDS.find(k => k[0] === kind)[2], w = word.toLowerCase();
-        const rows = r.rows.filter(x => f(x) && (!w || [x.company, x.legal_name, x.country, x.parent, x.direct, x.lei, x.what].some(v => String(v || "").toLowerCase().includes(w))));
+      // a word typed looks in every company asked about, not only in the rows with something to look at
+      const plain = a => ({ wba_id: a.wba_id, company: a.company, legal_name: a.legal_name, country: a.country, lei: a.lei, parent: a.ultimate_parent_name, direct: a.direct_parent_name,
+                            what: a.parent_note || (a.found === false ? "the register does not know this LEI" : [a.entity_status, a.registration_status].filter(Boolean).join(", ").toLowerCase() || "nothing to look at") });
+      const show = () => { const f = KINDS.find(k => k[0] === kind)[2], w = word.toLowerCase(), held = new Set(r.rows.map(x => x.wba_id));
+        const pool = w && all && kind === "all" ? [...r.rows, ...all.filter(a => !held.has(a.wba_id)).map(plain)] : r.rows;
+        const rows = pool.filter(x => f(x) && (!w || [x.company, x.legal_name, x.country, x.parent, x.direct, x.lei, x.what, x.wba_id].some(v => String(v || "").toLowerCase().includes(w)))).slice(0, 400);
         note.textContent = MEAN[kind] || ""; note.hidden = !MEAN[kind]; host.innerHTML = "";
-        for (const b of fbar.querySelectorAll("button")) b.style.fontWeight = b.dataset.k === kind ? "700" : "400";
         host.append(rows.length ? adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], rows.map(x => [nameCell(x), x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", leiCell(x)])) : el("p", null, "No row of that kind.")); };
-      for (const [k, label, f] of KINDS) { const n = r.rows.filter(f).length; if (!n && k !== "all") continue; const b = adminBtn(`${label} (${n.toLocaleString()})`, () => { kind = k; show(); }); b.dataset.k = k; fbar.append(b); }
-      finp.oninput = () => { word = finp.value.trim(); show(); }; fbar.append(finp); body.append(fbar, note, host); show();
+      // v174 (the owner: "the filters would perhaps be simpler as drop-downs")
+      const sel = el("select"); sel.setAttribute("aria-label", "which rows to show"); sel.style.cssText = "font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";
+      for (const [k, label, f] of KINDS) { const n = r.rows.filter(f).length; if (!n && k !== "all") continue; const o = el("option", null, k === "all" ? `Rows with something to look at (${n.toLocaleString()})` : `${label} (${n.toLocaleString()})`); o.value = k; sel.append(o); }
+      sel.onchange = () => { kind = sel.value; show(); };
+      refilter = () => { word = pick.value.trim(); if (word && !all) load().then(() => show()); show(); };
+      fbar.append(el("span", "what", "Show"), sel, el("span", "what", "A word in the box above finds any company asked about.")); body.append(fbar, note, host); show();
     }
     if ((r.no_lei || []).length) { const d = el("details"); d.style.margin = "14px 0"; const h = el("summary", null, `Companies with no LEI, or with a code that is not one (${r.no_lei.length.toLocaleString()})`); h.style.cursor = "pointer"; d.append(h, adminTable(["Company", "LEI"], r.no_lei.map(x => [x.company || x.wba_id, leiCell(x)]))); body.appendChild(d); }
   }
@@ -3127,8 +3137,11 @@
     const box = document.createElement("input"); box.placeholder = "a company or a word of the title"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:280px;background:var(--bg);color:var(--fg)";
     const again = () => { st.search = box.value.trim(); adminUnread(body); };
     box.onkeydown = ev => { if (ev.key === "Enter") again(); };
-    const mainB = adminBtn(st.main ? "Main reports only" : "Every kind of document", () => { st.main = !st.main; again(); }); mainB.title = "Switch between the main reports and every document";
-    const yearB = adminBtn(st.from ? `From ${st.from}` : "Every year", () => { st.from = st.from === 2023 ? 2020 : st.from === 2020 ? null : 2023; again(); }); yearB.title = "From 2023, from 2020, or every year";
+    // v174 (the owner: "the filters would perhaps be simpler as drop-downs")
+    const drop = (label, opts, now, set) => { const s = el("select"); s.setAttribute("aria-label", label); s.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";
+      for (const [v, t] of opts) { const o = el("option", null, t); o.value = v; s.append(o); } s.value = now; s.onchange = () => { set(s.value); again(); }; return s; };
+    const mainB = drop("which kinds of document", [["main", "Main reports only"], ["every", "Every kind of document"]], st.main ? "main" : "every", v => { st.main = v === "main"; });
+    const yearB = drop("from which year", [["2023", "From 2023"], ["2020", "From 2020"], ["all", "Every year"]], st.from ? String(st.from) : "all", v => { st.from = v === "all" ? null : Number(v); });
     const fresh = adminBtn("Refresh", again); fresh.title = "Read the list again: what you sent in the meantime shows at once";
     bar.append(box, adminBtn("Search", again), mainB, yearB, fresh); body.appendChild(bar);
     // v160 (the owner: "a check box, and a button, so that the extension downloads all this"): rows are ticked and
@@ -3147,7 +3160,10 @@
       qgo.textContent = ticked.size ? `Send the ${ticked.size} ticked to the extension` : "Send the ticked to the extension"; qclear.hidden = !waiting.size;
       qsay.textContent = waiting.size ? ` ${waiting.size.toLocaleString()} waiting. Open the extension on any page and press "Fetch my queue": it downloads them one after another with your browser; keep that window open.` : " Tick documents (or a whole company) and send them: the extension then downloads them one after another with your browser."; };
     const qhide = adminBtn("", () => { hideTried = !hideTried; for (const l of lines.values()) if (l.row.dataset.failed) l.row.style.display = hideTried ? "none" : l.shown; shown({ ids: [...waiting], tried }); }); qhide.hidden = true;
-    qbar.append(qgo, qclear, qhide, qsay); body.appendChild(qbar);
+    // v174 (the owner: "an option to select all"): every row shown is ticked, or unticked when all were; rows waiting in the queue and rows hidden are left
+    const qall = adminBtn("Tick all shown", () => { const open = [...boxes].filter(([id]) => !waiting.has(id) && lines.has(id) && lines.get(id).row.style.display !== "none"), on = !open.every(([, b]) => b.checked);
+      for (const [id, b] of open) { b.checked = on; if (on) ticked.add(id); else ticked.delete(id); } shown({ ids: [...waiting], tried }); }); qall.title = "Tick every document shown below (press again to untick). The ones the extension could not get are ticked too unless hidden.";
+    qbar.append(qall, qgo, qclear, qhide, qsay); body.appendChild(qbar);
     authed("admin_fetch_queue_set", { key, library_ids: [], queued: true }).then(q => { if (q) shown(q); }).catch(() => {});
     const tick = (d, on) => { if (on && !waiting.has(d.library_id)) ticked.add(d.library_id); else ticked.delete(d.library_id); };
     body.appendChild(latestMissing(st));
