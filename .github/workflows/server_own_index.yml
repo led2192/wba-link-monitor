@@ -33,12 +33,15 @@ on:
       partition:
         description: "k/N: this run takes slice k of N of the documents (two runs can share the work: 0/2 and 1/2)"
         default: ""
+      group:
+        description: "policies (policies and codes of every year) or main (main reports from 2024 on that the index lacks, live)"
+        default: "policies"
       live:
-        description: "switch the server-only documents into or out of the search (on / off), and stop; needs commit"
+        description: "switch the group's server-only documents into or out of the search (on / off), and stop; needs commit"
         default: ""
 
 concurrency:
-  group: server-own-index-${{ inputs.partition || 'all' }}
+  group: server-own-index-${{ inputs.group || 'policies' }}-${{ inputs.partition || 'all' }}
   cancel-in-progress: false
 
 jobs:
@@ -70,7 +73,7 @@ jobs:
           sudo -u postgres psql -d lantern -qc "create schema if not exists meaning authorization lantern_load"
           sudo -u postgres psql -d lantern -qc "create table if not exists meaning.settings (name text primary key, is_on boolean not null default false, changed timestamptz not null default now()); alter table meaning.settings owner to lantern_load"
           export LOCAL_DB_URL="postgresql://lantern_own:$PW@127.0.0.1:5432/lantern"
-          ARGS=(--limit "$LIMIT" --minutes "$MINUTES")
+          ARGS=(--group "$GROUP" --limit "$LIMIT" --minutes "$MINUTES")
           [ -n "$PARTITION" ] && ARGS+=(--partition "$PARTITION")
           [ "$COMMIT" = "true" ] && ARGS+=(--commit)
           [ "$REMAINING" = "true" ] && ARGS+=(--remaining)
@@ -89,6 +92,7 @@ jobs:
           TOKENIZERS_PARALLELISM: "false"
           REMAINING: ${{ inputs.remaining }}
           LIVE: ${{ inputs.live }}
+          GROUP: ${{ inputs.group || 'policies' }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
       - name: The role can no longer log in
         if: always()

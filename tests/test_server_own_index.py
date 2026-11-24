@@ -51,6 +51,19 @@ class OwnIndex(unittest.TestCase):
         self.assertEqual(O.set_live(d, True), 7)
         self.assertIn("update meaning.settings set is_on = %s", d.sql[0][0])
         self.assertIn("where own and live is distinct from %s", d.sql[1][0])
+        self.assertEqual((d.sql[0][1], d.sql[1][1][2]), ((True, "own_live"), list(O.OWN_TYPES)))          # the policies' switch moves the policies alone
+        m = Cursor(); O.set_live(m, False, group="main")
+        self.assertEqual(m.sql[0][1], (False, "own_main_live")); self.assertIn("Annual Report", m.sql[1][1][2]); self.assertNotIn("Policy Documents", m.sql[1][1][2])
+
+    def test_the_main_reports_the_index_lacks_are_a_group_of_their_own_and_live(self):
+        types, year_min, setting, starts_on = O.GROUPS["main"]
+        self.assertEqual((year_min, setting, starts_on), (2024, "own_main_live", True)); self.assertEqual(O.GROUPS["policies"][2:], ("own_live", False))
+        s = Cursor(); s.fetchall = lambda: []
+        O.in_scope(s, types, (0, 2), year_min)
+        self.assertIn("(%s::int is null or d.year >= %s)", s.sql[0][0]); self.assertEqual(s.sql[0][1][1:], (2, 0, 2024, 2024))
+        own = MEANING[MEANING.index("def refresh_own("):MEANING.index("def refresh_report(")]
+        self.assertIn("name = 'own_main_live'", own); self.assertIn("case when f.doc_type = any(%s) then %s else %s end", own)
+        self.assertIn('--group "$GROUP"', FLOW); self.assertIn("server-own-index-${{ inputs.group || 'policies' }}-", FLOW)
 
     def test_supabase_is_only_read_and_a_dry_run_embeds_nothing(self):
         self.assertIn("set default_transaction_read_only = on", SRC)
@@ -80,7 +93,7 @@ class OwnIndex(unittest.TestCase):
         self.assertIn("as_scheduled:", FLOW); self.assertIn("OMP_NUM_THREADS", FLOW)
         import json
         slices = [e["inputs"]["partition"] for e in json.load(open(os.path.join(ROOT, "server", "clock.json"))) if e["workflow"] == "server_own_index.yml"]
-        self.assertEqual(slices, ["0/2", "1/2"])                                  # the slices cover every document once; two, so a runner stays free
+        self.assertEqual(slices, ["0/2", "1/2", "0/2", "1/2"])          # the policies' two slices and the main reports' two                                  # the slices cover every document once; two, so a runner stays free
         self.assertIn("runs-on: [self-hosted, lantern]", FLOW); self.assertIn("alter role lantern_own nologin password null", FLOW)
         self.assertIn("grant lantern_load to lantern_own", FLOW)
         pages = SQL[SQL.index("create or replace function public.meaning_remote_pages("):SQL.index("revoke all on function public.meaning_remote_pages(")]

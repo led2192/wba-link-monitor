@@ -242,8 +242,9 @@ def refresh(src, dst, schema, commit, out=print):
 
 
 def refresh_own(src, dst, schema):
-    """The documents kept on the server only: company, year and type from Supabase, and live only while the setting
-    own_live is on and Supabase still holds the document. Returns how many there are."""
+    """The documents kept on the server only: company, year and type from Supabase, and live only while their group's
+    setting is on (own_live for the policies and codes, own_main_live for the main reports the index lacked) and
+    Supabase still holds the document. Returns how many there are."""
     s, d = src.cursor(), dst.cursor()
     d.execute(f"select count(*) from {schema}.chunk_filters where own")
     n = d.fetchone()[0]
@@ -251,8 +252,10 @@ def refresh_own(src, dst, schema):
         dst.rollback()
         return 0
     d.execute(f"create table if not exists {schema}.settings (name text primary key, is_on boolean not null default false, changed timestamptz not null default now())")
-    d.execute(f"select coalesce((select is_on from {schema}.settings where name = 'own_live'), false)")
-    on = d.fetchone()[0]
+    d.execute(f"select coalesce((select is_on from {schema}.settings where name = 'own_live'), false), coalesce((select is_on from {schema}.settings where name = 'own_main_live'), true)")
+    on, main_on = d.fetchone()
+    from semantic_index import MAIN_TYPES
+    main = list(MAIN_TYPES)
     d.execute("create temp table fresh_own (library_id text primary key, wba_id text, year int, doc_type text) on commit drop")
     d.execute(f"select array_agg(distinct doc_type) from {schema}.chunk_filters where own")
     types = [t for t in (d.fetchone()[0] or []) if t and "'" not in t]
@@ -261,8 +264,8 @@ def refresh_own(src, dst, schema):
          d.copy("copy fresh_own from stdin") as target:
         for block in source:
             target.write(block)
-    d.execute(f"update {schema}.chunk_filters f set wba_id = x.wba_id, year = x.year, live = %s from fresh_own x where f.own and x.library_id = f.library_id "
-              f"and (f.wba_id, f.year, f.live) is distinct from (x.wba_id, x.year, %s)", (on, on))
+    d.execute(f"update {schema}.chunk_filters f set wba_id = x.wba_id, year = x.year, live = case when f.doc_type = any(%s) then %s else %s end from fresh_own x where f.own and x.library_id = f.library_id "
+              f"and (f.wba_id, f.year, f.live) is distinct from (x.wba_id, x.year, case when f.doc_type = any(%s) then %s else %s end)", (main, main_on, on, main, main_on, on))
     d.execute(f"update {schema}.chunk_filters f set live = false where f.own and f.live and not exists (select 1 from fresh_own x where x.library_id = f.library_id)")
     dst.commit(); src.rollback()
     return n
