@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v166 2026-11-24";
+  const CLIENT = "lantern v167 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2670,7 +2670,7 @@
   async function adminRegister(body) {
     const r = await authed("admin_register", { key }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
     body.innerHTML = "";
-    body.appendChild(el("p", "what", "The public register of legal entities (GLEIF, open data) asked about each company that carries an LEI: is the LEI known, is the entity active, is its registration current, and does it have a parent. It is the first step towards a list of companies of lantrNa's own, and towards telling a group's documents from its subsidiaries'. Read on the server once a week. Only you see this."));
+    body.appendChild(el("p", "what", "The public register of legal entities (GLEIF, open data) asked about each company that carries an LEI: is the LEI known, is the entity active, is its registration current, and does it have a parent. It is the first step towards a list of companies of lantrNa's own, and towards telling a group's documents from its subsidiaries'. Read on the server every day; the subsidiaries once a week. Only you see this."));
     if (!r.checked) { body.appendChild(el("p", null, `${(r.with_lei || 0).toLocaleString()} of ${(r.companies || 0).toLocaleString()} companies carry an LEI. The register has not been read yet (workflow "Register").`)); return; }
     body.appendChild(el("p", null, `${r.with_lei.toLocaleString()} of ${r.companies.toLocaleString()} companies carry an LEI; ${r.checked.toLocaleString()} asked, last ${adminWhen(r.checked_at)}. ${r.fine.toLocaleString()} are active and their own ultimate parent${r.lapsed ? ` (${r.lapsed.toLocaleString()} of them did not renew their LEI this year: the entity is right, its data may be old)` : ""}. The ${(r.rows || []).length.toLocaleString()} below are worth a look.`));
     // v164 (the owner: "download all we have in Register as csv", "see the relations between companies"): everything as a
@@ -2696,7 +2696,9 @@
         const save = adminBtn("Save", async () => { say.textContent = " saving…"; let s = null; try { s = await authed("admin_register_lei_set", { key, company: x.wba_id, lei: inp.value }); } catch (err) {} if (s && s.ok) { x.lei = s.lei; box.innerHTML = ""; box.append(el("span", null, s.lei), el("span", "what", " saved: the register is asked at its next reading (daily)")); } else say.textContent = ` not saved: ${(s && s.why) || "try again"}`; });
         box.innerHTML = ""; box.append(inp, save, say); inp.focus(); };
       box.append(shown, edit, say); return box; };
-    if ((r.rows || []).length) body.appendChild(adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], r.rows.map(x => [x.company || x.wba_id, x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", leiCell(x)])));
+    // v167 (the owner: "Draw its group has to appear beside"): each row draws its own company's group, shown at the top
+    const nameCell = x => { const box = el("div"); const d = el("a", null, "draw its group"); d.href = "#"; d.style.cssText = "font-size:12px;display:block"; d.onclick = ev => { ev.preventDefault(); pick.value = x.wba_id; drawIt().then(() => { pick.value = x.company || x.wba_id; groups.scrollIntoView({ block: "start", behavior: "smooth" }); }); }; box.append(el("span", null, x.company || x.wba_id), d); return box; };
+    if ((r.rows || []).length) body.appendChild(adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], r.rows.map(x => [nameCell(x), x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", leiCell(x)])));
     if ((r.no_lei || []).length) { const d = el("details"); d.style.margin = "14px 0"; const h = el("summary", null, `Companies with no LEI, or with a code that is not one (${r.no_lei.length.toLocaleString()})`); h.style.cursor = "pointer"; d.append(h, adminTable(["Company", "LEI"], r.no_lei.map(x => [x.company || x.wba_id, leiCell(x)]))); body.appendChild(d); }
   }
   async function adminProfiles(body, search) {
