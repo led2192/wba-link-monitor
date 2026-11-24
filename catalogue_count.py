@@ -80,7 +80,15 @@ def main():
     def keys(node, pre="", depth=0):
         return [] if not isinstance(node, dict) or depth > 3 else sum(([pre + k] + keys(v, pre + k + ".", depth + 1) for k, v in node.items()), [])
     # 1. ISINs
-    i = requests.get(ISIN_INDEX, headers=head, timeout=60); idx = i.json() if i.status_code == 200 else {}
+    # the mapping's service answers 406 to "application/json" (24 Nov 2026): it wants the JSON:API type, as the register's API does
+    for accept in ("application/vnd.api+json", "*/*", "application/json"):
+        i = requests.get(ISIN_INDEX, headers={"User-Agent": ua, "Accept": accept}, timeout=60)
+        if i.status_code == 200:
+            break
+    try:
+        idx = i.json() if i.status_code == 200 else {}
+    except Exception:
+        idx = {}
     print(f"isin index: HTTP {i.status_code}; keys: " + ", ".join(sorted(set(keys(idx)))[:30]), flush=True)
     link = any_link(idx); with_isin = set(); n_isin = 0
     if link:
