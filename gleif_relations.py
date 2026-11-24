@@ -7,12 +7,21 @@ relationship record of the register as one file, the "golden copy" of the relati
 a day (CC0). This script fetches the latest one, reads it in a stream, and for every entity of public.register_entities
 takes its active direct parent (IS_DIRECTLY_CONSOLIDATED_BY) and ultimate parent (IS_ULTIMATELY_CONSOLIDATED_BY).
 
-One request for the index of the latest file and one download (tens of megabytes), as lanterN-bot, once a week.
+Since 24 Nov 2026 it also brings every entity of the groups lantrNa holds, not only the 600 a parent that
+gleif_children.py keeps: a bank's UK subsidiary was not among its first 600 and so its report could not be told as
+the subsidiary's. The relationship file says which entities belong to which group; the register's full file of
+entities (several hundred megabytes, read in a stream) gives their names, former names, country and status. And for
+a company whose registration is a duplicate or retired, the LEI the register kept in its place (the successor).
+
+Two requests for the indexes and two downloads, as lanterN-bot, once a week.
 Dry run by default (--commit writes). Prints counts and the names of keys and columns, never an entity.
 """
-import argparse, collections, csv, io, os, sys, tempfile, zipfile
+import argparse, collections, csv, io, os, re, sys, tempfile, zipfile
 
 INDEX = "https://goldencopy.gleif.org/api/v2/golden-copies/publishes/rr/latest"
+LEI_INDEX = "https://goldencopy.gleif.org/api/v2/golden-copies/publishes/lei2/latest"
+OTHER = re.compile(r"^Entity\.OtherEntityNames\.OtherEntityName\.(\d+)$")
+TRANS = re.compile(r"^Entity\.TransliteratedOtherEntityNames\.TransliteratedOtherEntityName\.(\d+)$")
 START, END = "Relationship.StartNode.NodeID", "Relationship.EndNode.NodeID"
 TYPE, STATUS = "Relationship.RelationshipType", "Relationship.RelationshipStatus"
 DIRECT, ULTIMATE = "IS_DIRECTLY_CONSOLIDATED_BY", "IS_ULTIMATELY_CONSOLIDATED_BY"
@@ -48,7 +57,7 @@ def parents(rows, wanted):
         if status != "ACTIVE" or kind not in (DIRECT, ULTIMATE):
             continue
         a, b = (r.get(START) or "").strip().upper(), (r.get(END) or "").strip().upper()
-        if a in wanted and b and a != b:
+        if (wanted is None or a in wanted) and b and a != b:
             (direct if kind == DIRECT else ultimate).setdefault(a, b)
     return direct, ultimate, c
 
@@ -65,6 +74,45 @@ def open_rows(path):
     return reader, list(reader.fieldnames or [])
 
 
+def members_of(direct, ultimate, tops):
+    """{lei: (direct parent, ultimate parent)} of every entity that belongs to a group topped by one of tops: its
+    ultimate or its direct parent is one of them. direct, ultimate: every active relationship of the file."""
+    out = {}
+    for lei, up in ultimate.items():
+        if up in tops:
+            out[lei] = (direct.get(lei), up)
+    for lei, dp in direct.items():
+        if dp in tops and lei not in out:
+            out[lei] = (dp, ultimate.get(lei))
+    return out
+
+
+def entity_row(r, cols):
+    """(legal name, a name in Latin script or None, former names, country, status, successor LEI or None) of one row
+    of the register's file of entities. cols: its column names."""
+    from gleif_register import latin
+    legal = (r.get("Entity.LegalName") or "").strip() or None
+    others = [((r.get(c) or "").strip(), (r.get(c + ".type") or "").upper()) for c in cols if OTHER.match(c) and (r.get(c) or "").strip()]
+    trans = [(r.get(c) or "").strip() for c in cols if TRANS.match(c) and (r.get(c) or "").strip()]
+    alt = next((n for n in trans + [n for n, _ in others] if latin(n)), None) if legal and not latin(legal) else None
+    former = []
+    for n, t in others:
+        if "PREVIOUS" in t and n != legal and n not in former:
+            former.append(n)
+    succ = next(((r.get(c) or "").strip().upper() for c in cols if c.endswith("SuccessorLEI") and (r.get(c) or "").strip()), None)
+    return legal, alt, former[:8], (r.get("Entity.LegalAddress.Country") or "").strip() or None, (r.get("Entity.EntityStatus") or "").strip() or None, succ
+
+
+def fetch(requests, url, ua):
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        size = 0
+        with requests.get(url, headers={"User-Agent": ua}, stream=True, timeout=900) as r:
+            r.raise_for_status()
+            for chunk in r.iter_content(1 << 20):
+                tmp.write(chunk); size += len(chunk)
+    return tmp.name, size
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
@@ -75,45 +123,73 @@ def main():
     if a.commit:
         os.environ["QA_COMMIT"] = "true"
     run = qa.Run("gleif_relations.py")
-    head = {"User-Agent": bot.BOT_UA, "Accept": "application/json"}
+    ua, head = bot.BOT_UA, {"User-Agent": bot.BOT_UA, "Accept": "application/json"}
     idx = requests.get(INDEX, headers=head, timeout=60)
-    index = idx.json() if idx.status_code == 200 else {}
-    def keys(node, pre="", depth=0):
-        return [] if not isinstance(node, dict) or depth > 3 else sum(([pre + k] + keys(v, pre + k + ".", depth + 1) for k, v in node.items()), [])
-    print(f"index: HTTP {idx.status_code}; keys: " + ", ".join(sorted(set(keys(index)))[:60]), flush=True)
-    link = csv_link(index)
-    if not link:
-        print("no link to the full file as CSV was found in the index: nothing read", flush=True)
+    link = csv_link(idx.json() if idx.status_code == 200 else {})
+    lidx = requests.get(LEI_INDEX, headers=head, timeout=60)
+    lei_link = csv_link(lidx.json() if lidx.status_code == 200 else {})
+    print(f"indexes: relationships HTTP {idx.status_code}, entities HTTP {lidx.status_code}", flush=True)
+    if not link or not lei_link:
+        print("a link to a full file as CSV was not found: nothing read", flush=True)
         run.finish("ok", rows_in=0, rows_out=0, counters={"index_status": idx.status_code}, notes="no link")
         return 0
-    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-        size = 0
-        with requests.get(link, headers={"User-Agent": bot.BOT_UA}, stream=True, timeout=300) as r:
-            r.raise_for_status()
-            for chunk in r.iter_content(1 << 20):
-                tmp.write(chunk); size += len(chunk)
-        path = tmp.name
-    print(f"file: {size / 1048576:.1f} MB", flush=True)
+    path, size = fetch(requests, link, ua)
+    rows, cols = open_rows(path)
+    direct, ultimate, c = parents(rows, None)
+    os.unlink(path)
     with evidence_db.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("select lei, direct_parent_lei, ultimate_parent_lei from public.register_entities"); have = {l: (d, u) for l, d, u in cur.fetchall()}
+            cur.execute("select lei, direct_parent_lei, ultimate_parent_lei from public.company_register where found"); held = cur.fetchall()
+            cur.execute("select count(*) from public.register_entities"); before = cur.fetchone()[0]
         conn.rollback()
+        held_leis = {l for l, _, _ in held}
+        tops = held_leis | {p for _, d, u in held for p in (d, u) if p}
+        members = members_of(direct, ultimate, tops)
+        print(f"relationships: {size / 1048576:.0f} MB, {sum(c.values()):,} records; {len(tops):,} companies and parents head groups of {len(members):,} entities in all ({before:,} were known here)", flush=True)
+        path, size = fetch(requests, lei_link, ua)
         rows, cols = open_rows(path)
-        print("columns: " + ", ".join(cols[:40]), flush=True)
-        direct, ultimate, c = parents(rows, set(have))
+        got, succ, n = {}, {}, 0
+        for r in rows:
+            n += 1
+            lei = (r.get("LEI") or "").strip().upper()
+            if lei in members or lei in held_leis:
+                e = entity_row(r, cols)
+                if lei in members:
+                    got[lei] = e
+                if lei in held_leis and e[5] and e[5] != lei:
+                    succ[lei] = e[5]
+        want = set(succ.values()); names = {l: (got[l][1] or got[l][0]) for l in want if l in got}
+        if want - set(names):                       # a successor that is in no group held: its name from a second reading
+            rows, cols = open_rows(path)
+            for r in rows:
+                lei = (r.get("LEI") or "").strip().upper()
+                if lei in want and lei not in names:
+                    e = entity_row(r, cols); names[lei] = e[1] or e[0]
         os.unlink(path)
-        change = [(l, direct.get(l), ultimate.get(l)) for l in have if (direct.get(l) and direct[l] != have[l][0]) or (ultimate.get(l) and ultimate[l] != have[l][1])]
-        print(f"{sum(c.values()):,} relationship records ({', '.join(f'{k} {n:,}' for k, n in c.most_common(8))}); {len(have):,} entities known here: "
-              f"{len(direct):,} have an active direct parent in the file, {len(ultimate):,} an ultimate one; {len(change):,} rows to change"
-              + ("" if a.commit else " (dry run: nothing written)"), flush=True)
-        if a.commit and change:
+        print(f"entities: {size / 1048576:.0f} MB, {n:,} records; {len(got):,} of the groups' entities found with their names; "
+              f"{sum(1 for e in got.values() if e[1]):,} with a name in Latin script added, {sum(1 for e in got.values() if e[2]):,} with former names; "
+              f"{len(succ):,} companies held have an LEI the register replaced by another" + ("" if a.commit else " (dry run: nothing written)"), flush=True)
+        if a.commit:
             with conn.cursor() as cur:
-                cur.executemany("update public.register_entities set direct_parent_lei = coalesce(%s, direct_parent_lei), ultimate_parent_lei = coalesce(%s, ultimate_parent_lei) where lei = %s",
-                                [(d, u, l) for l, d, u in change])
-                cur.execute("update public.register_groups g set deep_at = now(), placed = (select count(*) from public.register_entities e where e.ultimate_parent_lei = g.lei and e.direct_parent_lei is not null)")
-                cur.execute("select public.register_names_refresh()")
+                batch = [(l, e[0], e[1], e[2], e[3], e[4], members[l][0], members[l][1]) for l, e in got.items()]
+                for i in range(0, len(batch), 2000):
+                    cur.executemany("insert into public.register_entities (lei, name, name_latin, former_names, country, entity_status, direct_parent_lei, ultimate_parent_lei, read_at) "
+                                    "values (%s, %s, %s, %s, %s, %s, %s, %s, now()) on conflict (lei) do update set name = excluded.name, name_latin = excluded.name_latin, "
+                                    "former_names = excluded.former_names, country = excluded.country, entity_status = excluded.entity_status, read_at = now(), "
+                                    "direct_parent_lei = coalesce(excluded.direct_parent_lei, public.register_entities.direct_parent_lei), "
+                                    "ultimate_parent_lei = coalesce(excluded.ultimate_parent_lei, public.register_entities.ultimate_parent_lei)", batch[i:i + 2000])
+                    conn.commit()
+                cur.execute("update public.company_register set successor_lei = null, successor_name = null where successor_lei is not null")
+                cur.executemany("update public.company_register set successor_lei = %s, successor_name = %s where lei = %s", [(s, names.get(s), l) for l, s in succ.items()])
+                cur.execute("insert into public.register_groups (lei, direct_total, ultimate_total, read_at) "
+                            "select p.lei, (select count(*) from public.register_entities e where e.direct_parent_lei = p.lei), (select count(*) from public.register_entities e where e.ultimate_parent_lei = p.lei), now() "
+                            "from (select unnest(%s::text[]) as lei) p "
+                            "on conflict (lei) do update set direct_total = greatest(excluded.direct_total, public.register_groups.direct_total), "
+                            "ultimate_total = greatest(excluded.ultimate_total, public.register_groups.ultimate_total, excluded.direct_total), deep_at = now(), "
+                            "placed = (select count(*) from public.register_entities e where e.ultimate_parent_lei = excluded.lei and e.direct_parent_lei is not null)", (sorted(tops),))
+                cur.execute("select public.register_names_refresh()"); print(f"{cur.fetchone()[0]:,} names lead to a company held", flush=True)
             conn.commit()
-    run.finish("ok", rows_in=sum(c.values()), rows_out=len(change) if a.commit else 0, counters={"entities": len(have), "direct": len(direct), "ultimate": len(ultimate), "changed": len(change), "megabytes": round(size / 1048576)},
+    run.finish("ok", rows_in=sum(c.values()), rows_out=len(got) if a.commit else 0, counters={"tops": len(tops), "members": len(members), "named": len(got), "replaced_leis": len(succ)},
                notes="written" if a.commit else "dry run")
     return 0
 

@@ -5280,6 +5280,8 @@ create table if not exists public.company_lei_fixes (
 );
 alter table public.company_lei_fixes enable row level security;
 alter table public.company_register add column if not exists pending boolean not null default false;
+alter table public.company_register add column if not exists successor_lei text;      -- the LEI the register kept in place of a duplicate or retired one (gleif_relations.py)
+alter table public.company_register add column if not exists successor_name text;
 alter table public.company_register add column if not exists name_latin text;                         -- when the legal name is in another script
 alter table public.company_register add column if not exists former_names text[] not null default '{}';
 -- The entities below the companies lantrNa holds, and below the parents of the subsidiaries it holds (gleif_children.py,
@@ -5374,7 +5376,8 @@ begin
     -- old. One in five on the first reading (333 of 1,772, 24 Nov 2026): counted, not listed as trouble.
     'lapsed', (select count(*) from public.company_register r where r.found and r.registration_status = 'LAPSED'),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('wba_id', x.wba_id, 'company', x.name, 'lei', x.lei, 'legal_name', x.legal_name, 'country', x.country, 'what', x.what,
-                                                          'parent', x.ultimate_parent_name, 'direct', x.direct_parent_name) order by x.ord, x.name), '[]'::jsonb)
+                                                          'parent', x.ultimate_parent_name, 'direct', x.direct_parent_name,
+                                                          'successor_lei', x.successor_lei, 'successor_name', x.successor_name) order by x.ord, x.name), '[]'::jsonb)
              from (select r.*, c.name,
                           case when r.pending then 'corrected: the register is asked at its next reading (daily)'
                                when not r.found and not public.lei_ok(r.lei) then 'not an LEI: its check digits do not fit' || case when r.lei ~ '0{4}$' then ' (it ends in zeros: a spreadsheet rounded it)' else '' end
