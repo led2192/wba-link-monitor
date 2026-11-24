@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v159 2026-11-24";
+  const CLIENT = "lantern v160 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2991,6 +2991,19 @@
     const yearB = adminBtn(st.from ? `From ${st.from}` : "Every year", () => { st.from = st.from === 2023 ? 2020 : st.from === 2020 ? null : 2023; again(); }); yearB.title = "From 2023, from 2020, or every year";
     const fresh = adminBtn("Refresh", again); fresh.title = "Read the list again: what you sent in the meantime shows at once";
     bar.append(box, adminBtn("Search", again), mainB, yearB, fresh); body.appendChild(bar);
+    // v160 (the owner: "a check box, and a button, so that the extension downloads all this"): rows are ticked and
+    // sent to a queue (fetch_queue); the extension's window then downloads them one after another with this browser
+    const ticked = new Set(), boxes = new Map(); let waiting = new Set(), tried = {};
+    const qbar = el("div"); qbar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px;padding:8px 10px;border:1px solid var(--line);border-radius:10px";
+    const qsay = el("span", "what", ""), qgo = adminBtn("Send the ticked to the extension", async () => { const ids = [...ticked]; if (!ids.length) return; qsay.textContent = " saving…";
+        const q = await authed("admin_fetch_queue_set", { key, library_ids: ids, queued: true }).catch(() => null); if (!q) { qsay.textContent = " not saved"; return; } ticked.clear(); shown(q); }),
+      qclear = adminBtn("Empty the queue", async () => { const q = await authed("admin_fetch_queue_set", { key, library_ids: [...waiting], queued: false }).catch(() => null); if (q) shown(q); });
+    const shown = q => { waiting = new Set(q.ids || []); tried = q.tried || {}; for (const [id, b] of boxes) { b.checked = ticked.has(id) || waiting.has(id); b.title = waiting.has(id) ? "Waiting in the extension's queue" : tried[id] ? `Tried by the extension: ${tried[id]}` : ""; }
+      qgo.textContent = ticked.size ? `Send the ${ticked.size} ticked to the extension` : "Send the ticked to the extension"; qclear.hidden = !waiting.size;
+      qsay.textContent = waiting.size ? ` ${waiting.size.toLocaleString()} waiting. Open the extension on any page and press "Fetch my queue": it downloads them one after another with your browser; keep that window open.` : " Tick documents (or a whole company) and send them: the extension then downloads them one after another with your browser."; };
+    qbar.append(qgo, qclear, qsay); body.appendChild(qbar);
+    authed("admin_fetch_queue_set", { key, library_ids: [], queued: true }).then(q => { if (q) shown(q); }).catch(() => {});
+    const tick = (d, on) => { if (on && !waiting.has(d.library_id)) ticked.add(d.library_id); else ticked.delete(d.library_id); };
     body.appendChild(latestMissing(st));
     const why = Object.entries(r.by_status || {}).map(([k, n]) => `${n} ${UNREAD[k] ? k.replace(/_/g, " ") : k}`).join(", ");
     body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.${r.covered ? ` ${r.covered} more ${r.covered === 1 ? "address is" : "addresses are"} not listed: the library already reads a document of the same company, year and kind.` : ""}`));
@@ -3004,7 +3017,10 @@
     for (const d of order.flatMap(g => g)) {
       if (d.wba_id !== company) {
         company = d.wba_id;
-        const h = el("h3", null, `${d.company || d.wba_id} (${d.company_n})`); h.style.cssText = "margin:18px 0 4px;font-size:15px";
+        const h = el("h3", null, `${d.company || d.wba_id} (${d.company_n}) `); h.style.cssText = "margin:18px 0 4px;font-size:15px";
+        { const co = d.wba_id, all = el("a", null, "tick all shown"); all.href = "#"; all.style.cssText = "font-size:12px;font-weight:400;margin-left:8px";
+          all.onclick = ev => { ev.preventDefault(); const mine = (r.rows || []).filter(x => x.wba_id === co && boxes.has(x.library_id)), on = !mine.every(x => boxes.get(x.library_id).checked);
+            for (const x of mine) { if (!waiting.has(x.library_id)) { boxes.get(x.library_id).checked = on; tick(x, on); } } shown({ ids: [...waiting], tried }); }; h.append(all); }
         body.append(h);
         const usd = v => v >= 1e9 ? `${(v / 1e9).toFixed(v >= 1e10 ? 0 : 1)} bn USD` : `${Math.round(v / 1e6)} m USD`;
         const why = [d.missing, d.revenue_usd ? `revenue about ${usd(Number(d.revenue_usd))} (as the robot read it)` : ""].filter(Boolean).join(" · ");
@@ -3037,7 +3053,9 @@
         for (const t of ["dead link", "not a report", "duplicate", "wrong company", "other"]) { const o = el("option", null, t); o.value = t; why.appendChild(o); }
         f.append(document.createTextNode("Discard because: "), why, adminBtn("Discard", () => send(f, { what: "discard", why: why.value }, () => { row.style.opacity = "0.45"; stt.textContent = `discarded: ${why.value}`; acts.remove(); })), say);
       });
-      row.append(meta, a, stt, acts);
+      const qb = document.createElement("input"); qb.type = "checkbox"; qb.style.cssText = "flex:none;margin:0"; qb.setAttribute("aria-label", "queue this document for the extension"); boxes.set(d.library_id, qb);
+      qb.onchange = () => { if (waiting.has(d.library_id)) { qb.checked = true; return; } tick(d, qb.checked); shown({ ids: [...waiting], tried }); };
+      row.append(qb, meta, a, stt, acts);
       if (d._more) { groups.set(d, { rows: [], open: false }); table.append(row);
         if (d._more.length) { const more = el("a", null, `+${d._more.length} more address${d._more.length === 1 ? "" : "es"}`); more.href = "#"; more.title = "The same year, type and title under other addresses: most likely the same document"; more.style.cssText = "flex:none;font-size:12px;margin-left:8px";
           const g = groups.get(d); more.onclick = ev => { ev.preventDefault(); g.open = !g.open; for (const x of g.rows) x.style.display = g.open ? "flex" : "none"; more.textContent = g.open ? "fewer" : `+${d._more.length} more address${d._more.length === 1 ? "" : "es"}`; };

@@ -5226,6 +5226,92 @@ $$;
 revoke all on function public.admin_doc_fix(text, text, text, text, int, text) from public, anon;
 grant execute on function public.admin_doc_fix(text, text, text, text, int, text) to authenticated;
 
+-- The owner's queue for the extension (24 Nov 2026: "a check box, and a button, so that the extension downloads all
+-- this"). In Admin, Documents to fetch, rows are ticked and sent to the queue; the extension's sending window then
+-- downloads each address with the owner's browser, one after another, and sends the file as it sends any other.
+-- The owner decided that every row may be queued, the ones whose site refused the robot too: a person's browser
+-- asks for a public document, slowly. One row a document; who queued it; when it was tried and what came of it.
+create table if not exists public.fetch_queue (
+  library_id text primary key,
+  who        text not null,
+  queued_at  timestamptz not null default now(),
+  tried_at   timestamptz,
+  result     text
+);
+alter table public.fetch_queue enable row level security;
+
+-- Add to the queue, or take out of it (queued false). Returns what waits: how many, and which rows, so that the list
+-- shows them ticked. An empty list of ids only reads. A row tried before waits again when it is queued again.
+create or replace function public.admin_fetch_queue_set(key text, library_ids text[] default '{}', queued boolean default true) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if coalesce(array_length(library_ids, 1), 0) > 2000 then
+    raise exception 'two thousand documents at most at a time' using errcode = '22023';
+  end if;
+  if queued then
+    insert into public.fetch_queue (library_id, who)
+      select d.library_id, who from public.documents d where d.library_id = any(library_ids) and coalesce(d.url, '') ~* '^https?://'
+    on conflict (library_id) do update set who = excluded.who, queued_at = now(), tried_at = null, result = null;
+  else
+    delete from public.fetch_queue q where q.library_id = any(library_ids) and q.tried_at is null;
+  end if;
+  return jsonb_build_object('waiting', (select count(*) from public.fetch_queue q where q.tried_at is null),
+                            'ids', (select coalesce(jsonb_agg(q.library_id), '[]'::jsonb) from public.fetch_queue q where q.tried_at is null),
+                            'tried', (select coalesce(jsonb_object_agg(q.library_id, q.result), '{}'::jsonb) from public.fetch_queue q where q.tried_at > now() - interval '7 days'));
+end;
+$$;
+revoke all on function public.admin_fetch_queue_set(text, text[], boolean) from public, anon;
+grant execute on function public.admin_fetch_queue_set(text, text[], boolean) to authenticated;
+
+-- For the extension, signed in with the address that queued them: the documents that wait, the oldest queued first.
+create or replace function public.fetch_queue_mine(max_rows int default 500) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a listed address' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(jsonb_build_object('library_id', x.library_id, 'url', x.url, 'wba_id', x.wba_id, 'company', x.company, 'label', x.label, 'year', x.year, 'doc_type', x.doc_type)
+                                    order by x.queued_at, x.library_id), '[]'::jsonb)
+          from (select q.library_id, q.queued_at, d.url, d.wba_id, d.company, d.label, d.year, d.doc_type
+                from public.fetch_queue q join public.documents d on d.library_id = q.library_id
+                where q.who = who and q.tried_at is null and coalesce(d.wba_id, '') <> ''
+                order by q.queued_at, q.library_id limit least(greatest(coalesce(max_rows, 500), 1), 2000)) x);
+end;
+$$;
+revoke all on function public.fetch_queue_mine(int) from public, anon;
+grant execute on function public.fetch_queue_mine(int) to authenticated;
+
+-- The extension says what came of one: sent, already held, or why not. The row stops waiting.
+create or replace function public.fetch_queue_done(library_id text, result text) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  done int;
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a listed address' using errcode = '42501';
+  end if;
+  update public.fetch_queue q set tried_at = now(), result = left(btrim(coalesce(result, '')), 200) where q.library_id = library_id and q.who = who;
+  get diagnostics done = row_count;
+  return jsonb_build_object('ok', done = 1);
+end;
+$$;
+revoke all on function public.fetch_queue_done(text, text) from public, anon;
+grant execute on function public.fetch_queue_done(text, text) to authenticated;
+
 create or replace function public.admin_unread_docs(key text, search text default null, only_main boolean default true, from_year int default 2023, max_rows int default 300)
 returns jsonb
 language plpgsql stable security definer
