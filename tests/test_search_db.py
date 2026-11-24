@@ -2174,7 +2174,24 @@ class SearchOnPostgres(unittest.TestCase):
         put("RG5", "D" * 18 + "55", True, "Zebra Old SA", "ACTIVE", "RETIRED")
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
         self.assertEqual((r["checked"], r["fine"], r["lapsed"]), (5, 2, 1))                           # a lapsed registration is counted, not listed: the LEI was not renewed
-        self.assertEqual([(x["wba_id"], x["what"]) for x in r["rows"]], [("RG3", "the register does not know this LEI"), ("RG1", "a subsidiary: its ultimate parent is another entity")])   # RG5 has no company row
+        self.assertEqual([(x["wba_id"], x["what"]) for x in r["rows"]], [("RG3", "not an LEI: its check digits do not fit"), ("RG1", "a subsidiary: its ultimate parent is another entity")])   # RG5 has no company row; the test's made-up codes are not LEIs
+        # the owner corrects an LEI: check digits, no other company's, kept apart from the nightly copy, asked again at the next reading
+        good, cut = "95980020140005374753", "95980020140005300000"
+        cur.execute("select public.lei_ok(%s), public.lei_ok(%s), public.lei_ok('549300772D1G8JPIUR96'), public.lei_ok(null), public.lei_ok('short')", (good, cut)); self.assertEqual(cur.fetchone(), (True, False, True, False, False))
+        cur.execute("update public.companies set lei = %s where wba_id = 'RG3'", (cut,)); cur.execute("update public.company_register set lei = %s where wba_id = 'RG3'", (cut,))
+        cur.execute("select public.admin_register('k')"); self.assertIn("a spreadsheet rounded it", [x["what"] for x in cur.fetchone()[0]["rows"] if x["wba_id"] == "RG3"][0])
+        cur.execute("select public.admin_register_lei_set('k', 'RG3', %s)", (cut,)); self.assertFalse(cur.fetchone()[0]["ok"])
+        cur.execute("select public.admin_register_lei_set('k', 'RG3', %s)", (A,)); self.assertFalse(cur.fetchone()[0]["ok"])                      # not an LEI: the test's letters do not pass the check
+        cur.execute("select public.admin_register_lei_set('k', 'RG3', ' 9598 0020 1400 0537 4753 ')"); self.assertEqual(cur.fetchone()[0], {"ok": True, "lei": good})
+        cur.execute("select public.admin_register_lei_set('k', 'RG2', %s)", (good,)); self.assertIn("another company has that LEI", cur.fetchone()[0]["why"])
+        cur.execute("select lei from public.companies where wba_id = 'RG3'"); self.assertEqual(cur.fetchone(), (good,))
+        cur.execute("select lei, was from public.company_lei_fixes where wba_id = 'RG3'"); self.assertEqual(cur.fetchone(), (good, cut))
+        cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
+        self.assertEqual([x["what"] for x in r["rows"] if x["wba_id"] == "RG3"], ["corrected: the register is asked at its next reading (daily)"])
+        cur.execute("select wba_id from public.company_register order by checked_at, wba_id limit 1"); self.assertEqual(cur.fetchone(), ("RG3",))   # first at the next reading
+        cur.execute("insert into public.companies (wba_id, name) values ('RG6', 'Zebra No Code')"); cur.execute("select public.admin_register('k')")
+        self.assertIn("RG6", [x["wba_id"] for x in cur.fetchone()[0]["no_lei"]])
+        cur.execute("update public.companies set lei = %s where wba_id = 'RG3'", (C,)); cur.execute("update public.company_register set lei = %s, found = false, pending = false where wba_id = 'RG3'", (C,)); cur.execute("delete from public.company_lei_fixes")
         cur.execute("select public.admin_register_all('k')"); al = {x["wba_id"]: x for x in cur.fetchone()[0]}
         self.assertEqual(len(al), 5); self.assertEqual((al["RG1"]["company"], al["RG1"]["ultimate_parent_name"], al["RG1"]["held_parent"]), ("Zebra Bank UK", "Zebra Group SA", "Zebra Fine"))   # its parent is a company of lantrNa too
         self.assertEqual((al["RG4"]["held_parent"], al["RG3"]["found"], al["RG5"]["company"]), (None, False, None))

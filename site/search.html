@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v164 2026-11-24";
+  const CLIENT = "lantern v165 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2655,8 +2655,15 @@
     tools.append(adminBtn("Download everything (CSV)", async () => { const rows = await load(); if (!rows) return; const a = el("a"); a.href = URL.createObjectURL(new Blob([csv(rows)], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-register-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); tsay.textContent = ` ${rows.length.toLocaleString()} rows`; }),
       adminBtn("Draw the groups", async () => { const rows = await load(); if (!rows) return; groups.innerHTML = ""; drawGroups(groups, rows); }), tsay);
     body.append(tools, groups);
-    if (!(r.rows || []).length) return;
-    body.appendChild(adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], r.rows.map(x => [x.company || x.wba_id, x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", x.lei])));
+    // v165 (the owner: "I have to be able to correct the LEI in the admin"): the LEI of a row is corrected in place
+    const leiCell = x => { const box = el("div"); box.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap"; const shown = el("span", null, x.lei || "none"), say = el("span", "what", "");
+      const edit = el("a", null, x.lei ? "correct" : "add"); edit.href = "#"; edit.style.fontSize = "12px";
+      edit.onclick = ev => { ev.preventDefault(); const inp = document.createElement("input"); inp.value = x.lei || ""; inp.maxLength = 24; inp.placeholder = "20 characters"; inp.setAttribute("aria-label", `LEI of ${x.company || x.wba_id}`); inp.style.cssText = "font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:8px;width:230px;background:var(--bg);color:var(--fg)";
+        const save = adminBtn("Save", async () => { say.textContent = " saving…"; let s = null; try { s = await authed("admin_register_lei_set", { key, company: x.wba_id, lei: inp.value }); } catch (err) {} if (s && s.ok) { x.lei = s.lei; box.innerHTML = ""; box.append(el("span", null, s.lei), el("span", "what", " saved: the register is asked at its next reading (daily)")); } else say.textContent = ` not saved: ${(s && s.why) || "try again"}`; });
+        box.innerHTML = ""; box.append(inp, save, say); inp.focus(); };
+      box.append(shown, edit, say); return box; };
+    if ((r.rows || []).length) body.appendChild(adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], r.rows.map(x => [x.company || x.wba_id, x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", leiCell(x)])));
+    if ((r.no_lei || []).length) { const d = el("details"); d.style.margin = "14px 0"; const h = el("summary", null, `Companies with no LEI, or with a code that is not one (${r.no_lei.length.toLocaleString()})`); h.style.cursor = "pointer"; d.append(h, adminTable(["Company", "LEI"], r.no_lei.map(x => [x.company || x.wba_id, leiCell(x)]))); body.appendChild(d); }
   }
   async function adminProfiles(body, search) {
     const r = await authed("admin_company_profiles", { key, search: search || null }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }

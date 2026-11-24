@@ -5254,6 +5254,68 @@ create table if not exists public.company_register (
 );
 alter table public.company_register enable row level security;
 
+-- An LEI is 18 letters or digits and two check digits (ISO 17442): the letters read as 10 to 35, the whole number
+-- leaves 1 when divided by 97. A code a spreadsheet rounded (24 Nov 2026: two LEIs made of digits alone ended in
+-- "00000") does not pass.
+create or replace function public.lei_ok(lei text) returns boolean
+language sql immutable
+as $$
+  select upper(btrim(coalesce(lei, ''))) ~ '^[A-Z0-9]{18}[0-9]{2}$'
+     and (select string_agg(case when ch ~ '[0-9]' then ch else (ascii(ch) - 55)::text end, '' order by i)::numeric % 97
+          from regexp_split_to_table(upper(btrim(lei)), '') with ordinality as t(ch, i)) = 1
+$$;
+
+-- The owner puts a company's LEI right in Admin (24 Nov 2026: "I have to be able to correct the LEI in the admin,
+-- because it is what I use"). Any company, also one of the list lantrNa started from: the correction is kept here and
+-- load_companies.py puts it back after each nightly copy, so the copy cannot undo it. The code must pass its check
+-- digits and belong to no other company. The register is asked about it at its next reading (daily).
+create table if not exists public.company_lei_fixes (
+  wba_id text primary key,
+  lei    text not null,
+  was    text,
+  by     text not null,
+  at     timestamptz not null default now()
+);
+alter table public.company_lei_fixes enable row level security;
+alter table public.company_register add column if not exists pending boolean not null default false;
+
+create or replace function public.admin_register_lei_set(key text, company text, lei text) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  co text := btrim(coalesce(company, ''));
+  code text := upper(regexp_replace(coalesce(lei, ''), '\s+', '', 'g'));
+  before text;
+  other text;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  select to_jsonb(c) ->> 'lei' into before from public.companies c where c.wba_id = co;
+  if not found then
+    return jsonb_build_object('ok', false, 'why', 'no such company');
+  end if;
+  if not public.lei_ok(code) then
+    return jsonb_build_object('ok', false, 'why', 'not an LEI: 20 characters, and its two check digits must fit (a code copied through a spreadsheet often ends in zeros)');
+  end if;
+  select c.name into other from public.companies c where c.wba_id <> co and upper(btrim(coalesce(to_jsonb(c) ->> 'lei', ''))) = code limit 1;
+  if other is not null then
+    return jsonb_build_object('ok', false, 'why', 'another company has that LEI: ' || other);
+  end if;
+  update public.companies c set lei = code where c.wba_id = co;
+  insert into public.company_lei_fixes (wba_id, lei, was, by) values (co, code, before, coalesce(who, 'owner'))
+    on conflict (wba_id) do update set lei = excluded.lei, by = excluded.by, at = now();
+  insert into public.company_register (wba_id, lei, found, pending, checked_at) values (co, code, false, true, to_timestamp(0))
+    on conflict (wba_id) do update set lei = excluded.lei, found = false, pending = true, legal_name = null, country = null, entity_status = null, registration_status = null,
+      direct_parent_lei = null, direct_parent_name = null, ultimate_parent_lei = null, ultimate_parent_name = null, parent_note = null, checked_at = to_timestamp(0);
+  return jsonb_build_object('ok', true, 'lei', code);
+end;
+$$;
+revoke all on function public.admin_register_lei_set(text, text, text) from public, anon;
+grant execute on function public.admin_register_lei_set(text, text, text) to authenticated;
+
 -- For the owner: the counts, and the rows worth a look. An LEI the register does not know, an entity that is not
 -- active, a registration that is not current (lapsed, merged, retired), and a company whose ultimate parent is
 -- another entity (it is a subsidiary: its group may be the company to hold).
@@ -5268,8 +5330,12 @@ begin
     'companies', (select count(*) from public.companies),
     'with_lei', (select count(*) from public.companies c where upper(btrim(coalesce(c.lei, ''))) ~ '^[A-Z0-9]{18}[0-9]{2}$'),
     'checked', (select count(*) from public.company_register),
+    -- the companies with no LEI, or with a code that is not one: the owner can give each its LEI here
+    'no_lei', (select coalesce(jsonb_agg(jsonb_build_object('wba_id', c.wba_id, 'company', c.name, 'lei', nullif(btrim(coalesce(to_jsonb(c) ->> 'lei', '')), '')) order by c.name), '[]'::jsonb)
+               from (select * from public.companies c where not public.lei_ok(to_jsonb(c) ->> 'lei')
+                       and not exists (select 1 from public.company_register r where r.wba_id = c.wba_id) order by c.name limit 400) c),
     'checked_at', (select max(r.checked_at) from public.company_register r),
-    'fine', (select count(*) from public.company_register r where r.found and r.entity_status = 'ACTIVE' and r.registration_status in ('ISSUED', 'LAPSED')
+    'fine', (select count(*) from public.company_register r where r.found and coalesce(r.entity_status, 'ACTIVE') = 'ACTIVE' and r.registration_status in ('ISSUED', 'LAPSED')
                                                               and (r.ultimate_parent_lei is null or r.ultimate_parent_lei = r.lei)),
     -- a lapsed registration is an LEI the company did not renew that year: the entity and the LEI are right, the data may be
     -- old. One in five on the first reading (333 of 1,772, 24 Nov 2026): counted, not listed as trouble.
@@ -5277,13 +5343,15 @@ begin
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('wba_id', x.wba_id, 'company', x.name, 'lei', x.lei, 'legal_name', x.legal_name, 'country', x.country, 'what', x.what,
                                                           'parent', x.ultimate_parent_name, 'direct', x.direct_parent_name) order by x.ord, x.name), '[]'::jsonb)
              from (select r.*, c.name,
-                          case when not r.found then 'the register does not know this LEI'
-                               when coalesce(r.entity_status, '') <> 'ACTIVE' then 'the entity is ' || lower(coalesce(r.entity_status, 'of unknown status'))
+                          case when r.pending then 'corrected: the register is asked at its next reading (daily)'
+                               when not r.found and not public.lei_ok(r.lei) then 'not an LEI: its check digits do not fit' || case when r.lei ~ '0{4}$' then ' (it ends in zeros: a spreadsheet rounded it)' else '' end
+                               when not r.found then 'the register does not know this LEI'
+                               when coalesce(r.entity_status, 'ACTIVE') <> 'ACTIVE' then 'the entity is ' || lower(r.entity_status)
                                when coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED') then 'the registration is ' || lower(replace(coalesce(r.registration_status, 'unknown'), '_', ' '))
                                else 'a subsidiary: its ultimate parent is another entity' end as what,
-                          case when not r.found then 0 when coalesce(r.entity_status, '') <> 'ACTIVE' then 1 when coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED') then 2 else 3 end as ord
+                          case when not r.found then 0 when coalesce(r.entity_status, 'ACTIVE') <> 'ACTIVE' then 1 when coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED') then 2 else 3 end as ord
                    from public.company_register r join public.companies c on c.wba_id = r.wba_id
-                   where not r.found or coalesce(r.entity_status, '') <> 'ACTIVE' or coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED')
+                   where not r.found or coalesce(r.entity_status, 'ACTIVE') <> 'ACTIVE' or coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED')
                       or (r.ultimate_parent_lei is not null and r.ultimate_parent_lei <> r.lei)
                    order by 16, c.name limit 600) x));      -- 16: ord, the kind of trouble
 end;
