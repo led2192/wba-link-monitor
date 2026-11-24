@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v158 2026-11-24";
+  const CLIENT = "lantern v159 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2672,12 +2672,21 @@
       // v158: what the standard-setters name on their own pages and the list does not hold (standards_watch.py)
       const w = c.watch || {}; if (!(c.setters || []).length && !w.pages) return;
       cand.append(el("h3", null, "Named by the standard-setters, not in the list"), el("p", "what", `Full names with their acronym found on the pages the list's own entries point to (${(w.read || 0).toLocaleString()} of ${(w.pages || 0).toLocaleString()} pages read${w.closed ? `; ${w.closed.toLocaleString()} sites do not let the robot read them and are left alone` : ""}; last read ${adminWhen(w.checked_at)}). "New" means the name appeared on a page since it was first read.`));
-      if (!(c.setters || []).length) { cand.append(el("p", null, "Nothing the list does not hold yet.")); return; }
+      // v159: the list's own addresses that could not be read, to correct: gone, in error, or closed to the robot
+      const unread = () => { const u = c.unread || []; if (!u.length) return;
+        const why = { gone: "no longer there (404)", error: "no answer, or an error", "not html": "not a web page (a file)", refused: "the site refuses the robot", forbidden: "robots.txt forbids it" };
+        const box = el("details"); box.style.margin = "10px 0"; const head = el("summary", null, `Addresses of the list that could not be read (${u.length.toLocaleString()})`); head.style.cursor = "pointer"; box.append(head);
+        box.append(el("p", "what", "The first two kinds are worth correcting in the entry (find it by its name above). A site that refuses the robot or forbids the page is left alone: its address may be right."));
+        box.append(adminTable(["Entry", "Address", "What happened", "Last tried"], u.map(x => { const a = el("a", null, x.url.replace(/^https?:\/\//, "").slice(0, 70)); a.href = x.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+          return [(x.entries || []).join(" · "), a, why[x.status] || x.status, adminWhen(x.checked_at)]; })));
+        cand.append(box); };
+      if (!(c.setters || []).length) { cand.append(el("p", null, "Nothing the list does not hold yet.")); unread(); return; }
       cand.append(adminTable(["Name", "Acronym", "Looks like", "Named on", "", "In the list, similar", ""], c.setters.map(x => { const act = el("div"), say = el("span", "what", "");
         act.append(adminBtn("Add it", async () => { say.textContent = " adding…"; let s = null; try { s = await authed("admin_reference_save", { key, entry: null, kind: x.kind, name: x.name, aliases: x.acronym ? [x.acronym] : [], text_en: null, text_es: null, url: null, hide: false, ai: false }); } catch (err) {} if (s && s.ok) adminReference(body); else say.textContent = " not added (it may be in the list already)"; }),
           adminBtn("Edit first", () => { form({ kind: x.kind, name: x.name, aliases: x.acronym ? [x.acronym] : [] }, () => adminReference(body)); editor.scrollIntoView({ block: "center" }); }),
           adminBtn("Set aside", async () => { const s = await authed("admin_reference_candidate_set", { key, candidate: x.key, dismissed: true }); if (s && s.ok) adminReference(body); else say.textContent = " not saved"; }), say);
-        return [x.name, x.acronym || "", x.kind, (x.seen_on || []).join(", "), x.new ? "new" : "", (x.near || []).join(" · ") || "nothing like it", act]; }))); }).catch(() => {});
+        return [x.name, x.acronym || "", x.kind, (x.seen_on || []).join(", "), x.new ? "new" : "", (x.near || []).join(" · ") || "nothing like it", act]; })));
+      unread(); }).catch(() => {});
     body.append(el("h3", null, "Asked and not found"));
     const rows = r.asked || []; if (!rows.length) { body.appendChild(el("p", null, "Nothing asked and not found yet.")); return; }
     const line = m => { const act = el("div"); const say = el("span", "what", "");

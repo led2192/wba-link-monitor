@@ -2131,6 +2131,12 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_reference_candidates('k')"); r = cur.fetchone()[0]
         self.assertEqual(([x["key"] for x in r["rows"]], [(x["name"], x["seen_on"], x["new"]) for x in r["setters"]]), (["from the reports"], [("Zebra Sustainability Standards Board", ["open.example"], True)]))
         self.assertEqual((r["watch"]["pages"], r["watch"]["read"], r["watch"]["closed"]), (2, 1, 1))
+        # the addresses that could not be read, with the entries that carry them: gone before closed, a read page never
+        cur.execute("insert into public.reference_entries (id, kind, name, name_key, url) values ('norm:gonez', 'norm', 'Gone Zebra Standard', 'gone zebra standard', 'https://gone.example/s')")
+        cur.execute("insert into public.reference_watch (url, entry, status) values ('https://gone.example/s', 'norm:gonez', 'gone')")
+        cur.execute("select public.admin_reference_candidates('k')"); un = cur.fetchone()[0]["unread"]
+        self.assertEqual([(x["url"], x["status"], x["entries"]) for x in un], [("https://gone.example/s", "gone", ["Gone Zebra Standard (norm)"]), ("https://closed.example/private/a", "forbidden", [])])
+        cur.execute("delete from public.reference_entries where id = 'norm:gonez'")
         cur.execute("delete from public.reference_candidates where status = 'found' and source = 'reports'")          # what reference_candidates.py clears each week
         cur.execute("select key from public.reference_candidates"); self.assertEqual(cur.fetchall(), [("zebra sustainability standards board",)])
         cur.execute("select public.admin_reference_candidate_set('k', 'zebra sustainability standards board', true)"); self.assertTrue(cur.fetchone()[0]["ok"])
