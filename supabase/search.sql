@@ -5743,8 +5743,13 @@ begin
          -- dozens of files in an evening and the list did not move): a report downloaded from another address than the
          -- one held becomes a new document, and the old address stayed here as if nothing had been sent. They are
          -- counted (`covered`), not shown. A row the owner corrected to another kind or year is listed again.
-         d1 as (select d.*, exists (select 1 from public.documents h where h.wba_id = d.wba_id and h.text_status = 'ok' and h.year = d.year and h.doc_type = d.doc_type
-                                      and h.year is not null and coalesce(h.doc_type, '') <> '') as covered
+         -- Also not listed (24 Nov 2026, the owner: "there are cases I do not understand why they are still there"): the
+         -- file of this address was downloaded and is the very file the library already reads under another row (the
+         -- same bytes, held with another year or kind). The extension said "already in lantrNa" and the row stayed.
+         d1 as (select d.*, (exists (select 1 from public.documents h where h.wba_id = d.wba_id and h.text_status = 'ok' and h.year = d.year and h.doc_type = d.doc_type
+                                      and h.year is not null and coalesce(h.doc_type, '') <> '')
+                             or exists (select 1 from public.fetch_queue q where q.library_id = d.library_id and q.result = 'already in lantrNa')
+                             or exists (select 1 from public.browser_uploads u where u.wba_id = d.wba_id and u.source_url = d.url and u.status = 'known')) as covered
                 from d0 d),
          d as (select d.library_id, d.company, d.wba_id, d.year, d.doc_type, d.label, d.url, d.text_status, d.found, d.corrected,
                       (d.doc_type = any(main)) as is_main

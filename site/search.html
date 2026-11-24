@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v174 2026-11-24";
+  const CLIENT = "lantern v175 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -3165,10 +3165,15 @@
       for (const [id, b] of open) { b.checked = on; if (on) ticked.add(id); else ticked.delete(id); } shown({ ids: [...waiting], tried }); }); qall.title = "Tick every document shown below (press again to untick). The ones the extension could not get are ticked too unless hidden.";
     qbar.append(qall, qgo, qclear, qhide, qsay); body.appendChild(qbar);
     authed("admin_fetch_queue_set", { key, library_ids: [], queued: true }).then(q => { if (q) shown(q); }).catch(() => {});
+    // v175 (the owner: "can the refresh not happen on the fly?"): while documents wait in the extension's queue, what came of
+    // each is asked every 20 seconds and shown on its row; when the queue empties the list is read again, once, unless boxes are ticked
+    clearInterval(adminUnread._watch); adminUnread._watch = setInterval(async () => { if (!body.isConnected || !qbar.isConnected) { clearInterval(adminUnread._watch); return; } if (!waiting.size || document.hidden) return;
+      const q = await authed("admin_fetch_queue_set", { key, library_ids: [], queued: true }).catch(() => null); if (!q || !qbar.isConnected) return; const left = (q.ids || []).length; shown(q);
+      if (!left && !ticked.size) { clearInterval(adminUnread._watch); again(); } }, 20000);
     const tick = (d, on) => { if (on && !waiting.has(d.library_id)) ticked.add(d.library_id); else ticked.delete(d.library_id); };
     body.appendChild(latestMissing(st));
     const why = Object.entries(r.by_status || {}).map(([k, n]) => `${n} ${UNREAD[k] ? k.replace(/_/g, " ") : k}`).join(", ");
-    body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.${r.covered ? ` ${r.covered} more ${r.covered === 1 ? "address is" : "addresses are"} not listed: the library already reads a document of the same company, year and kind.` : ""}`));
+    body.append(el("p", null, `${r.documents} document${r.documents === 1 ? "" : "s"} of ${r.companies} compan${r.companies === 1 ? "y" : "ies"}${why ? ` (${why})` : ""}${(r.rows || []).length < r.documents ? `; the first ${r.rows.length} shown` : ""}.${r.covered ? ` ${r.covered} more ${r.covered === 1 ? "address is" : "addresses are"} not listed: the library already reads a document of the same company, year and kind, or the very file of the address under another row.` : ""}`));
     // v121 (the owner's screenshot: one company, sixteen rows with the same title): rows of a company with the same
     // year, type and title are one document held under several addresses. The first is shown, the others fold under
     // "+N more addresses"; a row already sent is put first, so that the group shows it.

@@ -698,6 +698,11 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select public.admin_doc_fix('k', 'U8', 'relabel', 'CSR Report', %s, null)", (y,))
             cur.execute("select public.admin_unread_docs('k')"); r5 = cur.fetchone()[0]; ids5 = {d["library_id"]: d for d in r5["rows"]}
             self.assertNotIn("U11", ids5); self.assertEqual((ids5["U8"]["doc_type"], ids5["U8"]["corrected"]), ("CSR Report", True))
+            # 24 Nov 2026: the extension downloaded a row's file and it is the very file already read under another row: the row leaves, counted as covered
+            cur.execute("insert into public.fetch_queue (library_id, who, tried_at, result) values ('U8', 'o@x.org', now(), 'already in lantrNa')")
+            cur.execute("select public.admin_unread_docs('k')"); r6 = cur.fetchone()[0]
+            self.assertNotIn("U8", {d["library_id"] for d in r6["rows"]}); self.assertEqual((r6["documents"], r6["covered"]), (r5["documents"] - 1, r5["covered"] + 1))
+            cur.execute("delete from public.fetch_queue")
             cur.execute("select action, reason, doc_type, applied_at from public.doc_fixes order by id"); self.assertEqual(cur.fetchall(), [("discard", "dead link", None, None), ("relabel", None, "CSR Report", None)])
             for bad in ("select public.admin_doc_fix('k', 'NOPE', 'discard')", "select public.admin_doc_fix('k', 'U8', 'delete')", "select public.admin_doc_fix('k', 'U8', 'relabel')", "select public.admin_doc_fix('k', 'U8', 'discard', null, null, 'whim')"):
                 cur.execute("savepoint s")
