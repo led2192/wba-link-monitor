@@ -5364,7 +5364,7 @@ begin
                from (select * from public.companies c where not public.lei_ok(to_jsonb(c) ->> 'lei')
                        and not exists (select 1 from public.company_register r where r.wba_id = c.wba_id) order by c.name limit 400) c),
     'checked_at', (select max(r.checked_at) from public.company_register r),
-    'fine', (select count(*) from public.company_register r where r.found and coalesce(r.entity_status, 'ACTIVE') = 'ACTIVE' and r.registration_status in ('ISSUED', 'LAPSED')
+    'fine', (select count(*) from public.company_register r where r.found and coalesce(nullif(upper(r.entity_status), 'NULL'), 'ACTIVE') = 'ACTIVE' and r.registration_status in ('ISSUED', 'LAPSED')
                                                               and (r.ultimate_parent_lei is null or r.ultimate_parent_lei = r.lei)),
     -- a lapsed registration is an LEI the company did not renew that year: the entity and the LEI are right, the data may be
     -- old. One in five on the first reading (333 of 1,772, 24 Nov 2026): counted, not listed as trouble.
@@ -5375,12 +5375,13 @@ begin
                           case when r.pending then 'corrected: the register is asked at its next reading (daily)'
                                when not r.found and not public.lei_ok(r.lei) then 'not an LEI: its check digits do not fit' || case when r.lei ~ '0{4}$' then ' (it ends in zeros: a spreadsheet rounded it)' else '' end
                                when not r.found then 'the register does not know this LEI'
-                               when coalesce(r.entity_status, 'ACTIVE') <> 'ACTIVE' then 'the entity is ' || lower(r.entity_status)
+                               -- (the register writes the word NULL where it gives no status: no status is not trouble)
+                               when coalesce(nullif(upper(r.entity_status), 'NULL'), 'ACTIVE') <> 'ACTIVE' then 'the entity is ' || lower(r.entity_status)
                                when coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED') then 'the registration is ' || lower(replace(coalesce(r.registration_status, 'unknown'), '_', ' '))
                                else 'a subsidiary: its ultimate parent is another entity' end as what,
-                          case when not r.found then 0 when coalesce(r.entity_status, 'ACTIVE') <> 'ACTIVE' then 1 when coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED') then 2 else 3 end as ord
+                          case when not r.found then 0 when coalesce(nullif(upper(r.entity_status), 'NULL'), 'ACTIVE') <> 'ACTIVE' then 1 when coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED') then 2 else 3 end as ord
                    from public.company_register r join public.companies c on c.wba_id = r.wba_id
-                   where not r.found or coalesce(r.entity_status, 'ACTIVE') <> 'ACTIVE' or coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED')
+                   where not r.found or coalesce(nullif(upper(r.entity_status), 'NULL'), 'ACTIVE') <> 'ACTIVE' or coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED')
                       or (r.ultimate_parent_lei is not null and r.ultimate_parent_lei <> r.lei)
                    order by 16, c.name limit 600) x));      -- 16: ord, the kind of trouble
 end;

@@ -2190,6 +2190,7 @@ class SearchOnPostgres(unittest.TestCase):
         put("RG1", A, True, "Zebra Bank UK plc", "ACTIVE", "ISSUED", P, "Zebra Group SA"); put("RG2", B, True, "Zebra Mills SA", "ACTIVE", "LAPSED"); put("RG3", C, False); put("RG4", P, True, "Zebra Group SA", "ACTIVE", "ISSUED", P, "Zebra Group SA")
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
         put("RG5", "D" * 18 + "55", True, "Zebra Old SA", "ACTIVE", "RETIRED")
+        cur.execute("update public.company_register set entity_status = 'NULL' where wba_id = 'RG4'")          # the register's word for no status: not trouble
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
         self.assertEqual((r["checked"], r["fine"], r["lapsed"]), (5, 2, 1))                           # a lapsed registration is counted, not listed: the LEI was not renewed
         self.assertEqual([(x["wba_id"], x["what"]) for x in r["rows"]], [("RG3", "not an LEI: its check digits do not fit"), ("RG1", "a subsidiary: its ultimate parent is another entity")])   # RG5 has no company row; the test's made-up codes are not LEIs
