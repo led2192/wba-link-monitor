@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v170 2026-11-24";
+  const CLIENT = "lantern v171 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2724,7 +2724,24 @@
       box.append(shown, edit, say); return box; };
     // v167 (the owner: "Draw its group has to appear beside"): each row draws its own company's group, shown at the top
     const nameCell = x => { const box = el("div"); const d = el("a", null, "draw its group"); d.href = "#"; d.style.cssText = "font-size:12px;display:block"; d.onclick = ev => { ev.preventDefault(); pick.value = x.wba_id; drawIt().then(() => groups.scrollIntoView({ block: "start", behavior: "smooth" })); }; box.append(el("span", null, x.company || x.wba_id), d); return box; };
-    if ((r.rows || []).length) body.appendChild(adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], r.rows.map(x => [nameCell(x), x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", leiCell(x)])));
+    // v171 (the owner: "it would be good to be able to filter"): the rows by the kind of thing to look at, and by a word
+    if ((r.rows || []).length) {
+      const KINDS = [["all", "All", () => true], ["lei", "LEI wrong", x => /^(not an LEI|the register does not know)/.test(x.what)], ["dup", "Duplicate or retired LEI", x => /^the registration is/.test(x.what)],
+                     ["off", "Entity inactive", x => /^the entity is/.test(x.what)], ["sub", "Subsidiaries", x => /^a subsidiary/.test(x.what)], ["fix", "Corrected, waiting", x => /^corrected/.test(x.what)]];
+      const MEAN = { dup: "Duplicate: the register found two LEIs for one entity and kept the other one; the LEI held here is the one it set aside, and the name beside it may be another entity's. Retired: the entity no longer exists under that LEI (merged or dissolved). Either way the LEI to hold is another one: look the company up in the register and correct it here.",
+                     off: "The entity under this LEI has ceased (merged, dissolved or absorbed). The company may live on under another entity and another LEI.",
+                     sub: "The company's ultimate parent is another entity. It may be right to hold the subsidiary, or the group may be the company people mean.",
+                     lei: "The code held is not a valid LEI, or the register has none like it: correct it in its row." };
+      let kind = "all", word = ""; const fbar = el("div"), note = el("p", "what", ""), host = el("div"); fbar.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0";
+      const finp = document.createElement("input"); finp.placeholder = "a company, a parent or a country"; finp.setAttribute("aria-label", "filter the rows"); finp.style.cssText = "font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:8px;width:230px;background:var(--bg);color:var(--fg)";
+      const show = () => { const f = KINDS.find(k => k[0] === kind)[2], w = word.toLowerCase();
+        const rows = r.rows.filter(x => f(x) && (!w || [x.company, x.legal_name, x.country, x.parent, x.direct, x.lei, x.what].some(v => String(v || "").toLowerCase().includes(w))));
+        note.textContent = MEAN[kind] || ""; note.hidden = !MEAN[kind]; host.innerHTML = "";
+        for (const b of fbar.querySelectorAll("button")) b.style.fontWeight = b.dataset.k === kind ? "700" : "400";
+        host.append(rows.length ? adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], rows.map(x => [nameCell(x), x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", leiCell(x)])) : el("p", null, "No row of that kind.")); };
+      for (const [k, label, f] of KINDS) { const n = r.rows.filter(f).length; if (!n && k !== "all") continue; const b = adminBtn(`${label} (${n.toLocaleString()})`, () => { kind = k; show(); }); b.dataset.k = k; fbar.append(b); }
+      finp.oninput = () => { word = finp.value.trim(); show(); }; fbar.append(finp); body.append(fbar, note, host); show();
+    }
     if ((r.no_lei || []).length) { const d = el("details"); d.style.margin = "14px 0"; const h = el("summary", null, `Companies with no LEI, or with a code that is not one (${r.no_lei.length.toLocaleString()})`); h.style.cursor = "pointer"; d.append(h, adminTable(["Company", "LEI"], r.no_lei.map(x => [x.company || x.wba_id, leiCell(x)]))); body.appendChild(d); }
   }
   async function adminProfiles(body, search) {
