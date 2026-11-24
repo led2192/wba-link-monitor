@@ -2188,9 +2188,20 @@ class SearchOnPostgres(unittest.TestCase):
             def get(self, url, params=None, headers=None, timeout=None):
                 lei = url.split("/")[-2]; self.asked.append(lei)
                 return Answer(200, {"meta": {"pagination": {"total": len(fam[lei]), "lastPage": 1}}, "data": [{"id": k, "attributes": {"lei": k, "entity": {"legalName": {"name": "Zebra " + k}}}} for k in fam[lei]]})
+        # the branches come from the register's own file of relationships: one download, read in a stream; only active
+        # relationships of the entities known here; the link is found in the index by its shape
+        import gleif_relations as R, tempfile, zipfile as zf
+        self.assertEqual(R.csv_link({"data": {"publish_date": "x", "full_file": {"xml": {"url": "u.xml"}, "csv": {"size": 1, "url": "https://x/rr.csv.zip"}}, "delta_files": {"LastDay": {"csv": {"url": "d"}}}}}), "https://x/rr.csv.zip")
+        self.assertIsNone(R.csv_link({"data": {"delta_files": {"csv": {"url": "d"}}}}))
+        text = "\ufeff" + ",".join([R.START, R.END, R.TYPE, R.STATUS, "Other"]) + "\n" + "\n".join(["a1,P1,%s,ACTIVE,x" % R.DIRECT, "A1,U1,%s,ACTIVE,x" % R.ULTIMATE, "A2,P9,%s,INACTIVE,x" % R.DIRECT, "ZZ,P1,%s,ACTIVE,x" % R.DIRECT, "A3,A3,%s,ACTIVE,x" % R.DIRECT]) + "\n"
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "rr.zip")
+            with zf.ZipFile(path, "w") as z: z.writestr("20261124-rr.csv", text)
+            rows, cols = R.open_rows(path); direct, ultimate, cnt = R.parents(rows, {"A1", "A2", "A3"})
+        self.assertEqual((cols[0], direct, ultimate, sum(cnt.values())), (R.START, {"A1": "P1"}, {"A1": "U1"}, 5))          # an inactive one, one of an entity not known here, and an entity under itself are left
         # 24 Nov 2026: main() named a list `deep` and so hid the function of that name: the first run of the levels died at once
         import types
-        for mod in (K, G):
+        for mod in (K, G, R):
             self.assertFalse(set(mod.main.__code__.co_varnames) & {n for n, v in vars(mod).items() if isinstance(v, types.FunctionType)}, mod.__name__)
         s3 = Sess3(); found, used = K.walk(G.Asker(s3, "the-bot", per_minute=6000, sleep=lambda s: None), ["F1", "F2"], 5)
         self.assertEqual(([(r["lei"], p) for r, p in found], used, s3.asked), ([("G1", "F1"), ("G2", "F1"), ("H1", "G1")], 3, ["F1", "F2", "G1"]))     # all five placed: G2 and H1 are not asked

@@ -1,0 +1,41 @@
+# Who hangs from whom, from the register's own file of relationship records (GLEIF golden copy, CC0; gleif_relations.py):
+# one download a week. Weekly (the server's clock), and by hand (dry unless mode=commit). Prints counts, keys and column names only.
+name: Register relations
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_scheduled:
+        description: "what the clock on the server starts: a commit run (server/clock.json)"
+        type: boolean
+        default: false
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+
+concurrency:
+  group: gleif-relations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: [self-hosted, lantern]      # lantrNa's server
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Load
+        run: |
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python gleif_relations.py --commit
+          else python gleif_relations.py; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

@@ -23,5 +23,5 @@
   {"workflow": "standards_watch.yml", "name": "Standards watch (the standard-setters' own pages; weekly)", "at": ["05:23"], "days": ["mon"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "gleif_register.yml", "name": "Register (the public register of legal entities; daily, a few hundred requests)", "at": ["06:11"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "gleif_children.yml", "name": "Register children (subsidiaries of the companies held; weekly)", "at": ["06:41"], "days": ["wed"], "inputs": {"as_scheduled": "true"}},
-  {"workflow": "gleif_children.yml", "name": "Register children, the levels below the first (weekly)", "at": ["06:41"], "days": ["thu"], "inputs": {"as_scheduled": "true", "deep": "yes"}}
+  {"workflow": "gleif_relations.yml", "name": "Register relations (who hangs from whom, from the register's file; weekly)", "at": ["06:41"], "days": ["thu"], "inputs": {"as_scheduled": "true"}}
 ]
