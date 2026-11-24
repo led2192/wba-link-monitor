@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-24: A cut capture of the Internet Archive is replaced by a new row for a larger capture, not by changing the row
+Of 310 unread documents held at an address of the archive, 166 have a larger capture of the same address, 94 are the only PDF the archive holds and 50 have others, none larger (run 45482673978). Decided with the owner: each of the 166 gets a new row for the larger capture, made as `wayback_backfill.py` makes its rows; the pipeline fetches and reads it, and the cut row leaves "Documents to fetch" once a document of its company, year and kind is read. Rejected: changing the address of the existing row (its id is made from its address, and its attachment would have to be removed by hand); discarding the 144 others (the document may still be on the company's site or reach us another way).
+
 ### 2026-11-24: The reader is told that a page is of a subsidiary's report, in few words (`ask_source_entity` on)
 The first note ("this document is a report of X, a subsidiary of the company, not of the whole group") failed the rule (entry below). With a shorter one ("report of X, a subsidiary of the company") the same 40 questions were asked again (run 45465928408, 0.180 USD): of 32 that read such a page, the answer names the subsidiary in 25 with the option and 17 without; answers that begin by saying the pages do not hold it: 3 of 40 both ways, none worse, none better; same pages, same length. Switched on. The count of answers that hold back moved from 1 to 3 between two runs of the same default, so a difference of two answers in forty is within what two runs differ by; the first note may not have been worse either, and the shorter one is kept because it is the one measured as not worse.
 

@@ -1,5 +1,5 @@
 # Documents at an address of the Internet Archive that are not read: does the archive hold a better capture? (archive_recheck.py). By hand.
-# One request a document to the archive's index, nothing written. Prints counts only.
+# One request a document to the archive's index, a dry run unless mode=commit, which adds a library row for each larger capture. Prints counts only.
 name: Archive recheck
 
 on:
@@ -29,8 +29,10 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Load
         run: |
-          python archive_recheck.py
+          if [ "${{ inputs.mode }}" = "commit" ]; then python archive_recheck.py --commit; else python archive_recheck.py; fi
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
           AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
