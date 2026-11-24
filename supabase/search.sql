@@ -8214,6 +8214,14 @@ begin
     -- the standard-setters' pages: how many were read, how many could not be (the site forbids or refuses the robot), and when
     'watch', (select jsonb_build_object('pages', count(*), 'read', count(*) filter (where w.status = 'ok'), 'closed', count(*) filter (where w.status in ('forbidden', 'refused')),
                                         'checked_at', max(w.checked_at)) from public.reference_watch w),
+    -- the list's own addresses that could not be read (the owner, 24 Nov 2026: yes to seeing which): gone first, then
+    -- errors, then the sites that do not let the robot in. One row an address, with the entries that carry it.
+    'unread', (select coalesce(jsonb_agg(jsonb_build_object('url', u.url, 'status', u.status, 'checked_at', u.checked_at, 'entries', u.entries)
+                                         order by case u.status when 'gone' then 0 when 'error' then 1 when 'not html' then 2 else 3 end, u.url), '[]'::jsonb)
+               from (select w.url, w.status, w.checked_at,
+                            (select coalesce(jsonb_agg(e.name || ' (' || e.kind || ')' order by e.name), '[]'::jsonb) from public.reference_entries e where e.url = w.url and not e.gone) as entries
+                     from public.reference_watch w where w.status <> 'ok'
+                     order by case w.status when 'gone' then 0 when 'error' then 1 when 'not html' then 2 else 3 end, w.url limit 300) u),
     'setters', (select coalesce(jsonb_agg(jsonb_build_object('key', c.key, 'name', c.name, 'acronym', c.acronym, 'kind', c.kind, 'seen_on', c.seen_on, 'new', c.new_on_site, 'companies', c.companies,
                                                              'near', (select coalesce(jsonb_agg(n.label), '[]'::jsonb)
                                                                       from (select e.name || ' (' || e.kind || ')' as label from public.reference_entries e
