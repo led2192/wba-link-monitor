@@ -3384,6 +3384,8 @@ revoke all on function public.ask_instructions_plain(boolean) from public, anon,
 -- (ask_concept_compare.py --option ask_source_entity).
 insert into public.search_options (name, is_on, note) values ('ask_source_entity', false, 'Ask: a page of a document that names a subsidiary of the company it is held under is given to the reader with that said in its heading, so the answer attributes it to the subsidiary. Compare with ask_concept_compare.py before switching on.')
 on conflict (name) do nothing;
+-- On since 24 Nov 2026 (run 45465928408, the shorter note): of 32 questions that read a subsidiary's page the answer names it in 25 (17 without); answers that hold back 3 of 40 both ways.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 24 Nov 2026, run 45465928408)' where name = 'ask_source_entity' and not is_on and note not like '%on since%';
 create or replace function public.ask_doc_note(doc text) returns text
 language plpgsql stable security definer set search_path = public
 as $$

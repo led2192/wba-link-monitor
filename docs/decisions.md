@@ -2,7 +2,10 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
-### 2026-11-24: The reader is not yet told that a page is of a subsidiary's report (`ask_source_entity` stays off)
+### 2026-11-24: The reader is told that a page is of a subsidiary's report, in few words (`ask_source_entity` on)
+The first note ("this document is a report of X, a subsidiary of the company, not of the whole group") failed the rule (entry below). With a shorter one ("report of X, a subsidiary of the company") the same 40 questions were asked again (run 45465928408, 0.180 USD): of 32 that read such a page, the answer names the subsidiary in 25 with the option and 17 without; answers that begin by saying the pages do not hold it: 3 of 40 both ways, none worse, none better; same pages, same length. Switched on. The count of answers that hold back moved from 1 to 3 between two runs of the same default, so a difference of two answers in forty is within what two runs differ by; the first note may not have been worse either, and the shorter one is kept because it is the one measured as not worse.
+
+### 2026-11-24: The first note for a subsidiary's page did not pass (`ask_source_entity` stayed off)
 The list of sources says when a document names a subsidiary; the reader did not know, and attributed a subsidiary's figures to the group. Option `ask_source_entity` says it in the heading of the page given to the reader. Compared on 40 questions about the ten companies that hold most annual reports of a subsidiary (run 45447257059, 0.181 USD), the same eight pages read both ways: of 32 questions that read such a page, the answer names the subsidiary in 18 without the option and 27 with it. But answers that begin by saying the pages do not hold it went from 1 to 3 of 40 (2 worse, none better): 5 points, more than the 3 the rule allows. The option stays off. Rejected: switching it on for the gain in attribution alone. Next, if tried: a shorter note that names the entity without "not of the whole group", which may be what makes the reader hold back; it needs its own comparison.
 
 ### 2026-11-24: The branches of a group come from the register's file, not from asking entity by entity
