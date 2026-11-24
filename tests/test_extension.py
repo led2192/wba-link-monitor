@@ -49,7 +49,11 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lantrNa decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.7.1"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.7.1", read("extension", "config.js"))
+        self.assertIn('"version": "0.8.0"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.8.0", read("extension", "config.js"))
+        # 0.8.0: the owner's queue. One at a time, a pause between two and a longer one on the same site; no page is claimed as the source
+        self.assertIn('rpc("fetch_queue_mine", { max_rows: 500 })', js); self.assertIn('rpc("fetch_queue_done", { library_id: d.library_id, result })', js)
+        self.assertIn("const QUEUE_PAUSE = 4000, SAME_SITE_PAUSE = 12000;", js); self.assertIn("page_url: doc.queue ? null :", js)
+        self.assertIn('id="queuego"', html); self.assertIn('id="queuestop"', html)
         self.assertIn('rpc("page_capture", { company: company.id, url: pageUrl(), title: got.title, body: got.text, client: CLIENT })', js)   # 0.7.0: Send this page
         self.assertIn('id="capture"', read("extension", "send.html")); self.assertIn("func: pageText", js)
         self.assertIn("if (samePage && !sure) continue;", js)                              # 0.6.4: the page's own filter links are not documents

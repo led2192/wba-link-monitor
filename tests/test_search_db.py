@@ -629,6 +629,32 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertIsNone(clean("")); self.assertIsNone(clean("  \n ")); self.assertEqual(clean("living-wage, suppliers!"), "living wage suppliers")
             c.rollback()
 
+    def test_the_owner_queues_documents_for_the_extension(self):
+        """24 Nov 2026: rows of Documents to fetch are ticked and sent to a queue; the extension, signed in with the same
+        address, reads what waits, downloads each with the owner's browser and says what came of it."""
+        import psycopg
+        with psycopg.connect(URL) as c:
+            cur = c.cursor()
+            for lid, url, wba in (("Q1", "https://x.example/a.pdf", "WA"), ("Q2", "https://x.example/b.pdf", "WA"), ("Q3", "", "WA"), ("Q4", "https://y.example/c.pdf", "")):
+                cur.execute("insert into public.documents (library_id, wba_id, company, year, doc_type, label, url, text_status) values (%s, %s, 'Alpha', 2024, 'Annual Report', %s, %s, 'timeout')", (lid, wba, lid, url))
+            cur.execute("select public.admin_fetch_queue_set('k', array['Q1', 'Q2', 'Q3', 'Q4', 'NOPE'])"); q = cur.fetchone()[0]
+            self.assertEqual((q["waiting"], sorted(q["ids"])), (3, ["Q1", "Q2", "Q4"]))                         # a row with no address, or not in the library, is not queued
+            cur.execute("select public.fetch_queue_mine()"); mine = cur.fetchone()[0]
+            self.assertEqual([(m["library_id"], m["url"], m["wba_id"], m["year"], m["doc_type"]) for m in mine],
+                             [("Q1", "https://x.example/a.pdf", "WA", 2024, "Annual Report"), ("Q2", "https://x.example/b.pdf", "WA", 2024, "Annual Report")])   # no company: nothing to send it for
+            cur.execute("select public.fetch_queue_done('Q1', %s)", ("sent (1.2 MB)" + "x" * 400,)); self.assertTrue(cur.fetchone()[0]["ok"])
+            cur.execute("select public.fetch_queue_done('NOPE', 'x')"); self.assertFalse(cur.fetchone()[0]["ok"])
+            cur.execute("select public.admin_fetch_queue_set('k')"); q = cur.fetchone()[0]
+            self.assertEqual((q["waiting"], sorted(q["ids"]), len(q["tried"]["Q1"])), (2, ["Q2", "Q4"], 200))
+            cur.execute("select public.admin_fetch_queue_set('k', array['Q2', 'Q1'], false)"); q = cur.fetchone()[0]     # taken out; what was tried stays as a record
+            self.assertEqual((q["waiting"], list(q["tried"])), (1, ["Q1"]))
+            cur.execute("select public.admin_fetch_queue_set('k', array['Q1'])"); self.assertEqual(sorted(cur.fetchone()[0]["ids"]), ["Q1", "Q4"])   # queued again: it waits again
+            c.rollback()
+            cur.execute("create or replace function auth.jwt() returns jsonb language sql as $f$ select '{}'::jsonb $f$")           # nobody signed in; undone by the rollback
+            with self.assertRaises(psycopg.Error):
+                cur.execute("select public.fetch_queue_mine()")
+            c.rollback()
+
     def test_the_documents_to_fetch_by_hand_are_listed_by_company_main_reports_first(self):
         import psycopg
         with psycopg.connect(URL) as c:

@@ -251,7 +251,7 @@ async function sendOne(doc, company) {
   const page = /^https?:/.test(TAB.url || "") ? TAB.url : null;
   const year = doc.year && /^(19|20)\d\d$/.test(doc.year.value.trim()) ? +doc.year.value.trim() : null;
   const j = await rpc("upload_begin", { company: company.id, filename: name, bytes: buf.byteLength, sha256: sha, source_url: doc.file ? null : doc.url,
-                                         page_url: doc.file ? page : (doc.url === TAB.url.split("#")[0] ? null : TAB.url), client: CLIENT,
+                                         page_url: doc.queue ? null : doc.file ? page : (doc.url === TAB.url.split("#")[0] ? null : TAB.url), client: CLIENT,
                                          sent_type: doc.kind && doc.kind.value || null, sent_year: year });
   if (j.known) return "already in lantrNa";
   if (j.again) return "already sent";
@@ -412,6 +412,7 @@ async function start() {
   $("company").onchange = () => { if (companies.some(c => c.name === $("company").value.trim())) { $("newco").textContent = "Not in the list? Add the company"; $("newco").style.fontWeight = ""; } markHeld(); };
   $("all").onclick = e => { e.preventDefault(); docs.forEach(d => { if (!d.box.disabled) d.box.checked = true; }); count(); };
   $("none").onclick = e => { e.preventDefault(); docs.forEach(d => d.box.checked = false); count(); };
+  showQueue();
   $("go").onclick = sendAll; $("watch").onclick = scanPage; $("capture").onclick = capturePage; showScan(false); $("newco").onclick = e => { e.preventDefault(); newCompany(); };
   $("deeper").hidden = tabIsDoc || !/^https?:/.test(TAB.url); $("deeper").onclick = e => { e.preventDefault(); lookDeeper(); };
 }
@@ -427,6 +428,40 @@ function showSignIn() {
     catch (e) { $("signmsg").textContent = `That code did not work: ${e.message}`; }
   };
 }
+// ---- the owner's queue (0.8.0) -----------------------------------------------------------------------------------
+// Documents ticked in lantrNa's Admin (Documents to fetch) wait in a queue. This window downloads them one after
+// another with this browser, sends each as any other document, and tells lantrNa what came of it. One at a time, with
+// QUEUE_PAUSE between two, and longer between two of the same site: a person's browser, not a crawler.
+const QUEUE_PAUSE = 4000, SAME_SITE_PAUSE = 12000;
+let queueStop = false;
+async function showQueue() {
+  let rows = []; try { rows = await rpc("fetch_queue_mine", { max_rows: 500 }); } catch (e) { return; }
+  const box = $("queue"); if (!rows.length) { box.hidden = true; return; }
+  box.hidden = false; $("queuesay").textContent = `${rows.length} document${rows.length === 1 ? "" : "s"} wait${rows.length === 1 ? "s" : ""} in your queue (ticked in lantrNa's Admin).`;
+  $("queuego").onclick = () => runQueue(rows); $("queuestop").onclick = () => { queueStop = true; $("queuestop").disabled = true; };
+}
+async function runQueue(rows) {
+  queueStop = false; $("queuego").disabled = true; $("queuestop").hidden = false; $("queuestop").disabled = false;
+  const log = $("queuelog"); log.innerHTML = ""; let ok = 0, bad = 0, lastHost = "";
+  for (let i = 0; i < rows.length && !queueStop; i++) {
+    const d = rows[i], line = el("div", "s"), host = hostOf(d.url);
+    line.textContent = `${i + 1}/${rows.length} · ${d.company || d.wba_id} · ${d.year || "no year"} · downloading…`; log.prepend(line);
+    const say = { set textContent(t) { line.textContent = `${i + 1}/${rows.length} · ${d.company || d.wba_id} · ${d.year || "no year"} · ${t}`; } };
+    let result;
+    try { result = await sendOne({ url: d.url, text: d.label || "", queue: true, status: say, year: { value: d.year ? String(d.year) : "" }, kind: { value: d.doc_type || "" } }, { id: d.wba_id });
+      line.className = "s ok"; ok++; }
+    catch (e) { result = `not sent: ${e.message}`; line.className = "s bad"; bad++; if (/sign in/.test(e.message)) { say.textContent = result; break; } }
+    say.textContent = result;
+    try { await rpc("fetch_queue_done", { library_id: d.library_id, result }); } catch (e) {}
+    $("queuesay").textContent = `${i + 1} of ${rows.length} tried: ${ok} sent or already held, ${bad} not.`;
+    if (i + 1 < rows.length && !queueStop) await pause(host && host === lastHost ? SAME_SITE_PAUSE : QUEUE_PAUSE);
+    lastHost = host;
+  }
+  $("queuestop").hidden = true; $("queuego").disabled = false; $("queuego").textContent = "Fetch what is left";
+  $("queuesay").textContent += queueStop ? " Stopped: the rest still waits." : " Done. What was not sent is marked in Admin.";
+  showQueue();
+}
+
 async function sendAll() {
   const company = chosenCompany(); if (!company) { $("msg").textContent = "Choose the company from the list first."; $("company").focus(); return; }
   const todo = docs.filter(d => d.box.checked && !d.done && !d.held); if (!todo.length) return;
