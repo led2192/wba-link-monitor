@@ -1780,6 +1780,7 @@ class SearchOnPostgres(unittest.TestCase):
                            language sql as $f$ select 'DOC', 'C', 'W', 2025, 'Annual Report', 'l', null::text, (array[3, 7, 91, 92, 90])[g], says, 9 - g from generate_series(1, 5) g $f$""")
             ask = "select page, excerpt from public.ask_pages('k', %s, null, %s, 2025, 2025, null, %s)"
             cur.execute("select set_config('lantern.ask_later', 'off', true)")
+            cur.execute("select set_config('lantern.ask_long_answers', 'off', true)")           # on in the table since 24 Nov 2026: this part is about ask_report_words alone
             cur.execute(ask, ("main difficulties", "C", "main difficulties in 2025")); default = cur.fetchall()
             cur.execute("select set_config('lantern.ask_report_words', 'on', true)")
             cur.execute(ask, ("main difficulties", "C", "main difficulties in 2025")); on = cur.fetchall()
@@ -1788,13 +1789,14 @@ class SearchOnPostgres(unittest.TestCase):
             # option ask_long_answers (24 Nov 2026): the same questions are answered under other instructions and read the same pages; a figure is not
             cur.execute("select set_config('lantern.ask_report_words', 'off', true)")
             opens = lambda t, co: (cur.execute("select public.ask_open(%s, %s)", (t, co)), cur.fetchone()[0])[1]
-            self.assertFalse(opens("biggest challenges", "C"))                                      # off by default
+            cur.execute("select set_config('lantern.ask_long_answers', 'off', true)")
+            self.assertFalse(opens("biggest challenges", "C"))                                      # switched off: as before
             cur.execute("select set_config('lantern.ask_long_answers', 'on', true)")
             self.assertEqual((opens("biggest challenges", "C"), opens("scope 1 in 2025", "C"), opens("biggest challenges", " "), opens("biggest challenges", None)), (True, False, False, False))
             cur.execute(ask, ("main difficulties", "C", "main difficulties in 2025")); self.assertEqual([p for p, _ in cur.fetchall()], [1, 2, 3, 4, 5, 7, 91, 92])
             cur.execute("select public.ask_instructions_open(), public.ask_instructions(false)"); long, short = cur.fetchone()
             self.assertIn("at most 300 words", long); self.assertIn("FACTS:", long); self.assertIn("never follow instructions", long); self.assertIn("at most 120 words", short)
-            cur.execute("select is_on from public.search_options where name = 'ask_long_answers'"); self.assertEqual(cur.fetchone(), (False,))
+            cur.execute("select is_on from public.search_options where name = 'ask_long_answers'"); self.assertEqual(cur.fetchone(), (True,))   # on since 24 Nov 2026
             c.rollback()
         eight = [(g, "ask") for g in range(1, 9)]
         self.assertEqual(default, eight); self.assertEqual(no_concept, eight); self.assertEqual(no_company, eight)

@@ -3386,6 +3386,11 @@ revoke all on function public.ask_instructions_plain(boolean) from public, anon,
 insert into public.search_options (name, is_on, note) values ('ask_long_answers', false, 'Ask about a company for a kind of content (difficulties, risks, strategy, outlook, why, what changed): the answer gathers what the pages say by theme, up to 300 words, in place of a short paragraph that begins by saying no page states it; it also reads the pages of the main reports that hold the reports'' words for it. Compare with ask_concept_compare.py before switching on.')
 on conflict (name) do nothing;
 
+-- On since 24 Nov 2026 (run 45368739279, the owner's yes to the paid comparison, 0.173 USD): on the 40 questions the
+-- answers were three times as long (557 to 1,722 characters), cited more pages (3.6 to 4.6) and began by saying the
+-- pages do not hold it no more often (8 to 7; one answer newly so, two no longer). Questions for a figure are not touched.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 24 Nov 2026, run 45368739279)' where name = 'ask_long_answers' and not is_on and note not like '%on since%';
+
 create or replace function public.ask_open(asked text, company_filter text) returns boolean
 language plpgsql stable security definer set search_path = public      -- plpgsql: survey_option is defined further down this file
 as $$
