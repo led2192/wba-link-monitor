@@ -3377,6 +3377,24 @@ end;
 $fn$;
 revoke all on function public.ask_instructions_plain(boolean) from public, anon, authenticated;
 
+-- Option ask_source_entity (24 Nov 2026). The owner asked about a bank and one source was the report of its UK
+-- subsidiary, held under the group: the list of sources says so (document_entities, "names its subsidiary"), the
+-- reader did not know. With the option on, the heading of such a page in what the reader is given says whose report
+-- it is, so the answer can attribute its figures to the subsidiary and not to the group. Off until compared
+-- (ask_concept_compare.py --option ask_source_entity).
+insert into public.search_options (name, is_on, note) values ('ask_source_entity', false, 'Ask: a page of a document that names a subsidiary of the company it is held under is given to the reader with that said in its heading, so the answer attributes it to the subsidiary. Compare with ask_concept_compare.py before switching on.')
+on conflict (name) do nothing;
+create or replace function public.ask_doc_note(doc text) returns text
+language plpgsql stable security definer set search_path = public
+as $$
+begin      -- plpgsql: survey_option and document_entities are made further down this file
+  if not public.survey_option('ask_source_entity') then return ''; end if;
+  return coalesce((select format(' (this document is a report of %s, %s of the company, not of the whole group)', e.name, e.kind)
+                   from public.document_entities e where e.library_id = doc), '');
+end;
+$$;
+revoke all on function public.ask_doc_note(text) from public, anon, authenticated;
+
 -- Option ask_long_answers (24 Nov 2026). The owner, of "biggest challenges" asked about a bank: "these answers are
 -- still pretty poor, and short". The instructions above are written for a figure: 120 words, and to say so when the
 -- excerpts do not state the thing asked. No report states its challenges as one ranked list, so the answer began by
@@ -3866,7 +3884,7 @@ begin
     for r in select * from public.overview_pages(key, company_filter, year_from, year_to, topic) loop
       n := n + 1;
       select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
-      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
+      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company || public.ask_doc_note(r.library_id), coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
       sources := sources || jsonb_build_object('n', n, 'company', r.company, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url, 'page', r.page,
                                                'library_id', r.library_id, 'wba_id', r.wba_id, 'excerpt', left(r.excerpt, 600));
     end loop;
@@ -3899,7 +3917,7 @@ begin
     loop
       n := n + 1;
       select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
-      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
+      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company || public.ask_doc_note(r.library_id), coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
       sources := sources || jsonb_build_object('n', n, 'company', r.company, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url, 'page', r.page,
                                                'library_id', r.library_id, 'wba_id', r.wba_id, 'excerpt', left(r.excerpt, 600));
     end loop;
@@ -5027,6 +5045,7 @@ declare
   out jsonb := '{}'::jsonb;
   tok_in int := 0;
   tok_out int := 0;
+  marked int := 0;
 begin
   if option is null or not exists (select 1 from public.search_options o where o.name = option and o.name like 'ask\_%') then
     return jsonb_build_object('skipped', 'not an option of the pages an answer reads');
@@ -5044,17 +5063,21 @@ begin
     context := ''; pages := '[]'::jsonb; n := 0;
     for r in select * from public.ask_pages('', words, qvec, company, year_from, year_to, null, words) loop
       n := n + 1;
-      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page,
+      context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company || public.ask_doc_note(r.library_id), coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page,
                                    coalesce((select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) from public.pages pg where pg.library_id = r.library_id and pg.page = r.page), ''));
       pages := pages || to_jsonb(r.library_id || '|' || r.page);
     end loop;
     if n = 0 then perform set_config('lantern.' || option, '', true); return jsonb_build_object('skipped', 'no page found'); end if;
+    -- how many of the pages read are of a document that names a subsidiary (ask_source_entity is judged on these)
+    select count(*) into marked from jsonb_array_elements_text(pages) p where exists (select 1 from public.document_entities e where e.library_id = split_part(p, '|', 1));
     got := public.ask_model(api_key, http_schema, model, case when public.ask_open(words, company) then public.ask_instructions_open() else public.ask_instructions(false) end, public.ask_message(words, '', '', '', context), 3500);
     if got ? 'error' then perform set_config('lantern.' || option, '', true); return jsonb_build_object('skipped', 'the model did not answer', 'arm', arm); end if;
     tok_in := tok_in + coalesce((got ->> 'in')::int, 0); tok_out := tok_out + coalesce((got ->> 'out')::int, 0);
     said := coalesce(public.ask_split(got ->> 'text') ->> 'answer', '');
     out := out || jsonb_build_object(arm, jsonb_build_object('pages', pages, 'chars', length(said), 'cites', (select count(distinct m[1]) from regexp_matches(said, '\[(\d+)\]', 'g') m),
-             'not_stated', said ~* '^\W*not stated',
+             'not_stated', said ~* '^\W*not stated', 'marked', marked,
+             'named', exists (select 1 from jsonb_array_elements_text(pages) p join public.document_entities e on e.library_id = split_part(p, '|', 1)
+                              where position(lower(array_to_string((regexp_split_to_array(btrim(e.name), '\s+'))[1:2], ' ')) in lower(said)) > 0),
              'hedged', left(said, 220) ~* '(excerpts?|pages?|documents?|reports?) (give|gives|provide|provides|contain|contains|hold|holds|include|includes|offer|offers|have|has) (no|little|only limited)|do(es)? not (state|say|discuss|describe|address|explain|mention|cover)|no (management )?(commentary|discussion|explanation|statement|mention)|not (directly |explicitly )?(stated|discussed|addressed|described|explained)'));
   end loop;
   perform set_config('lantern.' || option, '', true);
@@ -6421,7 +6444,7 @@ begin
       loop
         n := n + 1; n_round := n_round + 1;
         select left(regexp_replace(pg.body, '\s+', ' ', 'g'), public.reader_page_chars()) into body from public.pages pg where pg.library_id = r.library_id and pg.page = r.page;
-        context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company, coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
+        context := context || format(E'[%s] %s, %s, %s, page %s:\n%s\n\n', n, r.company || public.ask_doc_note(r.library_id), coalesce(r.year::text, 'no year'), coalesce(r.doc_type, 'document'), r.page, coalesce(body, ''));
         sources := sources || jsonb_build_object('n', n, 'library_id', r.library_id, 'page', r.page, 'year', r.year, 'doc_type', r.doc_type, 'label', r.label, 'url', r.url,
                                                  'body', lower(coalesce(body, '')));
       end loop;

@@ -30,12 +30,12 @@ ASKS = (("main difficulties", True), ("biggest challenges", False), ("key risks"
 PRICE_IN, PRICE_OUT = 0.10, 0.50          # USD a million tokens, the reader's list price (model_reader.cost)
 
 
-def cases(limit):
+def cases(limit, companies=COMPANIES):
     """[(words, company, with_year)]: each question of ASKS about a different company, in turn."""
     out = []
     for i in range(limit):
         words, with_year = ASKS[i % len(ASKS)]
-        out.append((words, COMPANIES[(i + i // len(ASKS)) % len(COMPANIES)], with_year))
+        out.append((words, companies[(i + i // len(ASKS)) % len(companies)], with_year))
     return out
 
 
@@ -51,6 +51,10 @@ def summarise(trials):
     c["worse"] = sum(1 for t in both if not (t["off"].get("hedged") or t["off"].get("not_stated")) and (t["on"].get("hedged") or t["on"].get("not_stated")))
     c["pages_changed"] = round(sum(len(set(t["on"].get("pages", [])) - set(t["off"].get("pages", []))) for t in both) / len(both), 1) if both else 0
     c["same_pages"] = sum(1 for t in both if set(t["on"].get("pages", [])) == set(t["off"].get("pages", [])))
+    # option ask_source_entity: the questions that read a page of a subsidiary's report, and the answers that name the subsidiary
+    c["marked"] = sum(1 for t in both if t["on"].get("marked"))
+    for arm in ("off", "on"):
+        c[f"named_{arm}"] = sum(1 for t in both if t["on"].get("marked") and t[arm].get("named"))
     c["tokens_in"] = sum(t.get("tokens_in", 0) for t in trials); c["tokens_out"] = sum(t.get("tokens_out", 0) for t in trials)
     return c
 
@@ -69,7 +73,12 @@ def main():
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("select coalesce(max(d.year), extract(year from now())::int) from public.documents d where d.doc_type = 'Annual Report' and d.text_status = 'ok'"); year = cur.fetchone()[0] - 1
-            for n, (words, company, with_year) in enumerate(cases(a.limit), 1):
+            companies = COMPANIES
+            if a.option == "ask_source_entity":          # judged on the companies that hold most annual reports of a subsidiary; no year, so those are met
+                cur.execute("select d.company from public.documents d join public.document_entities e on e.library_id = d.library_id "
+                            "where d.doc_type = 'Annual Report' and d.text_status = 'ok' and d.company is not null group by d.company order by count(*) desc, d.company limit 10")
+                companies = tuple(r[0] for r in cur.fetchall()) or COMPANIES
+            for n, (words, company, with_year) in enumerate(cases(a.limit, companies), 1):
                 try:
                     cur.execute("select public.ask_pages_trial(%s, %s, %s, %s, %s)", (words, company, year if with_year else None, year if with_year else None, a.option))
                     trials.append(cur.fetchone()[0])
@@ -84,6 +93,7 @@ def main():
     print(f"Answers that begin by saying the pages do not hold it: {c['hedged_off']} off, {c['hedged_on']} on. Better with the option: {c['better']}; worse: {c['worse']}.")
     print(f"Average answer: {c['chars_off']} characters and {c['cites_off']} pages cited off, {c['chars_on']} and {c['cites_on']} on.")
     print(f"Pages read: {c['pages_changed']} of eight are new with the option on average; {c['same_pages']} questions read the same eight.")
+    print(f"Questions that read a page of a subsidiary's report: {c['marked']}; of those, answers that name the subsidiary: {c['named_off']} off, {c['named_on']} on.")
     print(f"Cost: {usd:.3f} USD ({c['tokens_in']:,} tokens in, {c['tokens_out']:,} out).", flush=True)
     run.finish("ok", rows_in=c["asked"], rows_out=0, counters={k: v for k, v in c.items()}, notes=f"option {a.option}; {usd:.3f} USD")
     return 0
