@@ -9,6 +9,8 @@
   {"workflow": "load_companies.yml", "name": "Company profiles (after each Evidence database load)", "at": ["01:58", "19:58"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "server_own_index.yml", "name": "Server own index, slice 1 of 2 (policies and codes by meaning)", "at": ["22:13"], "inputs": {"as_scheduled": "true", "partition": "0/2", "threads": "7", "minutes": "450"}},
   {"workflow": "server_own_index.yml", "name": "Server own index, slice 2 of 2", "at": ["22:14"], "inputs": {"as_scheduled": "true", "partition": "1/2", "threads": "7", "minutes": "450"}},
+  {"workflow": "server_own_index.yml", "name": "Main reports new since the first fill, by meaning, slice 1 of 2", "at": ["22:20"], "inputs": {"as_scheduled": "true", "group": "main", "partition": "0/2", "threads": "7", "minutes": "440"}},
+  {"workflow": "server_own_index.yml", "name": "Main reports new since the first fill, by meaning, slice 2 of 2", "at": ["22:22"], "inputs": {"as_scheduled": "true", "group": "main", "partition": "1/2", "threads": "7", "minutes": "440"}},
   {"workflow": "propose_values.yml", "name": "Propose values (the nightly pass)", "at": ["03:30"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "library_mirror.yml", "name": "Library mirror", "at": ["04:43"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "server_meaning.yml", "name": "Server meaning (the nightly refresh of the passages)", "at": ["02:23"], "inputs": {"as_scheduled": "true"}},

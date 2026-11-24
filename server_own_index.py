@@ -20,7 +20,15 @@ current. Per the house rule, the search exam is run before and after the switch 
 
 A run stops cleanly after --minutes and the next one continues: a document is done when its row is in chunk_filters.
 
-    python server_own_index.py [--commit] [--limit N] [--minutes M] [--partition k/N] [--remaining] [--live on|off]
+Since 24 Nov 2026 there is a second group, `--group main`: the main reports from 2024 on that the index of meaning does
+not hold. The first fill (10 to 16 Nov) took the documents there were; only a file sent with the browser extension was
+indexed afterwards (the fast lane), so by 24 Nov 6,484 main reports the robot had brought since were read and not
+searched by meaning. The owner: "the semantic index should be updated every day with the documents that arrive".
+They are embedded here, on the server, every night, and kept on the server only (no more of Supabase's disk). They
+are the same kind of document the search already reads by meaning, so they are live as they are written: their
+switch (`own_main_live`) is on from the start and is separate from the policies' (`own_live`, off).
+
+    python server_own_index.py [--group policies|main] [--commit] [--limit N] [--minutes M] [--partition k/N] [--remaining] [--live on|off]
 
 Dry run by default: lists what it would do and embeds nothing. Prints counts and times only, no document or text.
 Env: SUPABASE_DB_URL (read), LOCAL_DB_URL (the server's database).
@@ -28,11 +36,13 @@ Env: SUPABASE_DB_URL (read), LOCAL_DB_URL (the server's database).
 import argparse, os, sys, time
 
 import qa
-from semantic_index import DIMS, MODEL, chunk_pages, parse_partition
+from semantic_index import DIMS, MAIN_TYPES, MODEL, YEAR_MIN, chunk_pages, parse_partition
 
 OWN_TYPES = ("Policy Documents", "Code of Conduct", "Human Rights Policy")
 SCHEMA = "meaning"
 SETTING = "own_live"
+# group: (document types, first year or None, the setting that makes its documents live, whether it starts on)
+GROUPS = {"policies": (OWN_TYPES, None, SETTING, False), "main": (tuple(MAIN_TYPES), YEAR_MIN, "own_main_live", True)}
 
 
 def ensure(d, schema=SCHEMA):
@@ -46,21 +56,23 @@ def ensure(d, schema=SCHEMA):
     d.execute(f"create table if not exists {schema}.chunk_filters (library_id text primary key, wba_id text, year int, doc_type text, live boolean not null default true)")
     d.execute(f"alter table {schema}.chunk_filters add column if not exists own boolean not null default false")
     d.execute(f"create table if not exists {schema}.settings (name text primary key, is_on boolean not null default false, changed timestamptz not null default now())")
-    d.execute(f"insert into {schema}.settings (name, is_on) values (%s, false) on conflict (name) do nothing", (SETTING,))
+    for _, _, setting, starts_on in GROUPS.values():
+        d.execute(f"insert into {schema}.settings (name, is_on) values (%s, %s) on conflict (name) do nothing", (setting, starts_on))
 
 
-def own_live(d, schema=SCHEMA):
-    d.execute(f"select is_on from {schema}.settings where name = %s", (SETTING,))
+def own_live(d, schema=SCHEMA, setting=SETTING):
+    d.execute(f"select is_on from {schema}.settings where name = %s", (setting,))
     row = d.fetchone()
     return bool(row and row[0])
 
 
-def in_scope(s, types, partition):
-    """[(library_id, wba_id, year, doc_type)] with text, of the types, in slice k of N; newest year first."""
+def in_scope(s, types, partition, year_min=None):
+    """[(library_id, wba_id, year, doc_type)] with text, of the types (from year_min on, when given), in slice k of N; newest year first."""
     k, n = partition
     s.execute("""select d.library_id, d.wba_id, d.year, d.doc_type from public.documents d
                  where d.doc_type = any(%s) and d.text_status = 'ok' and (abs(hashtext(d.library_id)) %% %s) = %s
-                 order by d.year desc nulls last, d.library_id""", (list(types), n, k))
+                   and (%s::int is null or d.year >= %s)
+                 order by d.year desc nulls last, d.library_id""", (list(types), n, k, year_min, year_min))
     return s.fetchall()
 
 
@@ -87,10 +99,11 @@ def write_document(d, doc, rows, live, schema=SCHEMA):
               (lid, wba_id, year, doc_type, live))
 
 
-def set_live(d, on, schema=SCHEMA):
-    """Switch the server-only documents into or out of the search. Returns how many rows changed."""
-    d.execute(f"update {schema}.settings set is_on = %s, changed = now() where name = %s", (on, SETTING))
-    d.execute(f"update {schema}.chunk_filters set live = %s where own and live is distinct from %s", (on, on))
+def set_live(d, on, schema=SCHEMA, group="policies"):
+    """Switch one group's server-only documents into or out of the search. Returns how many rows changed."""
+    types, _, setting, _ = GROUPS[group]
+    d.execute(f"update {schema}.settings set is_on = %s, changed = now() where name = %s", (on, setting))
+    d.execute(f"update {schema}.chunk_filters set live = %s where own and live is distinct from %s and doc_type = any(%s)", (on, on, list(types)))
     return d.rowcount
 
 
@@ -115,6 +128,7 @@ def report(m, commit):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--group", choices=tuple(GROUPS), default="policies", help="policies (every year, not live) or main (main reports from 2024 on the index lacks, live)")
     ap.add_argument("--limit", type=int, default=0, help="documents this run (0 = all that are left)")
     ap.add_argument("--minutes", type=float, default=330, help="stop cleanly after this many minutes")
     ap.add_argument("--partition", default="", help="k/N: this run takes slice k of N of the documents")
@@ -125,6 +139,7 @@ def main(argv=None):
     if not os.environ.get("SUPABASE_DB_URL") or not os.environ.get("LOCAL_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL and LOCAL_DB_URL.")
     partition = parse_partition(a.partition)
+    types, year_min, setting, _ = GROUPS[a.group]
     import psycopg
     run = qa.Run("server_own_index.py")
     t0 = time.time()
@@ -136,18 +151,18 @@ def main(argv=None):
             if not a.commit:
                 print(f">>> would switch the server-only documents {a.live} (dry run)")
                 return 0
-            changed = set_live(d, a.live == "on"); dst.commit()
+            changed = set_live(d, a.live == "on", group=a.group); dst.commit()
             print(f">>> server-only documents switched {a.live}: {changed:,} rows changed")
             run.finish(status="ok", rows_in=0, rows_out=changed)
             return 0
-        live = own_live(d)
-        scope = in_scope(s, OWN_TYPES, partition); src.rollback()
+        live = own_live(d, setting=setting)
+        scope = in_scope(s, types, partition, year_min); src.rollback()
         # every document the server holds, its own or copied from Supabase: a document Supabase indexed is Supabase's
         d.execute(f"select library_id from {SCHEMA}.chunk_filters")
         held = [r[0] for r in d.fetchall()]; dst.rollback()
         todo = to_do(scope, held)
         m = dict(scope=len(scope), held=len(scope) - len(todo), todo=len(todo), done=0, passages=0, empty=0, minutes=0.0, rate=0.0, live=live)
-        print(f">>> in scope {m['scope']:,}; on the server {m['held']:,}; left {m['todo']:,}", flush=True)
+        print(f">>> group {a.group}: in scope {m['scope']:,}; on the server {m['held']:,}; left {m['todo']:,}", flush=True)
         if a.remaining or not a.commit:
             print(report(m, a.commit))
             return 0
