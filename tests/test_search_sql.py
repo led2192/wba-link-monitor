@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v156 2026-11-23";' in PAGE
+    assert 'const CLIENT = "lantern v157 2026-11-24";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -543,7 +543,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "public.survey_instructions(tight)" in sr and "rounds int := case when public.survey_option('survey_again') then 2 else 1 end;" in sr
     assert "values ('survey_strict', false," in SQL and "values ('survey_again', false," in SQL                         # both options off until compared
     assert 'o = await authed("survey_offer", surveyScope(text));' in PAGE and "if (o && (o.may || o.have)) { surveyCard(c, text, o); return; }" in PAGE   # v88: the survey is offered before an answer is spent
-    assert 'adminBtn("A quick answer from the eight best pages", () => ask(false, true))' in PAGE and "if (!state.company && quick !== true) {" in PAGE
+    assert 'adminBtn("A quick answer from the eight best pages", () => ask(false, true))' in PAGE and "if ((!state.company || pickedGroup()) && quick !== true) {" in PAGE
     assert "surveySeed" not in PAGE
     ss = SQL[SQL.index("create or replace function public.survey_step("):SQL.index("revoke all on function public.survey_step(")]
     assert "said := public.survey_read(key, s.question || case when s.cohort is not null then" in ss and "ask_model" not in ss   # one reading, one function: what is measured is what runs

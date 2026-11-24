@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v156 2026-11-23";
+  const CLIENT = "lantern v157 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1938,7 +1938,7 @@
     // spent on eight pages, those who may run surveys are offered one (or shown the one they already ran); the quick
     // answer stays one press away. Everyone else is answered as before.
     state.surveyMay = false; state.surveyUsed = 0;
-    if (!state.company && quick !== true) {
+    if ((!state.company || pickedGroup()) && quick !== true) {
       let o = null; try { o = await authed("survey_offer", surveyScope(text)); } catch (e) { o = null; }
       if (seq !== searchSeq || !document.body.contains(c)) return;
       state.surveyMay = !!(o && o.may);
@@ -2010,7 +2010,10 @@
       b.onclick = async () => { const to = x.verdict === v ? "" : v; const r = await authed("survey_verdict", { key, survey: g.id, wba: x.wba_id, verdict: to }); if (!r) return; x.verdict = to || null; g.counts.right = r.right; g.counts.wrong = r.wrong; redraw(); };
       w.append(b); }
     return w; };
-  const surveyScope = text => ({ key, question: text, industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null, year_from: state.from || null, year_to: state.to || null });
+  // v157: a group picked on the page (several companies: state.company holds their ids joined by ";") is a survey's scope, exactly those companies
+  const pickedGroup = () => state.company && state.company.includes(";") ? state.company : null;
+  const surveyScope = text => ({ key, question: text, industry_filter: state.industry || null, country_filter: state.country || null, region_filter: state.region || null, year_from: state.from || null, year_to: state.to || null,
+                                 company_filter: pickedGroup(), group_label: pickedGroup() ? (state.companyName || null) : null });
   function surveyCard(c, text, o) {
     c.innerHTML = "";
     const scope = surveyScope(text), where = [(state.industry || "").replace(/;/g, ", "), state.region, state.countryName || state.country, state.from || state.to ? `${state.from || ""}–${state.to || ""}` : ""].filter(Boolean).join(" · ");
