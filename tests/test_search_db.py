@@ -2175,6 +2175,9 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
         self.assertEqual((r["checked"], r["fine"], r["lapsed"]), (5, 2, 1))                           # a lapsed registration is counted, not listed: the LEI was not renewed
         self.assertEqual([(x["wba_id"], x["what"]) for x in r["rows"]], [("RG3", "the register does not know this LEI"), ("RG1", "a subsidiary: its ultimate parent is another entity")])   # RG5 has no company row
+        cur.execute("select public.admin_register_all('k')"); al = {x["wba_id"]: x for x in cur.fetchone()[0]}
+        self.assertEqual(len(al), 5); self.assertEqual((al["RG1"]["company"], al["RG1"]["ultimate_parent_name"], al["RG1"]["held_parent"]), ("Zebra Bank UK", "Zebra Group SA", "Zebra Fine"))   # its parent is a company of lantrNa too
+        self.assertEqual((al["RG4"]["held_parent"], al["RG3"]["found"], al["RG5"]["company"]), (None, False, None))
         cur.execute("delete from public.company_register"); cur.execute("delete from public.companies where wba_id like 'RG_'")
 
     def test_what_a_standard_setter_names_on_its_page_and_the_list_lacks_is_a_candidate(self):

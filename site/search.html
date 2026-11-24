@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v163 2026-11-24";
+  const CLIENT = "lantern v164 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2613,6 +2613,31 @@
       over.append(row); over.scrollIntoView({ block: "center" }); }
   }
   // v144: what the reader made of each company from its own reports (company_profile), for the owner to judge
+  // v164: who belongs to whom, drawn. One small tree a group: the ultimate parent on top (filled when lantrNa holds it as a
+  // company), a direct parent between when it is another entity, the companies of lantrNa below. Largest groups first.
+  function drawGroups(box, rows) {
+    const subs = rows.filter(x => x.ultimate_parent_lei && x.ultimate_parent_lei !== x.lei), by = new Map();
+    for (const x of subs) { if (!by.has(x.ultimate_parent_lei)) by.set(x.ultimate_parent_lei, { name: x.ultimate_parent_name || x.ultimate_parent_lei, held: x.held_parent, kids: [] }); by.get(x.ultimate_parent_lei).kids.push(x); }
+    const list = [...by.values()].sort((a, b) => b.kids.length - a.kids.length || a.name.localeCompare(b.name));
+    box.append(el("p", "what", `${subs.length.toLocaleString()} companies of lantrNa are subsidiaries, under ${list.length.toLocaleString()} ultimate parents (as each entity declared it to the register). A filled box is a parent lantrNa holds as a company of its own; a dashed box is an entity lantrNa does not hold. Subsidiaries that lantrNa does not hold are not drawn yet.`));
+    const wrap = el("div"); wrap.style.cssText = "display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start"; box.append(wrap);
+    const NS = "http://www.w3.org/2000/svg", mk = (t, a) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+    const short = s => { s = String(s || ""); return s.length > 30 ? s.slice(0, 29) + "…" : s; };
+    for (const g of list) {
+      const W = 250, H = 30, GAP = 14, mids = [...new Set(g.kids.map(k => k.direct_parent_lei && k.direct_parent_lei !== k.ultimate_parent_lei ? k.direct_parent_name || k.direct_parent_lei : ""))].filter(Boolean);
+      const lines = [{ t: g.name, kind: g.held ? "held" : "out", depth: 0, title: g.held ? `Held in lantrNa as ${g.held}` : "Not a company of lantrNa" }];
+      for (const m of mids) { lines.push({ t: m, kind: "out", depth: 1, title: "Direct parent, not a company of lantrNa" }); for (const k of g.kids.filter(k => (k.direct_parent_name || k.direct_parent_lei) === m && k.direct_parent_lei !== k.ultimate_parent_lei)) lines.push({ t: k.company || k.legal_name, kind: "held", depth: 2, title: `${k.legal_name || ""} · ${k.country || ""} · ${k.lei}` }); }
+      for (const k of g.kids.filter(k => !(k.direct_parent_lei && k.direct_parent_lei !== k.ultimate_parent_lei))) lines.push({ t: k.company || k.legal_name, kind: "held", depth: 1, title: `${k.legal_name || ""} · ${k.country || ""} · ${k.lei}` });
+      const svg = mk("svg", { width: W + 44, height: lines.length * (H + GAP), viewBox: `0 0 ${W + 44} ${lines.length * (H + GAP)}`, role: "img", "aria-label": `${g.name} and its ${g.kids.length} companies in lantrNa` });
+      const last = {};
+      lines.forEach((l, i) => { const x = 2 + l.depth * 20, y = i * (H + GAP) + 2; last[l.depth] = y;
+        if (l.depth) { const py = last[l.depth - 1] + H, px = x - 10; svg.append(mk("path", { d: `M${px} ${py} V${y + H / 2} H${x}`, fill: "none", stroke: "currentColor", "stroke-opacity": "0.45" })); }
+        const r = mk("rect", { x, y, width: W, height: H, rx: 7, fill: l.kind === "held" && l.depth === 0 ? "currentColor" : "none", "fill-opacity": "0.12", stroke: "currentColor", "stroke-opacity": l.kind === "out" ? "0.5" : "0.85", "stroke-dasharray": l.kind === "out" ? "4 3" : "" });
+        const t = mk("text", { x: x + 9, y: y + H / 2 + 4, "font-size": "12.5", fill: "currentColor", "font-weight": l.depth === 0 ? "600" : "400" }); t.textContent = short(l.t);
+        const tip = mk("title", {}); tip.textContent = `${l.t} — ${l.title}`; r.append(tip); svg.append(r, t); });
+      wrap.append(svg);
+    }
+  }
   // v162: what the public register of legal entities (GLEIF) says about the companies that carry an LEI (gleif_register.py). The owner's only.
   async function adminRegister(body) {
     const r = await authed("admin_register", { key }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
@@ -2620,6 +2645,16 @@
     body.appendChild(el("p", "what", "The public register of legal entities (GLEIF, open data) asked about each company that carries an LEI: is the LEI known, is the entity active, is its registration current, and does it have a parent. It is the first step towards a list of companies of lantrNa's own, and towards telling a group's documents from its subsidiaries'. Read on the server once a week. Only you see this."));
     if (!r.checked) { body.appendChild(el("p", null, `${(r.with_lei || 0).toLocaleString()} of ${(r.companies || 0).toLocaleString()} companies carry an LEI. The register has not been read yet (workflow "Register").`)); return; }
     body.appendChild(el("p", null, `${r.with_lei.toLocaleString()} of ${r.companies.toLocaleString()} companies carry an LEI; ${r.checked.toLocaleString()} asked, last ${adminWhen(r.checked_at)}. ${r.fine.toLocaleString()} are active and their own ultimate parent${r.lapsed ? ` (${r.lapsed.toLocaleString()} of them did not renew their LEI this year: the entity is right, its data may be old)` : ""}. The ${(r.rows || []).length.toLocaleString()} below are worth a look.`));
+    // v164 (the owner: "download all we have in Register as csv", "see the relations between companies"): everything as a
+    // file, and the groups drawn: each ultimate parent with the companies of lantrNa under it. Asked for only on a press.
+    const tools = el("div"); tools.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px"; const tsay = el("span", "what", ""), groups = el("div");
+    let all = null; const load = async () => { if (!all) { tsay.textContent = " reading…"; all = await authed("admin_register_all", { key }).catch(() => null); tsay.textContent = all ? "" : " could not be read"; } return all; };
+    const csv = rows => { const cols = ["wba_id", "company", "lei", "found", "legal_name", "country", "entity_status", "registration_status", "direct_parent_lei", "direct_parent_name", "ultimate_parent_lei", "ultimate_parent_name", "held_parent", "parent_note", "checked_at"];
+      const cell = v => { const s = v == null ? "" : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+      return "\ufeff" + [cols.join(","), ...rows.map(x => cols.map(k => cell(x[k])).join(","))].join("\r\n"); };
+    tools.append(adminBtn("Download everything (CSV)", async () => { const rows = await load(); if (!rows) return; const a = el("a"); a.href = URL.createObjectURL(new Blob([csv(rows)], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-register-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); tsay.textContent = ` ${rows.length.toLocaleString()} rows`; }),
+      adminBtn("Draw the groups", async () => { const rows = await load(); if (!rows) return; groups.innerHTML = ""; drawGroups(groups, rows); }), tsay);
+    body.append(tools, groups);
     if (!(r.rows || []).length) return;
     body.appendChild(adminTable(["Company", "In the register as", "Country", "What", "Ultimate parent", "Direct parent", "LEI"], r.rows.map(x => [x.company || x.wba_id, x.legal_name || "", x.country || "", x.what, x.parent || "", x.direct && x.direct !== x.parent ? x.direct : "", x.lei])));
   }
