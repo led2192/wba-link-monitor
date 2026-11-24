@@ -60,8 +60,11 @@ class Watch(unittest.TestCase):
         mon, tue = datetime(2026, 11, 23, 0, 0, tzinfo=timezone.utc), datetime(2026, 11, 24, 0, 0, tzinfo=timezone.utc)
         self.assertEqual([m.day for m, _ in C.due(e, mon, datetime(2026, 12, 1, 0, 0, tzinfo=timezone.utc))], [23, 30])
         self.assertEqual(C.due(e, tue, datetime(2026, 11, 29, 23, 0, tzinfo=timezone.utc)), [])
-        weekly = {x["workflow"]: x["days"] for x in C.table() if x["days"]}
-        self.assertEqual(weekly, {"keywords_by_year.yml": [0], "reference_candidates.yml": [0], "company_short_names.yml": [0], "standards_watch.yml": [0], "gleif_children.yml": [2]})
+        weekly = {}
+        for x in C.table():
+            if x["days"]:
+                weekly[x["workflow"]] = sorted(weekly.get(x["workflow"], []) + x["days"])          # a workflow may have two entries (two days, two inputs)
+        self.assertEqual(weekly, {"keywords_by_year.yml": [0], "reference_candidates.yml": [0], "company_short_names.yml": [0], "standards_watch.yml": [0], "gleif_children.yml": [2, 3]})
         self.assertIn("reference_use.yml", {x["workflow"] for x in C.table()}); self.assertIn("reference_examples.yml", {x["workflow"] for x in C.table()})
 
     def test_what_came_due_while_the_clock_was_away_is_started(self):

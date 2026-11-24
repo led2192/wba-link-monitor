@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v168 2026-11-24";
+  const CLIENT = "lantern v169 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2622,10 +2622,14 @@
     if (g.ultimate_parent) { lines.push({ lei: g.ultimate_parent.lei, t: g.ultimate_parent.name || g.ultimate_parent.lei, depth: d, kind: g.ultimate_parent.held ? "held" : "out", note: "ultimate parent", title: tipOf(g.ultimate_parent) }); d++; }
     if (g.direct_parent && (!g.ultimate_parent || g.direct_parent.lei !== g.ultimate_parent.lei)) { lines.push({ lei: g.direct_parent.lei, t: g.direct_parent.name || g.direct_parent.lei, depth: d, kind: g.direct_parent.held ? "held" : "out", note: "direct parent", title: tipOf(g.direct_parent) }); d++; }
     lines.push({ t: c.name, depth: d, kind: "me", note: c.legal_name && c.legal_name !== c.name ? c.legal_name : "", title: [c.legal_name_own, c.country, c.lei, (c.former_names || []).length ? `formerly ${c.former_names.join(", ")}` : ""].filter(Boolean).join(" · ") });
-    for (const k of g.children || []) lines.push({ lei: k.lei, t: k.name || k.lei, depth: d + 1, kind: k.held ? "held" : "out", note: k.country || "", title: tipOf(k) + ((k.former || []).length ? ` · formerly ${k.former.join(", ")}` : "") });
-    const moreDirect = (g.direct_total || 0) - (g.children || []).length, deeper = (g.ultimate_total || 0) - (g.direct_total || 0);
-    if (moreDirect > 0) lines.push({ t: `and ${moreDirect.toLocaleString()} more one level below`, depth: d + 1, kind: "more" });
-    if (deeper > 0) lines.push({ t: `and ${deeper.toLocaleString()} more further down the group`, depth: d + 2, kind: "more" });
+    // v169 (the owner: "in the detail, see all the branches"): the entities below hang from their own direct parents, level
+    // by level (tree), when the register's levels have been walked; else the first level alone, as before
+    const tree = g.tree || [], kidsOf = new Map(); for (const k of tree) { if (!kidsOf.has(k.parent)) kidsOf.set(k.parent, []); kidsOf.get(k.parent).push(k); }
+    let drawn = 0; const hang = (lei, depth) => { for (const k of kidsOf.get(lei) || []) { if (drawn >= 250) return; drawn++; lines.push({ lei: k.lei, t: k.name || k.lei, depth, kind: k.held ? "held" : "out", note: k.country || "", title: tipOf(k) + ((k.former || []).length ? ` · formerly ${k.former.join(", ")}` : "") }); hang(k.lei, depth + 1); } };
+    if (tree.length) hang(c.lei, d + 1);
+    else for (const k of g.children || []) { drawn++; lines.push({ lei: k.lei, t: k.name || k.lei, depth: d + 1, kind: k.held ? "held" : "out", note: k.country || "", title: tipOf(k) + ((k.former || []).length ? ` · formerly ${k.former.join(", ")}` : "") }); }
+    const rest = Math.max((g.ultimate_total || 0), (g.direct_total || 0)) - drawn;
+    if (rest > 0) lines.push({ t: `and ${rest.toLocaleString()} more in the group, not drawn${tree.length > (g.direct_total || 0) || !((g.ultimate_total || 0) > (g.direct_total || 0)) ? "" : " (their place below the first level is not read yet)"}: see the table below`, depth: d + 1, kind: "more" });
     for (const s of g.sisters || []) lines.push({ lei: s.lei, t: s.name || s.lei, depth: d, kind: s.held ? "held" : "out", note: "sister" + (s.country ? ` · ${s.country}` : ""), title: tipOf(s) });
     if ((g.sisters_total || 0) > (g.sisters || []).length) lines.push({ t: `and ${(g.sisters_total - g.sisters.length).toLocaleString()} more sisters`, depth: d, kind: "more" });
     const kids = g.direct_total, state = !c.in_register ? "The register does not know this company's LEI: correct it below, and the group is read after the next reading." : g.read == null ? "Its subsidiaries have not been read yet (Register children, weekly)." : `${(kids || 0).toLocaleString()} entit${kids === 1 ? "y" : "ies"} one level below it and ${(g.ultimate_total || 0).toLocaleString()} in its whole group, as declared to the register; ${(g.sisters_total || 0).toLocaleString()} sister${g.sisters_total === 1 ? "" : "s"}. Subsidiaries read ${adminWhen(g.read)}.`;
