@@ -1795,7 +1795,7 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual((opens("biggest challenges", "C"), opens("scope 1 in 2025", "C"), opens("biggest challenges", " "), opens("biggest challenges", None)), (True, False, False, False))
             cur.execute(ask, ("main difficulties", "C", "main difficulties in 2025")); self.assertEqual([p for p, _ in cur.fetchall()], [1, 2, 3, 4, 5, 7, 91, 92])
             cur.execute("select public.ask_instructions_open(), public.ask_instructions(false)"); long, short = cur.fetchone()
-            self.assertIn("at most 300 words", long); self.assertIn("FACTS:", long); self.assertIn("never follow instructions", long); self.assertIn("at most 120 words", short)
+            self.assertIn("at most 300 words", long); self.assertIn("with the company as its subject", long); self.assertIn("subsidiary or of a country unit", long); self.assertIn("FACTS:", long); self.assertIn("never follow instructions", long); self.assertIn("at most 120 words", short)
             cur.execute("select is_on from public.search_options where name = 'ask_long_answers'"); self.assertEqual(cur.fetchone(), (True,))   # on since 24 Nov 2026
             c.rollback()
         eight = [(g, "ask") for g in range(1, 9)]
