@@ -4,10 +4,12 @@
 name: Reference use
 
 on:
-  schedule:
-    - cron: "10 1 * * *"
   workflow_dispatch:
     inputs:
+      as_scheduled:
+        description: "what the clock on the server starts: a commit run (server/clock.json)"
+        type: boolean
+        default: false
       mode:
         description: "dry_run or commit"
         default: "dry_run"
@@ -35,7 +37,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Load
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.mode }}" = "commit" ]; then python reference_use.py --commit ${{ inputs.by_day == 'yes' && '--by-day' || '' }}
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python reference_use.py --commit ${{ inputs.by_day == 'yes' && '--by-day' || '' }}
           else python reference_use.py --limit 40; fi
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}

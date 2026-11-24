@@ -14,5 +14,10 @@
   {"workflow": "server_meaning.yml", "name": "Server meaning (the nightly refresh of the passages)", "at": ["02:23"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "job_state.yml", "name": "Job state (the runs, for the Admin panel)", "at": ["00:20", "03:20", "06:20", "09:20", "12:20", "15:20", "18:20", "21:20"], "inputs": {"as_scheduled": "true"}},
   {"workflow": "page_kinds.yml", "name": "Page kinds (contents and index pages of the new documents)", "at": ["05:41"], "inputs": {"as_scheduled": "true"}},
-  {"workflow": "label_docs.yml", "name": "Label documents (type, language and title for new documents with none)", "at": ["00:50", "01:50", "02:50", "03:50", "04:50", "05:50", "06:50", "07:50", "08:50", "09:50", "10:50", "11:50", "12:50", "13:50", "14:50", "15:50", "16:50", "17:50", "18:50", "19:50", "20:50", "21:50", "22:50", "23:50"], "inputs": {"as_scheduled": "true"}}
+  {"workflow": "label_docs.yml", "name": "Label documents (type, language and title for new documents with none)", "at": ["00:50", "01:50", "02:50", "03:50", "04:50", "05:50", "06:50", "07:50", "08:50", "09:50", "10:50", "11:50", "12:50", "13:50", "14:50", "15:50", "16:50", "17:50", "18:50", "19:50", "20:50", "21:50", "22:50", "23:50"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "reference_examples.yml", "name": "Reference examples (sentences of reports for the terms; loads the database, at night)", "at": ["22:40"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "reference_use.yml", "name": "Reference use (norms, regulations and terms by year; loads the database, at night)", "at": ["01:10"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "keywords_by_year.yml", "name": "Words of the year (weekly)", "at": ["02:43"], "days": ["mon"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "reference_candidates.yml", "name": "Reference candidates (names in the reports the list does not hold; weekly)", "at": ["03:43"], "days": ["mon"], "inputs": {"as_scheduled": "true"}},
+  {"workflow": "company_short_names.yml", "name": "Company short names (weekly)", "at": ["04:13"], "days": ["mon"], "inputs": {"as_scheduled": "true"}}
 ]

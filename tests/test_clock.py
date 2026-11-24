@@ -52,6 +52,18 @@ class Watch(unittest.TestCase):
         self.assertEqual((len(calls), out), (3, (0, 1)))
         self.assertEqual(failed, [("A", at(1, 41))])
 
+    def test_a_weekly_entry_comes_due_on_its_day_only(self):
+        """24 Nov 2026: the two nightly reference jobs had a schedule of GitHub's and it never fired. They and the three
+        weekly jobs are on the clock; a weekly entry names its day."""
+        from datetime import datetime, timezone
+        e = [{"workflow": "w.yml", "name": "w", "at": [(2, 43)], "inputs": {}, "days": [0]}]
+        mon, tue = datetime(2026, 11, 23, 0, 0, tzinfo=timezone.utc), datetime(2026, 11, 24, 0, 0, tzinfo=timezone.utc)
+        self.assertEqual([m.day for m, _ in C.due(e, mon, datetime(2026, 12, 1, 0, 0, tzinfo=timezone.utc))], [23, 30])
+        self.assertEqual(C.due(e, tue, datetime(2026, 11, 29, 23, 0, tzinfo=timezone.utc)), [])
+        weekly = {x["workflow"]: x["days"] for x in C.table() if x["days"]}
+        self.assertEqual(weekly, {"keywords_by_year.yml": [0], "reference_candidates.yml": [0], "company_short_names.yml": [0]})
+        self.assertIn("reference_use.yml", {x["workflow"] for x in C.table()}); self.assertIn("reference_examples.yml", {x["workflow"] for x in C.table()})
+
     def test_what_came_due_while_the_clock_was_away_is_started(self):
         started = []
         self.run_watch(lambda e, repo: started.append(e["name"]) or True, minutes=1, saved=at(19, 40, 14))
