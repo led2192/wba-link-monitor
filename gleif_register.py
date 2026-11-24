@@ -55,6 +55,28 @@ def entity_of(record):
             at(a, "entity", "status"), at(a, "registration", "status"))
 
 
+def latin(s):
+    """True when the letters of s are mostly Latin ones."""
+    letters = [c for c in (s or "") if c.isalpha()]
+    return bool(letters) and sum(1 for c in letters if c < "ɐ") >= 0.7 * len(letters)
+
+
+def names_of(attributes):
+    """(legal name, a name in Latin script or None, former names) of an entity's attributes."""
+    e = (attributes or {}).get("entity") or {}
+    legal = at(e, "legalName", "name")
+    others = [(o.get("name"), str(o.get("type") or "")) for o in (e.get("otherNames") or []) if isinstance(o, dict) and o.get("name")]
+    trans = [(o.get("name"), str(o.get("type") or "")) for o in (e.get("transliteratedOtherNames") or []) if isinstance(o, dict) and o.get("name")]
+    alt = None
+    if legal and not latin(legal):
+        alt = next((n for n, _ in trans + others if latin(n)), None)
+    former = []
+    for n, t in others:
+        if "PREVIOUS" in t.upper() and n != legal and n not in former:
+            former.append(n)
+    return legal, alt, former[:8]
+
+
 class Asker:
     """GETs with the robot's name, never faster than PER_MINUTE a minute; 429 or 5xx waits and tries twice more."""
     def __init__(self, sess, ua, per_minute=PER_MINUTE, sleep=time.sleep, clock=time.time):
@@ -107,13 +129,18 @@ def read(asker, todo, seen_keys=None):
         row = {"lei": lei, "found": rec is not None}
         if rec is not None:
             _, row["name"], row["country"], row["entity_status"], row["registration_status"] = entity_of(rec)
+            _, row["name_latin"], row["former"] = names_of(rec.get("attributes"))
             for which, col in (("direct-parent", "direct"), ("ultimate-parent", "ultimate")):
                 kind, url = parent_link(rec, which)
                 row[col + "_kind"] = kind
                 if kind == "record":
                     if url not in names:
                         p = asker.get(url)
-                        names[url] = entity_of(p["data"])[:2] if p and isinstance(p.get("data"), dict) else (None, None)
+                        if p and isinstance(p.get("data"), dict):
+                            legal, alt, _ = names_of(p["data"].get("attributes"))
+                            names[url] = (entity_of(p["data"])[0], alt or legal)          # a parent named in another script shows its Latin name
+                        else:
+                            names[url] = (None, None)
                     row[col + "_lei"], row[col + "_name"] = names[url]
         for wba in by_lei[lei]:
             out[wba] = row
@@ -152,14 +179,14 @@ def main():
             with conn.cursor() as cur:
                 cur.executemany(
                     "insert into public.company_register (wba_id, lei, found, legal_name, country, entity_status, registration_status, direct_parent_lei, direct_parent_name, "
-                    "ultimate_parent_lei, ultimate_parent_name, parent_note, checked_at) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+                    "ultimate_parent_lei, ultimate_parent_name, parent_note, name_latin, former_names, pending, checked_at) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, false, now()) "
                     "on conflict (wba_id) do update set lei = excluded.lei, found = excluded.found, legal_name = excluded.legal_name, country = excluded.country, "
                     "entity_status = excluded.entity_status, registration_status = excluded.registration_status, direct_parent_lei = excluded.direct_parent_lei, "
                     "direct_parent_name = excluded.direct_parent_name, ultimate_parent_lei = excluded.ultimate_parent_lei, ultimate_parent_name = excluded.ultimate_parent_name, "
-                    "parent_note = excluded.parent_note, checked_at = now()",
+                    "parent_note = excluded.parent_note, name_latin = excluded.name_latin, former_names = excluded.former_names, pending = false, checked_at = now()",
                     [(w, r["lei"], r["found"], r.get("name"), r.get("country"), r.get("entity_status"), r.get("registration_status"), r.get("direct_lei"), r.get("direct_name"),
                       r.get("ultimate_lei"), r.get("ultimate_name"),
-                      "declared no parent record" if r.get("ultimate_kind") == "exception" else None) for w, r in rows.items()])
+                      "declared no parent record" if r.get("ultimate_kind") == "exception" else None, r.get("name_latin"), r.get("former") or []) for w, r in rows.items()])
             conn.commit()
     run.finish("ok", rows_in=len(todo), rows_out=len(rows) if a.commit else 0, counters={"requests": asker.calls, **dict(c)}, notes="written" if a.commit else "dry run")
     return 0

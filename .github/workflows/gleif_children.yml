@@ -1,0 +1,44 @@
+# The subsidiaries of the companies lantrNa holds, from the public register of legal entities (GLEIF, CC0; gleif_children.py). Its public API, 45 requests a minute at most. Weekly (the server's clock), and
+# by hand (dry unless mode=commit). Prints counts and the names of JSON keys only.
+name: Register children
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_scheduled:
+        description: "what the clock on the server starts: a commit run (server/clock.json)"
+        type: boolean
+        default: false
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+      limit:
+        description: "parents read at most (a small number for a trial)"
+        default: "2500"
+
+concurrency:
+  group: gleif-children
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: [self-hosted, lantern]      # lantrNa's server
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Load
+        run: |
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python gleif_children.py --commit --limit "${{ inputs.limit || '2500' }}"
+          else python gleif_children.py --limit "${{ inputs.limit || '2500' }}"; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

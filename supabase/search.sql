@@ -5278,6 +5278,35 @@ create table if not exists public.company_lei_fixes (
 );
 alter table public.company_lei_fixes enable row level security;
 alter table public.company_register add column if not exists pending boolean not null default false;
+alter table public.company_register add column if not exists name_latin text;                         -- when the legal name is in another script
+alter table public.company_register add column if not exists former_names text[] not null default '{}';
+-- The entities below the companies lantrNa holds, and below the parents of the subsidiaries it holds (gleif_children.py,
+-- 24 Nov 2026): subsidiaries, and through a shared parent, sisters. direct_parent_lei: the parent it was found one level
+-- under; ultimate_parent_lei: the parent whose whole group it was found in. register_groups: how many children the
+-- register counts for a parent, and how many of them are kept (600 of each kind at most).
+create table if not exists public.register_entities (
+  lei                 text primary key,
+  name                text,
+  name_latin          text,
+  former_names        text[] not null default '{}',
+  country             text,
+  entity_status       text,
+  direct_parent_lei   text,
+  ultimate_parent_lei text,
+  read_at             timestamptz not null default now()
+);
+create index if not exists register_entities_direct on public.register_entities (direct_parent_lei);
+create index if not exists register_entities_ultimate on public.register_entities (ultimate_parent_lei);
+alter table public.register_entities enable row level security;
+create table if not exists public.register_groups (
+  lei            text primary key,
+  direct_total   int,
+  ultimate_total int,
+  direct_kept    int not null default 0,
+  ultimate_kept  int not null default 0,
+  read_at        timestamptz not null default now()
+);
+alter table public.register_groups enable row level security;
 
 create or replace function public.admin_register_lei_set(key text, company text, lei text) returns jsonb
 language plpgsql security definer set search_path = public, extensions

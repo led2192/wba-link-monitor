@@ -2163,6 +2163,24 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual([u for u, _, _ in sess.asked], [G.API + "/lei-records", "u/P"])               # one request for the records, the parent once
         self.assertEqual({ua for _, _, ua in sess.asked}, {"the-bot"}); self.assertTrue(all(w >= 0.99 for w in waits[1:]))   # by name, a second apart at 60 a minute
         self.assertIn("ultimate-parent.links.reporting-exception", keys)
+        # the other way: the entities below a parent, 200 a request, at most the cap, with the register's own count; a name in
+        # another script brings its Latin one, and former names are kept
+        import gleif_children as K
+        kid = lambda n, name, other=None, trans=None: {"id": f"K{n:019d}", "attributes": {"lei": f"K{n:019d}", "entity": {"legalName": {"name": name}, "legalAddress": {"country": "JP"}, "status": "ACTIVE",
+                                                                                                          "otherNames": other or [], "transliteratedOtherNames": trans or []}}}
+        class Sess2:
+            def __init__(self): self.asked = []
+            def get(self, url, params=None, headers=None, timeout=None):
+                self.asked.append((url.rsplit("/", 1)[-1], int(params["page[number]"])))
+                if url.endswith("/direct-children"):
+                    return Answer(200, {"meta": {"pagination": {"total": 2, "lastPage": 1}}, "data": [kid(1, "三菱ゼブラ株式会社", trans=[{"name": "Mitsu Zebra KK", "type": "PREFERRED_ASCII_TRANSLITERATED_LEGAL_NAME"}]),
+                                                                                                     kid(2, "Zebra Leasing Ltd", other=[{"name": "Old Zebra Leasing", "type": "PREVIOUS_LEGAL_NAME"}, {"name": "ZL", "type": "TRADING_OR_OPERATING_NAME"}])]})
+                n = int(params["page[number]"]); return Answer(200, {"meta": {"pagination": {"total": 450, "lastPage": 3}}, "data": [kid(100 * n + i, f"Zebra Unit {n}-{i}") for i in range(200 if n < 3 else 50)]})
+        s2 = Sess2(); ask2 = G.Asker(s2, "the-bot", per_minute=6000, sleep=lambda s: None)
+        direct, d_total = K.children(ask2, P, "direct-children"); deep, u_total = K.children(ask2, P, "ultimate-children", cap=300)
+        self.assertEqual((d_total, [(r["name_latin"], r["former"]) for r in direct]), (2, [("Mitsu Zebra KK", []), (None, ["Old Zebra Leasing"])]))
+        self.assertEqual((u_total, len(deep), s2.asked), (450, 300, [("direct-children", 1), ("ultimate-children", 1), ("ultimate-children", 2)]))   # the cap stops the asking; the total is the register's
+        self.assertEqual((K.latin("三菱ゼブラ株式会社"), K.latin("Société Zèbre SA")), (False, True))
         cur = self.conn.cursor()
         cur.execute("create table if not exists public.companies (wba_id text primary key, name text, industry text, country text, region text, website text, lantern_id text, lei text)")
         cur.execute("alter table public.companies add column if not exists lei text")
