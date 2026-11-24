@@ -2278,6 +2278,18 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((al["RG4"]["held_parent"], al["RG3"]["found"], al["RG5"]["company"]), (None, False, None))
         cur.execute("delete from public.company_register"); cur.execute("delete from public.companies where wba_id like 'RG_'")
 
+    def test_the_catalogue_is_counted_from_the_registers_files(self):
+        """24 Nov 2026: before a list of companies of lantrNa's own is built, how many it would hold: entities with an
+        ISIN that are companies (not funds), active, and nobody's subsidiary."""
+        import catalogue_count as CC
+        cols = ["LEI", "Entity.LegalName", "Entity.LegalAddress.Country", "Entity.EntityCategory", "Entity.EntityStatus"]
+        rows = [dict(zip(cols, x)) for x in [("A", "a", "ES", "GENERAL", "ACTIVE"), ("B", "b", "ES", "FUND", "ACTIVE"), ("C", "c", "GB", "GENERAL", "INACTIVE"), ("D", "d", "GB", "GENERAL", "ACTIVE"), ("E", "e", "FR", "", "ACTIVE"), ("F", "f", "FR", "GENERAL", "ACTIVE")]]
+        c, by, used = CC.count(rows, cols, {"A", "B", "C", "D", "E"}, {"D"})
+        self.assertEqual((c["entities"], c["with_an_isin"], c["companies_active_with_an_isin"], c["of_them_subsidiaries"], c["catalogue"], dict(by)), (6, 5, 3, 1, 2, {"ES": 1, "FR": 1}))
+        self.assertEqual(used["country"], "Entity.LegalAddress.Country")
+        self.assertEqual(CC.any_link({"data": {"attributes": {"fileName": "x.zip", "downloadLink": "https://m.example/isin-lei/abc/download"}}}), "https://m.example/isin-lei/abc/download")
+        self.assertIsNone(CC.any_link({"data": {"attributes": {"fileName": "x.zip", "page": "https://m.example/about"}}}))
+
     def test_a_document_is_told_as_a_subsidiarys_by_its_address_or_label(self):
         """24 Nov 2026: a bank's UK subsidiary's annual report was held under the group, labelled "Annual Report 2025";
         its address named the subsidiary. The longest subsidiary name in the label (whole words) or in the address
