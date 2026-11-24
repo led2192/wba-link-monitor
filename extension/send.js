@@ -393,6 +393,15 @@ async function start() {
   if (!(await token())) { showSignIn(); return; }
   $("sign").hidden = true; $("work").hidden = false; $("out").hidden = false;
   $("page").textContent = TAB.title ? `${TAB.title} · ${hostOf(TAB.url)}` : TAB.url;
+  // 0.8.1 (24 Nov 2026: opened on lantrNa's Admin, the window offered the 351 links of that page for one company, and the
+  // queue sat out of sight below them): on lantrNa's own pages nothing of the page is offered; the window is the queue's
+  if (/(^|\.)lantrna\.com$/.test(hostOf(TAB.url))) {
+    for (const id of ["company", "newco", "deeper", "list", "go", "watch", "capture"]) $(id).hidden = true;
+    for (const e of [document.querySelector('label[for="company"]'), document.querySelector('label[for="files"]'), $("count").parentElement]) if (e) e.hidden = true;
+    $("page").textContent = "This is lantrNa's own page: its links are not offered. The documents you ticked in Admin are fetched from here.";
+    await showQueue(); if ($("queue").hidden) $("msg").textContent = "Nothing waits in your queue. Tick documents in Admin (Documents to fetch) and send them to the extension.";
+    return;
+  }
   try { companies = await rpc("upload_companies"); } catch (e) { $("msg").textContent = `The companies could not be read: ${e.message}`; if (/sign in/.test(e.message)) showSignIn(); return; }
   const dl = $("companies"); for (const c of companies) { const o = el("option"); o.value = c.name; dl.append(o); }
   // the company's own site, or a site this person has sent documents from before (a company with two sites:
