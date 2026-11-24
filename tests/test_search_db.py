@@ -2199,6 +2199,14 @@ class SearchOnPostgres(unittest.TestCase):
             with zf.ZipFile(path, "w") as z: z.writestr("20261124-rr.csv", text)
             rows, cols = R.open_rows(path); direct, ultimate, cnt = R.parents(rows, {"A1", "A2", "A3"})
         self.assertEqual((cols[0], direct, ultimate, sum(cnt.values())), (R.START, {"A1": "P1"}, {"A1": "U1"}, 5))          # an inactive one, one of an entity not known here, and an entity under itself are left
+        # every entity of the groups held, not the first 600 of a parent: who belongs to a group, and its names from the file of entities
+        mem = R.members_of({"X1": "T1", "X2": "X1", "X3": "T9", "X4": "T1"}, {"X1": "T1", "X2": "T1", "X3": "T9"}, {"T1"})
+        self.assertEqual(mem, {"X1": ("T1", "T1"), "X2": ("X1", "T1"), "X4": ("T1", None)})
+        ecols = ["LEI", "Entity.LegalName", "Entity.OtherEntityNames.OtherEntityName.1", "Entity.OtherEntityNames.OtherEntityName.1.type", "Entity.TransliteratedOtherEntityNames.TransliteratedOtherEntityName.1",
+                 "Entity.LegalAddress.Country", "Entity.EntityStatus", "Entity.SuccessorEntity.1.SuccessorLEI"]
+        row = dict(zip(ecols, ["X1", "三菱ゼブラ株式会社", "Old Zebra KK", "PREVIOUS_LEGAL_NAME", "Mitsu Zebra KK", "JP", "ACTIVE", "x9"]))
+        self.assertEqual(R.entity_row(row, ecols), ("三菱ゼブラ株式会社", "Mitsu Zebra KK", ["Old Zebra KK"], "JP", "ACTIVE", "X9"))
+        self.assertEqual(R.entity_row(dict(zip(ecols, ["X2", "Zebra Ltd", "", "", "", "GB", "ACTIVE", ""])), ecols), ("Zebra Ltd", None, [], "GB", "ACTIVE", None))
         # 24 Nov 2026: main() named a list `deep` and so hid the function of that name: the first run of the levels died at once
         import types
         for mod in (K, G, R):
@@ -2217,7 +2225,9 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
         put("RG5", "D" * 18 + "55", True, "Zebra Old SA", "ACTIVE", "RETIRED")
         cur.execute("update public.company_register set entity_status = 'NULL' where wba_id = 'RG4'")          # the register's word for no status: not trouble
+        cur.execute("update public.company_register set successor_lei = %s, successor_name = 'Zebra Fine SA' where wba_id = 'RG3'", (P,))
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
+        self.assertEqual([(x["successor_lei"], x["successor_name"]) for x in r["rows"] if x["wba_id"] == "RG3"], [(P, "Zebra Fine SA")])          # the LEI the register kept in its place is offered on the row
         self.assertEqual((r["checked"], r["fine"], r["lapsed"]), (5, 2, 1))                           # a lapsed registration is counted, not listed: the LEI was not renewed
         self.assertEqual([(x["wba_id"], x["what"]) for x in r["rows"]], [("RG3", "not an LEI: its check digits do not fit"), ("RG1", "a subsidiary: its ultimate parent is another entity")])   # RG5 has no company row; the test's made-up codes are not LEIs
         # the owner corrects an LEI: check digits, no other company's, kept apart from the nightly copy, asked again at the next reading

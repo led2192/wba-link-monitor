@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v172 2026-11-24";
+  const CLIENT = "lantern v173 2026-11-24";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2725,7 +2725,12 @@
       edit.onclick = ev => { ev.preventDefault(); const inp = document.createElement("input"); inp.value = x.lei || ""; inp.maxLength = 24; inp.placeholder = "20 characters"; inp.setAttribute("aria-label", `LEI of ${x.company || x.wba_id}`); inp.style.cssText = "font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:8px;width:230px;background:var(--bg);color:var(--fg)";
         const save = adminBtn("Save", async () => { say.textContent = " saving…"; let s = null; try { s = await authed("admin_register_lei_set", { key, company: x.wba_id, lei: inp.value }); } catch (err) {} if (s && s.ok) { x.lei = s.lei; box.innerHTML = ""; box.append(el("span", null, s.lei), el("span", "what", " saved: the register is asked at its next reading (daily)")); } else say.textContent = ` not saved: ${(s && s.why) || "try again"}`; });
         box.innerHTML = ""; box.append(inp, save, say); inp.focus(); };
-      box.append(shown, edit, say); return box; };
+      box.append(shown, edit, say);
+      // v173 (the owner said yes): for a duplicate or retired LEI, the one the register kept in its place, taken with one press
+      if (x.successor_lei && x.successor_lei !== x.lei) { const use = el("a", null, `use ${x.successor_lei}`); use.href = "#"; use.style.cssText = "font-size:12px;display:block;flex-basis:100%"; use.title = `The register kept this LEI in its place${x.successor_name ? `: ${x.successor_name}` : ""}`;
+        use.onclick = async ev => { ev.preventDefault(); say.textContent = " saving…"; let s = null; try { s = await authed("admin_register_lei_set", { key, company: x.wba_id, lei: x.successor_lei }); } catch (err) {} if (s && s.ok) { x.lei = s.lei; box.innerHTML = ""; box.append(el("span", null, s.lei), el("span", "what", " saved: the register is asked at its next reading (daily)")); } else say.textContent = ` not saved: ${(s && s.why) || "try again"}`; };
+        box.append(use, el("span", "what", x.successor_name ? `the register kept it for ${x.successor_name}` : "the register kept it in its place")); }
+      return box; };
     // v167 (the owner: "Draw its group has to appear beside"): each row draws its own company's group, shown at the top
     const nameCell = x => { const box = el("div"); const d = el("a", null, "draw its group"); d.href = "#"; d.style.cssText = "font-size:12px;display:block"; d.onclick = ev => { ev.preventDefault(); pick.value = x.wba_id; drawIt().then(() => groups.scrollIntoView({ block: "start", behavior: "smooth" })); }; box.append(el("span", null, x.company || x.wba_id), d); return box; };
     // v171 (the owner: "it would be good to be able to filter"): the rows by the kind of thing to look at, and by a word
