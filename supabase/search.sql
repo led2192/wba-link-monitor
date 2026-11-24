@@ -5397,39 +5397,68 @@ as $$
 #variable_conflict use_variable
 declare
   s text := btrim(coalesce(search, ''));
-  me record;
-  up text;
+  me record;          -- the company of lantrNa, when the entity is one
+  ent record;         -- the entity as a child read from the register, when it is one
+  lei0 text;
+  dp text; upl text; up text;
+  nm text;
 begin
   if not public.admin_ok(key) then
     raise exception 'not allowed' using errcode = '42501';
   end if;
   select r.*, c.name as company into me from public.company_register r join public.companies c on c.wba_id = r.wba_id
-    where s <> '' and (c.wba_id = s or c.name ilike '%' || replace(replace(s, '%', ''), '_', ' ') || '%')
-    order by (lower(c.name) = lower(s)) desc, length(c.name), c.name limit 1;
-  if me.wba_id is null then
+    where s <> '' and (c.wba_id = s or r.lei = upper(s) or c.name ilike '%' || replace(replace(s, '%', ''), '_', ' ') || '%')
+    order by (c.wba_id = s or r.lei = upper(s)) desc, (lower(c.name) = lower(s)) desc, length(c.name), c.name limit 1;
+  -- 24 Nov 2026 (the owner: "go into the detail and see that company's connections"): any entity of a drawing can be
+  -- the centre of the next one, also one lantrNa does not hold: its LEI is asked for
+  lei0 := coalesce(me.lei, case when upper(s) ~ '^[A-Z0-9]{18}[0-9]{2}$' then upper(s) end);
+  if lei0 is null then
     return jsonb_build_object('found', false);
   end if;
-  up := coalesce(nullif(me.direct_parent_lei, me.lei), nullif(me.ultimate_parent_lei, me.lei));       -- whose other children are its sisters
+  select e.* into ent from public.register_entities e where e.lei = lei0;
+  if me.wba_id is null and ent.lei is null and not exists (select 1 from public.register_groups g where g.lei = lei0) then
+    return jsonb_build_object('found', false);
+  end if;
+  dp := nullif(coalesce(me.direct_parent_lei, ent.direct_parent_lei), lei0);
+  upl := nullif(coalesce(me.ultimate_parent_lei, ent.ultimate_parent_lei), lei0);
+  up := coalesce(dp, upl);                                  -- whose other children are its sisters
+  nm := coalesce(me.company, ent.name_latin, ent.name,
+                 (select r.ultimate_parent_name from public.company_register r where r.ultimate_parent_lei = lei0 and r.ultimate_parent_name is not null limit 1),
+                 (select r.direct_parent_name from public.company_register r where r.direct_parent_lei = lei0 and r.direct_parent_name is not null limit 1), lei0);
   return jsonb_build_object('found', true,
-    'company', jsonb_build_object('wba_id', me.wba_id, 'name', me.company, 'lei', me.lei, 'legal_name', coalesce(me.name_latin, me.legal_name), 'legal_name_own', me.legal_name,
-                                  'former_names', me.former_names, 'country', me.country, 'in_register', me.found),
-    'direct_parent', case when me.direct_parent_lei is not null and me.direct_parent_lei <> me.lei then jsonb_build_object('lei', me.direct_parent_lei, 'name', me.direct_parent_name,
-        'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = me.direct_parent_lei limit 1)) end,
-    'ultimate_parent', case when me.ultimate_parent_lei is not null and me.ultimate_parent_lei <> me.lei then jsonb_build_object('lei', me.ultimate_parent_lei, 'name', me.ultimate_parent_name,
-        'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = me.ultimate_parent_lei limit 1)) end,
-    'read', (select g.read_at from public.register_groups g where g.lei = me.lei),
-    'direct_total', (select g.direct_total from public.register_groups g where g.lei = me.lei),
-    'ultimate_total', (select g.ultimate_total from public.register_groups g where g.lei = me.lei),
+    'company', jsonb_build_object('wba_id', me.wba_id, 'name', nm, 'lei', lei0, 'legal_name', coalesce(me.name_latin, me.legal_name, ent.name_latin, ent.name),
+                                  'legal_name_own', coalesce(me.legal_name, ent.name), 'former_names', coalesce(me.former_names, ent.former_names, '{}'),
+                                  'country', coalesce(me.country, ent.country), 'in_register', coalesce(me.found, true), 'held', me.wba_id is not null),
+    'direct_parent', case when dp is not null then jsonb_build_object('lei', dp,
+        'name', coalesce(case when me.direct_parent_lei = dp then me.direct_parent_name end, (select coalesce(e.name_latin, e.name) from public.register_entities e where e.lei = dp),
+                         (select coalesce(r.name_latin, r.legal_name) from public.company_register r where r.lei = dp limit 1),
+                         (select r.ultimate_parent_name from public.company_register r where r.ultimate_parent_lei = dp and r.ultimate_parent_name is not null limit 1), dp),
+        'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = dp limit 1)) end,
+    'ultimate_parent', case when upl is not null then jsonb_build_object('lei', upl,
+        'name', coalesce(case when me.ultimate_parent_lei = upl then me.ultimate_parent_name end, (select coalesce(e.name_latin, e.name) from public.register_entities e where e.lei = upl),
+                         (select coalesce(r.name_latin, r.legal_name) from public.company_register r where r.lei = upl limit 1),
+                         (select r.ultimate_parent_name from public.company_register r where r.ultimate_parent_lei = upl and r.ultimate_parent_name is not null limit 1), upl),
+        'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = upl limit 1)) end,
+    'read', (select g.read_at from public.register_groups g where g.lei = lei0),
+    'direct_total', (select g.direct_total from public.register_groups g where g.lei = lei0),
+    'ultimate_total', (select g.ultimate_total from public.register_groups g where g.lei = lei0),
     'children', (select coalesce(jsonb_agg(jsonb_build_object('lei', e.lei, 'name', coalesce(e.name_latin, e.name), 'country', e.country, 'status', e.entity_status, 'former', e.former_names,
                                                               'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = e.lei limit 1))
                                            order by e.name_key), '[]'::jsonb)
-                 from (select e.*, lower(coalesce(e.name_latin, e.name)) as name_key from public.register_entities e where e.direct_parent_lei = me.lei order by 10 limit 60) e),
-    'sisters_total', (select count(*) from public.register_entities e where up is not null and e.direct_parent_lei = up and e.lei <> me.lei),
+                 from (select e.*, lower(coalesce(e.name_latin, e.name)) as name_key from public.register_entities e where e.direct_parent_lei = lei0 order by 10 limit 60) e),
+    -- every entity kept below it, for the table under the drawing and its download: one level down first
+    'all', (select coalesce(jsonb_agg(jsonb_build_object('lei', e.lei, 'name', coalesce(e.name_latin, e.name), 'legal_name', e.name, 'country', e.country, 'status', e.entity_status,
+                                                         'former', e.former_names, 'level', case when e.direct_parent_lei = lei0 then 'one level below' else 'further down' end,
+                                                         'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = e.lei limit 1))
+                                      order by (e.direct_parent_lei = lei0) desc nulls last, e.name_key), '[]'::jsonb)
+            from (select e.*, lower(coalesce(e.name_latin, e.name)) as name_key from public.register_entities e
+                  where (e.direct_parent_lei = lei0 or e.ultimate_parent_lei = lei0) and e.lei <> lei0 order by (e.direct_parent_lei = lei0) desc nulls last, 10 limit 1200) e),
+    'sisters_total', (select count(*) from public.register_entities e where up is not null and e.direct_parent_lei = up and e.lei <> lei0),
     'sisters', (select coalesce(jsonb_agg(jsonb_build_object('lei', e.lei, 'name', coalesce(e.name_latin, e.name), 'country', e.country,
                                                              'held', (select c.name from public.company_register r join public.companies c on c.wba_id = r.wba_id where r.lei = e.lei limit 1))
                                           order by e.name_key), '[]'::jsonb)
                 from (select e.*, lower(coalesce(e.name_latin, e.name)) as name_key from public.register_entities e
-                      where up is not null and e.direct_parent_lei = up and e.lei <> me.lei order by 10 limit 30) e));
+                      where up is not null and e.direct_parent_lei = up and e.lei <> lei0 order by 10 limit 30) e));
 end;
 $$;
 revoke all on function public.admin_register_group(text, text) from public, anon;
