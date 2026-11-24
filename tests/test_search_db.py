@@ -2171,8 +2171,10 @@ class SearchOnPostgres(unittest.TestCase):
             "insert into public.company_register (wba_id, lei, found, legal_name, entity_status, registration_status, ultimate_parent_lei, ultimate_parent_name) values (%s, %s, %s, %s, %s, %s, %s, %s)", (w, lei, found, name, st, reg, ul, un))
         put("RG1", A, True, "Zebra Bank UK plc", "ACTIVE", "ISSUED", P, "Zebra Group SA"); put("RG2", B, True, "Zebra Mills SA", "ACTIVE", "LAPSED"); put("RG3", C, False); put("RG4", P, True, "Zebra Group SA", "ACTIVE", "ISSUED", P, "Zebra Group SA")
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
-        self.assertEqual((r["checked"], r["fine"]), (4, 1))
-        self.assertEqual([(x["wba_id"], x["what"]) for x in r["rows"]], [("RG3", "the register does not know this LEI"), ("RG2", "the registration is lapsed"), ("RG1", "a subsidiary: its ultimate parent is another entity")])
+        put("RG5", "D" * 18 + "55", True, "Zebra Old SA", "ACTIVE", "RETIRED")
+        cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
+        self.assertEqual((r["checked"], r["fine"], r["lapsed"]), (5, 2, 1))                           # a lapsed registration is counted, not listed: the LEI was not renewed
+        self.assertEqual([(x["wba_id"], x["what"]) for x in r["rows"]], [("RG3", "the register does not know this LEI"), ("RG1", "a subsidiary: its ultimate parent is another entity")])   # RG5 has no company row
         cur.execute("delete from public.company_register"); cur.execute("delete from public.companies where wba_id like 'RG_'")
 
     def test_what_a_standard_setter_names_on_its_page_and_the_list_lacks_is_a_candidate(self):

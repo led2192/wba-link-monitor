@@ -5269,18 +5269,21 @@ begin
     'with_lei', (select count(*) from public.companies c where upper(btrim(coalesce(c.lei, ''))) ~ '^[A-Z0-9]{18}[0-9]{2}$'),
     'checked', (select count(*) from public.company_register),
     'checked_at', (select max(r.checked_at) from public.company_register r),
-    'fine', (select count(*) from public.company_register r where r.found and r.entity_status = 'ACTIVE' and r.registration_status = 'ISSUED'
+    'fine', (select count(*) from public.company_register r where r.found and r.entity_status = 'ACTIVE' and r.registration_status in ('ISSUED', 'LAPSED')
                                                               and (r.ultimate_parent_lei is null or r.ultimate_parent_lei = r.lei)),
+    -- a lapsed registration is an LEI the company did not renew that year: the entity and the LEI are right, the data may be
+    -- old. One in five on the first reading (333 of 1,772, 24 Nov 2026): counted, not listed as trouble.
+    'lapsed', (select count(*) from public.company_register r where r.found and r.registration_status = 'LAPSED'),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('wba_id', x.wba_id, 'company', x.name, 'lei', x.lei, 'legal_name', x.legal_name, 'country', x.country, 'what', x.what,
                                                           'parent', x.ultimate_parent_name, 'direct', x.direct_parent_name) order by x.ord, x.name), '[]'::jsonb)
              from (select r.*, c.name,
                           case when not r.found then 'the register does not know this LEI'
                                when coalesce(r.entity_status, '') <> 'ACTIVE' then 'the entity is ' || lower(coalesce(r.entity_status, 'of unknown status'))
-                               when coalesce(r.registration_status, '') <> 'ISSUED' then 'the registration is ' || lower(replace(coalesce(r.registration_status, 'unknown'), '_', ' '))
+                               when coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED') then 'the registration is ' || lower(replace(coalesce(r.registration_status, 'unknown'), '_', ' '))
                                else 'a subsidiary: its ultimate parent is another entity' end as what,
-                          case when not r.found then 0 when coalesce(r.entity_status, '') <> 'ACTIVE' then 1 when coalesce(r.registration_status, '') <> 'ISSUED' then 2 else 3 end as ord
+                          case when not r.found then 0 when coalesce(r.entity_status, '') <> 'ACTIVE' then 1 when coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED') then 2 else 3 end as ord
                    from public.company_register r join public.companies c on c.wba_id = r.wba_id
-                   where not r.found or coalesce(r.entity_status, '') <> 'ACTIVE' or coalesce(r.registration_status, '') <> 'ISSUED'
+                   where not r.found or coalesce(r.entity_status, '') <> 'ACTIVE' or coalesce(r.registration_status, '') not in ('ISSUED', 'LAPSED')
                       or (r.ultimate_parent_lei is not null and r.ultimate_parent_lei <> r.lei)
                    order by 16, c.name limit 600) x));      -- 16: ord, the kind of trouble
 end;
