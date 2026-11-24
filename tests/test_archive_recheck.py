@@ -12,6 +12,9 @@ class Recheck(unittest.TestCase):
         self.assertEqual(A.split("http://web.archive.org/web/2023/https://x.example/r.pdf"), ("2023", "https://x.example/r.pdf"))
         self.assertIsNone(A.split("https://x.example/r.pdf"))
 
+    def test_wait(self):
+        self.assertEqual((A.wait_of(None), A.wait_of("abc"), A.wait_of("5"), A.wait_of("120"), A.wait_of("9000")), (90, 90, 30, 120, 300))
+
     def test_verdict(self):
         self.assertEqual(A.verdict("1", []), "no capture answered with a PDF")
         self.assertEqual(A.verdict("1", [H, ["1", "text/html", "200", "900"], ["2", "application/pdf", "404", "10"]]), "no capture answered with a PDF")

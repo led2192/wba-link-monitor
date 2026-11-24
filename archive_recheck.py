@@ -4,7 +4,7 @@ The owner (24 Nov 2026): "this is happening with every file that we try to get f
 browser could not load. Of 958 documents whose address is a capture of web.archive.org, 648 are read and 310 are not,
 253 of them "truncated": the capture itself holds a cut file, so neither the robot nor a person's browser will ever
 get the document from it. The archive often holds several captures of one address. This script asks the archive's
-own index (CDX, open, one request a document, one every 1.5 seconds, as lanterN-bot) which captures of the original
+own index (CDX, open, one request a document, one every 6 seconds, as lanterN-bot; it stops when the index says to slow down three times in a row) which captures of the original
 address answered 200 with a PDF, and compares the largest with the one held.
 
 A first step, to know what there is: it counts and writes nothing. What to do with the rows (point them to the better
@@ -21,7 +21,8 @@ import argparse, collections, os, re, sys, time
 CDX = "https://web.archive.org/cdx/search/cdx"
 CAPTURE = re.compile(r"^https?://web\.archive\.org/web/(\d{4,14})[a-z_]*/(.+)$", re.I)
 UNREAD = ("no_file", "download_fail", "timeout", "truncated", "too_big", "no_text")
-PAUSE = 1.5
+PAUSE = 6.0           # the index answered 429 after 30 requests at one every 1.5 s (first run, 24 Nov 2026)
+WAIT_429 = 90         # then wait, ask once more, and stop for good after three refusals in a row
 LARGER = 1.05          # a capture counts as larger when its stored length is 5% above the held one's
 
 
@@ -54,6 +55,14 @@ def verdict(held_ts, rows):
     return "no larger capture"
 
 
+def wait_of(retry_after):
+    """Seconds to wait after a 429: what the index asks for, between 30 and 300; 90 when it does not say."""
+    try:
+        return min(max(int(str(retry_after).strip()), 30), 300)
+    except (TypeError, ValueError):
+        return WAIT_429
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
@@ -70,14 +79,20 @@ def main():
     if a.limit:
         docs = docs[:a.limit]
     c, by = collections.Counter(), collections.Counter()
-    sess = requests.Session()
+    sess, refused = requests.Session(), 0
     for n, (lid, url, status) in enumerate(docs, 1):
         got = split(url)
         if not got:
             c["not the address of a capture"] += 1; continue
         ts, orig = got
+        if refused >= 3:
+            c["not asked: the index said to slow down three times in a row"] += 1; continue
         try:
-            r = sess.get(CDX, params={"url": orig, "output": "json", "fl": "timestamp,mimetype,statuscode,length", "limit": "200"}, headers={"User-Agent": bot.BOT_UA}, timeout=40)
+            ask = lambda: sess.get(CDX, params={"url": orig, "output": "json", "fl": "timestamp,mimetype,statuscode,length", "limit": "200"}, headers={"User-Agent": bot.BOT_UA}, timeout=40)
+            r = ask()
+            if r.status_code == 429:
+                time.sleep(wait_of(r.headers.get("Retry-After"))); r = ask()
+            refused = refused + 1 if r.status_code == 429 else 0
             v = verdict(ts, r.json() if r.status_code == 200 and r.text.strip() else []) if r.status_code == 200 else f"the index answered {r.status_code}"
         except Exception as e:
             v = f"the index did not answer ({type(e).__name__})"
