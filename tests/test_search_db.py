@@ -2278,6 +2278,22 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((al["RG4"]["held_parent"], al["RG3"]["found"], al["RG5"]["company"]), (None, False, None))
         cur.execute("delete from public.company_register"); cur.execute("delete from public.companies where wba_id like 'RG_'")
 
+    def test_a_document_is_told_as_a_subsidiarys_by_its_address_or_label(self):
+        """24 Nov 2026: a bank's UK subsidiary's annual report was held under the group, labelled "Annual Report 2025";
+        its address named the subsidiary. The longest subsidiary name in the label (whole words) or in the address
+        (spaces out) tells it; the company's own name, or a short name in an address, tells nothing."""
+        import subsidiary_documents as SD
+        names = [("zebra uk", "Zebra UK Group Holdings plc"), ("zebra", "Zebra SA"), ("zebra leasing", "Zebra Leasing Ltd"), ("banco zebra totta", "Banco Zebra Totta SA"), ("zb fin", "ZB Fin Ltd")]
+        own = SD.fold("Banco Zebra")
+        self.assertEqual(SD.told_by("2025 | Banco Zebra | Annual Report 2025", "https://www.zebra.co.uk/assets/ZebraLeasingLtd2025AnnualReport.pdf", names, own), ("Zebra Leasing Ltd", "address"))
+        self.assertEqual(SD.told_by("2024 | Banco Zebra | Zebra UK annual report", "https://x.example/a.pdf", names, own), ("Zebra UK Group Holdings plc", "label"))
+        self.assertEqual(SD.told_by("Relatório Banco Zebra Totta 2024", "https://x.example/zebrauk.pdf", names, own), ("Banco Zebra Totta SA", "label"))     # the longest; "zebrauk" is too short for an address
+        self.assertIsNone(SD.told_by("2024 | Banco Zebra | Annual Report", "https://www.bancozebra.com/zbfin/annual-report-2024.pdf", names, own))
+        cur = self.conn.cursor()
+        cur.execute("insert into public.document_entities (library_id, name, kind, how) values ('DE1', 'Zebra Leasing Ltd', 'a subsidiary', 'address')")
+        cur.execute("select name, how from public.document_entities where library_id = 'DE1'"); self.assertEqual(cur.fetchone(), ("Zebra Leasing Ltd", "address"))
+        cur.execute("delete from public.document_entities")
+
     def test_what_a_standard_setter_names_on_its_page_and_the_list_lacks_is_a_candidate(self):
         """24 Nov 2026: the list's entries carry the address of their own page. A full name with its acronym found there
         and not held by the list is a candidate with the site that names it; a page robots.txt forbids, or that the

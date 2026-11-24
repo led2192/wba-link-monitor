@@ -5473,6 +5473,17 @@ $$;
 revoke all on function public.find_entity(text, text) from public;
 grant execute on function public.find_entity(text, text) to anon, authenticated;
 
+-- A document held under a company that is a subsidiary's own (subsidiary_documents.py, 24 Nov 2026): told by the
+-- subsidiary's name in the document's address or label. One row a document. Not read by the search yet.
+create table if not exists public.document_entities (
+  library_id text primary key,
+  name       text not null,
+  kind       text not null,
+  how        text not null,
+  told_at    timestamptz not null default now()
+);
+alter table public.document_entities enable row level security;
+
 -- One company's whole group, to draw (the owner, 24 Nov 2026: "the draw could be simply to see the relations of one
 -- complete company"): its parents, itself, the entities one level below it, how many more lie further down, and its
 -- sisters (the other entities one level below its own parent). A name in Latin script is shown when the legal one is
