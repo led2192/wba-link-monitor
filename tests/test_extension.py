@@ -49,7 +49,9 @@ class Extension(unittest.TestCase):
         self.assertIn('"type: let lantrNa decide"', js)                                   # optional: nothing chosen, nothing said
         self.assertIn('id="files" type="file" accept="application/pdf,.pdf" multiple', html)
         self.assertIn('if (doc.file && !looksPdf(buf)) throw new Error("not a PDF");', js)
-        self.assertIn('"version": "0.8.0"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.8.0", read("extension", "config.js"))
+        self.assertIn('"version": "0.8.1"', read("extension", "manifest.json")); self.assertIn("send-to-lantern 0.8.1", read("extension", "config.js"))
+        # 0.8.1: on lantrNa's own pages the page's links are not offered (351 links of Admin were, for one company); the queue is at the top
+        self.assertIn('if (/(^|\\.)lantrna\\.com$/.test(hostOf(TAB.url))) {', js); self.assertLess(html.index('id="queue"'), html.index('id="company"'))
         # 0.8.0: the owner's queue. One at a time, a pause between two and a longer one on the same site; no page is claimed as the source
         self.assertIn('rpc("fetch_queue_mine", { max_rows: 500 })', js); self.assertIn('rpc("fetch_queue_done", { library_id: d.library_id, result })', js)
         self.assertIn("const QUEUE_PAUSE = 4000, SAME_SITE_PAUSE = 12000;", js); self.assertIn("page_url: doc.queue ? null :", js)

@@ -18,6 +18,11 @@
   </section>
   <section id="work" hidden>
     <p id="page" class="what"></p>
+    <div id="queue" class="box" hidden>
+      <p id="queuesay" class="small"></p>
+      <div class="acts"><button id="queuego">Fetch my queue</button><button id="queuestop" class="quiet" hidden>Stop after this one</button></div>
+      <div id="queuelog"></div>
+    </div>
     <label class="lab" for="company">Company</label>
     <input id="company" list="companies" placeholder="Company" autocomplete="off">
     <datalist id="companies"></datalist>
@@ -40,11 +45,6 @@
       <button id="capture" class="quiet" title="The text of this page, as you see it, is kept in lantrNa as a document of type Web page for the company and can be searched at once">Send this page</button>
     </div>
     <p id="msg" class="msg"></p>
-    <div id="queue" class="box" hidden>
-      <p id="queuesay" class="small"></p>
-      <div class="acts"><button id="queuego">Fetch my queue</button><button id="queuestop" class="quiet" hidden>Stop after this one</button></div>
-      <div id="queuelog"></div>
-    </div>
     <p id="scanmsg" class="msg small"></p>
   </section>
 </main>
