@@ -2220,6 +2220,15 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((g["found"], g["company"]["name"], g["ultimate_parent"]["name"], g["ultimate_parent"]["held"], g["direct_parent"]["lei"]), (True, "Zebra Bank UK", "Zebra Group SA", "Zebra Fine", P))
         self.assertEqual(([k["name"] for k in g["children"]], g["direct_total"], g["ultimate_total"]), (["Mitsu Zebra KK", "Zebra Leasing Ltd"], 2, 3))
         self.assertEqual(([s["name"] for s in g["sisters"]], g["sisters_total"]), (["Zebra Brasil SA"], 1))                                   # itself is not its own sister
+        self.assertEqual([(x["name"], x["level"]) for x in g["all"]], [("Mitsu Zebra KK", "one level below"), ("Zebra Leasing Ltd", "one level below")])
+        # an entity lantrNa does not hold can be the centre: by its LEI. A child, then the parent itself
+        cur.execute("select public.admin_register_group('k', 'K2')"); self.assertEqual(cur.fetchone()[0], {"found": False})                  # not an LEI
+        k2 = "K" + "2" * 17 + "22"; cur.execute("update public.register_entities set lei = %s where lei = 'K2'", (k2,)); cur.execute("update public.register_entities set direct_parent_lei = %s where lei = 'K3'", (k2,))
+        cur.execute("select public.admin_register_group('k', %s)", (k2.lower(),)); e = cur.fetchone()[0]
+        self.assertEqual((e["company"]["name"], e["company"]["held"], e["direct_parent"]["held"], e["ultimate_parent"]["name"], [k["name"] for k in e["children"]], [s["name"] for s in e["sisters"]]),
+                         ("Zebra Leasing Ltd", False, "Zebra Bank UK", "Zebra Group SA", ["Zebra Deep Ltd"], ["Mitsu Zebra KK"]))
+        cur.execute("select public.admin_register_group('k', %s)", (P,)); top = cur.fetchone()[0]
+        self.assertEqual((top["company"]["held"], top["company"]["name"], sorted(k["name"] for k in top["children"])), (True, "Zebra Fine", ["Zebra Bank UK plc", "Zebra Brasil SA"]))
         cur.execute("select public.admin_register_group('k', 'no such company')"); self.assertEqual(cur.fetchone()[0], {"found": False})
         cur.execute("delete from public.register_entities"); cur.execute("delete from public.register_groups")
         cur.execute("select public.admin_register_all('k')"); al = {x["wba_id"]: x for x in cur.fetchone()[0]}
