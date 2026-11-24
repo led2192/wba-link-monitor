@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.first.outputs.page_url || steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - name: Fill in the project address and the publishable key
@@ -61,7 +61,16 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public
+      # 24 Nov 2026: the deploy step often finds "0 artifacts" a second after the upload (five failures in one night) and
+      # the whole run fails. It is tried once, and once more half a minute later, inside the same run: a re-run of the
+      # run cannot work, it uploads a second artifact of the same name.
+      - id: first
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - if: steps.first.outcome == 'failure'
+        run: sleep 30
       - id: deployment
+        if: steps.first.outcome == 'failure'
         uses: actions/deploy-pages@v4
 
   # The same files on lantrNa's own server (19 Nov 2026), where the web server serves them under the owner's domain
