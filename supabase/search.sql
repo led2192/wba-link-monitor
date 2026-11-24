@@ -1850,7 +1850,9 @@ begin
   -- too_big...). A company's list showed such documents like the others, so six annual reports of one company
   -- looked held when only their addresses were; the page now says so on the row.
   return (select coalesce(jsonb_object_agg(d.library_id, jsonb_build_object('pages', coalesce(d.pages, 0), 'found', to_jsonb(d) ->> 'found',
-                                                                            'status', nullif(d.text_status, 'ok'))), '{}'::jsonb)
+                                                                            'status', nullif(d.text_status, 'ok'),
+                                                                            -- 24 Nov 2026: a document held under a group that names one of its subsidiaries (document_entities)
+                                                                            'entity', (select e.name from public.document_entities e where e.library_id = d.library_id))), '{}'::jsonb)
           from public.documents d where d.library_id = any(ids[1:200]));
 end;
 $$;

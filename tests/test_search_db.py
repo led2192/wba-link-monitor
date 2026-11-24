@@ -2292,6 +2292,9 @@ class SearchOnPostgres(unittest.TestCase):
         cur = self.conn.cursor()
         cur.execute("insert into public.document_entities (library_id, name, kind, how) values ('DE1', 'Zebra Leasing Ltd', 'a subsidiary', 'address')")
         cur.execute("select name, how from public.document_entities where library_id = 'DE1'"); self.assertEqual(cur.fetchone(), ("Zebra Leasing Ltd", "address"))
+        cur.execute("insert into public.documents (library_id, wba_id, company, label, text_status) values ('DE1', 'WX', 'Banco Zebra', 'Annual Report', 'ok'), ('DE2', 'WX', 'Banco Zebra', 'Annual Report', 'ok')")
+        cur.execute("select public.doc_facts('k', array['DE1', 'DE2'])"); f = cur.fetchone()[0]; self.assertEqual((f["DE1"]["entity"], f["DE2"]["entity"]), ("Zebra Leasing Ltd", None))   # the page says it on the row and under an answer
+        cur.execute("delete from public.documents where library_id in ('DE1', 'DE2')")
         cur.execute("delete from public.document_entities")
 
     def test_what_a_standard_setter_names_on_its_page_and_the_list_lacks_is_a_candidate(self):
