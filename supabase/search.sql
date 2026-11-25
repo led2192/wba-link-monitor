@@ -5580,6 +5580,7 @@ alter table public.catalogue add column if not exists revenue_currency text;
 alter table public.catalogue add column if not exists revenue_year int;
 alter table public.catalogue add column if not exists revenue_eur numeric;
 alter table public.catalogue add column if not exists size_at timestamptz;
+alter table public.catalogue add column if not exists revenue_concept text;   -- the concept the amount was read from: Revenue, or what stands in its place (a bank's interest revenue, a property company's rent)
 alter table public.catalogue enable row level security;
 revoke all on public.catalogue from anon, authenticated;
 
@@ -5595,7 +5596,7 @@ begin
     'total', (select count(*) from public.catalogue),
     'seen_at', (select max(c.seen_at) from public.catalogue c),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('lei', c.lei, 'name', coalesce(c.owner_name, c.common_name, c.legal_name), 'legal_name', c.legal_name, 'aliases', c.aliases, 'country', c.country,
-                                                          'website', coalesce(c.owner_website, c.website), 'fixed', c.owner_website is not null or c.owner_name is not null, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei, 'match', c.match, 'last_year', c.last_year, 'revenue', c.revenue, 'revenue_currency', c.revenue_currency, 'revenue_year', c.revenue_year, 'revenue_eur', c.revenue_eur, 'sized', c.size_at is not null,
+                                                          'website', coalesce(c.owner_website, c.website), 'fixed', c.owner_website is not null or c.owner_name is not null, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei, 'match', c.match, 'last_year', c.last_year, 'revenue', c.revenue, 'revenue_currency', c.revenue_currency, 'revenue_year', c.revenue_year, 'revenue_eur', c.revenue_eur, 'revenue_concept', c.revenue_concept, 'sized', c.size_at is not null,
                                                           'held', (select h.name from public.companies h where h.wba_id = c.duplicate_of))
                                        order by lower(regexp_replace(coalesce(c.owner_name, c.common_name, c.legal_name), '^[^[:alnum:]]+', '')), c.lei), '[]'::jsonb)
              from public.catalogue c));

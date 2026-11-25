@@ -9,7 +9,7 @@ class Size(unittest.TestCase):
         facts = [(1, "ifrs-full:RevenueFromContractsWithCustomers", 2025, "2025-12-31", 90.0, "SEK", "ESEF", ""),
                  (0, "ifrs-full:Revenue", 2025, "2025-12-31", 100.0, "SEK", "ESEF", ""),
                  (0, "ifrs-full:Revenue", 2024, "2024-12-31", 500.0, "SEK", "ESEF", "")]
-        self.assertEqual(C.newest(facts), (100.0, "SEK", 2025))
+        self.assertEqual(C.newest(facts), (100.0, "SEK", 2025, "Revenue"))
         self.assertIsNone(C.newest([])); self.assertIsNone(C.newest([(0, "ifrs-full:Revenue", 2025, "2025-12-31", 0.0, "EUR", "ESEF", "")]))
 
     def test_euros_are_rough_and_only_for_known_currencies(self):
@@ -22,11 +22,14 @@ class Size(unittest.TestCase):
         fl = lambda lei, sess, years: [("2024-12-31", "old.json", "", ""), ("2025-12-31", "new.json", "", "")]
         asked = []
         ok = lambda url: (asked.append(url), (200, oim))[1]
-        self.assertEqual(C.size_of("L", None, fl, ok), ("ok", (2500000.0, "EUR", 2025))); self.assertEqual(asked, ["new.json"])      # the newest filing only; a segment is not the group
+        self.assertEqual(C.size_of("L", None, fl, ok), ("ok", (2500000.0, "EUR", 2025, "Revenue"))); self.assertEqual(asked, ["new.json"])      # the newest filing only; a segment is not the group
         self.assertEqual(C.size_of("L", None, lambda *a: [], ok), ("no filing", None))
         self.assertEqual(C.size_of("L", None, fl, lambda url: (429, {})), ("refused", None))
         self.assertEqual(C.size_of("L", None, fl, lambda url: (200, {})), ("no facts", None))
         bank = {"facts": {"b": {"value": "1", "dimensions": {"concept": "ifrs-full:InterestIncome", "period": year, "unit": "iso4217:EUR"}}}}
+        rent = {"facts": {"r": {"value": "70", "dimensions": {"concept": "ifrs-full:RentalIncomeFromInvestmentProperty", "period": year, "unit": "iso4217:SEK"}},
+                          "i": {"value": "900", "dimensions": {"concept": "ifrs-full:RevenueFromInterest", "period": year, "unit": "iso4217:SEK"}}}}
+        self.assertEqual(C.size_of("L", None, fl, lambda url: (200, rent)), ("ok", (900.0, "SEK", 2025, "RevenueFromInterest")))      # what stands in revenue's place, by the list's order
         import collections
         why = collections.Counter()
         self.assertEqual(C.size_of("L", None, fl, lambda url: (200, bank), why=why), ("no revenue", None))

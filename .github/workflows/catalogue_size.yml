@@ -11,6 +11,9 @@ on:
       limit:
         description: "companies at most (0 = all still without a size)"
         default: "0"
+      again_empty:
+        description: "yes: ask again for those asked before with no amount read"
+        default: "no"
 
 concurrency:
   group: catalogue-size
@@ -32,7 +35,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Load
         run: |
-          if [ "${{ inputs.mode }}" = "commit" ]; then python catalogue_size.py --limit "${{ inputs.limit }}" --commit; else python catalogue_size.py --limit "${{ inputs.limit }}"; fi
+          if [ "${{ inputs.mode }}" = "commit" ]; then python catalogue_size.py --limit "${{ inputs.limit }}" --commit ${{ inputs.again_empty == 'yes' && '--again-empty' || '' }}; else python catalogue_size.py --limit "${{ inputs.limit }}"; fi
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
