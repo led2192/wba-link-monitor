@@ -44,6 +44,21 @@ class Check(unittest.TestCase):
         self.assertEqual(C.labels({"results": {"bindings": [{"c": v("http://www.wikidata.org/entity/Q5"), "label_": v("Zebra"), "aliases": v("Z|Zeb")}, {"c": v("http://www.wikidata.org/entity/Q6")}]}}),
                          {"Q5": ("Zebra", ["Z", "Zeb"]), "Q6": (None, [])})
 
+    def test_a_request_cut_short_is_asked_again(self):
+        import unittest.mock as mock
+        calls = []
+        class R:
+            def __init__(s, code): s.status_code = code
+            def json(s): return {"ok": 1}
+        def do():
+            calls.append(1)
+            if len(calls) == 1: raise ConnectionError("Response ended prematurely")
+            return R(502 if len(calls) == 2 else 200)
+        with mock.patch.object(C.time, "sleep", lambda s: None):
+            self.assertEqual(C.fetch_json(do), (200, {"ok": 1})); self.assertEqual(len(calls), 3)
+            self.assertEqual(C.fetch_json(lambda: R(404)), (404, {}))
+            self.assertEqual(C.fetch_json(lambda: (_ for _ in ()).throw(TimeoutError()))[0], "TimeoutError")
+
     def test_entries(self):
         v = lambda x: {"value": x}
         got = C.entries({"results": {"bindings": [{"lei": v(A), "c": v("http://www.wikidata.org/entity/Q5"), "site_": v("https://x.example"), "label_": v("Zebra"), "aliases": v("Z|Zeb| ")}, {"lei": v(A), "c": v("http://www.wikidata.org/entity/Q6")}]}})

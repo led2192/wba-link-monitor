@@ -94,6 +94,23 @@ def labels(answer):
     return out
 
 
+def fetch_json(do, tries=3):
+    """(status, json) of a request made by do(); a connection cut short or a 429 or 502 to 504 is waited for and asked again."""
+    status = None
+    for attempt in range(1, tries + 1):
+        try:
+            r = do(); status = r.status_code
+            if status == 200:
+                return 200, r.json()
+            if status not in (429, 502, 503, 504):
+                return status, {}
+        except Exception as e:
+            status = type(e).__name__
+        if attempt < tries:
+            time.sleep(30 * attempt)
+    return status, {}
+
+
 def check(cand, held):
     """(reason or None, the held company's id or None) for one candidate against what is held.
     cand: dict lei, website, names (a list). held: dict by_lei {LEI: wba_id}, group {LEI: wba_id}, by_host {host: wba_id}, by_name {key: wba_id}."""
@@ -167,11 +184,10 @@ def main():
     firms, last, n = {}, {}, 0
     while True:
         n += 1
-        r = sess.get(E.API, params={"page[size]": str(E.SIZE), "page[number]": str(n), "include": "entity"}, headers={"User-Agent": ua, "Accept": "application/vnd.api+json"}, timeout=90)
-        if r.status_code == 429:
-            time.sleep(90); r = sess.get(E.API, params={"page[size]": str(E.SIZE), "page[number]": str(n), "include": "entity"}, headers={"User-Agent": ua, "Accept": "application/vnd.api+json"}, timeout=90)
-        j = r.json() if r.status_code == 200 else {}
+        st, j = fetch_json(lambda: sess.get(E.API, params={"page[size]": str(E.SIZE), "page[number]": str(n), "include": "entity"}, headers={"User-Agent": ua, "Accept": "application/vnd.api+json"}, timeout=90))
         if not j.get("data"):
+            if st != 200:
+                sys.exit(f"the repository of filings answered {st} on page {n}: nothing written (a list cut short would drop candidates)")
             break
         inc = {(x.get("type"), x.get("id")): x for x in j.get("included") or []}
         for it in j["data"]:
@@ -187,15 +203,10 @@ def main():
     # 2. Wikidata by LEI
     wd, status = {}, 200
     for i in range(0, len(leis), BATCH):
-        for attempt in (1, 2):
-            r = sess.post(SPARQL, data={"query": QUERY % " ".join('"%s"' % l for l in leis[i:i + BATCH]), "format": "json"}, headers={"User-Agent": ua, "Accept": "application/sparql-results+json"}, timeout=90)
-            status = r.status_code
-            if status in (429, 502, 503, 504) and attempt == 1:
-                time.sleep(60); continue
-            break
+        status, j = fetch_json(lambda: sess.post(SPARQL, data={"query": QUERY % " ".join('"%s"' % l for l in leis[i:i + BATCH]), "format": "json"}, headers={"User-Agent": ua, "Accept": "application/sparql-results+json"}, timeout=90))
         if status != 200:
             break
-        wd.update(entries(r.json())); time.sleep(5.0)
+        wd.update(entries(j)); time.sleep(5.0)
     # 2b. those not found by LEI, by name: to be looked at one by one
     by_name = {}
     if status == 200 and not a.no_names:
