@@ -1,0 +1,41 @@
+# What people did with the results (opened, marked useful, marked not) summed into the signal of the option
+# learn_from_use (learn_from_use.py). Every night, and by hand (dry unless mode=commit). Light. Prints counts only.
+name: Learn from use
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_scheduled:
+        description: "what the clock on the server starts: a commit run (server/clock.json)"
+        type: boolean
+        default: false
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+
+concurrency:
+  group: learn-from-use
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: [self-hosted, lantern]      # lantrNa's server
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Load
+        run: |
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python learn_from_use.py --commit
+          else python learn_from_use.py; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
