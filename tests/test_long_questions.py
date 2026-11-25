@@ -14,7 +14,8 @@ class Compare(unittest.TestCase):
 
     def test_the_share_of_pages_is_sent_as_the_real_the_function_takes(self):
         import inspect
-        self.assertIn("refresh_word_freq(%s::real)", inspect.getsource(L.main))          # 25 Nov 2026: a float alone is double precision, and no such function exists
+        self.assertIn("refresh_word_freq(%s::real)", inspect.getsource(L.main))
+        self.assertLess(inspect.getsource(L.main).index("set statement_timeout = '30min'"), inspect.getsource(L.main).index("refresh_word_freq(%s::real)"))          # 25 Nov 2026: a float alone is double precision, and no such function exists
 
 
 if __name__ == "__main__":

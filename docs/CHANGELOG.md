@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-25 Fix: `long_questions.py --freq` was cancelled after two minutes by the connection's statement timeout; the session now sets 30 minutes before the count. (#826)
 - 2026-11-25 Option `ask_series` on: a question about a company over time reads the best page of each of the last seven years' main reports. Paid comparison run 45701180130 (40 questions, 0.170 USD): report years among the pages read 2.8 to 4.8, years named in the answer 4.2 to 4.5 (more in 17 answers, fewer in 8), answers that say the pages do not hold it 8 to 6, better 4, worse 2. (#825)
 - 2026-11-25 Fix: `long_questions.py --freq` failed at once ("function public.refresh_word_freq(double precision) does not exist"): the share of pages is now sent as the `real` the function takes. (#824)
 - 2026-11-25 Learning from use. Option `learn_from_use` (off until compared): `learn_from_use.py` (workflow "Learn from use", every night 02:17 UTC on the server) sums the openings and the marks of results by search and document into `public.use_signal` (useful +2, not -2, opened +1, one voice a person); with the option on `find_pages_ranked` moves a document with 2 or more up and one with -2 or less down by five places and a half for that same search. Admin "Today" (v190) shows the last 24 hours against the week before (`admin_search_digest`): nothing shown, typed again in other words, slow, the good result third or lower, marked not, with the day's cases. (#823)

@@ -478,3 +478,6 @@ The browser monitor set `status` to error when Chromium raised, and left `http_s
 
 ## A Python float is not a Postgres `real` (25 Nov 2026)
 psycopg sends a Python float as `double precision`, and Postgres does not pick a function declared with a `real` argument for it: `long_questions.py --freq` died on its first statement in the night it was meant to run. The offline tests stub the database and did not see it. Cast in the statement (`%s::real`) or declare the argument `double precision`.
+
+## A function's `set statement_timeout` does not lengthen the statement that calls it (25 Nov 2026)
+`refresh_word_freq` is declared with `set statement_timeout = '30min'` and was still cancelled after two minutes: the timer of a statement is set when the statement starts, with the connection's value, and the function's setting only applies to statements started inside it. A long function needs `set statement_timeout` on the connection before the call (as `keywords_by_year.py` does).
