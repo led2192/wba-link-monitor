@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v182 2026-11-25";
+  const CLIENT = "lantern v183 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1044,6 +1044,11 @@
       // v170 (the owner: people do not search by the official name; a subsidiary's or a former name should lead to the
       // company held): with no company named, the words are looked up among the names of the register. An offer beside
       // the results, asked after they are shown: the search is not held for it, and nothing is applied by itself.
+      // v183 (the owner, of a question that named a company with a slip: "users should not have to figure out the perfect
+      // query"; the person blamed the question's length): a question of five words or more in which no company, industry
+      // or country was read is answered from every company, and the page now says so, where it said nothing.
+      if (!state.company && !more && !fromChips && !state.industry && !state.country && !state.region && state.q && $("q").value.trim().split(/\s+/).length >= 5)
+        $("status").append(document.createTextNode(" · No company was read in your question, so these are pages of every company: name one to narrow."));
       if (!state.company && !state.maybe && !more && !fromChips && !state.industry && !state.country && !state.region && /\S\s+\S/.test($("q").value)) {
         const asked = $("q").value, mine = seq;
         rpc("find_entity", { key, q: asked }).then(e => { if (!e || mine !== searchSeq || $("q").value !== asked) return;
