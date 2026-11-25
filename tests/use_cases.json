@@ -382,6 +382,24 @@
    "intent": "fact",
    "seen": "2026-11-25",
    "was": "since a year is over time"
+  },
+  {
+   "typed": "nike integrated report 2025",
+   "company": "PT_6",
+   "typed_type": true,
+   "seen": "2026-11-25",
+   "was": "a report by a name the company does not use: its kin are shown",
+   "from": 2025,
+   "to": 2025,
+   "intent": "search"
+  },
+  {
+   "typed": "nike impact report",
+   "company": "PT_6",
+   "typed_type": true,
+   "seen": "2026-11-25",
+   "was": "impact report is a kind of document, not a topic",
+   "intent": "search"
   }
  ],
  "topics": [
