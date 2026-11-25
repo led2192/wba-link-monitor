@@ -75,9 +75,14 @@ class Asker:
         self.sess, self.ua, self.stopped = sess, ua, None
 
     def _get(self, do):
-        for attempt in (1, 2):
-            r = do()
-            if r.status_code in (429, 502, 503, 504) and attempt == 1:
+        for attempt in (1, 2, 3):
+            try:
+                r = do()
+            except Exception as e:          # a connection cut short (25 Nov 2026: "Response ended prematurely" ended a run of 50 minutes)
+                if attempt < 3:
+                    time.sleep(20 * attempt); continue
+                self.stopped = type(e).__name__; return {}
+            if r.status_code in (429, 502, 503, 504) and attempt < 3:
                 wait = r.headers.get("Retry-After", ""); time.sleep(min(max(int(wait) if wait.isdigit() else 60, 30), 300)); continue
             if r.status_code != 200:
                 self.stopped = r.status_code; return {}
