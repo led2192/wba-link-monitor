@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v184 2026-11-25";
+  const CLIENT = "lantern v185 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1005,8 +1005,20 @@
       const otherAsked = state.q && state.yearsTyped && (state.from || state.to) && !state.strictYears
         ? rpc("find_pages_ranked", { ...args, year_from: null, year_to: null, client: CLIENT + " +years" }).catch(() => []) : null;
       let words = [], wordsFailed = null;
+      if (!more) state.relaxed = null; else if (state.relaxed) args.q = state.relaxed.q;
       try { words = await rpc("find_pages_ranked", args); }      // v110: the words, the pages that are not content last
       catch (e) { if (e.message.includes("not allowed") || !meaningAsked || more) throw e; wordsFailed = e; }
+      // v185 (25 Nov 2026, from the searches people repeated in other words): a question in Spanish of a company whose
+      // documents are in English found no page, because every word typed must be on the page. When the words find
+      // nothing, the words that no page of the scope holds are left out (absent_terms) and the search is made once
+      // more with the others; the status line says which were left out. A search that finds pages is not touched.
+      if (!more && !wordsFailed && !words.length && state.q && !state.q.includes('"') && /\S\s+\S/.test(state.q)) {
+        let t = null; try { t = await rpc("absent_terms", { key, q: state.q, company_filter: state.company }); } catch (e) {}
+        if (t && (t.absent || []).length && (t.present || []).length) {
+          const q2 = t.present.join(" ");
+          try { words = await rpc("find_pages_ranked", { ...args, q: q2, client: CLIENT + " +relaxed" }); if (words.length) state.relaxed = { q: q2, absent: t.absent }; } catch (e) { words = []; }
+        }
+      }
       if (wordsFailed) { meaning = await meaningAsked; if (!meaning || !meaning.length) throw wordsFailed; }
       else if (meaningAsked) meaning = more ? await meaningAsked : await Promise.race([meaningAsked, new Promise(r => setTimeout(() => r(null), 1500))]);
       const vec = !!(meaning && meaning.length);
@@ -1048,6 +1060,7 @@
       // v170 (the owner: people do not search by the official name; a subsidiary's or a former name should lead to the
       // company held): with no company named, the words are looked up among the names of the register. An offer beside
       // the results, asked after they are shown: the search is not held for it, and nothing is applied by itself.
+      if (state.relaxed && !more) $("status").append(document.createTextNode(` · No page${state.company ? " of this company" : ""} holds ${state.relaxed.absent.map(w => `“${w}”`).join(", ")}: searched for the other words.`));
       // v183 (the owner, of a question that named a company with a slip: "users should not have to figure out the perfect
       // query"; the person blamed the question's length): a question of five words or more in which no company, industry
       // or country was read is answered from every company, and the page now says so, where it said nothing.

@@ -3762,6 +3762,55 @@ insert into public.search_options (name, is_on, note) values ('ask_reuse', true,
 -- whether to press Ask). The page reads it with search_flags, so it can be switched off without a new page.
 insert into public.search_options (name, is_on, note) values ('answer_topics', true, 'one company and a few words of a topic are answered at once, the pages below') on conflict (name) do nothing;
 
+-- Words no page holds (25 Nov 2026, from the searches people repeated in other words: "Cuándo reportó por primera vez
+-- Scope 1 emissions" of a company whose documents are in English found no page, because every word typed must be on
+-- the page and "cuándo", "reportó", "primera" and "vez" are on none; the person then wrote it in English). When the
+-- words of a search find no page, the page asks here which of them the scope holds at all: a word no page of the
+-- company holds (of the whole library, when no company is named: fewer than five pages) cannot have been what
+-- separated the pages, so the search is made again with the others and the person is told which were left out.
+-- It acts only on a search that found nothing: a search that finds pages is not touched.
+insert into public.search_options (name, is_on, note) values ('relax_absent_words', true, 'Search: when the words find no page, the words that no page of the scope holds are left out and the search is made again, and the page says which. Acts only on a search that found nothing (on since 25 Nov 2026).')
+on conflict (name) do nothing;
+create or replace function public.absent_terms(key text, q text, company_filter text default null) returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+set statement_timeout = '4s'
+set enable_seqscan = 'off'
+as $$
+declare
+  ids text[] := case when nullif(btrim(coalesce(company_filter, '')), '') is null then null else public.find_company_ids(company_filter) end;
+  t record;
+  w text;
+  tsq tsquery;
+  n int;
+  present text[] := '{}';
+  absent text[] := '{}';
+begin
+  if public.search_key_name(key) is null then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if not public.survey_option('relax_absent_words') then
+    return jsonb_build_object('present', '[]'::jsonb, 'absent', '[]'::jsonb);
+  end if;
+  select * into t from public.find_terms(q);
+  foreach w in array coalesce(t.words, '{}') loop
+    begin
+      tsq := case when length(w) >= 4 then to_tsquery('simple', quote_literal(w) || ':*') else to_tsquery('simple', quote_literal(w)) end;
+    exception when others then continue;
+    end;
+    if ids is null then
+      select count(*) into n from (select 1 from public.pages p where p.words @@ tsq limit 5) x;
+      if n >= 5 then present := present || w; else absent := absent || w; end if;
+    else
+      if exists (select 1 from public.pages p where p.words @@ tsq and p.wba_id = any(ids)) then present := present || w; else absent := absent || w; end if;
+    end if;
+  end loop;
+  return jsonb_build_object('present', to_jsonb(present), 'absent', to_jsonb(absent), 'phrases', to_jsonb(coalesce(t.phrases, '{}')));
+end;
+$$;
+revoke all on function public.absent_terms(text, text, text) from public;
+grant execute on function public.absent_terms(text, text, text) to anon, authenticated;
+
 create or replace function public.search_flags(key text) returns jsonb
 language plpgsql stable security definer set search_path = public
 as $$
