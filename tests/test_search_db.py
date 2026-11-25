@@ -2073,6 +2073,14 @@ class SearchOnPostgres(unittest.TestCase):
         held = lambda ws: (cur.execute("select public.names_not_held('', %s::text[])", (ws,)), cur.fetchone()[0])[1]
         self.assertEqual(held(["Zyntharix", "scope", "unilver", "x1", "zyntharix"]), ["zyntharix"])     # "unilver" is Unilever typed wrong; "scope" is a word
         self.assertEqual(held(["zyntharix"]), ["zyntharix"]); self.assertEqual(held(None), [])
+        # 25 Nov 2026: find_terms keeps its eight words, find_terms_n as many as asked; the option's six words are the rarest, in the order typed
+        cur.execute("select (public.find_terms('one two three four five six seven eight nine ten')).words, (public.find_terms_n('one two three four five six seven eight nine ten', 16)).words")
+        eight, more = cur.fetchone(); self.assertEqual((len(eight), len(more), eight), (8, 10, more[:8]))
+        cur.execute("delete from public.word_freq"); cur.execute("insert into public.word_freq values ('times', 900), ('scope', 300), ('emissions', 250), ('restated', 5), ('justification', 9), ('many', 950), ('reported', 400)")
+        cur.execute("select array(select x.w from (select u.w, u.ord from unnest(array['times','scope','emissions','reported','zzslip','restated','justification','many']) with ordinality u(w, ord) "
+                    "left join public.word_freq f on f.word = u.w order by (f.pages is null), f.pages, u.ord limit 6) x order by x.ord)")
+        self.assertEqual(cur.fetchone()[0], ["times", "scope", "emissions", "reported", "restated", "justification"])          # "many" (the most common) and the slip are left out
+        cur.execute("delete from public.word_freq")
         # 25 Nov 2026: the words no page of the scope holds, asked when a search found nothing
         cur.execute("insert into public.companies (wba_id, name) values ('ABS1', 'Absent Words Test Co') on conflict do nothing")
         cur.execute("insert into public.documents (library_id, wba_id, company, year, doc_type, text_status) values ('ABS1-d', 'ABS1', 'Absent Words Test Co', 2024, 'Annual Report', 'ok')")
