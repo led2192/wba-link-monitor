@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v179 2026-11-25";
+  const CLIENT = "lantern v180 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -3467,10 +3467,15 @@
     const go = () => { st.search = box.value.trim(); adminAllCompanies(body); }; box.onkeydown = ev => { if (ev.key === "Enter") go(); };
     bar.append(box, adminBtn("Search", go), el("span", null, `${Number(got.all).toLocaleString("en-GB")} companies in all, ${got.added} added by people. Showing ${got.rows.length}${got.rows.length >= 200 ? " (the first 200: search to narrow)" : ""}; people's first, then by documents.`));
     body.appendChild(bar);
-    body.appendChild(adminTable(["Company", "Id", "Industry", "Country", "Documents", "Website", "LEI", "ISIN"], got.rows.map(c => {
+    body.appendChild(adminTable(["Company", "Id", "Industry", "Country", "Documents", "Website", "LEI", "ISIN", ""], got.rows.map(c => {
       const name = el("span", null, c.name || "?"); if (c.added) { const t = el("span", null, "added by a person"); t.style.cssText = "font-size:11px;padding:0 6px;border:1px solid var(--line);border-radius:999px;margin-left:6px;white-space:nowrap"; name.appendChild(t); }
       let site = ""; if (c.website) { site = el("a", null, c.website.replace(/^https?:\/\//, "").replace(/\/$/, "")); site.href = /^https?:/.test(c.website) ? c.website : `https://${c.website}`; site.target = "_blank"; site.rel = "noopener"; }
-      return [name, c.id, c.industry || "", c.country || "", Number(c.documents).toLocaleString("en-GB"), site, c.lei || "", c.isin || ""]; })));
+      // v180 (the owner: "in All companies too"): a company a person added can be rejected here, as in Companies; pressed twice
+      let act = ""; if (c.added && c.request) { act = el("a", null, "reject"); act.href = "#"; act.title = "It leaves lantrNa: its pages are no longer read and its documents are discarded with a reason. Nothing is deleted.";
+        act.onclick = async ev => { ev.preventDefault(); if (act.textContent === "reject") { act.textContent = "reject: press again"; return; } act.textContent = "…";
+          let s = null; try { s = await authed("admin_company_set", { key, request: c.request, verdict: "rejected", note: "rejected in All companies" }); } catch (e) {}
+          if (s && s.ok) adminAllCompanies(body); else act.textContent = `not rejected: ${(s && s.why) || "try again"}`; }; }
+      return [name, c.id, c.industry || "", c.country || "", Number(c.documents).toLocaleString("en-GB"), site, c.lei || "", c.isin || "", act]; })));
   }
   // Company facts (v73). One company's facts laid out by the taxonomy: a row a metric, a column a year, the newest
   // on the left, every value linked to the page it was read on. What changed from one year to the next is marked (a

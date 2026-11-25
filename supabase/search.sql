@@ -4815,7 +4815,9 @@ begin
     'added', (select count(*) from public.companies c where c.wba_id like 'LN\_%'),
     'rows', (select coalesce(jsonb_agg(to_jsonb(x) order by x.added desc, x.documents desc, x.name), '[]'::jsonb) from (
       select c.wba_id as id, c.name, c.industry, c.country, c.region, c.website, to_jsonb(c) ->> 'lei' as lei, to_jsonb(c) ->> 'isin' as isin,
-             c.wba_id like 'LN\_%' as added, coalesce(n.documents, 0) as documents
+             c.wba_id like 'LN\_%' as added, coalesce(n.documents, 0) as documents,
+             -- the request a person's company was made by, so that the owner can reject it from this list too (25 Nov 2026)
+             (select q.id from public.company_requests q where q.wba_id = c.wba_id and q.review is distinct from 'rejected' order by q.id desc limit 1) as request
       from public.companies c
         left join (select d.wba_id, count(*) as documents from public.documents d group by d.wba_id) n on n.wba_id = c.wba_id
       where not exists (select 1 from regexp_split_to_table(lower(btrim(coalesce(search, ''))), '\s+') w
