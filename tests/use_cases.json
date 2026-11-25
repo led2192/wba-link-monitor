@@ -357,6 +357,31 @@
    "typed": "zebra motors emissions",
    "company": null,
    "intent": "search"
+  },
+  {
+   "typed": "Revenue of nike across the past few years",
+   "company": "PT_6",
+   "from": null,
+   "to": null,
+   "intent": "fact",
+   "seen": "2026-11-25",
+   "was": "searched, not answered: seven words were counted against the six a topic may have"
+  },
+  {
+   "typed": "lukoil scope 1 emissions over the last five years",
+   "company": "PT_5",
+   "from": null,
+   "to": null,
+   "intent": "fact",
+   "seen": "2026-11-25",
+   "was": "a figure over time is asked for year by year"
+  },
+  {
+   "typed": "gerdau production since 2019",
+   "company": "PT_1",
+   "intent": "fact",
+   "seen": "2026-11-25",
+   "was": "since a year is over time"
   }
  ],
  "topics": [

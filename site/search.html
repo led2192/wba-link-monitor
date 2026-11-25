@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v186 2026-11-25";
+  const CLIENT = "lantern v187 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1903,6 +1903,10 @@
   let topics = new Set(), metricNames = new Set(), flags = {};
   const TOPIC_FILLER = new Set("tell me us give show overview summary general overall about on of the in at for its their data information info profile key performance disclosure disclosures reporting what is are and resumen sobre de la el los las datos del a an company s".split(" "));
   const topicNorm = t => (t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && !TOPIC_FILLER.has(w)).join(" ");
+  const TIME_WORDS = new Set("across over past last previous recent few several years year yearly annual annually time trend trends evolution history historical historic since throughout decade yoy años año últimos ultimos evolución evolucion histórico historico tendencia".split(" "));
+  // what says "over time": a phrase, not a word ("base year target" and "year on year growth" are not it)
+  const OVER_TIME = /(?:^| )(?:past|last|previous|recent|últimos|ultimos) (?:(?:few|several|two|three|four|five|six|ten|\d+) )?(?:years|años)(?: |$)|(?:^| )(?:over|across|through|throughout) (?:the )?(?:years|time)(?: |$)|(?:^| )(?:trend|trends|evolution|evolución|evolucion|historical|histórico|historico|time series|year by year|a lo largo de los años)(?: |$)|(?:^| )(?:since|desde) (?:19|20)\d\d(?: |$)/;
+  const LITTLE_WORDS = new Set("of the a an in on for and or its their by per to from at de la el los las del en y".split(" "));
   function intent(text, p) {
     const one = !!p.company && !String(p.company).includes(";");
     const rest = (p.q || "").toLowerCase().replace(/[^a-záéíóúñü\s]/g, " ").split(/\s+/).filter(Boolean);
@@ -1912,11 +1916,16 @@
     if (one && !p.type && !p.typeHint && topics.has(topicNorm(p.q))) return "overview";
     if (one && !p.type && !p.typeHint && metricNames.has(topicNorm(p.q))) return "fact";
     if (one && (p.from || p.to) && !p.type && !p.typeHint && rest.length >= 1 && rest.length <= 8) return "fact";
+    // v187 (the owner, 25 Nov 2026: "Revenue of unilever across the past few years" was searched, not answered): one
+    // company, a few words, and words that say "over time" ask for the figure year by year. The words of time and the
+    // little words do not count against the length: seven words were typed and one of them, "revenue", was the subject.
+    const core = rest.filter(w => !TIME_WORDS.has(w) && !LITTLE_WORDS.has(w));
+    if (one && !p.type && !p.typeHint && !/["“”]/.test(text) && (OVER_TIME.test(rest.join(" ")) || OVER_TIME.test(String(p.q || "").toLowerCase().replace(/\s+/g, " "))) && core.length >= 1 && core.length <= 6) return "fact";
     // v112 (the owner, 19 Nov 2026): one company and a few words of a topic ("nike supply chain", "Lukoil safety",
     // "Gerdau biodiversity approach") are answered at once, with the pages below: the person wants to know how the
     // company stands on it, and must not have to work out whether to press Ask. Not when a kind of report is
     // named or a phrase is in quotes: those ask for pages. The answer kept for the same question costs nothing.
-    if (flags.answer_topics && one && !p.type && !p.typeHint && !/["“”]/.test(text) && rest.length >= 1 && rest.length <= 6) return "overview";
+    if (flags.answer_topics && one && !p.type && !p.typeHint && !/["“”]/.test(text) && rest.length >= 1 && (rest.length <= 6 || (core.length >= 1 && core.length <= 5 && rest.length <= 9))) return "overview";
     return "search";
   }
   const go = async () => {
