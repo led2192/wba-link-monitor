@@ -8,7 +8,8 @@ lantrNa's Register already use. So a filing there is a report with an address, a
 crawl.
 
 A first step, to know what there is: it walks the repository's list of filings through its open API (pages of 500,
-one request every 2 seconds, as lanterN-bot; it stops at the first answer that is not 200) and counts filings,
+one request every 10 seconds, as lanterN-bot; after a 429 it waits what is asked, at least a minute, and asks once more; it stops at the
+first answer that is still not 200) and counts filings,
 companies, countries and years, and how many of the companies lantrNa holds already. It writes nothing.
 
 The API's shape was not known when this was written (the session could not reach it), so fields are looked for by
@@ -23,7 +24,7 @@ Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run record (QA_COMMIT).
 import argparse, collections, os, re, sys, time
 
 API = "https://filings.xbrl.org/api/filings"
-SIZE, PAUSE = 500, 2.0
+SIZE, PAUSE = 500, 10.0          # at one request every 2 seconds the repository answered 429 on the 11th page (24 Nov 2026)
 LEI = re.compile(r"^[A-Z0-9]{18}[0-9]{2}$")
 
 
@@ -94,6 +95,9 @@ def main():
             break
         try:
             r = sess.get(API, params={"page[size]": str(SIZE), "page[number]": str(n), "include": "entity"}, headers={"User-Agent": bot.BOT_UA, "Accept": "application/vnd.api+json"}, timeout=90)
+            if r.status_code == 429:          # slow down: wait what is asked, once
+                wait = r.headers.get("Retry-After", ""); time.sleep(min(max(int(wait) if wait.isdigit() else 60, 60), 300))
+                r = sess.get(API, params={"page[size]": str(SIZE), "page[number]": str(n), "include": "entity"}, headers={"User-Agent": bot.BOT_UA, "Accept": "application/vnd.api+json"}, timeout=90)
             status = r.status_code
             j = r.json() if status == 200 else {}
         except Exception as e:
