@@ -2073,6 +2073,18 @@ class SearchOnPostgres(unittest.TestCase):
         held = lambda ws: (cur.execute("select public.names_not_held('', %s::text[])", (ws,)), cur.fetchone()[0])[1]
         self.assertEqual(held(["Zyntharix", "scope", "unilver", "x1", "zyntharix"]), ["zyntharix"])     # "unilver" is Unilever typed wrong; "scope" is a word
         self.assertEqual(held(["zyntharix"]), ["zyntharix"]); self.assertEqual(held(None), [])
+        # 25 Nov 2026: the words no page of the scope holds, asked when a search found nothing
+        cur.execute("insert into public.companies (wba_id, name) values ('ABS1', 'Absent Words Test Co') on conflict do nothing")
+        cur.execute("insert into public.documents (library_id, wba_id, company, year, doc_type, text_status) values ('ABS1-d', 'ABS1', 'Absent Words Test Co', 2024, 'Annual Report', 'ok')")
+        cur.execute("insert into public.pages (library_id, page, body, words, year, doc_type, wba_id) values ('ABS1-d', 1, 'scope 1 emissions were verified', to_tsvector('simple', 'scope 1 emissions were verified'), 2024, 'Annual Report', 'ABS1')")
+        cur.execute("select public.absent_terms('', 'Cuándo reportó por primera vez Scope 1 emissions', 'ABS1')"); got = cur.fetchone()[0]
+        self.assertEqual((got["present"], got["absent"]), (["scope", "1", "emissions"], ["cuándo", "reportó", "primera", "vez"]))          # "por" is a little word, dropped before
+        cur.execute("select public.absent_terms('', 'scope emission', 'ABS1')"); self.assertEqual(cur.fetchone()[0]["absent"], [])          # a word of four letters finds its longer forms
+        cur.execute("select public.absent_terms('', 'zyntharixq emissions', null)"); got = cur.fetchone()[0]; self.assertIn("zyntharixq", got["absent"])          # no company: a word on fewer than five pages
+        cur.execute("update public.search_options set is_on = false where name = 'relax_absent_words'")
+        cur.execute("select public.absent_terms('', 'cuándo scope', 'ABS1')"); self.assertEqual(cur.fetchone()[0], {"present": [], "absent": []})
+        cur.execute("update public.search_options set is_on = true where name = 'relax_absent_words'")
+        cur.execute("delete from public.pages where library_id = 'ABS1-d'"); cur.execute("delete from public.documents where library_id = 'ABS1-d'"); cur.execute("delete from public.companies where wba_id = 'ABS1'")
         cur.execute("select word, times, cardinality(people), dismissed from public.company_misses"); self.assertEqual(cur.fetchall(), [("zyntharix", 2, 1, False)])
         cur.execute("select public.admin_name_not_held_set('k', 'Zyntharix', true)"); done = cur.fetchone()[0]
         cur.execute("select public.admin_names_not_held('k')"); rows = cur.fetchone()[0]
