@@ -27,6 +27,9 @@ another candidate's is marked as repeating it.
 Nothing here watches a page or fetches a document: the candidates are a list to look at (public.catalogue). A
 company enters lantrNa only by the owner's choice, later.
 
+The owner's own website or name for a candidate (owner_website, owner_name) and his choice (status) are his: the
+upsert never writes them.
+
 Dry run by default: counts. --commit writes public.catalogue (an upsert by LEI; a status the owner set is kept).
 Prints counts only, never a company, a name or an address.
 
