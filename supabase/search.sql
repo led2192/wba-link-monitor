@@ -5424,6 +5424,28 @@ $$;
 -- names of the entities of its group (register_entities), each under public.name_key (no legal form). Kept: a name of
 -- two words or more and eight characters or more, that is not the company's own listed name, and that leads to one
 -- company only. Rebuilt whole by register_names_refresh(), which the register's scripts call after writing.
+-- lantrNa's own list of companies, beyond those it started with: candidates, each checked against the companies held
+-- (catalogue_build.py, 25 Nov 2026). A row is a company with an identity (its LEI), the names people use and a website.
+-- Nothing watches a candidate's pages: a company enters lantrNa by the owner's choice (status), later.
+create table if not exists public.catalogue (
+  lei           text primary key,
+  legal_name    text,
+  common_name   text,
+  aliases       text[] not null default '{}',
+  country       text,
+  website       text,
+  wikidata      text,
+  source        text,
+  duplicate_why text,                               -- why it is not new: held (the same LEI, website or name), in a held company's group, or like another candidate
+  duplicate_of  text,                               -- the held company's wba_id, when there is one
+  like_lei      text,                               -- the other candidate's LEI, when it repeats one
+  status        text not null default 'candidate',  -- candidate, wanted, not wanted, added: set by the owner, never by the script
+  first_seen    timestamptz not null default now(),
+  seen_at       timestamptz not null default now()
+);
+alter table public.catalogue enable row level security;
+revoke all on public.catalogue from anon, authenticated;
+
 create table if not exists public.register_names (
   key    text not null,
   wba_id text not null,
