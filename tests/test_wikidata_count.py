@@ -24,6 +24,14 @@ class Count(unittest.TestCase):
                          (2, 1, 1, 1, 1, 1, 2, 0))
         self.assertEqual(W.tally({}, c), set())
 
+    def test_by_isin_an_entity_counts_once(self):
+        q = W.query_for(["ES0000000001", "bad", "FR0000000002"], by="isin")
+        self.assertIn("wdt:P946", q); self.assertNotIn("wdt:P1278", q); self.assertIn('"ES0000000001" "FR0000000002"', q); self.assertNotIn("bad", q)
+        c, seen = collections.Counter(), set()
+        answer = {"results": {"bindings": [{"lei": v("ES0000000001"), "site_": v("https://x.example")}, {"lei": v("FR0000000002"), "site_": v("https://x.example")}, {"lei": v("XX0000000003")}]}}
+        W.tally(answer, c, {"ES0000000001": A, "FR0000000002": A}, seen)          # two ISINs of one entity; a third nobody asked for
+        self.assertEqual((seen, c["in Wikidata"], c["with a website"]), ({A}, 1, 1))
+
 
 if __name__ == "__main__":
     unittest.main()

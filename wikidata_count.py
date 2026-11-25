@@ -13,7 +13,12 @@ for two sets of LEIs and counts what comes back:
   esef   the companies that file in the European format and are not held (filings.xbrl.org, read as esef_count.py
          does): mostly smaller, the case that matters for growing the list
 
-One query for every 150 LEIs, one every 5 seconds, as lanterN-bot; a 429 is waited for once and then the run stops.
+The first run (25 Nov 2026) found by LEI only 58% of the companies held, which are large and surely in Wikidata:
+many entries lack the LEI. So the companies not found by LEI are asked for again by their ISINs (P946), taken from
+the register's own ISIN-to-LEI mapping (the file catalogue_count.py reads), up to three an entity.
+
+One query for every 150 LEIs or ISINs, one every 5 seconds, as lanterN-bot; a 429 or a 502 to 504 is waited for and
+asked once more, and then the run stops.
 It writes nothing. Prints counts only, never a company, a name or an address.
 
     python wikidata_count.py [--set held|esef|both] [--limit N]
@@ -37,16 +42,24 @@ QUERY = """SELECT ?lei (SAMPLE(?site) AS ?site_) (SAMPLE(?label) AS ?label_) (CO
 } GROUP BY ?lei"""
 
 
-def query_for(leis):
-    return QUERY % " ".join('"%s"' % l for l in leis if LEI.match(l))
+ISIN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
 
 
-def tally(answer, c):
-    """Adds one answer of the query service (its JSON) to the counters. Returns the LEIs found."""
-    found = set()
+def query_for(keys, by="lei"):
+    """The query for a batch of LEIs, or of ISINs (by="isin"): the same, with the ISIN's property and its own test."""
+    ok = LEI if by == "lei" else ISIN
+    q = QUERY % " ".join('"%s"' % k for k in keys if ok.match(k))
+    return q if by == "lei" else q.replace("wdt:P1278", "wdt:P946")
+
+
+def tally(answer, c, owner=None, seen=None):
+    """Adds one answer of the query service (its JSON) to the counters. Returns the LEIs found. owner: {ISIN: LEI}
+    when the batch was of ISINs, so that an entity found by two of its ISINs counts once (seen: those counted)."""
+    found = set() if seen is None else seen
     for b in ((answer or {}).get("results") or {}).get("bindings") or []:
         has = lambda k: bool((b.get(k) or {}).get("value"))
         lei = (b.get("lei") or {}).get("value")
+        lei = owner.get(lei) if owner is not None else lei
         if not lei or lei in found:
             continue
         found.add(lei); c["in Wikidata"] += 1
@@ -57,28 +70,54 @@ def tally(answer, c):
     return found
 
 
-def ask(sess, leis, ua):
-    """(status, answer) for one batch; a 429 is waited for once."""
+def ask(sess, keys, ua, by="lei"):
+    """(status, answer) for one batch; a 429 or a gateway's 502 to 504 is waited for and asked once more."""
     for attempt in (1, 2):
-        r = sess.post(SPARQL, data={"query": query_for(leis), "format": "json"}, headers={"User-Agent": ua, "Accept": "application/sparql-results+json"}, timeout=90)
-        if r.status_code == 429 and attempt == 1:
+        r = sess.post(SPARQL, data={"query": query_for(keys, by), "format": "json"}, headers={"User-Agent": ua, "Accept": "application/sparql-results+json"}, timeout=90)
+        if r.status_code in (429, 502, 503, 504) and attempt == 1:
             wait = r.headers.get("Retry-After", ""); time.sleep(min(max(int(wait) if wait.isdigit() else 60, 30), 300)); continue
         return r.status_code, (r.json() if r.status_code == 200 else {})
     return 429, {}
 
 
-def count_set(sess, leis, ua):
-    c, status = collections.Counter(), 200
-    for i in range(0, len(leis), BATCH):
+def count_set(sess, keys, ua, by="lei", owner=None):
+    """(counters, the last status, the LEIs found) over the batches of keys."""
+    c, status, found = collections.Counter(), 200, set()
+    for i in range(0, len(keys), BATCH):
         try:
-            status, answer = ask(sess, leis[i:i + BATCH], ua)
+            status, answer = ask(sess, keys[i:i + BATCH], ua, by)
         except Exception as e:
             status, answer = type(e).__name__, {}
         if status != 200:
             break
-        tally(answer, c); c["asked"] += len(leis[i:i + BATCH])
+        tally(answer, c, owner, found); c["asked"] += len(keys[i:i + BATCH])
         time.sleep(PAUSE)
-    return c, status
+    return c, status, found
+
+
+def isins_of(wanted, requests, ua, most=3):
+    """{ISIN: LEI} for the LEIs wanted, up to `most` an entity, from the register's ISIN-to-LEI mapping."""
+    import catalogue_count as K
+    from gleif_relations import open_rows
+    i = None
+    for accept in ("application/vnd.api+json", "*/*"):
+        i = requests.get(K.ISIN_INDEX, headers={"User-Agent": ua, "Accept": accept}, timeout=60)
+        if i.status_code == 200:
+            break
+    link = K.any_link(i.json()) if i is not None and i.status_code == 200 else None
+    if not link:
+        return {}
+    path, _ = K.fetch(requests, link, ua); rows, cols = open_rows(path)
+    lei_c, isin_c = K.column(cols, "LEI"), K.column(cols, "ISIN")
+    out, per = {}, collections.Counter()
+    for r in rows:
+        lei = (r.get(lei_c) or "").strip().upper()
+        if lei in wanted and per[lei] < most:
+            isin = (r.get(isin_c) or "").strip().upper()
+            if ISIN.match(isin):
+                out[isin] = lei; per[lei] += 1
+    os.unlink(path)
+    return out
 
 
 def esef_leis(sess, ua, held, pages=0):
@@ -120,15 +159,30 @@ def main():
         sets.append(("held by lantrNa", held))
     if a.set in ("esef", "both"):
         sets.append(("filing in the European format, not held", esef_leis(sess, bot.BOT_UA, set(held))))
+    todo = []
     for name, leis in sets:
         if a.limit:
             leis = leis[:a.limit]
-        c, status = count_set(sess, leis, bot.BOT_UA)
+        c, status, found = count_set(sess, leis, bot.BOT_UA)
+        todo.append((name, leis, found, c))
         print(f"### Companies {name}: {len(leis):,} LEIs, {c['asked']:,} asked of Wikidata, the last answer {status}\n")
         for k in ("in Wikidata", "with a website", "with a name in English", "with other names in English", "with a size (employees or revenue)", "with employees", "with revenue", "with a stock exchange"):
             print(f"- {k}: {c[k]:,}" + (f" ({100 * c[k] / c['asked']:.0f}%)" if c["asked"] else ""))
         print("", flush=True)
         counters.update({re.sub(r"[^a-z0-9]+", "_", f"{name[:8]} {k}".lower())[:40]: v for k, v in c.items()})
+    # the second pass: those not found by LEI, by their ISINs
+    missing = set().union(*[set(leis) - found for _, leis, found, _ in todo]) if todo else set()
+    owner = isins_of(missing, requests, bot.BOT_UA) if missing else {}
+    print(f"### Second pass, by ISIN: {len(missing):,} companies not found by LEI; {len(set(owner.values())):,} of them have an ISIN in the register's mapping ({len(owner):,} ISINs asked)\n", flush=True)
+    for name, leis, found, c1 in todo:
+        mine = {i: l for i, l in owner.items() if l in set(leis) - found}
+        c, status, more = count_set(sess, sorted(mine), bot.BOT_UA, by="isin", owner=mine)
+        n = len(leis)
+        print(f"Companies {name}: {len(more):,} more found by ISIN (the last answer {status}), {c['with a website']:,} of them with a website. "
+              f"By LEI or ISIN: {len(found) + len(more):,} of {n:,} ({100 * (len(found) + len(more)) / max(n, 1):.0f}%) in Wikidata, "
+              f"{c1['with a website'] + c['with a website']:,} ({100 * (c1['with a website'] + c['with a website']) / max(n, 1):.0f}%) with a website, "
+              f"{c1['with a size (employees or revenue)'] + c['with a size (employees or revenue)']:,} with a size.\n", flush=True)
+        counters.update({re.sub(r"[^a-z0-9]+", "_", f"{name[:8]} isin {k}".lower())[:40]: v for k, v in c.items()})
     print("Nothing written.", flush=True)
     run.finish("ok", rows_in=sum(len(l) for _, l in sets), rows_out=0, counters=counters, notes="count only")
     return 0
