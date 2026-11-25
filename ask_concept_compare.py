@@ -27,14 +27,17 @@ import qa
 COMPANIES = ("Nike", "Unilever", "Nestle", "Shell", "Inditex", "Iberdrola", "BBVA", "Danone", "Toyota", "Coca-Cola")
 ASKS = (("main difficulties", True), ("biggest challenges", False), ("key risks", True), ("strategy priorities", False),
         ("outlook for next year", False), ("why did revenue change", True), ("what changed in the emissions methodology", False), ("main problems", True))
+# option ask_series: what is asked over time (no year is given with these)
+SERIES = (("revenue across the past few years", False), ("scope 1 emissions over the last five years", False), ("number of employees trend", False), ("net profit over the years", False),
+          ("water withdrawal since 2020", False), ("scope 3 emissions trend", False), ("dividend per share over time", False), ("capital expenditure over the past few years", False))
 PRICE_IN, PRICE_OUT = 0.10, 0.50          # USD a million tokens, the reader's list price (model_reader.cost)
 
 
-def cases(limit, companies=COMPANIES):
-    """[(words, company, with_year)]: each question of ASKS about a different company, in turn."""
+def cases(limit, companies=COMPANIES, asks=ASKS):
+    """[(words, company, with_year)]: each question of asks about a different company, in turn."""
     out = []
     for i in range(limit):
-        words, with_year = ASKS[i % len(ASKS)]
+        words, with_year = asks[i % len(asks)]
         out.append((words, companies[(i + i // len(ASKS)) % len(companies)], with_year))
     return out
 
@@ -52,6 +55,12 @@ def summarise(trials):
     c["pages_changed"] = round(sum(len(set(t["on"].get("pages", [])) - set(t["off"].get("pages", []))) for t in both) / len(both), 1) if both else 0
     c["same_pages"] = sum(1 for t in both if set(t["on"].get("pages", [])) == set(t["off"].get("pages", [])))
     # option ask_source_entity: the questions that read a page of a subsidiary's report, and the answers that name the subsidiary
+    # option ask_series: the different years the answer names, and the report years of the pages it read
+    for arm in ("off", "on"):
+        c[f"years_{arm}"] = round(sum(t[arm].get("years") or 0 for t in both) / len(both), 1) if both else 0
+        c[f"page_years_{arm}"] = round(sum(t[arm].get("page_years") or 0 for t in both) / len(both), 1) if both else 0
+    c["more_years"] = sum(1 for t in both if (t["on"].get("years") or 0) > (t["off"].get("years") or 0))
+    c["fewer_years"] = sum(1 for t in both if (t["on"].get("years") or 0) < (t["off"].get("years") or 0))
     c["marked"] = sum(1 for t in both if t["on"].get("marked"))
     for arm in ("off", "on"):
         c[f"named_{arm}"] = sum(1 for t in both if t["on"].get("marked") and t[arm].get("named"))
@@ -78,7 +87,7 @@ def main():
                 cur.execute("select d.company from public.documents d join public.document_entities e on e.library_id = d.library_id "
                             "where d.doc_type = 'Annual Report' and d.text_status = 'ok' and d.company is not null group by d.company order by count(*) desc, d.company limit 10")
                 companies = tuple(r[0] for r in cur.fetchall()) or COMPANIES
-            for n, (words, company, with_year) in enumerate(cases(a.limit, companies), 1):
+            for n, (words, company, with_year) in enumerate(cases(a.limit, companies, SERIES if a.option == "ask_series" else ASKS), 1):
                 try:
                     cur.execute("select public.ask_pages_trial(%s, %s, %s, %s, %s)", (words, company, year if with_year else None, year if with_year else None, a.option))
                     trials.append(cur.fetchone()[0])
@@ -93,6 +102,7 @@ def main():
     print(f"Answers that begin by saying the pages do not hold it: {c['hedged_off']} off, {c['hedged_on']} on. Better with the option: {c['better']}; worse: {c['worse']}.")
     print(f"Average answer: {c['chars_off']} characters and {c['cites_off']} pages cited off, {c['chars_on']} and {c['cites_on']} on.")
     print(f"Pages read: {c['pages_changed']} of eight are new with the option on average; {c['same_pages']} questions read the same eight.")
+    print(f"Different years an answer names, on average: {c['years_off']} off, {c['years_on']} on (more in {c['more_years']} answers, fewer in {c['fewer_years']}); report years among the pages read: {c['page_years_off']} off, {c['page_years_on']} on.")
     print(f"Questions that read a page of a subsidiary's report: {c['marked']}; of those, answers that name the subsidiary: {c['named_off']} off, {c['named_on']} on.")
     print(f"Cost: {usd:.3f} USD ({c['tokens_in']:,} tokens in, {c['tokens_out']:,} out).", flush=True)
     run.finish("ok", rows_in=c["asked"], rows_out=0, counters={k: v for k, v in c.items()}, notes=f"option {a.option}; {usd:.3f} USD")

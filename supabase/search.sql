@@ -3179,7 +3179,18 @@ declare
   later_from int;         -- the second search's first year: the newest report's year or the year before (no year asked), or the year after the years asked (ask_later)
   later boolean := false;
   says text;              -- option ask_report_words: the reports' words for the kind of content the question asks about
+  series boolean := false; -- option ask_series: the question asks for something over time
 begin
+  -- Option ask_series (25 Nov 2026, the owner, of "Revenue of Unilever across the past few years": the answer gave 2025
+  -- and 2016 to 2020, and said "the 2024 figure is not in these pages"). With no year asked, the eight pages are the
+  -- best of the search and the newest report's, so a question about several years reads one or two reports. When the
+  -- question says "over time" and names a company, the best page of each of the last seven report years' main
+  -- reports is read first (each year's report prints its own year and usually the one or two before), and the rest
+  -- of the eight are filled as before.
+  if year_from is null and year_to is null and nullif(btrim(coalesce(company_filter, '')), '') is not null and public.survey_option('ask_series')
+     and lower(coalesce(asked, q, '')) ~ '(past|last|previous|recent|últimos|ultimos) ((few|several|two|three|four|five|six|ten|[0-9]+) )?(years|años)|(over|across|through|throughout) (the )?(years|time)|\m(trend|trends|evolution|evolución|historical|histórico|time series|year by year)\M|(since|desde) (19|20)[0-9]{2}' then
+    series := true;
+  end if;
   if nullif(btrim(coalesce(company_filter, '')), '') is not null and (public.survey_option('ask_report_words') or public.survey_option('ask_long_answers')) then
     says := public.ask_concept_says(coalesce(asked, q));
   end if;
@@ -3229,7 +3240,15 @@ begin
          w as materialized (select f.*, row_number() over (order by f.held desc, f.year desc nulls last, f.page) as rk
                             from public.ask_concept_pages(company_filter, year_from, year_to, says, 8) f
                             where says is not null and not exists (select 1 from c where c.library_id = f.library_id and c.page = f.page and c.rank <= 5)),
+         -- ask_series: the best page of each year's main reports, the last seven years the search finds
+         s0 as materialized (select x.*, row_number() over (partition by x.year order by x.rank) as in_year
+                             from public.find_blend(key, q, qvec, company_filter, null, null, type_filter, 60, 'ask series', industry_filter, country_filter, region_filter, asked) x
+                             where series and x.year is not null
+                               and x.doc_type in ('Annual Report', 'Integrated Report', '10K Form', 'Registration Document', 'Financial Statement', 'Sustainability Report', 'ESG Report', 'CSR Report')),
+         s as (select s0.* from s0 where s0.in_year = 1 and s0.year > (select max(y.year) from s0 y) - 7),
          u as (select c.library_id, c.company, c.wba_id, c.year, c.doc_type, c.label, c.url, c.page, c.excerpt, c.rank, 0 as src from c
+               union all
+               select s.library_id, s.company, s.wba_id, s.year, s.doc_type, s.label, s.url, s.page, s.excerpt, (10000 - s.year)::int, 3 from s
                union all
                select r.library_id, r.company, r.wba_id, r.year, r.doc_type, r.label, r.url, r.page, r.excerpt, r.rank, 1 from r
                where not exists (select 1 from c where c.library_id = r.library_id and c.page = r.page)
@@ -3237,10 +3256,11 @@ begin
                select w.library_id, w.company, w.wba_id, w.year, w.doc_type, w.label, w.url, w.page, w.excerpt, w.rk::int, 2 from w
                where w.rk <= 3),
          -- a page the reports' words found and the search ranked sixth or lower is read as the former
-         u2 as (select distinct on (u.library_id, u.page) u.*, newest.y as newest_y from u, newest order by u.library_id, u.page, (u.src = 2) desc)
+         u2 as (select distinct on (u.library_id, u.page) u.*, newest.y as newest_y from u, newest order by u.library_id, u.page, (u.src = 3) desc, (u.src = 2) desc)
     select u.library_id, u.company, u.wba_id, u.year, u.doc_type, u.label, u.url, u.page, u.excerpt
     from u2 u
-    order by case when u.src = 0 and u.rank <= 5 then 0
+    order by case when u.src = 3 then -1                                                           -- ask_series: a page a year, the newest first (seven at most)
+                  when u.src = 0 and u.rank <= 5 then 0
                   when u.src = 2 then 1                                                              -- the pages found by the reports' words (three at most: eight in all)
                   when later and u.src = 1 then 2                                                    -- after the best five of the years asked, the later reports' pages (three at most: eight in all)
                   when not later and u.year is not null and u.year >= coalesce(latest, u.newest_y) - 1 then 2
@@ -3419,6 +3439,8 @@ end;
 $fn$;
 revoke all on function public.ask_instructions_plain(boolean) from public, anon, authenticated;
 
+insert into public.search_options (name, is_on, note) values ('ask_series', false, 'Ask: a question about something over time ("across the past few years", "trend", "since 2019") of one company reads the best page of each of the last seven years'' main reports first. Compare with ask_concept_compare.py --option ask_series before switching on.')
+on conflict (name) do nothing;
 -- Option ask_source_entity (24 Nov 2026). The owner asked about a bank and one source was the report of its UK
 -- subsidiary, held under the group: the list of sources says so (document_entities, "names its subsidiary"), the
 -- reader did not know. With the option on, the heading of such a page in what the reader is given says whose report
@@ -5173,6 +5195,8 @@ begin
     said := coalesce(public.ask_split(got ->> 'text') ->> 'answer', '');
     out := out || jsonb_build_object(arm, jsonb_build_object('pages', pages, 'chars', length(said), 'cites', (select count(distinct m[1]) from regexp_matches(said, '\[(\d+)\]', 'g') m),
              'not_stated', said ~* '^\W*not stated', 'marked', marked,
+             'years', (select count(distinct m[1]) from regexp_matches(said, '\m((?:19|20)[0-9]{2})\M', 'g') m),          -- ask_series: how many different years the answer names
+             'page_years', (select count(distinct d.year) from jsonb_array_elements_text(pages) p join public.documents d on d.library_id = split_part(p, '|', 1)),
              'named', exists (select 1 from jsonb_array_elements_text(pages) p join public.document_entities e on e.library_id = split_part(p, '|', 1)
                               where position(lower(array_to_string((regexp_split_to_array(btrim(e.name), '\s+'))[1:2], ' ')) in lower(said)) > 0),
              'hedged', left(said, 220) ~* '(excerpts?|pages?|documents?|reports?) (give|gives|provide|provides|contain|contains|hold|holds|include|includes|offer|offers|have|has) (no|little|only limited)|do(es)? not (state|say|discuss|describe|address|explain|mention|cover)|no (management )?(commentary|discussion|explanation|statement|mention)|not (directly |explicitly )?(stated|discussed|addressed|described|explained)'));
