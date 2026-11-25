@@ -2252,6 +2252,13 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual((cat["total"], [(x["lei"], x["name"], x["why"], x["status"]) for x in cat["rows"]]), (2, [("CAT1", "Gnu Rail", None, "candidate"), ("CAT2", "Zebra Two SA", "held: the same website", "candidate")]))
         self.assertEqual({x["match"] for x in cat["rows"]}, {"lei"})          # exact unless the script says the entry was found by name
         self.assertIsNotNone(cat["rows"][1]["held"])
+        # the owner fixes a website and a name: shown in place of the source's, refused when it is a held company's site or not an address
+        cur.execute("select public.admin_catalogue_fix('k', 'CAT1', 'gnurail.example/investors', 'Gnu')"); self.assertEqual(cur.fetchone()[0], {"ok": True, "website": "https://gnurail.example/investors", "name": "Gnu", "fixed": True})
+        cur.execute("select public.admin_catalogue_fix('k', 'CAT1', 'not an address')"); self.assertFalse(cur.fetchone()[0]["ok"])
+        cur.execute("select public.admin_catalogue_fix('k', 'NOPE', 'x.example')"); self.assertFalse(cur.fetchone()[0]["ok"])
+        cur.execute("select website, owner_website from public.catalogue where lei = 'CAT1'"); self.assertEqual(cur.fetchone(), ("https://gnu.example", "https://gnurail.example/investors"))          # the source's value is kept
+        cur.execute("select public.admin_catalogue('k')"); self.assertEqual([(x["name"], x["website"], x["fixed"]) for x in cur.fetchone()[0]["rows"] if x["lei"] == "CAT1"], [("Gnu", "https://gnurail.example/investors", True)])
+        cur.execute("select public.admin_catalogue_fix('k', 'CAT1', null, null)"); self.assertEqual(cur.fetchone()[0], {"ok": True, "website": "https://gnu.example", "name": "Gnu Rail", "fixed": False})
         cur.execute("select public.admin_catalogue_set('k', array['CAT1', 'NOPE'], 'Wanted')"); self.assertEqual(cur.fetchone()[0], {"ok": True, "changed": 1, "status": "wanted"})
         cur.execute("select public.admin_catalogue_set('k', array['CAT1'], 'added')"); self.assertFalse(cur.fetchone()[0]["ok"])          # not a choice of this function
         cur.execute("select status from public.catalogue where lei = 'CAT1'"); self.assertEqual(cur.fetchone()[0], "wanted")

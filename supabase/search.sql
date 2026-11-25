@@ -5443,7 +5443,11 @@ create table if not exists public.catalogue (
   first_seen    timestamptz not null default now(),
   seen_at       timestamptz not null default now()
 );
-alter table public.catalogue add column if not exists match text not null default 'lei';   -- how its Wikidata entry was found: lei (exact) or name (to be looked at: right 92 times in 100)
+alter table public.catalogue add column if not exists match text not null default 'lei';
+-- the owner's own website or name for a candidate ("how do I fix a website?", 25 Nov 2026): kept beside what the sources
+-- gave, shown and used in its place, and never written by the script
+alter table public.catalogue add column if not exists owner_website text;
+alter table public.catalogue add column if not exists owner_name text;   -- how its Wikidata entry was found: lei (exact) or name (to be looked at: right 92 times in 100)
 alter table public.catalogue enable row level security;
 revoke all on public.catalogue from anon, authenticated;
 
@@ -5458,15 +5462,53 @@ begin
   return jsonb_build_object(
     'total', (select count(*) from public.catalogue),
     'seen_at', (select max(c.seen_at) from public.catalogue c),
-    'rows', (select coalesce(jsonb_agg(jsonb_build_object('lei', c.lei, 'name', coalesce(c.common_name, c.legal_name), 'legal_name', c.legal_name, 'aliases', c.aliases, 'country', c.country,
-                                                          'website', c.website, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei, 'match', c.match,
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('lei', c.lei, 'name', coalesce(c.owner_name, c.common_name, c.legal_name), 'legal_name', c.legal_name, 'aliases', c.aliases, 'country', c.country,
+                                                          'website', coalesce(c.owner_website, c.website), 'fixed', c.owner_website is not null or c.owner_name is not null, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei, 'match', c.match,
                                                           'held', (select h.name from public.companies h where h.wba_id = c.duplicate_of))
-                                       order by coalesce(c.common_name, c.legal_name), c.lei), '[]'::jsonb)
+                                       order by lower(regexp_replace(coalesce(c.owner_name, c.common_name, c.legal_name), '^[^[:alnum:]]+', '')), c.lei), '[]'::jsonb)
              from public.catalogue c));
 end;
 $$;
 revoke all on function public.admin_catalogue(text) from public, anon;
 grant execute on function public.admin_catalogue(text) to authenticated;
+
+-- The owner corrects a candidate's website or name. An empty value takes his correction away. A website is checked as
+-- request_company checks it, and must not be the site of a company held.
+create or replace function public.admin_catalogue_fix(key text, lei text, website text default null, name text default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  site text := nullif(btrim(coalesce(website, '')), '');
+  nm text := nullif(btrim(coalesce(name, '')), '');
+  held text;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if not exists (select 1 from public.catalogue c where c.lei = lei) then
+    return jsonb_build_object('ok', false, 'why', 'no candidate has this LEI');
+  end if;
+  if site is not null and (length(site) > 300 or site !~* '^(https?://)?[a-z0-9.-]+\.[a-z]{2,}(/.*)?$') then
+    return jsonb_build_object('ok', false, 'why', 'that does not look like a web address');
+  end if;
+  if nm is not null and (length(nm) < 2 or length(nm) > 120) then
+    return jsonb_build_object('ok', false, 'why', 'a name has 2 to 120 characters');
+  end if;
+  if site is not null and site !~* '^https?://' then site := 'https://' || site; end if;
+  if site is not null then
+    select h.name into held from public.companies h where public.site_host(h.website) = public.site_host(site) and public.site_host(site) <> '' limit 1;
+    if held is not null then
+      return jsonb_build_object('ok', false, 'why', 'that is the website of a company held: ' || held);
+    end if;
+  end if;
+  update public.catalogue c set owner_website = site, owner_name = nm where c.lei = lei;
+  return (select jsonb_build_object('ok', true, 'website', coalesce(c.owner_website, c.website), 'name', coalesce(c.owner_name, c.common_name, c.legal_name), 'fixed', c.owner_website is not null or c.owner_name is not null)
+          from public.catalogue c where c.lei = lei);
+end;
+$$;
+revoke all on function public.admin_catalogue_fix(text, text, text, text) from public, anon;
+grant execute on function public.admin_catalogue_fix(text, text, text, text) to authenticated;
 
 -- The owner's choice for candidates: wanted, not wanted, or back to candidate. It changes nothing else: no page is
 -- watched and no company is added by it. 'added' is not set here.
@@ -5512,8 +5554,8 @@ begin
   if not public.admin_ok(key) then
     raise exception 'not allowed' using errcode = '42501';
   end if;
-  for r in select c.lei, left(coalesce(nullif(btrim(c.common_name), ''), c.legal_name), 120) as name, c.website from public.catalogue c
-           where c.status = 'wanted' and c.match = 'lei' and c.duplicate_why is null and c.website is not null
+  for r in select c.lei, left(coalesce(c.owner_name, nullif(btrim(c.common_name), ''), c.legal_name), 120) as name, coalesce(c.owner_website, c.website) as website from public.catalogue c
+           where c.status = 'wanted' and c.match = 'lei' and c.duplicate_why is null and coalesce(c.owner_website, c.website) is not null
              and (of_country is null or of_country = '' or upper(c.country) = upper(of_country))
            order by coalesce(c.common_name, c.legal_name), c.lei limit greatest(1, least(coalesce(most, 20), 20)) loop
     begin
