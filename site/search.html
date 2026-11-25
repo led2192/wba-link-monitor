@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v191 2026-11-25";
+  const CLIENT = "lantern v192 2026-11-26";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2781,7 +2781,7 @@
     // list largest first. The order uses a rough amount in euros; what is shown is the figure in its own currency.
     const sized = rows.some(x => x.revenue_eur != null); let bySize = sized;
     const money = x => { if (x.revenue == null) return x.sized ? "none tagged" : ""; const v = Number(x.revenue), u = v >= 1e9 ? [v / 1e9, "bn"] : v >= 1e6 ? [v / 1e6, "m"] : [v / 1e3, "k"];
-      return `${u[0] >= 100 ? Math.round(u[0]) : u[0].toFixed(1)} ${u[1]} ${x.revenue_currency || ""}${x.revenue_year ? ` (${x.revenue_year})` : ""}`; };
+      return `${u[0] >= 100 ? Math.round(u[0]) : u[0].toFixed(1)} ${u[1]} ${x.revenue_currency || ""}${x.revenue_year ? ` (${x.revenue_year})` : ""}${/Interest/.test(x.revenue_concept || "") ? " · interest revenue" : /Rental/.test(x.revenue_concept || "") ? " · rental income" : ""}`; };
     const show = () => { const w = word.toLowerCase();
       const all = rows.filter(x => kindOf(x) === kind && (old || live(x) || x.status !== "candidate") && (!country || (x.country || "?") === country) && (!w || [x.name, x.legal_name, x.website, x.lei, x.held, ...(x.aliases || [])].some(v => String(v || "").toLowerCase().includes(w))));
       if (bySize) all.sort((a, b) => (b.revenue_eur == null ? -1 : b.revenue_eur) - (a.revenue_eur == null ? -1 : a.revenue_eur));

@@ -10,7 +10,9 @@ filings.xbrl.org for the company's latest filings, reads the newest one's facts 
 the amount, its currency, the year, and the amount in euros at a fixed rough rate (RATES), which is for ordering a
 list and for nothing else.
 
-A bank or an insurer that tags no revenue concept gets none: the column stays empty, and the list says so.
+A company that tags none of the revenue concepts is sized by what its kind of business tags in its place (SIZE_CONCEPTS:
+a bank's interest revenue, a property company's rental income). That is a size for ordering a list, not the revenue an
+analyst would validate; the concept read is kept beside the amount (revenue_concept) and the list says which it is.
 
     python catalogue_size.py [--limit N] [--again] [--commit]
 
@@ -27,15 +29,41 @@ RATES = {"EUR": 1.0, "SEK": 0.09, "DKK": 0.134, "NOK": 0.085, "GBP": 1.15, "USD"
          "HUF": 0.0025, "RON": 0.2, "BGN": 0.511, "ISK": 0.0068, "JPY": 0.0058, "CNY": 0.127, "ZAR": 0.05, "CAD": 0.66, "AUD": 0.6}
 
 
+# The concepts a size is read from, the first that the report tags: revenue as esef_facts.py reads it, then what
+# stands in its place in the accounts of a bank or a property company (seen in 7 of the first 35 candidates read).
+SIZE_CONCEPTS = ["ifrs-full:Revenue", "ifrs-full:RevenueFromContractsWithCustomers", "ifrs-full:InsuranceRevenue", "ifrs-full:RevenueAndOperatingIncome",
+                 "ifrs-full:RevenueFromInterest", "ifrs-full:InterestRevenueCalculatedUsingEffectiveInterestMethod", "ifrs-full:RentalIncomeFromInvestmentProperty"]
+
+
+def size_facts(oim):
+    """The group's annual amounts of the SIZE_CONCEPTS in a report's facts, in esef_facts.annual_facts' shape:
+    [(rank, concept, year, end, value, currency, "ESEF", "")]. A fact with another dimension (a segment) is left out."""
+    from esef_facts import CORE_DIMS, period_days
+    out = []
+    for f in ((oim or {}).get("facts") or {}).values():
+        dims = f.get("dimensions") or {}; concept = dims.get("concept"); unit = str(dims.get("unit") or "")
+        if concept not in SIZE_CONCEPTS or set(dims) - CORE_DIMS or not unit.startswith("iso4217:"):
+            continue
+        p = period_days(dims.get("period"))
+        if not p or not 330 <= p[2] <= 380:
+            continue
+        try:
+            v = float(f.get("value"))
+        except (TypeError, ValueError):
+            continue
+        out.append((SIZE_CONCEPTS.index(concept), concept, p[1].year, p[1].isoformat(), v, unit.split(":", 1)[1].upper(), "ESEF", ""))
+    return out
+
+
 def newest(facts):
-    """(value, currency, year) of the latest annual revenue among esef_facts.annual_facts rows, the preferred concept
-    first; None when the report tags none. A row: (rank, concept, wba year, end, value, currency, form, filed)."""
+    """(value, currency, year, concept) of the latest annual amount among size_facts rows, the preferred concept
+    first; None when the report tags none. A row: (rank, concept, year, end, value, currency, form, filed)."""
     good = [f for f in facts if f[4] is not None and f[4] > 0]
     if not good:
         return None
     end = max(f[3] for f in good)
     f = min((f for f in good if f[3] == end), key=lambda f: (f[0], -f[4]))
-    return f[4], f[5], int(end[:4])
+    return f[4], f[5], int(end[:4]), f[1].split(":")[-1]
 
 
 def in_euros(value, currency):
@@ -70,8 +98,7 @@ def size_of(lei, sess, get_filings, get_json, year_min=2024, why=None):
         return "refused", None
     if status != 200 or not oim:
         return "no facts", None
-    from esef_facts import annual_facts
-    got = newest(annual_facts(oim))
+    got = newest(size_facts(oim))
     if not got and why is not None:
         why.update(set(why_none(oim)))          # once a report
     return ("ok", got) if got else ("no revenue", None)
@@ -81,6 +108,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--again", action="store_true")
+    ap.add_argument("--again-empty", action="store_true", help="ask again for those asked before with no amount read")
     ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
@@ -97,7 +125,7 @@ def main():
     with evidence_db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute("""select lei from public.catalogue where status in ('candidate', 'wanted') and duplicate_why is null and coalesce(last_year, 0) >= 2024
-                             and (%s or size_at is null) order by (status = 'wanted') desc, lei""", (a.again,))
+                             and (%s or size_at is null or (%s and revenue is null)) order by (status = 'wanted') desc, lei""", (a.again, a.again_empty))
             todo = [r[0] for r in cur.fetchall()]; conn.rollback()
             if a.limit:
                 todo = todo[:a.limit]
@@ -105,7 +133,7 @@ def main():
 
             def write():
                 if a.commit and pending:
-                    cur.executemany("update public.catalogue set revenue = %s, revenue_currency = %s, revenue_year = %s, revenue_eur = %s, size_at = now() where lei = %s", pending)
+                    cur.executemany("update public.catalogue set revenue = %s, revenue_currency = %s, revenue_year = %s, revenue_eur = %s, revenue_concept = %s, size_at = now() where lei = %s", pending)
                     conn.commit()
                 pending.clear()
 
@@ -119,9 +147,11 @@ def main():
                 if refused >= 5:
                     print("The site refused five times in a row: stopped. Run it again later; what was read is kept.", flush=True); break
                 if what == "ok":
-                    pending.append((got[0], got[1], got[2], in_euros(got[0], got[1]), lei))
+                    pending.append((got[0], got[1], got[2], in_euros(got[0], got[1]), got[3], lei))
+                    if got[3] not in ("Revenue", "RevenueFromContractsWithCustomers"):
+                        seen["of them by " + got[3]] += 1
                 elif what in ("no filing", "no revenue", "no facts"):
-                    pending.append((None, None, None, None, lei))          # asked: not asked again without --again
+                    pending.append((None, None, None, None, None, lei))          # asked: not asked again without --again
                 if n % 25 == 0:
                     write(); print(f"  {n:,} asked: " + ", ".join(f"{k} {v:,}" for k, v in seen.most_common()), flush=True)
                 time.sleep(PAUSE)
