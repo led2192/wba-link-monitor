@@ -17,13 +17,20 @@ Each is then checked, in this order, and the first that holds is written down as
      legal name, former name or short name                         -> "held: the same name"
   5. another candidate has the same website or Wikidata entry      -> "another candidate: the same website/entry"
 
+Since 25 Nov 2026 (the owner's yes, "with the matched by name: review, perfect") the companies Wikidata does not
+hold by LEI are also looked for by name (wikidata_names.py: the legal name without its legal form, the first hit
+of the company's country with a website). Measured the same day, such a match is the right company 92 times in
+100 and its website the one lantrNa holds 80 in 100, so these candidates carry match = 'name' and are shown apart,
+to be looked at one by one, never among the exact ones. The same checks run on them; one whose Wikidata entry is
+another candidate's is marked as repeating it.
+
 Nothing here watches a page or fetches a document: the candidates are a list to look at (public.catalogue). A
 company enters lantrNa only by the owner's choice, later.
 
 Dry run by default: counts. --commit writes public.catalogue (an upsert by LEI; a status the owner set is kept).
 Prints counts only, never a company, a name or an address.
 
-    python catalogue_build.py [--commit] [--limit N]
+    python catalogue_build.py [--commit] [--limit N] [--no-names]
 
 Env: SUPABASE_DB_URL; AIRTABLE_QA_TOKEN for the run record (QA_COMMIT).
 """
@@ -67,6 +74,23 @@ def entries(answer):
     return out
 
 
+LABELS = """SELECT ?c (SAMPLE(?label) AS ?label_) (GROUP_CONCAT(DISTINCT ?alias; separator="|") AS ?aliases) WHERE {
+  VALUES ?c { %s }
+  OPTIONAL { ?c rdfs:label ?label FILTER(LANG(?label) = "en") }
+  OPTIONAL { ?c skos:altLabel ?alias FILTER(LANG(?alias) = "en") }
+} GROUP BY ?c"""
+
+
+def labels(answer):
+    """{QID: (label, [aliases])} of one answer to LABELS."""
+    out = {}
+    for b in ((answer or {}).get("results") or {}).get("bindings") or []:
+        val = lambda k: (b.get(k) or {}).get("value") or None
+        if val("c"):
+            out[val("c").rsplit("/", 1)[-1]] = (val("label_"), [a for a in (val("aliases") or "").split("|") if a.strip()][:8])
+    return out
+
+
 def check(cand, held):
     """(reason or None, the held company's id or None) for one candidate against what is held.
     cand: dict lei, website, names (a list). held: dict by_lei {LEI: wba_id}, group {LEI: wba_id}, by_host {host: wba_id}, by_name {key: wba_id}."""
@@ -86,7 +110,7 @@ def check(cand, held):
 def among(cands):
     """Marks the candidates that repeat another candidate's website or Wikidata entry; the first by LEI stands. cands: dicts, changed in place."""
     seen_host, seen_q = {}, {}
-    for c in sorted(cands, key=lambda c: c["lei"]):
+    for c in sorted(cands, key=lambda c: (c.get("match") == "name", c["lei"])):          # an exact match stands before one by name
         if c.get("reason"):
             continue
         h, q = host_key(c.get("website")), c.get("wikidata")
@@ -126,6 +150,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--commit", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--no-names", action="store_true", help="only the exact matches by LEI")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
@@ -165,6 +190,19 @@ def main():
         if status != 200:
             break
         wd.update(entries(r.json())); time.sleep(5.0)
+    # 2b. those not found by LEI, by name: to be looked at one by one
+    by_name = {}
+    if status == 200 and not a.no_names:
+        from wikidata_names import Asker, QID, match as match_by_name
+        asker = Asker(sess, ua)
+        got, _ = match_by_name(asker, [(l, firms[l][0], firms[l][1]) for l in leis if l not in wd and firms[l][0]])
+        qids = sorted({q for q, _ in got.values() if q}); lab = {}
+        for i in range(0, len(qids), 100):
+            if asker.stopped:
+                break
+            lab.update(labels(asker.sparql(LABELS % " ".join("wd:" + q for q in qids[i:i + 100] if QID.match(q)))))
+        by_name = {l: (q, site) + lab.get(q, (None, [])) for l, (q, site) in got.items() if q}
+        print(f"by name: {len(got):,} asked, {len(by_name):,} with an entry of their country and a website" + (f"; stopped by {asker.stopped}" if asker.stopped else ""), flush=True)
     # 3. candidates with a website, checked
     with evidence_db.connect() as conn:
         with conn.cursor() as cur:
@@ -172,15 +210,16 @@ def main():
         conn.rollback()
         cands = []
         for lei in leis:
-            q, site, label, aliases = wd.get(lei, (None, None, None, []))
+            how = "lei" if lei in wd else "name"
+            q, site, label, aliases = wd.get(lei) or by_name.get(lei) or (None, None, None, [])
             if not site:
                 continue
-            c = {"lei": lei, "legal_name": firms[lei][0], "country": firms[lei][1], "common_name": label, "aliases": aliases, "website": site, "wikidata": q, "like": None,
+            c = {"lei": lei, "match": how, "legal_name": firms[lei][0], "country": firms[lei][1], "common_name": label, "aliases": aliases, "website": site, "wikidata": q, "like": None,
                  "names": [firms[lei][0], label] + aliases}
             c["reason"], c["held"] = check(c, held)
             cands.append(c)
         among(cands)
-        by = collections.Counter(c["reason"] or "new: no company like it is held" for c in cands)
+        by = collections.Counter(c["reason"] or ("matched by name: to review" if c["match"] == "name" else "new: no company like it is held") for c in cands)
         print(f"### Candidates for lantrNa's own list\n\n{len(firms):,} companies file in the European format; {len(leis):,} asked of Wikidata (the last answer {status}), {len(wd):,} found by LEI, {len(cands):,} with a website.\n")
         for k, v in by.most_common():
             print(f"- {v:,}: {k}")
@@ -188,11 +227,11 @@ def main():
         written = 0
         if a.commit:
             with conn.cursor() as cur:
-                cur.executemany("""insert into public.catalogue (lei, legal_name, common_name, aliases, country, website, wikidata, source, duplicate_why, duplicate_of, like_lei, seen_at)
-                                   values (%s, %s, %s, %s, %s, %s, %s, 'esef, wikidata', %s, %s, %s, now())
+                cur.executemany("""insert into public.catalogue (lei, legal_name, common_name, aliases, country, website, wikidata, source, duplicate_why, duplicate_of, like_lei, match, seen_at)
+                                   values (%s, %s, %s, %s, %s, %s, %s, 'esef, wikidata', %s, %s, %s, %s, now())
                                    on conflict (lei) do update set legal_name = excluded.legal_name, common_name = excluded.common_name, aliases = excluded.aliases, country = excluded.country,
-                                     website = excluded.website, wikidata = excluded.wikidata, duplicate_why = excluded.duplicate_why, duplicate_of = excluded.duplicate_of, like_lei = excluded.like_lei, seen_at = now()""",
-                                [(c["lei"], c["legal_name"], c["common_name"], c["aliases"], c["country"], c["website"], c["wikidata"], c["reason"], c.get("held"), c.get("like")) for c in cands])
+                                     website = excluded.website, wikidata = excluded.wikidata, duplicate_why = excluded.duplicate_why, duplicate_of = excluded.duplicate_of, like_lei = excluded.like_lei, match = excluded.match, seen_at = now()""",
+                                [(c["lei"], c["legal_name"], c["common_name"], c["aliases"], c["country"], c["website"], c["wikidata"], c["reason"], c.get("held"), c.get("like"), c["match"]) for c in cands])
                 written = len(cands)
             conn.commit()
             print(f"\n{written:,} candidates written to public.catalogue.", flush=True)

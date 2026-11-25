@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v176 2026-11-25";
+  const CLIENT = "lantern v177 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2612,9 +2612,10 @@
     let r = null; try { r = await authed("admin_catalogue", { key }); } catch (e) {}
     if (!r) { body.appendChild(el("p", null, "Could not read the catalogue.")); return; }
     if (!r.total) { body.appendChild(el("p", null, 'No candidates yet (workflow "Catalogue build").')); return; }
-    const rows = r.rows || [], kindOf = x => x.status !== "candidate" ? x.status : (x.why || "new");
+    const rows = r.rows || [], kindOf = x => x.status !== "candidate" ? x.status : (x.why || (x.match === "name" ? "matched by name: review" : "new"));
     const LABEL = { "new": "New: no company like it is held", "wanted": "Wanted (your choice)", "not wanted": "Not wanted (your choice)", "added": "Added" };
     const MEAN = { "new": "No held company has its LEI, its website or its name, and it is in no held company's group. These are the ones to choose from.",
+                   "matched by name: review": "Wikidata does not hold these by their LEI: the entry was found by the company's name and country, which is the right company about 92 times in 100. Open the entry and the website before wanting one. They are never among the new ones.",
                    "held: the same LEI": "lantrNa already holds this company: the same LEI. Nothing to do.",
                    "in the group of a held company": "A subsidiary, a sister or the parent of a company lantrNa holds, by the Register. A listed subsidiary can be worth holding on its own: your call.",
                    "held: the same website": "Another LEI, the same website as a company held: almost always the same company under another legal entity.",
@@ -2627,7 +2628,7 @@
     const ksel = el("select"), csel = el("select"), inp = document.createElement("input"); ksel.style.cssText = csel.style.cssText = style; inp.style.cssText = style + ";width:220px"; inp.placeholder = "a name or a website"; inp.setAttribute("aria-label", "filter by a name or a website");
     ksel.setAttribute("aria-label", "which candidates"); csel.setAttribute("aria-label", "which country");
     const fill = () => { const n = {}; for (const x of rows) n[kindOf(x)] = (n[kindOf(x)] || 0) + 1; const keep = ksel.value || kind; ksel.innerHTML = "";
-      for (const k of ["new", "wanted", "not wanted", "added", ...Object.keys(MEAN).filter(k => k !== "new")]) { if (!n[k] && k !== "new") continue; const o = el("option", null, `${LABEL[k] || k[0].toUpperCase() + k.slice(1)} (${(n[k] || 0).toLocaleString()})`); o.value = k; ksel.append(o); }
+      for (const k of ["new", "matched by name: review", "wanted", "not wanted", "added", ...Object.keys(MEAN).filter(k => k !== "new" && k !== "matched by name: review")]) { if (!n[k] && k !== "new") continue; const o = el("option", null, `${LABEL[k] || k[0].toUpperCase() + k.slice(1)} (${(n[k] || 0).toLocaleString()})`); o.value = k; ksel.append(o); }
       ksel.value = [...ksel.options].some(o => o.value === keep) ? keep : "new"; kind = ksel.value; };
     const byCountry = {}; for (const x of rows) byCountry[x.country || "?"] = (byCountry[x.country || "?"] || 0) + 1;
     csel.append(Object.assign(el("option", null, "Every country"), { value: "" })); for (const [c, n] of Object.entries(byCountry).sort((a, b) => b[1] - a[1])) csel.append(Object.assign(el("option", null, `${c} (${n.toLocaleString()})`), { value: c }));
@@ -2643,12 +2644,14 @@
         const pickBox = el("span"); const mk = (label, st) => { const a = el("a", null, label); a.href = "#"; a.style.marginRight = "8px"; a.onclick = ev => { ev.preventDefault(); set([x.lei], st); }; return a; };
         if (x.status === "added") pickBox.append(el("span", "what", "added")); else pickBox.append(...(x.status === "wanted" ? [el("b", null, "wanted "), mk("undo", "candidate")] : x.status === "not wanted" ? [el("b", null, "not wanted "), mk("undo", "candidate")] : [mk("want", "wanted"), mk("not", "not wanted")]));
         const name = el("span", null, x.name || ""); name.title = `LEI ${x.lei}` + (x.wikidata ? ` · Wikidata ${x.wikidata}` : "");
+        // v177: a candidate matched by name says so wherever it is shown, with its entry to check
+        if (x.match === "name") { const chk = el("a", null, "by name: check the entry"); chk.href = `https://www.wikidata.org/wiki/${encodeURIComponent(x.wikidata || "")}`; chk.target = "_blank"; chk.rel = "noopener"; chk.style.cssText = "display:block;font-size:12px"; name.append(chk); }
         return [name, x.legal_name || "", x.country || "", site, kind === "new" || kind === "wanted" || kind === "not wanted" ? (x.aliases || []).slice(0, 4).join(", ") : (x.held || x.like_lei || ""), pickBox]; }))); };
     ksel.onchange = () => { kind = ksel.value; show(); }; csel.onchange = () => { country = csel.value; show(); }; inp.oninput = () => { word = inp.value.trim(); show(); };
     const cell = v => { const s = v == null ? "" : Array.isArray(v) ? v.join("; ") : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const cols = ["lei", "name", "legal_name", "aliases", "country", "website", "wikidata", "why", "held", "like_lei", "status"];
+    const cols = ["lei", "name", "legal_name", "aliases", "country", "website", "wikidata", "match", "why", "held", "like_lei", "status"];
     bar.append(el("span", "what", "Show"), ksel, csel, inp,
-      adminBtn("Want all shown", () => { const ids = shownRows.filter(x => x.status === "candidate").map(x => x.lei); if (ids.length) set(ids, "wanted"); }),
+      adminBtn("Want all shown", () => { if (kind === "matched by name: review") { say.textContent = " those matched by name are wanted one by one, after a look"; return; } const ids = shownRows.filter(x => x.status === "candidate" && x.match !== "name").map(x => x.lei); if (ids.length) set(ids, "wanted"); }),
       adminBtn("Download everything (CSV)", () => { const a = el("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + [cols.join(","), ...rows.map(x => cols.map(k => cell(x[k])).join(","))].join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-catalogue-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); }), say);
     body.append(el("p", null, `${r.total.toLocaleString()} candidates, read ${String(r.seen_at || "").slice(0, 10)}.`), bar, note, host); fill(); show();
   }

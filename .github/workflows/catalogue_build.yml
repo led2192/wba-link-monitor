@@ -19,7 +19,7 @@ permissions:
 jobs:
   load:
     runs-on: [self-hosted, lantern]      # lantrNa's server
-    timeout-minutes: 60
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - name: The server's own Python (kept on its disk, shared by its runners)

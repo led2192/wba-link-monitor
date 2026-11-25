@@ -5443,6 +5443,7 @@ create table if not exists public.catalogue (
   first_seen    timestamptz not null default now(),
   seen_at       timestamptz not null default now()
 );
+alter table public.catalogue add column if not exists match text not null default 'lei';   -- how its Wikidata entry was found: lei (exact) or name (to be looked at: right 92 times in 100)
 alter table public.catalogue enable row level security;
 revoke all on public.catalogue from anon, authenticated;
 
@@ -5458,7 +5459,7 @@ begin
     'total', (select count(*) from public.catalogue),
     'seen_at', (select max(c.seen_at) from public.catalogue c),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('lei', c.lei, 'name', coalesce(c.common_name, c.legal_name), 'legal_name', c.legal_name, 'aliases', c.aliases, 'country', c.country,
-                                                          'website', c.website, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei,
+                                                          'website', c.website, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei, 'match', c.match,
                                                           'held', (select h.name from public.companies h where h.wba_id = c.duplicate_of))
                                        order by coalesce(c.common_name, c.legal_name), c.lei), '[]'::jsonb)
              from public.catalogue c));
