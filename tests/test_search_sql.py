@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v190 2026-11-25";' in PAGE
+    assert 'const CLIENT = "lantern v191 2026-11-25";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -633,3 +633,8 @@ def test_learning_from_use_is_an_option_and_the_digest_is_on_today():
     assert "('learn_from_use', false," in SQL and "public.use_signal u on learn and u.use_key = uk" in SQL          # off until compared
     assert "revoke all on function public.refresh_use_signal(int, boolean) from public, anon, authenticated" in SQL
     assert 'authed("admin_search_digest", { key })' in PAGE and "How the search went in the last 24 hours" in PAGE
+
+
+def test_the_catalogue_shows_the_size_of_a_candidate():
+    assert "alter table public.catalogue add column if not exists revenue_eur" in SQL and "'revenue_eur', c.revenue_eur" in SQL
+    assert '"Last report", "Revenue", "Website"' in PAGE and "if (bySize) all.sort(" in PAGE          # v191: largest first

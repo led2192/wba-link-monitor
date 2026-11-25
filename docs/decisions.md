@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-25: A candidate's size is the revenue its own report tags
+To choose among two thousand candidates the owner needs to see the large ones first. Chosen: the revenue tagged in the company's newest ESEF annual report, read as `esef_facts.py` reads it for the companies held, shown in its own currency, with a rough amount in euros at fixed rates used only to order the list. Rejected: Wikidata's revenue and employees (held for 15% of these companies) and market value (no open source for all of them). Banks and insurers that tag no revenue concept get no size and are listed after the others.
+
 ### 2026-11-25: Of a long question, the first six words stay; the six rarest are not better (`terms_by_weight` off)
 Tried on the 40 questions of nine words or more that people typed in 30 days (run 45709514650): with the six words the fewest pages hold, 2 questions find more pages, 9 fewer, 29 the same number, and one that found pages finds none. Rare words together are on fewer pages, so the search narrows where it should widen. The option stays off and is not the way: a long question needs words left out when they find nothing (as `relax_absent_words` does for words no page holds), not other words required. `learn_from_use` was switched on the same night: the search exam is the same off and on (run 45707446528).
 
