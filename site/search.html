@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v177 2026-11-25";
+  const CLIENT = "lantern v178 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2622,7 +2622,7 @@
                    "held: the same name": "Another LEI and website, the same name as a company held once the legal form is taken off: look before wanting it.",
                    "another candidate: the same website": "Two candidates with one website: the first by LEI stands, this one repeats it.",
                    "another candidate: the same entry": "Two candidates with one Wikidata entry: this one repeats the other." };
-    let kind = "new", country = "", word = "";
+    let kind = "new", country = "", word = ""; const asked = new Set(), confirmOnce = text => { if (asked.has(text)) { asked.delete(text); return true; } asked.add(text); say.textContent = ` ${text} Press again to go ahead.`; return false; };
     const bar = el("div"), note = el("p", "what", ""), host = el("div"), say = el("span", "what", ""); bar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0";
     const style = "font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";
     const ksel = el("select"), csel = el("select"), inp = document.createElement("input"); ksel.style.cssText = csel.style.cssText = style; inp.style.cssText = style + ";width:220px"; inp.placeholder = "a name or a website"; inp.setAttribute("aria-label", "filter by a name or a website");
@@ -2652,6 +2652,13 @@
     const cols = ["lei", "name", "legal_name", "aliases", "country", "website", "wikidata", "match", "why", "held", "like_lei", "status"];
     bar.append(el("span", "what", "Show"), ksel, csel, inp,
       adminBtn("Want all shown", () => { if (kind === "matched by name: review") { say.textContent = " those matched by name are wanted one by one, after a look"; return; } const ids = shownRows.filter(x => x.status === "candidate" && x.match !== "name").map(x => x.lei); if (ids.length) set(ids, "wanted"); }),
+      // v178 (the owner: "start with 20 Spanish ones"): wanted candidates become companies, twenty at a time, by the door a person's own request uses
+      adminBtn("Add 20 of the wanted", async () => { const n = rows.filter(x => x.status === "wanted" && x.match !== "name" && !x.why && (!country || (x.country || "?") === country)).length;
+        if (!n) { say.textContent = " no wanted company" + (country ? ` of ${country}` : "") + " to add: mark some first"; return; }
+        if (!confirmOnce(`Add up to 20 of the ${n} wanted companies${country ? ` of ${country}` : ""}? Each becomes a company of lantrNa: its website is searched for report pages and its documents are fetched and read from then on.`)) return;
+        say.textContent = " adding…"; let s = null; try { s = await authed("admin_catalogue_add", { key, of_country: country || null, most: 20 }); } catch (e) {}
+        if (!s || !s.ok) { say.textContent = " not added: try again"; return; }
+        say.textContent = ` ${s.added} added` + (s.held ? `, ${s.held} already held` : "") + (s.other ? `, ${s.other} not added (see the row)` : "") + (s.stopped ? `; stopped: ${s.stopped}` : "") + ". Reading the list again…"; adminCatalogue(body); }),
       adminBtn("Download everything (CSV)", () => { const a = el("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + [cols.join(","), ...rows.map(x => cols.map(k => cell(x[k])).join(","))].join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-catalogue-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); }), say);
     body.append(el("p", null, `${r.total.toLocaleString()} candidates, read ${String(r.seen_at || "").slice(0, 10)}.`), bar, note, host); fill(); show();
   }
