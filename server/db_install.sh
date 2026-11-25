@@ -23,7 +23,7 @@ set -euo pipefail
 MODE="${1:-check}"
 PG=17
 NEED_FREE_GB=120          # the passages and their index need about 100 GB; below this, install refuses
-MEMORY_MAX=28G            # ceiling for the database's processes together
+MEMORY_MAX=40G            # ceiling for the database's processes together (28G until 25 Nov 2026: the index of every main report, about 21 GB, must fit; the machine has 64 GB)
 CPU_QUOTA=600%            # six of the sixteen cores
 CONF=/etc/postgresql/$PG/main
 UNIT=postgresql@$PG-main.service
@@ -68,7 +68,7 @@ port = 5432
 password_encryption = 'scram-sha-256'
 max_connections = 40
 shared_buffers = '8GB'
-effective_cache_size = '24GB'
+effective_cache_size = '34GB'
 work_mem = '32MB'
 maintenance_work_mem = '2GB'
 CONFEOF
