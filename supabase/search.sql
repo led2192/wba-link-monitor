@@ -3441,6 +3441,10 @@ revoke all on function public.ask_instructions_plain(boolean) from public, anon,
 
 insert into public.search_options (name, is_on, note) values ('ask_series', false, 'Ask: a question about something over time ("across the past few years", "trend", "since 2019") of one company reads the best page of each of the last seven years'' main reports first. Compare with ask_concept_compare.py --option ask_series before switching on.')
 on conflict (name) do nothing;
+-- On since 25 Nov 2026. Comparison run 45701180130, 40 questions over time, each answered with the option off and on
+-- (0.170 USD): the pages read cover 4.8 report years against 2.8, the answers name 4.5 different years against 4.2
+-- (more in 17, fewer in 8), 6 answers begin by saying the pages do not hold it against 8, 4 answers better and 2 worse.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 25 Nov 2026, run 45701180130)' where name = 'ask_series' and not is_on and note not like '%on since%';
 -- Option ask_source_entity (24 Nov 2026). The owner asked about a bank and one source was the report of its UK
 -- subsidiary, held under the group: the list of sources says so (document_entities, "names its subsidiary"), the
 -- reader did not know. With the option on, the heading of such a page in what the reader is given says whose report
