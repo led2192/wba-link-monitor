@@ -2230,6 +2230,16 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
         put("RG5", "D" * 18 + "55", True, "Zebra Old SA", "ACTIVE", "RETIRED")
         cur.execute("update public.company_register set entity_status = 'NULL' where wba_id = 'RG4'")          # the register's word for no status: not trouble
+        # the catalogue of candidates: read by the owner, and only its status is his to set
+        cur.execute("insert into public.catalogue (lei, legal_name, common_name, aliases, country, website, duplicate_why, duplicate_of) values "
+                    "('CAT1', 'Gnu Rail plc', 'Gnu Rail', '{GR}', 'GB', 'https://gnu.example', null, null), ('CAT2', 'Zebra Two SA', null, '{}', 'ES', 'https://z.example', 'held: the same website', 'RG3')")
+        cur.execute("select public.admin_catalogue('k')"); cat = cur.fetchone()[0]
+        self.assertEqual((cat["total"], [(x["lei"], x["name"], x["why"], x["status"]) for x in cat["rows"]]), (2, [("CAT1", "Gnu Rail", None, "candidate"), ("CAT2", "Zebra Two SA", "held: the same website", "candidate")]))
+        self.assertIsNotNone(cat["rows"][1]["held"])
+        cur.execute("select public.admin_catalogue_set('k', array['CAT1', 'NOPE'], 'Wanted')"); self.assertEqual(cur.fetchone()[0], {"ok": True, "changed": 1, "status": "wanted"})
+        cur.execute("select public.admin_catalogue_set('k', array['CAT1'], 'added')"); self.assertFalse(cur.fetchone()[0]["ok"])          # not a choice of this function
+        cur.execute("select status from public.catalogue where lei = 'CAT1'"); self.assertEqual(cur.fetchone()[0], "wanted")
+        cur.execute("delete from public.catalogue")
         cur.execute("update public.company_register set successor_lei = %s, successor_name = 'Zebra Fine SA' where wba_id = 'RG3'", (P,))
         cur.execute("select public.admin_register('k')"); r = cur.fetchone()[0]
         self.assertEqual([(x["successor_lei"], x["successor_name"]) for x in r["rows"] if x["wba_id"] == "RG3"], [(P, "Zebra Fine SA")])          # the LEI the register kept in its place is offered on the row

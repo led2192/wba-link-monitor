@@ -5446,6 +5446,51 @@ create table if not exists public.catalogue (
 alter table public.catalogue enable row level security;
 revoke all on public.catalogue from anon, authenticated;
 
+-- The candidates, for the owner to look at and choose from (Admin, "Catalogue"). Every row: 1,679 on 25 Nov 2026.
+create or replace function public.admin_catalogue(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return jsonb_build_object(
+    'total', (select count(*) from public.catalogue),
+    'seen_at', (select max(c.seen_at) from public.catalogue c),
+    'rows', (select coalesce(jsonb_agg(jsonb_build_object('lei', c.lei, 'name', coalesce(c.common_name, c.legal_name), 'legal_name', c.legal_name, 'aliases', c.aliases, 'country', c.country,
+                                                          'website', c.website, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei,
+                                                          'held', (select h.name from public.companies h where h.wba_id = c.duplicate_of))
+                                       order by coalesce(c.common_name, c.legal_name), c.lei), '[]'::jsonb)
+             from public.catalogue c));
+end;
+$$;
+revoke all on function public.admin_catalogue(text) from public, anon;
+grant execute on function public.admin_catalogue(text) to authenticated;
+
+-- The owner's choice for candidates: wanted, not wanted, or back to candidate. It changes nothing else: no page is
+-- watched and no company is added by it. 'added' is not set here.
+create or replace function public.admin_catalogue_set(key text, leis text[], status text) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  to_status text := lower(btrim(coalesce(status, '')));
+  n int;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if to_status not in ('candidate', 'wanted', 'not wanted') then
+    return jsonb_build_object('ok', false, 'why', 'the status is candidate, wanted or not wanted');
+  end if;
+  update public.catalogue c set status = to_status where c.lei = any(coalesce(leis, '{}')) and c.status is distinct from to_status and c.status <> 'added';
+  get diagnostics n = row_count;
+  return jsonb_build_object('ok', true, 'changed', n, 'status', to_status);
+end;
+$$;
+revoke all on function public.admin_catalogue_set(text, text[], text) from public, anon;
+grant execute on function public.admin_catalogue_set(text, text[], text) to authenticated;
+
 create table if not exists public.register_names (
   key    text not null,
   wba_id text not null,
