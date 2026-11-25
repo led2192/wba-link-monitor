@@ -654,7 +654,9 @@ create or replace function public.type_weight(doc_type text) returns real
 -- languages (the, of, la, de, der, van...), at most 8 (a lone digit stays: scope 1); a word of 4 letters or
 -- more also matches its longer forms (emission matches emissions; prefix match), a shorter one matches
 -- exactly (CO2, GRI). A page that prints the words together, in order, ranks above one that scatters them.
-create or replace function public.find_terms(q text, out phrases text[], out words text[])
+-- find_terms_n (25 Nov 2026): the same reading with the number of words kept given, for the option terms_by_weight,
+-- which looks at up to sixteen words of a long question before choosing six. find_terms keeps its eight.
+create or replace function public.find_terms_n(q text, most int, out phrases text[], out words text[])
 language plpgsql immutable
 as $$
 declare
@@ -687,9 +689,41 @@ begin
         from regexp_split_to_table(rest, '[[:space:],;:()\[\]{}<>|/\\&+]+') with ordinality t) x
       where (length(w) >= 2 or w ~ '^[0-9]$') and w <> all(stop)
       order by w, ord) y
-    order by ord limit 8), '{}');
+    order by ord limit greatest(coalesce(most, 8), 1)), '{}');
 end;
 $$;
+create or replace function public.find_terms(q text, out phrases text[], out words text[])
+language sql immutable
+as $$ select * from public.find_terms_n(q, 8) $$;
+
+-- How many pages hold each word (25 Nov 2026), counted on a sample of the pages: what a search engine calls the
+-- weight of a word. A question written in full has more words than the six a search can carry, and the first six
+-- were taken: "How many times the scope 1 emissions of X has been restated" searched for "times" and found 4 pages
+-- in 9.7 s, where its keywords find 606. With the option terms_by_weight the six words that the fewest pages hold
+-- are taken instead (in the order typed); a word the sample does not hold at all (a slip, a name) comes last.
+-- Filled by refresh_word_freq (long_questions.py --freq, at night: it reads a sample of the pages).
+create table if not exists public.word_freq (word text primary key, pages int not null);
+alter table public.word_freq enable row level security;
+create or replace function public.refresh_word_freq(pct real default 2) returns int
+language plpgsql security definer set search_path = public, extensions
+set statement_timeout = '30min'
+set work_mem = '512MB'
+as $$
+declare
+  n int;
+  p real := least(greatest(coalesce(pct, 2), 0.1), 10);
+begin
+  create temp table wf_new on commit drop as
+    select word, ndoc as pages from ts_stat(format('select words from public.pages tablesample system (%s) where words is not null', p))
+    where word ~ '^[[:alnum:]]{1,30}$' and ndoc >= 2;
+  delete from public.word_freq;
+  insert into public.word_freq select * from wf_new;
+  get diagnostics n = row_count;
+  drop table wf_new;
+  return n;
+end;
+$$;
+revoke all on function public.refresh_word_freq(real) from public, anon, authenticated;
 
 -- Query synonyms (10 Nov 2026): a word typed in the box also finds its alternatives ("wba" finds "World
 -- Benchmarking Alliance"). Editable in the SQL editor: insert into search_synonyms (term, alternatives) values
@@ -938,6 +972,7 @@ declare
   ids text[] := public.find_company_ids(company_filter);
   pids text[] := public.profile_matching(industry_filter, country_filter, region_filter);
   types text[] := public.types_matching(type_filter);
+  by_weight boolean := false;
 begin
   if k is null then
     raise exception 'not allowed to search' using errcode = '42501';
@@ -949,7 +984,8 @@ begin
   if k <> 'owner' and (select count(*) from public.search_log l where l.key_name = k and l.at > now() - interval '1 minute') >= 60 then
     raise exception 'too many searches in a minute' using errcode = '53400';
   end if;
-  select * into t from public.find_terms(q);
+  by_weight := public.survey_option('terms_by_weight');
+  if by_weight then select * into t from public.find_terms_n(q, 16); else select * into t from public.find_terms(q); end if;
   phrases := t.phrases; words := t.words;
   nw := coalesce(array_length(words, 1), 0);
   -- A question written in full: eight words, then every seven of them or-ed, then every six of them (28 groups of
@@ -958,7 +994,13 @@ begin
   -- the page said "Failed to fetch"), with and without a company filter. So the work is bounded whatever is typed:
   -- at most six words are searched (the first six), and from five words on only one word may be missing.
   if nw > 6 then
-    words := words[1:6];
+    -- option terms_by_weight (25 Nov 2026): the six words the fewest pages hold, in the order typed, not the first six
+    if by_weight and exists (select 1 from public.word_freq limit 1) then
+      words := array(select x.w from (select u.w, u.ord from unnest(words) with ordinality u(w, ord) left join public.word_freq f on f.word = u.w
+                                      order by (f.pages is null), f.pages, u.ord limit 6) x order by x.ord);
+    else
+      words := words[1:6];
+    end if;
     nw := 6;
   end if;
   if nw = 0 and coalesce(array_length(phrases, 1), 0) = 0 then   -- only little words: take them as typed
@@ -3769,6 +3811,8 @@ insert into public.search_options (name, is_on, note) values ('answer_topics', t
 -- company holds (of the whole library, when no company is named: fewer than five pages) cannot have been what
 -- separated the pages, so the search is made again with the others and the person is told which were left out.
 -- It acts only on a search that found nothing: a search that finds pages is not touched.
+insert into public.search_options (name, is_on, note) values ('terms_by_weight', false, 'Search: of a question with more than six words, the six that the fewest pages hold are searched (word_freq), not the first six. Compare with long_questions.py and search_exam.py before switching on.')
+on conflict (name) do nothing;
 insert into public.search_options (name, is_on, note) values ('relax_absent_words', true, 'Search: when the words find no page, the words that no page of the scope holds are left out and the search is made again, and the page says which. Acts only on a search that found nothing (on since 25 Nov 2026).')
 on conflict (name) do nothing;
 create or replace function public.absent_terms(key text, q text, company_filter text default null) returns jsonb

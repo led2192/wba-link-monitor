@@ -1,0 +1,45 @@
+# Long questions: the six rarest words of a question against its first six (long_questions.py). mode=compare runs the
+# long questions people typed with the option terms_by_weight off and on (read only); mode=freq counts how many pages
+# hold each word, on a sample (writes public.word_freq; not by day unless by_day). By hand. Prints counts only.
+name: Long questions
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_scheduled:
+        description: "what the clock on the server starts: a commit run (server/clock.json)"
+        type: boolean
+        default: false
+      mode:
+        description: "compare or freq"
+        default: "compare"
+      by_day:
+        description: "yes: a commit run may start in the hours people search (it loads the database)"
+        default: "no"
+
+concurrency:
+  group: heavy-database      # one of the jobs that load the database at a time
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: [self-hosted, lantern]      # lantrNa's server
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Load
+        run: |
+          if [ "${{ inputs.mode }}" = "freq" ]; then python long_questions.py --freq --commit ${{ inputs.by_day == 'yes' && '--by-day' || '' }}
+          else python long_questions.py; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
