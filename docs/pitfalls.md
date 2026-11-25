@@ -475,3 +475,6 @@ The Scan now watch runs five and a half hours and starts other scripts from its 
 
 ## A failed read must clear what the last good read wrote (23 Nov 2026)
 The browser monitor set `status` to error when Chromium raised, and left `http_status` as it was. 1,924 open PAGE_UNREACHABLE rows (719 High) therefore said "200", the code of a read weeks earlier, and nobody could tell why they failed. About 200 of the High ones were files watched as pages: Chromium raises "Download is starting" on an address that sends a file, every night. Any writer that records a failure writes every field the success path writes, cleared or set to the failure's own value.
+
+## A Python float is not a Postgres `real` (25 Nov 2026)
+psycopg sends a Python float as `double precision`, and Postgres does not pick a function declared with a `real` argument for it: `long_questions.py --freq` died on its first statement in the night it was meant to run. The offline tests stub the database and did not see it. Cast in the statement (`%s::real`) or declare the argument `double precision`.

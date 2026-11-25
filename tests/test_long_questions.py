@@ -12,6 +12,10 @@ class Compare(unittest.TestCase):
         self.assertEqual((c["median seconds off"], c["median seconds on"], c["median pages off"], c["median pages on"]), (2.0, 1.0, 10, 20))
         self.assertEqual(L.summary([])["median pages on"], 0.0)
 
+    def test_the_share_of_pages_is_sent_as_the_real_the_function_takes(self):
+        import inspect
+        self.assertIn("refresh_word_freq(%s::real)", inspect.getsource(L.main))          # 25 Nov 2026: a float alone is double precision, and no such function exists
+
 
 if __name__ == "__main__":
     unittest.main()
