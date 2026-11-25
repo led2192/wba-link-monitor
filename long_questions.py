@@ -60,7 +60,7 @@ def main():
                 wait = quiet_hours.held(True, a.by_day)
                 if wait:
                     print(wait, flush=True); run.finish("ok", rows_in=0, rows_out=0, notes="by day: not started"); return 0
-                t0 = time.time(); cur.execute("select public.refresh_word_freq(%s)", (a.pct,)); n = cur.fetchone()[0]; conn.commit()
+                t0 = time.time(); cur.execute("select public.refresh_word_freq(%s::real)", (a.pct,)); n = cur.fetchone()[0]; conn.commit()
                 print(f"{n:,} words counted on a sample of {a.pct}% of the pages, in {(time.time() - t0) / 60:.1f} min.")
                 run.finish("ok", rows_in=n, rows_out=n, notes="word_freq"); return 0
             cur.execute("select count(*) from public.word_freq"); words = cur.fetchone()[0]
