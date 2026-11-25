@@ -8376,6 +8376,11 @@ create table if not exists public.use_signal (
 );
 alter table public.use_signal enable row level security;
 insert into public.search_options (name, is_on, note) values ('learn_from_use', false, 'Search: a document people marked useful or opened for the same search moves up, one marked not moves down (use_signal, counted every night)') on conflict (name) do nothing;
+-- On since 25 Nov 2026. Search exam run 45707446528, 224 validated figures of ten number attributes, off and on: the
+-- same in every attribute (140 of 193 on the 24 pages, 116 of 193 on the eight an answer reads). The first count moves
+-- 8 documents up and 1 down, in the searches they were marked in: the exam's questions are not among them, so the exam
+-- shows that nothing else moves, not that the moved ones are better; that is what the marks themselves say.
+update public.search_options set is_on = true, changed = now(), note = note || ' (on since 25 Nov 2026, run 45707446528)' where name = 'learn_from_use' and not is_on and note not like '%on since%';
 
 create or replace function public.refresh_use_signal(days int default 365, write boolean default false) returns jsonb
 language plpgsql security definer set search_path = public, extensions

@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-25: Of a long question, the first six words stay; the six rarest are not better (`terms_by_weight` off)
+Tried on the 40 questions of nine words or more that people typed in 30 days (run 45709514650): with the six words the fewest pages hold, 2 questions find more pages, 9 fewer, 29 the same number, and one that found pages finds none. Rare words together are on fewer pages, so the search narrows where it should widen. The option stays off and is not the way: a long question needs words left out when they find nothing (as `relax_absent_words` does for words no page holds), not other words required. `learn_from_use` was switched on the same night: the search exam is the same off and on (run 45707446528).
+
 ### 2026-11-25: A question over time reads a page of each year's report (`ask_series` on)
 The owner asked for a company's revenue across the past few years and the answer read pages of one or two reports. With the option the reader is given the best page of each of the last seven years' main reports first. Compared on 40 questions over time, off and on (run 45701180130, 0.170 USD): the pages read cover 4.8 report years against 2.8, the answers name 4.5 years against 4.2, 6 answers say the pages do not hold it against 8, 4 are better and 2 worse. Nothing is worse by more than 3 points, so it is the default. Left as it is: the eight answers in which the answer names fewer years, to be read when the question comes up in real use.
 
