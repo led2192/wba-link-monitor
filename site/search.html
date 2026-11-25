@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v175 2026-11-24";
+  const CLIENT = "lantern v176 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2555,7 +2555,7 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Register": adminRegister, "Standards in use": adminUse, "Words of the year": adminWords, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
+    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Register": adminRegister, "Catalogue": adminCatalogue, "Standards in use": adminUse, "Words of the year": adminWords, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
     for (const name of Object.keys(views)) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
@@ -2604,6 +2604,55 @@
     body.appendChild(adminTable(["", "Words", "Companies", "Of the companies sampled", `Against ${r.year - 1}`], (r.rows || []).map((x, i) => [i + 1, x.phrase, x.companies.toLocaleString(), `${x.share}%`, pts(x)])));
   }
   // v145: which norms and regulations the reports of a year name most (reference_use, counted on the server). The owner's only.
+  // v176 (the owner, 24 and 25 Nov 2026: lantrNa's own list of companies, "unique companies and not duplicates"): the
+  // candidates of catalogue_build.py, each with why it is not new when it is not, and the owner's choice for each
+  async function adminCatalogue(body) {
+    body.innerHTML = ""; body.appendChild(el("h3", null, "Catalogue"));
+    body.appendChild(el("p", "what", "Candidates for lantrNa's own list of companies, beyond those it holds. So far: companies that file an annual report in the European format, found in Wikidata by their LEI (an exact match) with an official website. Each was checked against the companies held: the same LEI, an entity of a held company's group, the same website, the same name without the legal form; and against the other candidates. Nothing here watches a page or fetches a document: mark the ones you want, and they stay candidates until they are added."));
+    let r = null; try { r = await authed("admin_catalogue", { key }); } catch (e) {}
+    if (!r) { body.appendChild(el("p", null, "Could not read the catalogue.")); return; }
+    if (!r.total) { body.appendChild(el("p", null, 'No candidates yet (workflow "Catalogue build").')); return; }
+    const rows = r.rows || [], kindOf = x => x.status !== "candidate" ? x.status : (x.why || "new");
+    const LABEL = { "new": "New: no company like it is held", "wanted": "Wanted (your choice)", "not wanted": "Not wanted (your choice)", "added": "Added" };
+    const MEAN = { "new": "No held company has its LEI, its website or its name, and it is in no held company's group. These are the ones to choose from.",
+                   "held: the same LEI": "lantrNa already holds this company: the same LEI. Nothing to do.",
+                   "in the group of a held company": "A subsidiary, a sister or the parent of a company lantrNa holds, by the Register. A listed subsidiary can be worth holding on its own: your call.",
+                   "held: the same website": "Another LEI, the same website as a company held: almost always the same company under another legal entity.",
+                   "held: the same name": "Another LEI and website, the same name as a company held once the legal form is taken off: look before wanting it.",
+                   "another candidate: the same website": "Two candidates with one website: the first by LEI stands, this one repeats it.",
+                   "another candidate: the same entry": "Two candidates with one Wikidata entry: this one repeats the other." };
+    let kind = "new", country = "", word = "";
+    const bar = el("div"), note = el("p", "what", ""), host = el("div"), say = el("span", "what", ""); bar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0";
+    const style = "font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";
+    const ksel = el("select"), csel = el("select"), inp = document.createElement("input"); ksel.style.cssText = csel.style.cssText = style; inp.style.cssText = style + ";width:220px"; inp.placeholder = "a name or a website"; inp.setAttribute("aria-label", "filter by a name or a website");
+    ksel.setAttribute("aria-label", "which candidates"); csel.setAttribute("aria-label", "which country");
+    const fill = () => { const n = {}; for (const x of rows) n[kindOf(x)] = (n[kindOf(x)] || 0) + 1; const keep = ksel.value || kind; ksel.innerHTML = "";
+      for (const k of ["new", "wanted", "not wanted", "added", ...Object.keys(MEAN).filter(k => k !== "new")]) { if (!n[k] && k !== "new") continue; const o = el("option", null, `${LABEL[k] || k[0].toUpperCase() + k.slice(1)} (${(n[k] || 0).toLocaleString()})`); o.value = k; ksel.append(o); }
+      ksel.value = [...ksel.options].some(o => o.value === keep) ? keep : "new"; kind = ksel.value; };
+    const byCountry = {}; for (const x of rows) byCountry[x.country || "?"] = (byCountry[x.country || "?"] || 0) + 1;
+    csel.append(Object.assign(el("option", null, "Every country"), { value: "" })); for (const [c, n] of Object.entries(byCountry).sort((a, b) => b[1] - a[1])) csel.append(Object.assign(el("option", null, `${c} (${n.toLocaleString()})`), { value: c }));
+    const set = async (leis, status) => { say.textContent = " saving…"; let s = null; try { s = await authed("admin_catalogue_set", { key, leis, status }); } catch (e) {}
+      if (!s || !s.ok) { say.textContent = ` not saved: ${(s && s.why) || "try again"}`; return; } const on = new Set(leis); for (const x of rows) if (on.has(x.lei) && x.status !== "added") x.status = status; say.textContent = ` ${s.changed.toLocaleString()} marked ${status}`; fill(); show(); };
+    let shownRows = [];
+    const show = () => { const w = word.toLowerCase();
+      const all = rows.filter(x => kindOf(x) === kind && (!country || (x.country || "?") === country) && (!w || [x.name, x.legal_name, x.website, x.lei, x.held, ...(x.aliases || [])].some(v => String(v || "").toLowerCase().includes(w))));
+      shownRows = all.slice(0, 300); note.textContent = MEAN[kind] || ""; note.hidden = !MEAN[kind]; host.innerHTML = "";
+      host.appendChild(el("p", "what", `${all.length.toLocaleString()} companies` + (all.length > shownRows.length ? `, the first ${shownRows.length} shown: narrow by country or a word to see the others.` : ".")));
+      host.appendChild(adminTable(["Company", "Legal name", "Country", "Website", kind === "new" || kind === "wanted" || kind === "not wanted" ? "Other names" : "Like", "Your choice"], shownRows.map(x => {
+        const site = el("a", null, String(x.website || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").slice(0, 40)); site.href = x.website; site.target = "_blank"; site.rel = "noopener";
+        const pickBox = el("span"); const mk = (label, st) => { const a = el("a", null, label); a.href = "#"; a.style.marginRight = "8px"; a.onclick = ev => { ev.preventDefault(); set([x.lei], st); }; return a; };
+        if (x.status === "added") pickBox.append(el("span", "what", "added")); else pickBox.append(...(x.status === "wanted" ? [el("b", null, "wanted "), mk("undo", "candidate")] : x.status === "not wanted" ? [el("b", null, "not wanted "), mk("undo", "candidate")] : [mk("want", "wanted"), mk("not", "not wanted")]));
+        const name = el("span", null, x.name || ""); name.title = `LEI ${x.lei}` + (x.wikidata ? ` · Wikidata ${x.wikidata}` : "");
+        return [name, x.legal_name || "", x.country || "", site, kind === "new" || kind === "wanted" || kind === "not wanted" ? (x.aliases || []).slice(0, 4).join(", ") : (x.held || x.like_lei || ""), pickBox]; }))); };
+    ksel.onchange = () => { kind = ksel.value; show(); }; csel.onchange = () => { country = csel.value; show(); }; inp.oninput = () => { word = inp.value.trim(); show(); };
+    const cell = v => { const s = v == null ? "" : Array.isArray(v) ? v.join("; ") : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const cols = ["lei", "name", "legal_name", "aliases", "country", "website", "wikidata", "why", "held", "like_lei", "status"];
+    bar.append(el("span", "what", "Show"), ksel, csel, inp,
+      adminBtn("Want all shown", () => { const ids = shownRows.filter(x => x.status === "candidate").map(x => x.lei); if (ids.length) set(ids, "wanted"); }),
+      adminBtn("Download everything (CSV)", () => { const a = el("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + [cols.join(","), ...rows.map(x => cols.map(k => cell(x[k])).join(","))].join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-catalogue-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); }), say);
+    body.append(el("p", null, `${r.total.toLocaleString()} candidates, read ${String(r.seen_at || "").slice(0, 10)}.`), bar, note, host); fill(); show();
+  }
+
   async function adminUse(body, year, kind) {
     const r = await authed("admin_reference_use", { key, of_year: year || null, of_kind: kind || null }); if (!r) { body.textContent = "Not available: open lantrNa with the owner's link and sign in."; return; }
     body.innerHTML = "";
