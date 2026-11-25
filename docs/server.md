@@ -49,7 +49,7 @@ The server also holds a database of its own, for the search by meaning: PostgreS
 
 - It listens on the machine itself only. The firewall is not changed: the database's port is shut to the world.
 - Every connection over the network interface needs a password. The one way in without a password is the system user `postgres` on the machine's own socket, for administration.
-- A ceiling of 28 GB of memory and six cores for its processes, so the other jobs are not starved. An index build raises it for the time of the build, with the runners paused.
+- A ceiling of 40 GB of memory (28 GB until 25 Nov 2026; the owner agreed to raise it so that the index of every main report fits; the machine has 64 GB and 47 GB were free that morning) and six cores for its processes, so the other jobs are not starved. An index build raises it for the time of the build, with the runners paused.
 - The packages come from the PostgreSQL project's own source (Ubuntu 24.04 carries pgvector 0.6, which has no half-precision vectors), set up by the script Ubuntu ships for that. Their security updates arrive with the system's automatic updates.
 - Step 2 creates an empty database `lantern` with the vector extension: no tables, no roles, no data.
 - The runners on this machine can act as root, so a job run here can reach the database whatever its passwords. The guard is who may run a job here: step 2 of "Setting it up" (approval for every outside contributor) while the repository is public.
