@@ -322,6 +322,21 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.site_label('investors.example.co.uk'), public.site_label('example.com'), public.site_label('localhost')")
         self.assertEqual(cur.fetchone(), ("example", "example", ""))
         cur.execute("select public.request_company('Acme Robotics Ltd', 'acme.example.com', null, 'for 2027')"); j = cur.fetchone()[0]
+        # 25 Nov 2026: wanted candidates of the catalogue go in by the same door, and say what came of it
+        cur.execute("delete from public.catalogue")
+        cur.execute("insert into public.catalogue (lei, legal_name, common_name, country, website, status, match, duplicate_why) values "
+                    "('529900ABCDEFGHIJKL12', 'Gnu Rail SA', 'Gnu Rail', 'ES', 'https://gnurail.example', 'wanted', 'lei', null), "
+                    "('549300ZZZZZZZZZZZZ34', 'Acme Robotics Ltd', null, 'ES', 'https://other.example', 'wanted', 'lei', null), "
+                    "('213800YYYYYYYYYYYY56', 'Emu Air SA', null, 'ES', 'https://emu.example', 'wanted', 'name', null), "
+                    "('969500XXXXXXXXXXXX78', 'Ibis Hotels AB', null, 'SE', 'https://ibis.example', 'wanted', 'lei', null), "
+                    "('894500XXXXXXXXXXXX79', 'Okapi SA', null, 'ES', 'https://okapi.example', 'candidate', 'lei', null)")
+        cur.execute("select public.admin_catalogue_add('k', 'es', 20)"); self.assertEqual(cur.fetchone()[0], {"ok": True, "added": 1, "held": 1, "other": 0})
+        cur.execute("select lei, status, duplicate_why from public.catalogue order by lei"); cat = {r[0][:6]: r[1:] for r in cur.fetchall()}
+        self.assertEqual(cat["529900"], ("added", None)); self.assertEqual(cat["549300"], ("candidate", "held: found when adding"))          # the same name as a company just made
+        self.assertEqual((cat["213800"][0], cat["969500"][0]), ("wanted", "wanted"))          # one matched by name, and another country: not taken
+        cur.execute("select c.wba_id, q.lei, q.client from public.companies c join public.company_requests q on q.wba_id = c.wba_id where c.name = 'Gnu Rail'")
+        made = cur.fetchone(); self.assertRegex(made[0], r"^LN_[0-9a-f]{8}$"); self.assertEqual(made[1:], ("529900ABCDEFGHIJKL12", "catalogue"))
+        cur.execute("delete from public.company_requests where client = 'catalogue'"); cur.execute("delete from public.companies where name = 'Gnu Rail'"); cur.execute("delete from public.catalogue")
         self.assertTrue(j["created"]); self.assertEqual(j["id"], A.company_id("Acme Robotics Ltd", "")); self.assertEqual(j["doubts"], [])
         cur.execute("select name, website from public.companies where wba_id = %s", (j["id"],)); self.assertEqual(cur.fetchone(), ("Acme Robotics Ltd", "acme.example.com"))
         cur.execute("select public.upload_begin(%s, 'a.pdf', 5000, %s)", (j["id"], "ef" * 32)); self.assertEqual(cur.fetchone()[0]["path"], f"{j['id']}/{'ef' * 32}.pdf")      # its documents at once

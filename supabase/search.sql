@@ -5492,6 +5492,54 @@ $$;
 revoke all on function public.admin_catalogue_set(text, text[], text) from public, anon;
 grant execute on function public.admin_catalogue_set(text, text[], text) to authenticated;
 
+-- Wanted candidates become companies (25 Nov 2026, the owner: "start with 20 Spanish ones"). Each goes in by the
+-- door a person's own request uses (request_company): the same checks for a company already held, the same id
+-- (LN_ and a hash of its LEI), the same doubts written for the owner, the same twenty a day. From there the pipeline
+-- takes it as any company a person added: its row, the search of its website for report pages, the watch.
+-- Only exact matches (by LEI) that are new go in this way; one matched by name is added by hand after a look.
+create or replace function public.admin_catalogue_add(key text, of_country text default null, most int default 20) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+#variable_conflict use_variable
+declare
+  r record;
+  got jsonb;
+  added int := 0;
+  held int := 0;
+  other int := 0;
+  why text;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  for r in select c.lei, left(coalesce(nullif(btrim(c.common_name), ''), c.legal_name), 120) as name, c.website from public.catalogue c
+           where c.status = 'wanted' and c.match = 'lei' and c.duplicate_why is null and c.website is not null
+             and (of_country is null or of_country = '' or upper(c.country) = upper(of_country))
+           order by coalesce(c.common_name, c.legal_name), c.lei limit greatest(1, least(coalesce(most, 20), 20)) loop
+    begin
+      got := public.request_company(r.name, r.website, r.lei, 'from the catalogue', 'catalogue');
+    exception when others then
+      why := sqlerrm;
+      if why like 'twenty companies a day%' then
+        return jsonb_build_object('ok', true, 'added', added, 'held', held, 'other', other, 'stopped', why);
+      end if;
+      update public.catalogue c set duplicate_why = 'not added: ' || left(why, 120) where c.lei = r.lei;
+      other := other + 1; continue;
+    end;
+    if coalesce((got ->> 'created')::boolean, false) then
+      update public.catalogue c set status = 'added', duplicate_of = got ->> 'id' where c.lei = r.lei; added := added + 1;
+    elsif coalesce((got ->> 'held')::boolean, false) then
+      update public.catalogue c set status = 'candidate', duplicate_why = 'held: found when adding', duplicate_of = got ->> 'id' where c.lei = r.lei; held := held + 1;
+    else
+      update public.catalogue c set duplicate_why = 'not added: asked before' || coalesce(' (' || (got ->> 'why') || ')', '') where c.lei = r.lei; other := other + 1;
+    end if;
+  end loop;
+  return jsonb_build_object('ok', true, 'added', added, 'held', held, 'other', other);
+end;
+$$;
+revoke all on function public.admin_catalogue_add(text, text, int) from public, anon;
+grant execute on function public.admin_catalogue_add(text, text, int) to authenticated;
+
 create table if not exists public.register_names (
   key    text not null,
   wba_id text not null,

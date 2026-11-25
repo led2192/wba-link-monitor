@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-25: A wanted candidate becomes a company by the door a person's request uses
+The owner chose 304 candidates and said to start with 20 Spanish ones. Chosen: `admin_catalogue_add` calls `request_company` for each, so a candidate is checked once more against the companies held at the moment it goes in, gets the id any added company gets, leaves its doubts for the owner, and is bound by the same twenty a day; `add_companies.py`, `discover_pages.py` and the watch then take it as they take any added company. The owner presses the button himself: the function acts under his sign-in. Rejected: a script writing `public.companies` directly (a second way in, with its own duplicate rules to keep equal to the first); adding all 304 at once (what a company of this size brings in documents and pages is not known until a first batch has been through).
+
 ### 2026-11-25: Candidates matched by name are in the catalogue, apart and never wanted in bulk
 A match to a Wikidata entry by name is the right company 92 times in 100 and gives the website lantrNa holds 80 times in 100 (`wikidata_names.py`, run 45564247578: 300 companies whose entry is known, and 380 websites compared); it gives a website to about 27 in 100 of the companies not found by LEI. Asked whether they should enter, the owner said yes, labelled for review. Chosen: they carry `match = 'name'`, have a kind of their own in Admin with the entry to open, and "Want all shown" does not take them. Rejected: mixing them with the exact matches (one in twelve would be the wrong company, and a wrong website would send the robot to another company's pages); leaving them out (about 490 companies more).
 

@@ -412,7 +412,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_catalogue", "admin_catalogue_set", "admin_register_group", "admin_register_lei_set", "admin_register_all", "admin_register", "admin_fetch_queue_set", "admin_keyword_use", "admin_reference_use_series", "admin_reference_candidates", "admin_reference_candidate_set", "admin_reference_example_set", "admin_reference_use", "admin_company_profiles", "admin_company_profile_set", "admin_reference", "admin_reference_asked_set", "admin_reference_find", "admin_reference_save", "admin_names_not_held", "admin_name_not_held_set", "admin_overview", "admin_docs", "admin_link_browsers", "admin_link_browser_set", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
+    assert set(names) == {"admin_catalogue", "admin_catalogue_set", "admin_catalogue_add", "admin_register_group", "admin_register_lei_set", "admin_register_all", "admin_register", "admin_fetch_queue_set", "admin_keyword_use", "admin_reference_use_series", "admin_reference_candidates", "admin_reference_candidate_set", "admin_reference_example_set", "admin_reference_use", "admin_company_profiles", "admin_company_profile_set", "admin_reference", "admin_reference_asked_set", "admin_reference_find", "admin_reference_save", "admin_names_not_held", "admin_name_not_held_set", "admin_overview", "admin_docs", "admin_link_browsers", "admin_link_browser_set", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v177 2026-11-25";' in PAGE
+    assert 'const CLIENT = "lantern v178 2026-11-25";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
