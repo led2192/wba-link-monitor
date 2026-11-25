@@ -34,6 +34,16 @@ class Check(unittest.TestCase):
         self.assertEqual(got[B], ("another candidate: the same website", D)); self.assertEqual(got["969500XXXXXXXXXXXX78"], ("another candidate: the same entry", D))
         self.assertEqual(got[A][0], "held: the same LEI")          # one already explained is left as it is
 
+    def test_an_exact_match_stands_before_one_by_name(self):
+        cs = [dict(cand(A, "https://one.example"), wikidata="Q1", match="name", reason=None), dict(cand(D, "https://two.example"), wikidata="Q1", match="lei", reason=None)]
+        C.among(cs)
+        self.assertEqual([(c["lei"], c["reason"]) for c in cs], [(A, "another candidate: the same entry"), (D, None)])          # though its LEI sorts first
+
+    def test_labels(self):
+        v = lambda x: {"value": x}
+        self.assertEqual(C.labels({"results": {"bindings": [{"c": v("http://www.wikidata.org/entity/Q5"), "label_": v("Zebra"), "aliases": v("Z|Zeb")}, {"c": v("http://www.wikidata.org/entity/Q6")}]}}),
+                         {"Q5": ("Zebra", ["Z", "Zeb"]), "Q6": (None, [])})
+
     def test_entries(self):
         v = lambda x: {"value": x}
         got = C.entries({"results": {"bindings": [{"lei": v(A), "c": v("http://www.wikidata.org/entity/Q5"), "site_": v("https://x.example"), "label_": v("Zebra"), "aliases": v("Z|Zeb| ")}, {"lei": v(A), "c": v("http://www.wikidata.org/entity/Q6")}]}})

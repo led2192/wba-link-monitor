@@ -2235,6 +2235,7 @@ class SearchOnPostgres(unittest.TestCase):
                     "('CAT1', 'Gnu Rail plc', 'Gnu Rail', '{GR}', 'GB', 'https://gnu.example', null, null), ('CAT2', 'Zebra Two SA', null, '{}', 'ES', 'https://z.example', 'held: the same website', 'RG3')")
         cur.execute("select public.admin_catalogue('k')"); cat = cur.fetchone()[0]
         self.assertEqual((cat["total"], [(x["lei"], x["name"], x["why"], x["status"]) for x in cat["rows"]]), (2, [("CAT1", "Gnu Rail", None, "candidate"), ("CAT2", "Zebra Two SA", "held: the same website", "candidate")]))
+        self.assertEqual({x["match"] for x in cat["rows"]}, {"lei"})          # exact unless the script says the entry was found by name
         self.assertIsNotNone(cat["rows"][1]["held"])
         cur.execute("select public.admin_catalogue_set('k', array['CAT1', 'NOPE'], 'Wanted')"); self.assertEqual(cur.fetchone()[0], {"ok": True, "changed": 1, "status": "wanted"})
         cur.execute("select public.admin_catalogue_set('k', array['CAT1'], 'added')"); self.assertFalse(cur.fetchone()[0]["ok"])          # not a choice of this function
