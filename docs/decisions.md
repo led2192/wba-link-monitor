@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-25: A question over time reads a page of each year's report (`ask_series` on)
+The owner asked for a company's revenue across the past few years and the answer read pages of one or two reports. With the option the reader is given the best page of each of the last seven years' main reports first. Compared on 40 questions over time, off and on (run 45701180130, 0.170 USD): the pages read cover 4.8 report years against 2.8, the answers name 4.5 years against 4.2, 6 answers say the pages do not hold it against 8, 4 are better and 2 worse. Nothing is worse by more than 3 points, so it is the default. Left as it is: the eight answers in which the answer names fewer years, to be read when the question comes up in real use.
+
 ### 2026-11-25: The search learns from what people do with the results, by a bounded step and behind an option
 The owner asked whether anything is learnt when a person marks the first result as not the one. Nothing was: the openings and the marks were kept for a person to read. Chosen: a nightly sum by search (company, type and words in any order) and document, one voice a person, and a move of five places and a half up or down for a document with a sum of 2 or more, or -2 or less; off until compared, as every change to the order. Chosen with it: a daily digest on the admin page "Today", so that what the marks cannot say (a search typed again, nothing shown) is read every day. Rejected: learning across different searches (a document good for one question pushed up for another; needs far more use than there is), a jump to the first place on one mark (one person would reorder everyone's list), and counting an opening as much as a mark (people read the passage in the list and open little).
 
