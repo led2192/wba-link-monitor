@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v185 2026-11-25";
+  const CLIENT = "lantern v186 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -503,6 +503,27 @@
     }
     return best && !tie ? { word: best.word, id: best.id, name: best.name } : null;
   }
+  // v186 (25 Nov 2026, from the searches people repeated in other words): "unilver deforestation" and "What were Polus
+  // Scope 1 and 2 GHG emissions" read no company. nearCompany() leaves them: two companies begin with "Unilever", and
+  // "Polus" has five letters. Such a word is not taken for the company, it is offered beside the results, and only when
+  // the library does not know the word (search() asks): the first word of a company's name, five letters or more, one
+  // slip away (two from nine letters), the same first letter, and one such first word only. Of the companies that begin
+  // with it, the one with the shortest name is meant ("Unilever", not its unit).
+  let looseNames = null;
+  function nearCompanyLoose(text) {
+    if (!companies.length) return null;
+    nearCompany("");                                                       // builds nearNames.all
+    if (!looseNames) { const fold = t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); looseNames = new Map();
+      for (const c of companies) { const w = fold(c.name || "").split(/[^a-z0-9]+/).filter(Boolean)[0]; if (!w || w.length < 5 || !/^[a-z]+$/.test(w) || WORD_NAMES.has(w)) continue;
+        const had = looseNames.get(w); if (!had || (c.name || "").length < (had.name || "").length) looseNames.set(w, c); } }
+    for (const word of new Set(text.toLowerCase().split(/[^a-z]+/).filter(w => w.length >= 5))) {
+      if (nearNames.all.has(word)) continue;
+      const max = word.length >= 9 ? 2 : 1, got = [];
+      for (const [w, c] of looseNames) { if (w[0] !== word[0] || Math.abs(w.length - word.length) > max) continue; if (slips(word, w, max) <= max) got.push(c); }
+      if (got.length === 1) return { word, id: got[0].id, name: got[0].name };
+    }
+    return null;
+  }
   let shortList = null, shortOf = null;
   const shortFirst = () => { if (shortOf !== companies) { shortOf = companies; shortList = companies.filter(c => c.short && c.short.length >= 4).sort((a, b) => b.short.length - a.short.length); } return shortList; };
   const fold1 = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -588,6 +609,7 @@
     // name of a few capitals with two letters swapped ("CHR" for CRH) is not caught by the rule above, which wants six
     // letters, and must not be taken by itself: such a word can be another company or an abbreviation. It is offered
     // beside the results ("Search the company CRH instead"), one press, when exactly one company's name is that swap.
+    if (!hits.length && !found.typo && !found.maybe) found.near = nearCompanyLoose(fq);
     if (!hits.length && !found.typo && !found.maybe) {
       const caps = new Map(); for (const c of companies) { const n = fold(c.name || ""); if (/^[A-Z0-9]{3,5}$/.test(n)) caps.set(n, caps.has(n) ? null : c); }
       for (const w of new Set(fold(text).split(/[^A-Za-z0-9]+/).filter(t => /^[A-Z][A-Z0-9]{2,4}$/.test(t) && !caps.has(t)))) {
@@ -969,7 +991,7 @@
       state.from = parsed.from || (+$("fFrom").value || null);
       state.to = parsed.to || (+$("fTo").value || null);
       state.yearsTyped = !!(parsed.from || parsed.to); state.yearsDropped = null; state.strictYears = false;       // v103: see the search with no page, below
-      state.type = parsed.type || ($("fType").value || null); state.typeWords = parsed.type ? parsed.typeWords : null; state.typeHint = parsed.typeHint || null; state.maybe = parsed.maybe || null;
+      state.type = parsed.type || ($("fType").value || null); state.typeWords = parsed.type ? parsed.typeWords : null; state.typeHint = parsed.typeHint || null; state.maybe = parsed.maybe || null; state.near = parsed.near || null;
       state.industry = parsed.industry; state.country = parsed.country; state.countryName = parsed.countryName; state.region = parsed.region;
       state.rows = 50;
     } else if (!more) { state.rows = 50; }
@@ -1060,6 +1082,13 @@
       // v170 (the owner: people do not search by the official name; a subsidiary's or a former name should lead to the
       // company held): with no company named, the words are looked up among the names of the register. An offer beside
       // the results, asked after they are shown: the search is not held for it, and nothing is applied by itself.
+      if (state.near && !state.company && !state.maybe && !more && !fromChips) {          // v186: a word near one company's name, offered when the library does not know the word
+        const nr = state.near, asked = $("q").value, mine = seq;
+        wordUnknown(nr.word).then(u => { if (!u || mine !== searchSeq || $("q").value !== asked) return;
+          const a = el("a", null, `Did you mean the company ${nr.name}? Search it`); a.href = "#";
+          a.onclick = ev => { ev.preventDefault(); $("q").value = asked.replace(new RegExp("(^|[^\\p{L}])" + nr.word + "(?:'s)?(?=[^\\p{L}]|$)", "iu"), (m0, pre) => pre + nr.name + ";"); search(false); };
+          $("status").append(document.createTextNode(" · "), a); }).catch(() => {});
+      }
       if (state.relaxed && !more) $("status").append(document.createTextNode(` · No page${state.company ? " of this company" : ""} holds ${state.relaxed.absent.map(w => `“${w}”`).join(", ")}: searched for the other words.`));
       // v183 (the owner, of a question that named a company with a slip: "users should not have to figure out the perfect
       // query"; the person blamed the question's length): a question of five words or more in which no company, industry
