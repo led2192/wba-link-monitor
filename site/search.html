@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v189 2026-11-25";
+  const CLIENT = "lantern v190 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2670,10 +2670,10 @@
   // v189: what waits for the owner today, counted from what the sections themselves read, and what needs nobody.
   async function adminToday(body) {
     const nav = $("admin").querySelector("[data-view]").parentElement, quiet = p => p.catch(() => null), year = new Date().getFullYear();
-    const [cos, unread, recent, cat, jobs, hard] = await Promise.all([quiet(authed("admin_companies", { key })),
+    const [cos, unread, recent, cat, jobs, hard, dig] = await Promise.all([quiet(authed("admin_companies", { key })),
       quiet(authed("admin_unread_docs", { key, search: null, only_main: false, from_year: null, max_rows: 1 })),
       quiet(authed("admin_unread_docs", { key, search: null, only_main: true, from_year: year - 2, max_rows: 1 })),
-      quiet(authed("admin_catalogue", { key })), quiet(authed("admin_jobs", { key })), quiet(authed("admin_hard_searches", { key, days: 1 }))]);
+      quiet(authed("admin_catalogue", { key })), quiet(authed("admin_jobs", { key })), quiet(authed("admin_hard_searches", { key, days: 1 })), quiet(authed("admin_search_digest", { key }))]);
     body.innerHTML = "";
     const line = (n, text, view, calm) => { const d = el("div"); d.style.cssText = "display:flex;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)";
       const c = el("b", null, n == null ? "?" : String(n)); c.style.cssText = "width:56px;text-align:right;flex:none;font-size:17px" + (n && !calm ? ";color:#c0392b" : "");
@@ -2690,6 +2690,21 @@
     line(cat ? wanted : null, "candidates you marked as wanted and not added yet (20 a day).", "Catalogue", true);
     line(cat ? fresh : null, "new candidates you have not chosen from.", "Catalogue", true);
     line(hard ? ((hard.nothing || []).length + (hard.runs || []).length) : null, "searches of the last day that showed nothing, or one company searched three times in a row.", "Hard searches", true);
+    // v190 (the owner: "are we learning every day from the failures?"): the last 24 hours against the seven days before,
+    // and the day's cases that say most. What the search learns by itself from the marks is said in one line.
+    if (dig) {
+      head("How the search went in the last 24 hours");
+      const d = dig.day || {}, w = dig.week || {}, per = k => w[k] == null ? "?" : (Math.round(w[k] / 7 * 10) / 10);
+      body.appendChild(adminTable(["", "Last 24 hours", "A day of the week before"], [["Searches", "searches"], ["People", "people"], ["Nothing shown", "nothing"], ["Typed again in other words, nothing opened", "rewritten"],
+        ["Five seconds or more", "slow"], ["The good result was third or lower", "deep"], ["A result marked not useful", "marked_not"]].map(([t, k]) => [t, d[k] == null ? 0 : d[k], k === "people" ? (w[k] == null ? "?" : `${w[k]} in the week`) : per(k)])));
+      const L = dig.learnt || {}, lp = el("p", null, L.on ? `Learning from use is on: ${L.up || 0} documents moved up and ${L.down || 0} down for the searches they were marked in.` :
+        `Learning from use is counted and not applied yet (it waits for its comparison): ${L.up || 0} documents would move up and ${L.down || 0} down. The small marks beside a result (useful, not) are what it learns most from.`);
+      lp.style.cssText = "max-width:760px;line-height:1.5"; body.appendChild(lp);
+      const part = (title, rows, heads, cells) => { if (!rows.length) return; const h = el("h4", null, `${title} (${rows.length})`); h.style.cssText = "margin:14px 0 4px;font-size:14px"; body.append(h, adminTable(heads, rows.map(cells))); };
+      part("Typed again in other words", dig.rewritten || [], ["When", "Link", "First", "Then", "Shown"], x => [adminWhen(x.at), x.key_name || "", x.typed || "", x.next_typed || "", x.shown == null ? "" : x.shown]);
+      part("The good result was third or lower", dig.deep || [], ["When", "Link", "What was typed", "Place", ""], x => [adminWhen(x.at), x.key_name || "", x.typed || "", x.place, adminRun(x.typed)]);
+      part("A result marked not useful", dig.marked || [], ["When", "Link", "What was typed", ""], x => [adminWhen(x.at), x.key_name || "", x.typed || "", adminRun(x.typed)]);
+    }
     head("Needs nobody");
     const p = el("p", null, "A company you accept or add from the Catalogue gets its row in about 15 minutes. The robot then looks for the pages where the company publishes its reports, watches them, fetches the documents and reads them in the night: its documents can be searched the next morning, and they enter the search by meaning in the following nights. The extension is only for a file the robot could not get: once the company has its row you can send its documents with the extension at once, without waiting for the robot.");
     p.style.cssText = "max-width:760px;line-height:1.5"; body.appendChild(p);

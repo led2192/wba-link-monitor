@@ -1604,6 +1604,28 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual([x["typed"] for x in again["few"] if x["key_name"] == "hard"], ["base year target acme"])
             self.assertEqual([(x["typed"], x["ms"]) for x in hard["slow"] if x["key_name"] == "hard"], [("base year target acme", 6200)])
             cur.execute("select has_function_privilege('anon', 'public.admin_hard_searches(text, int)', 'execute')"); self.assertFalse(cur.fetchone()[0])
+            # the day's digest: counted against the week before, with the searches typed again in other words
+            cur.execute("select public.admin_search_digest('k')"); dig = cur.fetchone()[0]
+            self.assertGreaterEqual(dig["day"]["searches"], 5); self.assertGreaterEqual(dig["day"]["nothing"], 1); self.assertGreaterEqual(dig["day"]["slow"], 1)
+            self.assertIn(("rebaseline acme", "other company"), [(x["typed"], x["next_typed"]) for x in dig["rewritten"]])
+            self.assertNotIn("a trial question", [x["typed"] for x in dig["rewritten"]])
+            cur.execute("select has_function_privilege('anon', 'public.admin_search_digest(text)', 'execute')"); self.assertFalse(cur.fetchone()[0])
+            # learning from use: a mark counts for its search whatever the order of the words; one opening alone moves nothing
+            cur.execute("select public.use_key('PT_1', null, 'Water  risk') = public.use_key(' pt_1', '', 'risk water'), public.use_key('PT_1', null, 'water') = public.use_key('PT_2', null, 'water')")
+            self.assertEqual(cur.fetchone(), (True, False))
+            cur.execute("insert into public.search_log (key_name, q, company, n, ms) values ('hard', 'water risk', 'PT_1', 9, 40), ('other', 'risk water', 'PT_1', 9, 40) returning id"); a1, a2 = [r[0] for r in cur.fetchall()]
+            cur.execute("insert into public.search_clicks (log_id, library_id, page, rank, kind) values (%s, 'LUP', 1, 4, 'open'), (%s, 'LUP', 1, 4, 'useful'), (%s, 'LDOWN', 1, 1, 'not'), (%s, 'LONE', 1, 2, 'open'), (%s, 'LUP', 2, 3, 'open')", (a1, a1, a1, a1, a2))
+            cur.execute("select public.refresh_use_signal(365, false)"); dry = cur.fetchone()[0]
+            cur.execute("select count(*) from public.use_signal"); self.assertEqual((dry["written"], cur.fetchone()[0]), (False, 0))
+            cur.execute("select public.refresh_use_signal(365, true)"); self.assertTrue(cur.fetchone()[0]["written"])
+            cur.execute("select library_id, score, voices from public.use_signal where use_key = public.use_key('PT_1', null, 'water risk') order by 1")
+            self.assertEqual(cur.fetchall(), [("LDOWN", -2, 1), ("LONE", 1, 1), ("LUP", 3, 2)])            # a person's mark stands for their opening; another person's opening adds one
+            cur.execute("select public.refresh_use_signal(365, true)"); cur.execute("select count(*) from public.use_signal where use_key = public.use_key('PT_1', null, 'water risk')"); self.assertEqual(cur.fetchone()[0], 3)
+            cur.execute("select (public.admin_search_digest('k')->'learnt'->>'up')::int >= 1")
+            self.assertTrue(cur.fetchone()[0])
+            cur.execute("select set_config('lantern.learn_from_use', 'on', true)")
+            cur.execute("select count(*) from public.find_pages_ranked('k', 'zzzqqq nothing')"); self.assertEqual(cur.fetchone()[0], 0)       # the option on: the search still answers
+            cur.execute("select set_config('lantern.learn_from_use', '', true)")
             cur.execute("select public.admin_searches('k', null, 'p@x.org')"); got = cur.fetchone()[0]
             self.assertEqual(got["searches"], [])
             self.assertEqual(sorted((x["question"], x["answered"], x["failed"]) for x in got["questions"]), [("Broken?", False, True), ("What is Nike scope 1?", True, False)])

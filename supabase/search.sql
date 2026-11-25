@@ -6265,6 +6265,42 @@ end;
 $$;
 revoke all on function public.admin_hard_searches(text, int) from public, anon;
 grant execute on function public.admin_hard_searches(text, int) to authenticated;
+
+-- How the search went in the last 24 hours, against the seven days before (25 Nov 2026; the owner: "are we learning
+-- every day from the failures?"). Counts of what a person would call a failure, and the day's cases of the three that
+-- say most: a search typed again in other words within three minutes with nothing opened, a result opened or marked
+-- useful from the third place down, and a result marked not. Reads the log; writes nothing.
+create or replace function public.admin_search_digest(key text) returns jsonb
+language plpgsql stable security definer
+set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (
+    with l as (
+      select l.id, l.at, l.key_name, coalesce(nullif(btrim(l.typed), ''), l.q) as typed, l.n, l.shown, l.ms, (l.at > now() - interval '24 hours') as today,
+             (select min(c.rank) from public.search_clicks c where c.log_id = l.id and c.kind in ('open', 'useful')) as first_good,
+             exists (select 1 from public.search_clicks c where c.log_id = l.id and c.kind = 'not') as marked_not
+        from public.search_log l
+       where l.at > now() - interval '8 days' and l.key_name is not null and coalesce(l.client, '') not like '% +years' and coalesce(l.client, '') not like '% +relaxed' and coalesce(l.client, '') !~* 'trial|timing|eval|exam'),
+    s as (select l.*, lead(l.typed) over w as next_typed, lead(l.at) over w as next_at from l window w as (partition by l.key_name order by l.at, l.id)),
+    f as (select s.*, (s.next_typed is not null and s.next_at - s.at <= interval '3 minutes' and lower(btrim(s.next_typed)) <> lower(btrim(s.typed)) and s.first_good is null) as rewritten from s),
+    c as (select f.today, count(*) as searches, count(*) filter (where coalesce(f.shown, f.n) = 0) as nothing, count(*) filter (where f.rewritten) as rewritten,
+                 count(*) filter (where f.ms >= 5000) as slow, count(*) filter (where f.first_good >= 3) as deep, count(*) filter (where f.marked_not) as marked_not,
+                 count(distinct f.key_name) as people from f group by f.today)
+    select jsonb_build_object(
+      'day', (select to_jsonb(c) - 'today' from c where c.today),
+      'week', (select to_jsonb(c) - 'today' from c where not c.today),
+      'rewritten', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (select f.at, f.key_name, f.typed, f.next_typed, coalesce(f.shown, f.n) as shown from f where f.today and f.rewritten order by f.at desc limit 40) x),
+      'deep', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (select f.at, f.key_name, f.typed, f.first_good as place from f where f.today and f.first_good >= 3 order by f.at desc limit 20) x),
+      'marked', (select coalesce(jsonb_agg(to_jsonb(x) order by x.at desc), '[]'::jsonb) from (select f.at, f.key_name, f.typed from f where f.today and f.marked_not order by f.at desc limit 20) x),
+      'learnt', (select jsonb_build_object('on', public.survey_option('learn_from_use'), 'up', count(*) filter (where u.score >= 2), 'down', count(*) filter (where u.score <= -2), 'at', max(u.at)) from public.use_signal u)));
+end;
+$$;
+revoke all on function public.admin_search_digest(text) from public, anon;
+grant execute on function public.admin_search_digest(text) to authenticated;
 revoke all on function public.admin_searches(text, text, text, int) from public, anon;
 grant execute on function public.admin_searches(text, text, text, int) to authenticated;
 
@@ -8313,6 +8349,60 @@ revoke all on function public.profile_matching(text, text, text) from public, an
 -- apart and merges them itself, so neither list knew of the marks. These two are what the page calls now: the same
 -- rows as find_pages and find_meaning, a marked page moved after the others in its own list, so the merge of the
 -- two puts it down whoever does the merge. With the option off they return exactly what the two functions return.
+-- Learning from use (25 Nov 2026; the owner: "if I mark that the first result is not the ideal one, is anything
+-- learnt from it?"). Until now nothing was: the opened documents and the marks beside a result (search_clicks) were
+-- kept and read by a person. Option learn_from_use (off until compared): every night refresh_use_signal sums, for a
+-- search (the company, the type and the words, in any order: use_key) and a document, what people did with it: marked
+-- useful +2, marked not -2, opened +1; one voice a person, the last mark of each. find_pages_ranked then moves a
+-- document of that same search with 2 or more up, and one with -2 or less down, by five places and a half: a bounded
+-- step, never to the top at once. One opening alone moves nothing. The table is small and read by its key: no wait.
+create or replace function public.use_key(company_filter text, type_filter text, q text) returns text
+language sql immutable
+as $$
+  select md5(lower(btrim(coalesce(company_filter, ''))) || '|' || btrim(coalesce(type_filter, '')) || '|' ||
+             coalesce((select string_agg(x.w, ' ' order by x.w) from (select distinct w from regexp_split_to_table(lower(coalesce(q, '')), '[^[:alnum:]]+') w where length(w) > 1) x), ''))
+$$;
+create table if not exists public.use_signal (
+  use_key    text not null,
+  library_id text not null,
+  score      int not null,
+  voices     int not null,
+  at         timestamptz not null default now(),
+  primary key (use_key, library_id)
+);
+alter table public.use_signal enable row level security;
+insert into public.search_options (name, is_on, note) values ('learn_from_use', false, 'Search: a document people marked useful or opened for the same search moves up, one marked not moves down (use_signal, counted every night)') on conflict (name) do nothing;
+
+create or replace function public.refresh_use_signal(days int default 365, write boolean default false) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  out jsonb;
+begin
+  create temp table _use on commit drop as
+    with m as (
+      select public.use_key(l.company, l.doc_type, l.q) as k, c.library_id, c.kind,
+             row_number() over (partition by public.use_key(l.company, l.doc_type, l.q), c.library_id, l.key_name order by (c.kind <> 'open') desc, c.at desc, c.id desc) as r
+        from public.search_clicks c join public.search_log l on l.id = c.log_id
+       where c.at > now() - make_interval(days => least(greatest(coalesce(days, 365), 1), 3650))
+         and l.key_name is not null and c.library_id is not null
+         and coalesce(l.client, '') !~* 'trial|timing|eval|exam'
+         and (btrim(coalesce(l.q, '')) <> '' or btrim(coalesce(l.company, '')) <> ''))
+    select m.k as use_key, m.library_id, sum(case m.kind when 'useful' then 2 when 'not' then -2 else 1 end)::int as score, count(*)::int as voices
+      from m where m.r = 1 group by 1, 2;
+  select jsonb_build_object('searches', count(distinct u.use_key), 'documents', count(*), 'up', count(*) filter (where u.score >= 2),
+                            'down', count(*) filter (where u.score <= -2), 'written', write) into out from _use u;
+  if write then
+    delete from public.use_signal where true;               -- a count made again from the marks, which are kept
+    insert into public.use_signal (use_key, library_id, score, voices) select u.use_key, u.library_id, u.score, u.voices from _use u;
+  end if;
+  drop table _use;
+  return out;
+end;
+$$;
+revoke all on function public.refresh_use_signal(int, boolean) from public, anon, authenticated;
+revoke all on function public.use_key(text, text, text) from public, anon, authenticated;
+
 create or replace function public.find_pages_ranked(
   key text, q text, company_filter text default null, year_from int default null, year_to int default null,
   type_filter text default null, max_rows int default 50, client text default null,
@@ -8324,19 +8414,25 @@ language plpgsql security definer
 set search_path = public, extensions
 as $$
 #variable_conflict use_column
+declare
+  kinds boolean := public.survey_option('page_kinds');
+  learn boolean := public.survey_option('learn_from_use');
+  uk text;
 begin
-  if not public.survey_option('page_kinds') then
+  if not kinds and not learn then
     return query select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
                                                   industry_filter, country_filter, region_filter, typed);
     return;
   end if;
+  if learn then uk := public.use_key(company_filter, type_filter, q); end if;
   return query
     with w as materialized (select * from public.find_pages(key, q, company_filter, year_from, year_to, type_filter, max_rows, client,
                                                              industry_filter, country_filter, region_filter, typed))
-    select w.log_id, (row_number() over (order by (pk.kind is not null), w.rank))::int, w.library_id, w.company, w.wba_id, w.year, w.doc_type,
+    select w.log_id, (row_number() over (order by (pk.kind is not null), w.rank - 5.5 * coalesce(sign(u.score), 0), w.rank))::int, w.library_id, w.company, w.wba_id, w.year, w.doc_type,
            w.label, w.url, w.page, w.score, w.excerpt
-    from w left join public.page_kinds pk on pk.library_id = w.library_id and pk.page = w.page and pk.kind <> 'content'
-    order by (pk.kind is not null), w.rank;
+    from w left join public.page_kinds pk on kinds and pk.library_id = w.library_id and pk.page = w.page and pk.kind <> 'content'
+           left join public.use_signal u on learn and u.use_key = uk and u.library_id = w.library_id and abs(u.score) >= 2
+    order by (pk.kind is not null), w.rank - 5.5 * coalesce(sign(u.score), 0), w.rank;
 end;
 $$;
 revoke all on function public.find_pages_ranked(text, text, text, int, int, text, int, text, text, text, text, text) from public;
