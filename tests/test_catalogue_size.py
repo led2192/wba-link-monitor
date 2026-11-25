@@ -27,7 +27,10 @@ class Size(unittest.TestCase):
         self.assertEqual(C.size_of("L", None, fl, lambda url: (429, {})), ("refused", None))
         self.assertEqual(C.size_of("L", None, fl, lambda url: (200, {})), ("no facts", None))
         bank = {"facts": {"b": {"value": "1", "dimensions": {"concept": "ifrs-full:InterestIncome", "period": year, "unit": "iso4217:EUR"}}}}
-        self.assertEqual(C.size_of("L", None, fl, lambda url: (200, bank)), ("no revenue", None))
+        import collections
+        why = collections.Counter()
+        self.assertEqual(C.size_of("L", None, fl, lambda url: (200, bank), why=why), ("no revenue", None))
+        self.assertEqual(dict(why), {("ifrs-full:InterestIncome", "plain", "a year", "money"): 1})          # names of the taxonomy only
 
 
 if __name__ == "__main__":

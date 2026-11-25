@@ -44,7 +44,23 @@ def in_euros(value, currency):
     return round(value * r) if r and value is not None else None
 
 
-def size_of(lei, sess, get_filings, get_json, year_min=2024):
+def why_none(oim):
+    """What a report with no revenue read does tag, as names of the taxonomy only: every concept whose name says revenue
+    or income, with whether the fact has another dimension and how long its period is. For the run's last lines."""
+    from esef_facts import CORE_DIMS, period_days
+    out = collections.Counter()
+    for f in ((oim or {}).get("facts") or {}).values():
+        dims = f.get("dimensions") or {}; concept = str(dims.get("concept") or "")
+        if not any(w in concept.lower() for w in ("revenue", "income")) or "comprehensive" in concept.lower():
+            continue
+        p = period_days(dims.get("period")) if "/" in str(dims.get("period") or "") else None
+        length = "instant" if not p else "a year" if 330 <= p[2] <= 380 else "another length"
+        extra = sorted(set(dims) - CORE_DIMS)
+        out[(concept, "plain" if not extra else "with " + extra[0].split(":")[-1], length, "money" if str(dims.get("unit") or "").startswith("iso4217:") else "no currency")] += 1
+    return out
+
+
+def size_of(lei, sess, get_filings, get_json, year_min=2024, why=None):
     """("ok", (value, currency, year)) | ("no filing" | "no facts" | "no revenue" | "refused", None) for one LEI."""
     fl = get_filings(lei, sess, {year_min, year_min + 2})
     if not fl:
@@ -56,6 +72,8 @@ def size_of(lei, sess, get_filings, get_json, year_min=2024):
         return "no facts", None
     from esef_facts import annual_facts
     got = newest(annual_facts(oim))
+    if not got and why is not None:
+        why.update(set(why_none(oim)))          # once a report
     return ("ok", got) if got else ("no revenue", None)
 
 
@@ -75,7 +93,7 @@ def main():
     run = qa.Run("catalogue_size.py")
     sess = requests.Session(); sess.headers["User-Agent"] = bot.BOT_UA
     get_json = lambda url: fetch_json(lambda: sess.get(url, timeout=120), tries=2)
-    seen, refused, pending = collections.Counter(), 0, []
+    seen, refused, pending, why = collections.Counter(), 0, [], collections.Counter()
     with evidence_db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute("""select lei from public.catalogue where status in ('candidate', 'wanted') and duplicate_why is null and coalesce(last_year, 0) >= 2024
@@ -93,7 +111,7 @@ def main():
 
             for n, lei in enumerate(todo, 1):
                 try:
-                    what, got = size_of(lei, sess, filings, get_json)
+                    what, got = size_of(lei, sess, filings, get_json, why=why)
                 except Exception as e:
                     what, got = "failed", None
                 seen[what] += 1
@@ -109,6 +127,10 @@ def main():
                 time.sleep(PAUSE)
             write()
     print("Sized: " + (", ".join(f"{k} {v:,}" for k, v in seen.most_common()) or "none") + ("." if a.commit else ". Dry run: nothing written."))
+    if why:
+        print("In the reports with no revenue read, the concepts that say revenue or income (reports that tag each):")
+        for (concept, dims, length, unit), n in why.most_common(25):
+            print(f"  {n:,}  {concept} · {dims} · {length} · {unit}")
     run.finish("ok", rows_in=sum(seen.values()), rows_out=seen["ok"] if a.commit else 0, notes="catalogue size")
     return 0
 
