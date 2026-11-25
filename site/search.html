@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v190 2026-11-25";
+  const CLIENT = "lantern v191 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2777,11 +2777,17 @@
     const set = async (leis, status) => { say.textContent = " saving…"; let s = null; try { s = await authed("admin_catalogue_set", { key, leis, status }); } catch (e) {}
       if (!s || !s.ok) { say.textContent = ` not saved: ${(s && s.why) || "try again"}`; return; } const on = new Set(leis); for (const x of rows) if (on.has(x.lei) && x.status !== "added") x.status = status; say.textContent = ` ${s.changed.toLocaleString()} marked ${status}`; fill(); show(); };
     let shownRows = [];
+    // v191: the size of a candidate, from its own annual report (catalogue_size.py): its revenue as filed, and the
+    // list largest first. The order uses a rough amount in euros; what is shown is the figure in its own currency.
+    const sized = rows.some(x => x.revenue_eur != null); let bySize = sized;
+    const money = x => { if (x.revenue == null) return x.sized ? "none tagged" : ""; const v = Number(x.revenue), u = v >= 1e9 ? [v / 1e9, "bn"] : v >= 1e6 ? [v / 1e6, "m"] : [v / 1e3, "k"];
+      return `${u[0] >= 100 ? Math.round(u[0]) : u[0].toFixed(1)} ${u[1]} ${x.revenue_currency || ""}${x.revenue_year ? ` (${x.revenue_year})` : ""}`; };
     const show = () => { const w = word.toLowerCase();
       const all = rows.filter(x => kindOf(x) === kind && (old || live(x) || x.status !== "candidate") && (!country || (x.country || "?") === country) && (!w || [x.name, x.legal_name, x.website, x.lei, x.held, ...(x.aliases || [])].some(v => String(v || "").toLowerCase().includes(w))));
+      if (bySize) all.sort((a, b) => (b.revenue_eur == null ? -1 : b.revenue_eur) - (a.revenue_eur == null ? -1 : a.revenue_eur));
       shownRows = all.slice(0, 300); note.textContent = MEAN[kind] || ""; note.hidden = !MEAN[kind]; host.innerHTML = "";
       host.appendChild(el("p", "what", `${all.length.toLocaleString()} companies` + (all.length > shownRows.length ? `, the first ${shownRows.length} shown: narrow by country or a word to see the others.` : ".")));
-      host.appendChild(adminTable(["Company", "Legal name", "Country", "Last report", "Website", kind === "new" || kind === "wanted" || kind === "not wanted" ? "Other names" : "Like", "Your choice"], shownRows.map(x => {
+      host.appendChild(adminTable(["Company", "Legal name", "Country", "Last report", "Revenue", "Website", kind === "new" || kind === "wanted" || kind === "not wanted" ? "Other names" : "Like", "Your choice"], shownRows.map(x => {
         const site = el("a", null, String(x.website || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").slice(0, 40)); site.href = x.website; site.target = "_blank"; site.rel = "noopener";
         const pickBox = el("span"); const mk = (label, st) => { const a = el("a", null, label); a.href = "#"; a.style.marginRight = "8px"; a.onclick = ev => { ev.preventDefault(); set([x.lei], st); }; return a; };
         if (x.status === "added") pickBox.append(el("span", "what", "added")); else pickBox.append(...(x.status === "wanted" ? [el("b", null, "wanted "), mk("undo", "candidate")] : x.status === "not wanted" ? [el("b", null, "not wanted "), mk("undo", "candidate")] : [mk("want", "wanted"), mk("not", "not wanted")]));
@@ -2796,10 +2802,10 @@
           const save = adminBtn("Save", async () => { msg.textContent = " saving…"; let s = null; try { s = await authed("admin_catalogue_fix", { key, lei: x.lei, website: w.value.trim() === String(x.website || "").trim() && !x.fixed ? null : w.value.trim() || null, name: n.value.trim() === String(x.name || "").trim() && !x.fixed ? null : n.value.trim() || null }); } catch (e) {}
             if (!s || !s.ok) { msg.textContent = ` not saved: ${(s && s.why) || "try again"}`; return; } x.website = s.website; x.name = s.name; x.fixed = s.fixed; show(); });
           siteBox.innerHTML = ""; siteBox.append(w, n, save, msg); w.focus(); };
-        return [name, x.legal_name || "", x.country || "", x.last_year ? String(x.last_year) : "", siteBox, kind === "new" || kind === "wanted" || kind === "not wanted" ? (x.aliases || []).slice(0, 4).join(", ") : (x.held || x.like_lei || ""), pickBox]; }))); };
+        return [name, x.legal_name || "", x.country || "", x.last_year ? String(x.last_year) : "", money(x), siteBox, kind === "new" || kind === "wanted" || kind === "not wanted" ? (x.aliases || []).slice(0, 4).join(", ") : (x.held || x.like_lei || ""), pickBox]; }))); };
     ksel.onchange = () => { kind = ksel.value; show(); }; csel.onchange = () => { country = csel.value; show(); }; inp.oninput = () => { word = inp.value.trim(); show(); };
     const cell = v => { const s = v == null ? "" : Array.isArray(v) ? v.join("; ") : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const cols = ["lei", "name", "legal_name", "aliases", "country", "last_year", "website", "wikidata", "match", "why", "held", "like_lei", "status"];
+    const cols = ["lei", "name", "legal_name", "aliases", "country", "last_year", "revenue", "revenue_currency", "revenue_year", "website", "wikidata", "match", "why", "held", "like_lei", "status"];
     const oldBox = document.createElement("input"); oldBox.type = "checkbox"; oldBox.id = "cat-old"; oldBox.onchange = () => { old = oldBox.checked; show(); };
     const oldLab = el("label", "what", `also those with no report since ${RECENT - 1} (${rows.filter(x => !live(x)).length.toLocaleString()})`); oldLab.htmlFor = "cat-old"; oldLab.title = "A company that stopped filing may have merged, delisted or closed. They are left out of the list and of 'Add 20 of the wanted' unless ticked here.";
     bar.append(el("span", "what", "Show"), ksel, csel, inp, oldBox, oldLab,

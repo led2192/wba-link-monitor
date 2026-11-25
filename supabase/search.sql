@@ -5572,6 +5572,14 @@ alter table public.catalogue add column if not exists match text not null defaul
 alter table public.catalogue add column if not exists last_year int;   -- the latest year it filed a report for: one that stopped years ago may no longer exist (a bank merged in 2021 was among the first twenty added)
 alter table public.catalogue add column if not exists owner_website text;
 alter table public.catalogue add column if not exists owner_name text;   -- how its Wikidata entry was found: lei (exact) or name (to be looked at: right 92 times in 100)
+-- The size of a candidate, from its own annual report (catalogue_size.py, 25 Nov 2026): the group's annual revenue as
+-- tagged in the ESEF filing, its currency and year; revenue_eur is a rough amount for ordering the list, never shown.
+-- size_at says the report was asked for, also when it tags no revenue (a bank).
+alter table public.catalogue add column if not exists revenue numeric;
+alter table public.catalogue add column if not exists revenue_currency text;
+alter table public.catalogue add column if not exists revenue_year int;
+alter table public.catalogue add column if not exists revenue_eur numeric;
+alter table public.catalogue add column if not exists size_at timestamptz;
 alter table public.catalogue enable row level security;
 revoke all on public.catalogue from anon, authenticated;
 
@@ -5587,7 +5595,7 @@ begin
     'total', (select count(*) from public.catalogue),
     'seen_at', (select max(c.seen_at) from public.catalogue c),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('lei', c.lei, 'name', coalesce(c.owner_name, c.common_name, c.legal_name), 'legal_name', c.legal_name, 'aliases', c.aliases, 'country', c.country,
-                                                          'website', coalesce(c.owner_website, c.website), 'fixed', c.owner_website is not null or c.owner_name is not null, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei, 'match', c.match, 'last_year', c.last_year,
+                                                          'website', coalesce(c.owner_website, c.website), 'fixed', c.owner_website is not null or c.owner_name is not null, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei, 'match', c.match, 'last_year', c.last_year, 'revenue', c.revenue, 'revenue_currency', c.revenue_currency, 'revenue_year', c.revenue_year, 'revenue_eur', c.revenue_eur, 'sized', c.size_at is not null,
                                                           'held', (select h.name from public.companies h where h.wba_id = c.duplicate_of))
                                        order by lower(regexp_replace(coalesce(c.owner_name, c.common_name, c.legal_name), '^[^[:alnum:]]+', '')), c.lei), '[]'::jsonb)
              from public.catalogue c));
@@ -5682,7 +5690,7 @@ begin
            where c.status = 'wanted' and c.match = 'lei' and c.duplicate_why is null and coalesce(c.owner_website, c.website) is not null
              and (c.last_year is null or c.last_year >= extract(year from now())::int - 2)          -- not one that stopped filing: it may no longer exist
              and (of_country is null or of_country = '' or upper(c.country) = upper(of_country))
-           order by coalesce(c.common_name, c.legal_name), c.lei limit greatest(1, least(coalesce(most, 20), 20)) loop
+           order by c.revenue_eur desc nulls last, coalesce(c.common_name, c.legal_name), c.lei limit greatest(1, least(coalesce(most, 20), 20)) loop          -- the largest first, where the size is known
     begin
       got := public.request_company(r.name, r.website, r.lei, 'from the catalogue', 'catalogue');
     exception when others then

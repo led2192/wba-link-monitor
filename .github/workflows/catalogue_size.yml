@@ -1,0 +1,39 @@
+# How large each candidate of the catalogue is: the revenue its own ESEF annual report tags (catalogue_size.py).
+# By hand (dry unless mode=commit). One company every 10 seconds, some hours for all. Prints counts only.
+name: Catalogue size
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+      limit:
+        description: "companies at most (0 = all still without a size)"
+        default: "0"
+
+concurrency:
+  group: catalogue-size
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: [self-hosted, lantern]      # lantrNa's server
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Load
+        run: |
+          if [ "${{ inputs.mode }}" = "commit" ]; then python catalogue_size.py --limit "${{ inputs.limit }}" --commit; else python catalogue_size.py --limit "${{ inputs.limit }}"; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
