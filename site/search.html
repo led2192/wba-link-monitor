@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v188 2026-11-25";
+  const CLIENT = "lantern v189 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2642,20 +2642,58 @@
     const nav = el("div"); nav.style.cssText = "width:210px;flex:none;padding:16px 12px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:4px;overflow:auto";
     const body = el("div"); body.style.cssText = "flex:1;min-width:0;padding:20px 28px;overflow:auto;font-size:14px";
     main.append(nav, body); d.append(head, main);
-    const views = { "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Register": adminRegister, "Catalogue": adminCatalogue, "Standards in use": adminUse, "Words of the year": adminWords, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
-    for (const name of Object.keys(views)) {
+    // v189 (the owner, 25 Nov 2026: "the sections keep growing and I no longer know what I have to do each day"): the
+    // menu is in groups by what a section is for, and it opens on "Today": what waits for the owner, counted.
+    const GROUPS = [["", ["Today"]],
+      ["Each day", ["Companies", "Documents to fetch", "Hard searches", "Jobs"]],
+      ["Growing the list", ["Catalogue", "All companies", "Names not held", "Register", "Reference list"]],
+      ["What lantrNa knows", ["Company profiles", "Company facts", "Facts from answers", "Fact taxonomy", "Standards in use", "Words of the year"]],
+      ["People", ["People and links", "Surveys"]],
+      ["Running it", ["Cost", "Model trial", "Documentation"]]];
+    const views = { "Today": adminToday, "Companies": adminCompanies, "All companies": adminAllCompanies, "Names not held": adminNotHeld, "Company profiles": adminProfiles, "Register": adminRegister, "Catalogue": adminCatalogue, "Standards in use": adminUse, "Words of the year": adminWords, "Reference list": adminReference, "People and links": adminPeople, "Facts from answers": adminFacts, "Company facts": adminCompanyFacts, "Fact taxonomy": adminTaxonomy, "Model trial": adminFactTrials, "Surveys": adminSurveys, "Hard searches": adminHard, "Documents to fetch": adminUnread, "Jobs": adminJobs, "Cost": adminCost, "Documentation": adminDocs };
+    const grouped = new Set(GROUPS.flatMap(g => g[1])), rest = Object.keys(views).filter(n => !grouped.has(n));
+    if (rest.length) GROUPS.push(["Other", rest]);          // a section added later and put in no group is never lost
+    for (const [group, names] of GROUPS) { if (group) { const g = el("div", null, group); g.style.cssText = "font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted, #777);padding:12px 12px 2px"; nav.appendChild(g); }
+    for (const name of names) {
       const b = el("button", null, name); b.type = "button"; b.dataset.view = name;
       b.style.cssText = "font:inherit;text-align:left;padding:7px 12px;border-radius:8px;border:0;background:none;color:var(--fg);cursor:pointer";
-      b.onclick = () => { for (const x of nav.children) { x.style.fontWeight = "400"; x.style.background = "none"; } b.style.fontWeight = "700"; b.style.background = "var(--box)"; b.blur();
+      b.onclick = () => { for (const x of nav.querySelectorAll("[data-view]")) { x.style.fontWeight = "400"; x.style.background = "none"; } b.style.fontWeight = "700"; b.style.background = "var(--box)"; b.blur();
         body.innerHTML = ""; const h = el("h2", null, name); h.style.cssText = "margin:0 0 14px;font-size:20px"; const inner = el("div", null, "Loading…"); body.append(h, inner); views[name](inner); };
       nav.appendChild(b);
-    }
-    (nav.querySelector(`[data-view="${first || "Companies"}"]`) || nav.firstChild).click();
+    } }
+    (nav.querySelector(`[data-view="${first || "Today"}"]`) || nav.firstChild).click();
     adminWaiting(nav); adminJobsMark(nav);
   }
   // v141: the panel is laid out with display:flex in its own style, and that wins over the hidden attribute: "Back to
   // the search" did nothing (the owner, 22 Nov 2026). The display itself is switched.
   function closeAdmin() { const d = $("admin"); if (d) { d.hidden = true; d.style.display = "none"; } document.body.style.overflow = ""; }
+  // v189: what waits for the owner today, counted from what the sections themselves read, and what needs nobody.
+  async function adminToday(body) {
+    const nav = $("admin").querySelector("[data-view]").parentElement, quiet = p => p.catch(() => null), year = new Date().getFullYear();
+    const [cos, unread, recent, cat, jobs, hard] = await Promise.all([quiet(authed("admin_companies", { key })),
+      quiet(authed("admin_unread_docs", { key, search: null, only_main: false, from_year: null, max_rows: 1 })),
+      quiet(authed("admin_unread_docs", { key, search: null, only_main: true, from_year: year - 2, max_rows: 1 })),
+      quiet(authed("admin_catalogue", { key })), quiet(authed("admin_jobs", { key })), quiet(authed("admin_hard_searches", { key, days: 1 }))]);
+    body.innerHTML = "";
+    const line = (n, text, view, calm) => { const d = el("div"); d.style.cssText = "display:flex;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)";
+      const c = el("b", null, n == null ? "?" : String(n)); c.style.cssText = "width:56px;text-align:right;flex:none;font-size:17px" + (n && !calm ? ";color:#c0392b" : "");
+      const t = el("span", null, text); t.style.flex = "1"; const a = el("a", null, `Open ${view}`); a.href = "#"; a.onclick = ev => { ev.preventDefault(); const b = nav.querySelector(`[data-view="${view}"]`); if (b) b.click(); };
+      d.append(c, t, a); body.appendChild(d); };
+    const head = t => { const h = el("h3", null, t); h.style.cssText = "margin:22px 0 4px;font-size:15px"; body.appendChild(h); };
+    head("Needs you");
+    line(cos ? cos.filter(c => !c.review).length : null, "companies people added that you have not looked at: accept or reject.", "Companies");
+    line(jobs ? (jobs.alerts || 0) : null, "critical jobs that failed or did not run.", "Jobs");
+    line(recent ? recent.documents : null, `main reports of ${year - 2} or later whose file the robot could not get: open the address and send the file with the extension.`, "Documents to fetch");
+    head("Worth a look, when you have time");
+    line(unread ? unread.documents : null, "documents of every kind and year the robot could not get. They wait; nothing breaks.", "Documents to fetch", true);
+    const rows = (cat && cat.rows) || [], wanted = rows.filter(x => x.status === "wanted").length, fresh = rows.filter(x => x.status === "candidate" && !x.why && x.match !== "name").length;
+    line(cat ? wanted : null, "candidates you marked as wanted and not added yet (20 a day).", "Catalogue", true);
+    line(cat ? fresh : null, "new candidates you have not chosen from.", "Catalogue", true);
+    line(hard ? ((hard.nothing || []).length + (hard.runs || []).length) : null, "searches of the last day that showed nothing, or one company searched three times in a row.", "Hard searches", true);
+    head("Needs nobody");
+    const p = el("p", null, "A company you accept or add from the Catalogue gets its row in about 15 minutes. The robot then looks for the pages where the company publishes its reports, watches them, fetches the documents and reads them in the night: its documents can be searched the next morning, and they enter the search by meaning in the following nights. The extension is only for a file the robot could not get: once the company has its row you can send its documents with the extension at once, without waiting for the robot.");
+    p.style.cssText = "max-width:760px;line-height:1.5"; body.appendChild(p);
+  }
   // the number of companies not looked at yet, beside the section's name
   async function adminWaiting(nav) {
     try { const rows = await authed("admin_companies", { key }); const n = (rows || []).filter(c => !c.review).length;
