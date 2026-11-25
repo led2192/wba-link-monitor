@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v187 2026-11-25";
+  const CLIENT = "lantern v188 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -332,13 +332,21 @@
   // A type of document is often a family: what one company files as a 10-K is another's annual report, and a sustainability
   // report is elsewhere an ESG, CSR or Impact report. The family goes to the search as several types, the first listed first.
   const ANNUAL = "10K Form;Annual Report;Integrated Report", SUSTAIN = "Sustainability Report;ESG Report;CSR Report;Impact Report;Integrated Report";
-  const TYPE_LABEL = { [ANNUAL]: "Annual report, 10-K", [SUSTAIN]: "Sustainability, ESG, CSR, Impact" };
+  // v188 (the owner, 25 Nov 2026): "unilever integrated report 2025" found nothing, because that company publishes no
+  // report under that name. What is asked by one name is shown under the name the company uses: the kind asked first,
+  // then its nearest kin. The status line says when no document of the asked kind is held.
+  const INTEG = "Integrated Report;Annual Report;10K Form;Sustainability Report", ESG = "ESG Report;Sustainability Report;CSR Report;Impact Report;Integrated Report",
+        CSR = "CSR Report;Sustainability Report;ESG Report;Impact Report;Integrated Report", IMPACT = "Impact Report;Sustainability Report;ESG Report;CSR Report;Integrated Report";
+  const TYPE_LABEL = { [ANNUAL]: "Annual report, 10-K", [SUSTAIN]: "Sustainability, ESG, CSR, Impact", [INTEG]: "Integrated report, or the annual and sustainability reports",
+    [ESG]: "ESG report, or its kin", [CSR]: "CSR report, or its kin", [IMPACT]: "Impact report, or its kin" };
   // one word that names a family, when it is all that is asked of a company ("Nike annual"): the documents, not the pages that say "annual"
-  const TYPE_ALONE = { annual: ANNUAL, anual: ANNUAL, annuel: ANNUAL, sustainability: SUSTAIN, sostenibilidad: SUSTAIN, esg: SUSTAIN, csr: SUSTAIN };
+  const TYPE_ALONE = { annual: ANNUAL, anual: ANNUAL, annuel: ANNUAL, sustainability: SUSTAIN, sostenibilidad: SUSTAIN, esg: SUSTAIN, csr: SUSTAIN,
+    integrated: INTEG };
   const TYPE_WORDS = { "annual report": ANNUAL, "informe anual": ANNUAL, "memoria anual": ANNUAL, "rapport annuel": ANNUAL,
-    "integrated report": "Integrated Report", "informe integrado": "Integrated Report",
+    "integrated report": INTEG, "integrated annual report": INTEG, "informe integrado": INTEG,
+    "impact report": IMPACT, "informe de impacto": IMPACT, "sustainability statement": SUSTAIN, "estado de sostenibilidad": SUSTAIN,
     "sustainability report": SUSTAIN, "informe de sostenibilidad": SUSTAIN, "memoria de sostenibilidad": SUSTAIN,
-    "esg report": "ESG Report", "informe esg": "ESG Report", "csr report": "CSR Report", "climate report": "Climate Report", "informe climático": "Climate Report",
+    "esg report": ESG, "informe esg": ESG, "csr report": CSR, "corporate responsibility report": CSR, "climate report": "Climate Report", "informe climático": "Climate Report",
     "10-k": "10K Form", "10k": "10K Form",
     "code of conduct": "Code of Conduct", "code of ethics": "Code of Conduct", "código de conducta": "Code of Conduct", "codigo de conducta": "Code of Conduct",
     "código de comportamiento": "Code of Conduct", "codigo de comportamiento": "Code of Conduct", "código ético": "Code of Conduct", "código de ética": "Code of Conduct", "code de conduite": "Code of Conduct",
@@ -1050,7 +1058,7 @@
       // those words": the year was read as "documents of 2025 only", and the one report of 2025 held was never read.
       // A year in a search most often says which year the fact is about, and other years' reports print it. So the
       // search is made again without the year, and the status line says so and offers the documents of that year alone.
-      if (!more && !rows.length && state.q && state.yearsTyped && (state.from || state.to) && !state.strictYears) {
+      if (!more && !rows.length && (state.q || (state.typeWords && state.type && state.company)) && state.yearsTyped && (state.from || state.to) && !state.strictYears) {
         state.yearsDropped = { from: state.from, to: state.to }; state.from = state.to = null; state.yearsTyped = false;
         return search(true);
       }
@@ -1072,6 +1080,12 @@
                              $("q").value = re.test($("q").value) ? $("q").value.replace(re, m => `"${m}"`) : ($("q").value + ` "${w}"`).trim();
                              $("fType").value = ""; search(); };
         st.append(document.createTextNode(" · "), a);
+      }
+      if (state.typeWords && state.type && state.type.includes(";") && !state.q && rows.length && !more) {      // v188: the asked kind is not held
+        const asked = state.type.split(";")[0], first = rows[0].doc_type;
+        if (first && first !== asked && !rows.some(r => r.doc_type === asked) && /report/i.test(state.typeWords) && asked.toLowerCase().startsWith(state.typeWords.toLowerCase().replace(/s$/, "").split(" ")[0])) {
+          const d = el("div", "dym"); d.textContent = `No document called ${asked} is held for ${state.companyName || "this selection"}: these are the nearest reports it publishes.`; $("status").appendChild(d);
+        }
       }
       if (state.typeHint && !state.type && !more) {         // v123: the kind was read as a preference: say so, offer the filter
         const st = $("status"), kind = TYPE_LABEL[state.typeHint] || state.typeHint, vague = TYPE_VAGUE.has(state.typeHint);
@@ -1126,7 +1140,7 @@
         const y = state.yearsDropped, label = y.from === y.to ? String(y.from) : `${y.from || ""}–${y.to || ""}`;
         const a = el("a", null, `Only documents of ${label}`); a.href = "#";
         a.onclick = ev => { ev.preventDefault(); state.from = y.from; state.to = y.to; state.yearsDropped = null; state.strictYears = true; search(true); };
-        const d = el("div", "dym"); d.append(document.createTextNode(`No page in the documents of ${label}: these are pages of other years. `), a); $("status").appendChild(d);
+        const d = el("div", "dym"); d.append(document.createTextNode(state.q ? `No page in the documents of ${label}: these are pages of other years. ` : `No such report of ${label} is held: these are of other years, newest first. `), a); $("status").appendChild(d);
       }
       if (state.fixed && !more && !fromChips) {                               // v97: say whose pages these are, and leave the way back
         const fx = state.fixed, typed = $("q").value.trim(); const a = el("a", null, "Search the words as typed"); a.href = "#";
