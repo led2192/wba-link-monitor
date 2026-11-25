@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v181 2026-11-25";
+  const CLIENT = "lantern v182 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -505,6 +505,7 @@
   }
   let shortList = null, shortOf = null;
   const shortFirst = () => { if (shortOf !== companies) { shortOf = companies; shortList = companies.filter(c => c.short && c.short.length >= 4).sort((a, b) => b.short.length - a.short.length); } return shortList; };
+  const fold1 = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   function parse(text) {
     let q = " " + text.trim().replace(/[?¿!¡]+/g, " ").replace(/\s+/g, " ") + " ";      // a question's marks are not words ("in 2024?" is the year 2024)
     // v128 (20 Nov 2026, from a real question): "What was the steel production of X in year 2023?" was searched with the
@@ -578,6 +579,18 @@
     // more that is one slip away from one company's name (two when it has nine letters or more), with the same first
     // letter, is kept as `typo`; search() takes it as the company only when the library does not know the word.
     if (!hits.length) found.typo = nearCompany(fq);
+    // v182 (25 Nov 2026, a person typed "kg CO2 /tonne of cementitious product of CHR in year 2021": no company was read,
+    // pages of every company came back in 7 s, and he rewrote the question as keywords, thinking it was too long). A
+    // name of a few capitals with two letters swapped ("CHR" for CRH) is not caught by the rule above, which wants six
+    // letters, and must not be taken by itself: such a word can be another company or an abbreviation. It is offered
+    // beside the results ("Search the company CRH instead"), one press, when exactly one company's name is that swap.
+    if (!hits.length && !found.typo && !found.maybe) {
+      const caps = new Map(); for (const c of companies) { const n = fold(c.name || ""); if (/^[A-Z0-9]{3,5}$/.test(n)) caps.set(n, caps.has(n) ? null : c); }
+      for (const w of new Set(fold(text).split(/[^A-Za-z0-9]+/).filter(t => /^[A-Z][A-Z0-9]{2,4}$/.test(t) && !caps.has(t)))) {
+        const near = []; for (let i = 0; i + 1 < w.length; i++) { const s = w.slice(0, i) + w[i + 1] + w[i] + w.slice(i + 2); if (s !== w && caps.get(s)) near.push(caps.get(s)); }
+        const one = [...new Set(near)]; if (one.length === 1) { found.maybe = { id: one[0].id, name: one[0].name, word: w }; break; }
+      }
+    }
     if (hits.length) { found.company = hits.map(c => c.id).join(";"); found.companyName = hits.map(c => c.name).join(", "); }
     // then the profiles (an industry name like "Oil & Gas" or a country must not be read as words), longest names first.
     // Companies come before them: "Basra Oil Company" is a company, not the Oil & Gas industry and the word "Basra"
@@ -1039,7 +1052,7 @@
           st.append(document.createTextNode(` · ${how}: `), a); }).catch(() => {});
       }
       if (state.maybe && !state.company && !more && !fromChips) {             // a word that is also a company's name was read as the word: offer the company
-        const st = $("status"), mb = state.maybe; const a = el("a", null, `Search the company ${mb.name} instead`); a.href = "#";
+        const st = $("status"), mb = state.maybe; const a = el("a", null, mb.word.toLowerCase() === fold1(mb.name).toLowerCase() ? `Search the company ${mb.name} instead` : `Did you mean the company ${mb.name}? Search it`); a.href = "#";
         a.onclick = ev => { ev.preventDefault(); $("q").value = $("q").value.replace(new RegExp("(^|\\s)" + mb.word + "(?=\\s|$)", "i"), (m0, pre) => pre + mb.name + ";"); search(false); };
         st.append(document.createTextNode(" · "), a);
       }
