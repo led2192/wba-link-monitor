@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v183 2026-11-25";
+  const CLIENT = "lantern v184 2026-11-25";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -507,6 +507,10 @@
   const shortFirst = () => { if (shortOf !== companies) { shortOf = companies; shortList = companies.filter(c => c.short && c.short.length >= 4).sort((a, b) => b.short.length - a.short.length); } return shortList; };
   const fold1 = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   function parse(text) {
+    // v184 (found among the searches people repeated in other words, 25 Nov 2026): "What were Unilever’s scope 1 emissions
+    // in 2024?" read no company, because a phone or a word processor writes the apostrophe curled and only the straight
+    // one was known: 1,301 pages of every company in 16 s. Every apostrophe is the same apostrophe.
+    text = String(text || "").replace(/[\u2018\u2019\u02BC\u0060\u00B4]/g, "'");
     let q = " " + text.trim().replace(/[?¿!¡]+/g, " ").replace(/\s+/g, " ") + " ";      // a question's marks are not words ("in 2024?" is the year 2024)
     // v128 (20 Nov 2026, from a real question): "What was the steel production of X in year 2023?" was searched with the
     // word "year" required on the page, took six seconds and found five pages; without it, half a second. The word
