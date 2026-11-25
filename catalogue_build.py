@@ -164,7 +164,7 @@ def main():
     run = qa.Run("catalogue_build.py")
     sess, ua = requests.Session(), bot.BOT_UA
     # 1. the companies that file in the European format: LEI, name, country
-    firms, n = {}, 0
+    firms, last, n = {}, {}, 0
     while True:
         n += 1
         r = sess.get(E.API, params={"page[size]": str(E.SIZE), "page[number]": str(n), "include": "entity"}, headers={"User-Agent": ua, "Accept": "application/vnd.api+json"}, timeout=90)
@@ -177,8 +177,11 @@ def main():
         for it in j["data"]:
             lei = E.lei_of(it, inc); ref = (((it.get("relationships") or {}).get("entity") or {}).get("data") or {})
             name = ((inc.get((ref.get("type"), ref.get("id"))) or {}).get("attributes") or {}).get("name")
-            if lei and LEI.match(lei) and lei not in firms:
-                firms[lei] = (name, E.facts(it)[0])
+            country, year, _ = E.facts(it)
+            if lei and LEI.match(lei):
+                if lei not in firms:
+                    firms[lei] = (name, country)
+                last[lei] = max(last.get(lei) or 0, year or 0) or None          # the latest year it filed for: a company that stopped years ago may no longer exist
         time.sleep(E.PAUSE)
     leis = sorted(firms)[:a.limit] if a.limit else sorted(firms)
     # 2. Wikidata by LEI
@@ -217,7 +220,7 @@ def main():
             q, site, label, aliases = wd.get(lei) or by_name.get(lei) or (None, None, None, [])
             if not site:
                 continue
-            c = {"lei": lei, "match": how, "legal_name": firms[lei][0], "country": firms[lei][1], "common_name": label, "aliases": aliases, "website": site, "wikidata": q, "like": None,
+            c = {"lei": lei, "match": how, "last_year": last.get(lei), "legal_name": firms[lei][0], "country": firms[lei][1], "common_name": label, "aliases": aliases, "website": site, "wikidata": q, "like": None,
                  "names": [firms[lei][0], label] + aliases}
             c["reason"], c["held"] = check(c, held)
             cands.append(c)
@@ -226,15 +229,16 @@ def main():
         print(f"### Candidates for lantrNa's own list\n\n{len(firms):,} companies file in the European format; {len(leis):,} asked of Wikidata (the last answer {status}), {len(wd):,} found by LEI, {len(cands):,} with a website.\n")
         for k, v in by.most_common():
             print(f"- {v:,}: {k}")
+        print(f"\nBy the latest year filed for: " + ", ".join(f"{y or 'none'} {v:,}" for y, v in sorted(collections.Counter(c["last_year"] for c in cands).items(), key=lambda kv: kv[0] or 0)))
         print(f"\nCompanies held, to compare with: {len(held['by_lei']):,} LEIs, {len(held['group']):,} entities of their groups, {len(held['by_host']):,} websites, {len(held['by_name']):,} names.", flush=True)
         written = 0
         if a.commit:
             with conn.cursor() as cur:
-                cur.executemany("""insert into public.catalogue (lei, legal_name, common_name, aliases, country, website, wikidata, source, duplicate_why, duplicate_of, like_lei, match, seen_at)
-                                   values (%s, %s, %s, %s, %s, %s, %s, 'esef, wikidata', %s, %s, %s, %s, now())
+                cur.executemany("""insert into public.catalogue (lei, legal_name, common_name, aliases, country, website, wikidata, source, duplicate_why, duplicate_of, like_lei, match, last_year, seen_at)
+                                   values (%s, %s, %s, %s, %s, %s, %s, 'esef, wikidata', %s, %s, %s, %s, %s, now())
                                    on conflict (lei) do update set legal_name = excluded.legal_name, common_name = excluded.common_name, aliases = excluded.aliases, country = excluded.country,
-                                     website = excluded.website, wikidata = excluded.wikidata, duplicate_why = excluded.duplicate_why, duplicate_of = excluded.duplicate_of, like_lei = excluded.like_lei, match = excluded.match, seen_at = now()""",
-                                [(c["lei"], c["legal_name"], c["common_name"], c["aliases"], c["country"], c["website"], c["wikidata"], c["reason"], c.get("held"), c.get("like"), c["match"]) for c in cands])
+                                     website = excluded.website, wikidata = excluded.wikidata, duplicate_why = excluded.duplicate_why, duplicate_of = excluded.duplicate_of, like_lei = excluded.like_lei, match = excluded.match, last_year = excluded.last_year, seen_at = now()""",
+                                [(c["lei"], c["legal_name"], c["common_name"], c["aliases"], c["country"], c["website"], c["wikidata"], c["reason"], c.get("held"), c.get("like"), c["match"], c["last_year"]) for c in cands])
                 written = len(cands)
             conn.commit()
             print(f"\n{written:,} candidates written to public.catalogue.", flush=True)
