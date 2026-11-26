@@ -481,3 +481,7 @@ psycopg sends a Python float as `double precision`, and Postgres does not pick a
 
 ## A function's `set statement_timeout` does not lengthen the statement that calls it (25 Nov 2026)
 `refresh_word_freq` is declared with `set statement_timeout = '30min'` and was still cancelled after two minutes: the timer of a statement is set when the statement starts, with the connection's value, and the function's setting only applies to statements started inside it. A long function needs `set statement_timeout` on the connection before the call (as `keywords_by_year.py` does).
+
+## A module that stops at import stops whoever imports it (26 Nov 2026)
+`active_search.py` ends the program at import when `AIRTABLE_TOKEN` and `AIRTABLE_BASE` are not set. `own_lane.py` imports it for its reading of a website and runs with no Airtable variables on purpose: its first real run took its four companies and stopped there. The end-to-end test had not seen it because the test machine's environment had the variables. A script that reuses a module's pure functions must check what the module does when it is imported, and the test of it must run without the variables the script is meant to do without.
+

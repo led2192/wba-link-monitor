@@ -59,9 +59,28 @@ class Lane(unittest.TestCase):
         self.assertEqual(L.fetch_doc(Sess(Resp(200, PDF, {"Content-Length": "999999999"})), "u", "b")[0], "too_big")
         self.assertEqual(L.fetch_doc(Sess(OSError("x")), "u", "b")[0], "download_fail")
 
+    def test_the_file_is_kept_in_the_storage_and_on_the_disk(self):
+        import tempfile
+
+        class Arch:
+            def __init__(self, answer): self.answer, self.got = answer, []
+            def upload(self, path, data):
+                self.got.append((path, len(data)))
+                if isinstance(self.answer, Exception): raise self.answer
+                return self.answer
+        with tempfile.TemporaryDirectory() as d:
+            a = Arch("ok")
+            self.assertEqual(L.keep_file(PDF, "LN_ab12cd34", "LN_ab12cd34|a.example/x.pdf", a, d), f"archive/LN_ab12cd34/LN_ab12cd34_a.example_x.pdf.pdf ({len(PDF)} bytes) + disk")
+            self.assertEqual(a.got, [("LN_ab12cd34/LN_ab12cd34_a.example_x.pdf.pdf", len(PDF))])
+            self.assertEqual(open(os.path.join(d, "LN_ab12cd34", "LN_ab12cd34_a.example_x.pdf.pdf"), "rb").read(), PDF)
+            self.assertEqual(L.keep_file(PDF, "LN_x", "LN_x|b", Arch("too large"), d), "disk")          # refused by the storage: on the disk only
+            self.assertEqual(L.keep_file(PDF, "LN_x", "LN_x|c", Arch(RuntimeError("down")), None), None)          # kept nowhere: said, and the reading goes on
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
+        self.assertLess(src.index('os.environ.setdefault("AIRTABLE_TOKEN", "none'), src.index("import requests, active_search as AS"))          # 26 Nov: the first run stopped at this import
+
     def test_nothing_of_the_lane_is_written_to_airtable(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
-        self.assertNotIn("airtable_request", src); self.assertNotIn("AIRTABLE_TOKEN", src)
+        self.assertNotIn("airtable_request", src); self.assertNotIn('environ["AIRTABLE', src); self.assertNotIn("secrets.AIRTABLE_TOKEN", src)
         self.assertIn("q.wba_id not like 'PT\\\\_%%'", src)          # an SDG2000 company never enters the lane
 
 
