@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v193 2026-11-26";' in PAGE
+    assert 'const CLIENT = "lantern v194 2026-11-26";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -649,3 +649,11 @@ def test_a_company_added_says_how_far_it_is_covered_and_one_can_be_added_alone()
 def test_the_page_a_document_is_sent_from_is_watched():
     assert "perform public.watch_page_of_upload(who, co, page_url);" in SQL and "exception when others then\n  return false;" in SQL          # never in the way of the document
     assert "revoke all on function public.watch_page_of_upload(text, text, text) from public, anon, authenticated" in SQL
+
+
+def test_the_wanted_candidates_go_in_by_themselves_and_the_pages_say_what_happened():
+    assert "revoke all on function public.catalogue_feed(int) from public, anon, authenticated" in SQL and "revoke all on function public.catalogue_add_inner(text, int, text[]) from public, anon, authenticated" in SQL
+    assert "function feedLine(feed)" in PAGE and PAGE.count("feedLine(") == 3          # v194: said on Today and on Catalogue
+    import json, os
+    clock = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server", "clock.json")).read()
+    assert '"workflow": "catalogue_feed.yml"' in clock

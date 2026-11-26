@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-26: The wanted candidates are added every night by a job that checks the room first
+The owner did not want to press "Add 20 of the wanted" day after day, and asked that the room, the documents and the index be watched while companies come in. Chosen: a nightly job that adds up to twenty (the limit a person has), the largest first, and adds none when the evidence database is at 140 GB or more, the Disclosure Library at 90% or more of its 500,000 records, or fewer than half of the companies added three days ago or more have a document (with twenty or more that old). The reason is kept and shown. Rejected: adding all the wanted at once (some 300 companies and their documents in one night, with no sign of whether the robot finds their pages) and a higher daily number before the first weeks say what a company costs in records and gigabytes. To stop the feed the owner unmarks the wanted.
+
 ### 2026-11-26: The page a person sends a document from becomes a watched page
 The owner's idea: when he downloads a document from a company's page with the extension, more documents are probably there, so the page should be watched. Chosen: the request "Scan this page" already makes (`page_scans`), written by the database when a document is registered, so the extension does not change and the page goes in by the door a person's own request uses. Limits: the company's own site only (the label of the page's host is the label of the company's website), not when the tab was the document itself, once in thirty days for a page. Rejected: watching any page a document is sent from (a regulator's or a report library's page would be watched under one company) and a new button (it is what the person already did).
 

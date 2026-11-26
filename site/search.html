@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v193 2026-11-26";
+  const CLIENT = "lantern v194 2026-11-26";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2667,6 +2667,13 @@
   // v141: the panel is laid out with display:flex in its own style, and that wins over the hidden attribute: "Back to
   // the search" did nothing (the owner, 22 Nov 2026). The display itself is switched.
   function closeAdmin() { const d = $("admin"); if (d) { d.hidden = true; d.style.display = "none"; } document.body.style.overflow = ""; }
+  // v194: what the nightly feed of the catalogue did (catalogue_feed.py): one sentence for "Today" and "Catalogue".
+  function feedLine(feed) {
+    const f = (feed || [])[0]; if (!f) return "The wanted candidates are added by themselves every night, twenty at most, the largest first, when there is room. It has not run yet.";
+    const did = f.added ? `added ${f.added}` + (f.held ? `, found ${f.held} already held` : "") + (f.other ? `, ${f.other} not added` : "") : "added none";
+    return `The wanted candidates are added by themselves every night, twenty at most, the largest first. Last run (${f.day}): ${did}${f.waited_why ? ` (${f.waited_why})` : ""}. ` +
+      `${f.wanted_left == null ? "?" : Number(f.wanted_left).toLocaleString("en-GB")} wanted left. Room: evidence database ${f.db_gb == null ? "?" : Math.round(f.db_gb)} GB, Disclosure Library ${f.base_full == null ? "?" : Math.round(f.base_full * 100) + "%"} full.`;
+  }
   // v189: what waits for the owner today, counted from what the sections themselves read, and what needs nobody.
   async function adminToday(body) {
     const nav = $("admin").querySelector("[data-view]").parentElement, quiet = p => p.catch(() => null), year = new Date().getFullYear();
@@ -2709,6 +2716,8 @@
       part("The good result was third or lower", dig.deep || [], ["When", "Link", "What was typed", "Place", ""], x => [adminWhen(x.at), x.key_name || "", x.typed || "", x.place, adminRun(x.typed)]);
       part("A result marked not useful", dig.marked || [], ["When", "Link", "What was typed", ""], x => [adminWhen(x.at), x.key_name || "", x.typed || "", adminRun(x.typed)]);
     }
+    if (cat) { head("The catalogue, by itself"); const fp = el("p", null, feedLine(cat.feed)); fp.style.cssText = "max-width:760px;line-height:1.5";
+      const f0 = (cat.feed || [])[0]; if (f0 && f0.waited_why && !f0.added && !/no wanted/.test(f0.waited_why)) { fp.style.color = "#c0392b"; } body.appendChild(fp); }
     head("Needs nobody");
     const p = el("p", null, "A company you accept or add from the Catalogue gets its row in about 15 minutes. The robot then looks for the pages where the company publishes its reports, watches them, fetches the documents and reads them in the night: its documents can be searched the next morning, and they enter the search by meaning in the following nights. The extension is only for a file the robot could not get: once the company has its row you can send its documents with the extension at once, without waiting for the robot.");
     p.style.cssText = "max-width:760px;line-height:1.5"; body.appendChild(p);
@@ -2828,7 +2837,7 @@
         if (!s || !s.ok) { say.textContent = " not added: try again"; return; }
         say.textContent = ` ${s.added} added` + (s.held ? `, ${s.held} already held` : "") + (s.other ? `, ${s.other} not added (see the row)` : "") + (s.stopped ? `; stopped: ${s.stopped}` : "") + ". Reading the list again…"; adminCatalogue(body); }),
       adminBtn("Download everything (CSV)", () => { const a = el("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + [cols.join(","), ...rows.map(x => cols.map(k => cell(x[k])).join(","))].join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-catalogue-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); }), say);
-    body.append(el("p", null, `${r.total.toLocaleString()} candidates, read ${String(r.seen_at || "").slice(0, 10)}.`), bar, note, host); fill(); show();
+    body.append(el("p", null, `${r.total.toLocaleString()} candidates, read ${String(r.seen_at || "").slice(0, 10)}.`), el("p", "what", feedLine(r.feed)), bar, note, host); fill(); show();
   }
 
   async function adminUse(body, year, kind) {
