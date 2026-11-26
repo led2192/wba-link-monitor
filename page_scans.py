@@ -112,7 +112,7 @@ def main(argv=None):
             print("public.page_scans is not there yet: nothing to do.")
             return 0
         cur.execute("select id, wba_id, url, status, link_record, before, at from public.page_scans "
-                    "where status in ('new', 'queued', 'added') order by id limit 200")
+                    "where status in ('new', 'queued', 'added') and wba_id like 'PT\\_%' order by id limit 200")          # 26 Nov 2026: only SDG2000 companies (PT_) go to Airtable; the others wait for lantrNa's own lane
         rows = cur.fetchall()
         if not rows:
             return 0                                   # the usual case, every three minutes: say nothing

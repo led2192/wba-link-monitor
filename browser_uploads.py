@@ -248,7 +248,7 @@ def main():
             print(f"  {cur.rowcount} files called known in the last {a.again_known} days are looked at again", flush=True)
             conn.commit()
         cur.execute("select id, wba_id, source_url, filename, bytes, path, to_jsonb(b) ->> 'sent_type', (to_jsonb(b) ->> 'sent_year')::int "
-                    "from public.browser_uploads b where status = 'stored' order by id limit %s", (a.limit,))      # to_jsonb: the two columns may not be installed yet
+                    "from public.browser_uploads b where status = 'stored' and wba_id like 'PT\\_%%' order by id limit %s", (a.limit,))          # 26 Nov 2026: only SDG2000 (PT_) files become rows of Airtable; the others stay stored for lantrNa's own lane      # to_jsonb: the two columns may not be installed yet
         uploads = [dict(zip(("id", "wba_id", "source_url", "filename", "bytes", "path", "sent_type", "sent_year"), r)) for r in cur.fetchall()]
         if not uploads:
             print("No new file sent from a browser.")
