@@ -1,0 +1,44 @@
+# The companies that are not SDG2000 (ids LN_) are followed without Airtable: their report pages found and scanned,
+# their documents read into the evidence database (own_lane.py). Twice a night, and by hand (dry unless mode=commit).
+# Prints ids and counts only.
+name: Own lane
+
+on:
+  workflow_dispatch:
+    inputs:
+      as_scheduled:
+        description: "what the clock on the server starts: a commit run (server/clock.json)"
+        type: boolean
+        default: false
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+
+concurrency:
+  group: own-lane
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    runs-on: [self-hosted, lantern]      # lantrNa's server
+    timeout-minutes: 130
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Load
+        run: |
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python own_lane.py --commit --minutes 100
+          else python own_lane.py; fi
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

@@ -4930,6 +4930,47 @@ create table if not exists public.company_pages (
   at      timestamptz not null default now()
 );
 alter table public.company_pages enable row level security;
+-- lantrNa's own lane (26 Nov 2026, own_lane.py): the companies that are not SDG2000 (ids LN_) are followed here and
+-- not in Airtable. own_companies: who is in the lane. own_pages: the pages watched for them, found on the company's
+-- site or asked for by a person. own_docs: the documents those pages link, under the id the library would give
+-- them, with what came of reading each. The text goes to public.documents and public.pages like any other.
+create table if not exists public.own_companies (
+  wba_id      text primary key,
+  since       timestamptz not null default now(),
+  searched_at timestamptz,            -- when its website was last searched for report pages
+  note        text
+);
+create table if not exists public.own_pages (
+  id          text primary key,       -- ids.link_id(wba_id, url)
+  wba_id      text not null,
+  url         text not null,
+  kind        text,
+  how         text not null default 'found',      -- found (on the site) or person (asked for with the extension)
+  status      text not null default 'watched',    -- watched, gone
+  first_seen  timestamptz not null default now(),
+  scanned_at  timestamptz,
+  last_result text,
+  fails       int not null default 0,
+  docs        int
+);
+create index if not exists own_pages_company on public.own_pages (wba_id);
+create table if not exists public.own_docs (
+  library_id  text primary key,       -- ids.doc_id(wba_id, url): the id of public.documents
+  wba_id      text not null,
+  url         text,
+  link_text   text,
+  found_on    text,                   -- own_pages.id
+  how         text not null default 'found',      -- found (on a watched page) or sent (with the extension)
+  status      text not null default 'new',        -- new, ok, no_text, encrypted, parse_fail, too_big, not_pdf, truncated, download_fail, refused
+  tries       int not null default 0,
+  first_seen  timestamptz not null default now(),
+  tried_at    timestamptz,
+  read_at     timestamptz
+);
+create index if not exists own_docs_company on public.own_docs (wba_id, status);
+alter table public.own_companies enable row level security;
+alter table public.own_pages enable row level security;
+alter table public.own_docs enable row level security;
 drop function if exists public.admin_company_list(text, text, int);
 create or replace function public.admin_company_list(key text, search text default null, max_rows int default 200, which text default null)
 returns jsonb
