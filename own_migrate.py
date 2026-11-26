@@ -10,6 +10,9 @@ run one at a time and can each be run again:
   (no flag)   counts, and writes nothing: the companies, their pages and their documents in Airtable (live,
               discarded, with a file, with the file's copy in lantrNa's storage), and their documents in the evidence
               database.
+  --stop      only the pages are no longer monitored, so that nothing new of these companies arrives while their
+              files are being copied (archive_copy.py copies the files of documents that are not discarded, so the
+              copy comes before --move). Reversible.
   --move      the evidence database learns them as the lane's own (own_lane.py): own_companies; own_pages from the
               pages still monitored; own_docs from the documents the database holds (with what was read of each) and
               from the library's rows it does not hold yet (to be fetched by the lane). From then on load_supabase.py
@@ -20,7 +23,7 @@ run one at a time and can each be run again:
               _moved/, and only then deleted. A document with a file and no copy of it (stored_file empty) is NOT
               deleted: its row would take the only copy with it. Not reversible, except by hand from the archive.
 
-    python own_migrate.py [--move | --delete] [--commit]
+    python own_migrate.py [--stop | --move | --delete] [--commit]
 
 Without --commit --move and --delete say what they would do. Prints ids and counts only. Env: AIRTABLE_TOKEN,
 AIRTABLE_BASE, SUPABASE_DB_URL; SUPABASE_URL and SUPABASE_SERVICE_KEY for the archive of --delete.
@@ -81,12 +84,12 @@ def archive_bytes(rows_by_table):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--move", action="store_true"); ap.add_argument("--delete", action="store_true"); ap.add_argument("--commit", action="store_true")
+    ap.add_argument("--stop", action="store_true"); ap.add_argument("--move", action="store_true"); ap.add_argument("--delete", action="store_true"); ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     for v in ("AIRTABLE_TOKEN", "AIRTABLE_BASE", "SUPABASE_DB_URL"):
         if not os.environ.get(v):
             sys.exit(f"Set {v}.")
-    if a.move and a.delete:
+    if a.stop + a.move + a.delete > 1:
         sys.exit("One step at a time: --move, and --delete on another run.")
     import requests, qa, evidence_db
     from monitor_core import airtable_request
@@ -118,6 +121,15 @@ def main():
         c["documents in the evidence database"], c["of them with text"] = cur.fetchone()
         cur.execute("select count(*) from public.own_companies where wba_id = any(%s)", (wbas,)); c["companies already in the lane"] = cur.fetchone()[0]
         print("In Airtable, not SDG2000: " + "; ".join(f"{k} {v:,}" for k, v in c.items()) + ".", flush=True)
+
+        if a.stop:
+            rows = airtable_patches(companies, pages, docs, date.today().isoformat())["monitored_links"]
+            print(f"--stop: monitored_links {len(rows):,} pages to switch off" + ("" if a.commit else " (not written)"), flush=True)
+            if a.commit:
+                for i in range(0, len(rows), 10):
+                    airtable_request("PATCH", f"{API}/{base}/{quote('monitored_links')}", H, payload={"records": [{"id": rid, "fields": f} for rid, f in rows[i:i + 10]]})
+                    time.sleep(0.22)
+                print(f"  monitored_links: {len(rows):,} rows changed", flush=True)
 
         if a.move:
             patches = airtable_patches(companies, pages, docs, date.today().isoformat())
