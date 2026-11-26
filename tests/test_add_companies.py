@@ -97,6 +97,9 @@ class NotInAirtable(unittest.TestCase):
         self.assertFalse(A.LN_IN_AIRTABLE)          # 26 Nov 2026: the owner's rule
         skip, post = src.index('if what == "add" and not LN_IN_AIRTABLE:'), src.index('"intake_note": f"{note}, added by a person in lanterN ({today})"')
         self.assertLess(skip, post); self.assertIn("continue", src[skip:skip + 160])          # the row is never reached
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.assertIn("and wba_id like 'PT\\\\_%' order by id limit 200", open(os.path.join(here, "page_scans.py"), encoding="utf-8").read())          # a page asked for another company waits
+        self.assertIn("status = 'stored' and wba_id like 'PT\\\\_%%' order by id", open(os.path.join(here, "browser_uploads.py"), encoding="utf-8").read())          # and so does a file sent for it
 
 
 if __name__ == "__main__":
