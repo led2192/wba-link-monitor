@@ -344,6 +344,13 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertTrue(j["created"]); self.assertEqual(j["id"], A.company_id("Acme Robotics Ltd", "")); self.assertEqual(j["doubts"], [])
         cur.execute("select name, website from public.companies where wba_id = %s", (j["id"],)); self.assertEqual(cur.fetchone(), ("Acme Robotics Ltd", "acme.example.com"))
         cur.execute("select public.upload_begin(%s, 'a.pdf', 5000, %s)", (j["id"], "ef" * 32)); self.assertEqual(cur.fetchone()[0]["path"], f"{j['id']}/{'ef' * 32}.pdf")      # its documents at once
+        # 26 Nov 2026: the page a document is sent from is asked for a scan, once, when it is of the company's own site
+        cur.execute("update public.companies set website = 'https://www.acme.example.com' where wba_id = %s", (j["id"],))
+        for page, sha in (("https://acme.example.com/investors/reports#2025", "e1" * 32), ("https://acme.example.com/investors/reports", "e2" * 32),
+                          ("https://reportlibrary.test/acme", "e3" * 32), ("https://acme.example.com/files/report.pdf", "e4" * 32), (None, "e5" * 32)):
+            cur.execute("select public.upload_begin(%s, 'p.pdf', 5000, %s, null, %s)", (j["id"], sha, page))
+        cur.execute("select url, client, status from public.page_scans where wba_id = %s", (j["id"],))
+        self.assertEqual(cur.fetchall(), [("https://acme.example.com/investors/reports", "sent a document from it", "new")])
         # clear duplicates are not made: the same name without its legal ending, the same website, the same LEI
         cur.execute("select public.request_company('ACME ROBOTICS')"); k = cur.fetchone()[0]; self.assertTrue(k["held"]); self.assertEqual(k["id"], j["id"])
         cur.execute("select public.request_company('Unilever')"); self.assertTrue(cur.fetchone()[0]["held"])

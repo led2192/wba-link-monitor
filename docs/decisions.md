@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-26: The page a person sends a document from becomes a watched page
+The owner's idea: when he downloads a document from a company's page with the extension, more documents are probably there, so the page should be watched. Chosen: the request "Scan this page" already makes (`page_scans`), written by the database when a document is registered, so the extension does not change and the page goes in by the door a person's own request uses. Limits: the company's own site only (the label of the page's host is the label of the company's website), not when the tab was the document itself, once in thirty days for a page. Rejected: watching any page a document is sent from (a regulator's or a report library's page would be watched under one company) and a new button (it is what the person already did).
+
 ### 2026-11-25: A candidate's size is the revenue its own report tags
 To choose among two thousand candidates the owner needs to see the large ones first. Chosen: the revenue tagged in the company's newest ESEF annual report, read as `esef_facts.py` reads it for the companies held, shown in its own currency, with a rough amount in euros at fixed rates used only to order the list. Rejected: Wikidata's revenue and employees (held for 15% of these companies) and market value (no open source for all of them). Changed the next day, after 7 of the first 35 had no amount: a company that tags none of the revenue concepts is sized by what stands in its place (a bank's interest revenue, a property company's rental income), kept with its concept and said in the list. It is a size for ordering, not the revenue an analyst validates; `esef_facts.py` and its score are untouched.
 

@@ -8629,6 +8629,38 @@ as $$
 $$;
 revoke all on function public.company_overlap_note(text, text[]) from public, anon, authenticated;
 
+-- The page a document was sent from is a page worth watching (26 Nov 2026, the owner: "where I download something
+-- there are probably more documents"). When a person sends a document with the extension from a web page of the
+-- company's own site, that page is asked for a scan as "Scan this page" does (public.page_scans): page_scans.py ticks
+-- it when it is already watched and hands it to the company's inbox as a link added by a person when it is not.
+-- Not when the tab was the document itself (the extension sends no page then), not a page of another site (a
+-- regulator, a library of reports), not twice in thirty days, and never in the way of the document: it fails silently.
+create or replace function public.watch_page_of_upload(who text, co text, page text) returns boolean
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  u text := split_part(btrim(coalesce(page, '')), '#', 1);
+  site text;
+begin
+  if u !~* '^https?://[^[:space:]/]+\.[^[:space:]]+$' or length(u) > 1000 or u ~* '\.pdf([?].*)?$' then
+    return false;
+  end if;
+  select c.website into site from public.companies c where c.wba_id = co;
+  if coalesce(public.site_label(public.site_host(site)), '') = '' or public.site_label(public.site_host(u)) is distinct from public.site_label(public.site_host(site)) then
+    return false;
+  end if;
+  if exists (select 1 from public.page_scans p where p.wba_id = co and p.url = u and p.at > now() - interval '30 days')
+     or (select count(*) from public.page_scans p where p.reviewer = who and p.at > now() - interval '1 day') >= 60 then
+    return false;
+  end if;
+  insert into public.page_scans (reviewer, wba_id, url, client) values (who, co, u, 'sent a document from it');
+  return true;
+exception when others then
+  return false;
+end;
+$$;
+revoke all on function public.watch_page_of_upload(text, text, text) from public, anon, authenticated;
+
 create or replace function public.upload_begin(
   company text, filename text, bytes bigint, sha256 text, source_url text default null, page_url text default null, client text default null,
   sent_type text default null, sent_year int default null)
@@ -8659,6 +8691,7 @@ begin
   if sha !~ '^[0-9a-f]{64}$' then
     raise exception 'the file''s SHA-256 is missing' using errcode = '22023';
   end if;
+  perform public.watch_page_of_upload(who, co, page_url);          -- 26 Nov 2026: the page it was sent from, also when the file is already held
   if kind is not null and kind <> all(array['Annual Report', 'Integrated Report', 'Sustainability Report', 'ESG Report', 'CSR Report', 'Impact Report', 'Climate Report', 'Environmental Reports', 'Social Reports', 'Financial Statement', '10K Form', 'Registration Document', 'Interim Reports', 'CDP Report', 'GRI', 'SASB Index', 'Human Rights Policy', 'Code of Conduct', 'Policy Documents', 'Statutory Documents', 'Company Presentations', 'Engagement Report', 'Certifications']) then
     raise exception 'not one of the document types' using errcode = '22023';
   end if;

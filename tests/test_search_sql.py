@@ -644,3 +644,8 @@ def test_a_company_added_says_how_far_it_is_covered_and_one_can_be_added_alone()
     assert "drop function if exists public.admin_company_list(text, text, int);" in SQL and "drop function if exists public.admin_catalogue_add(text, text, int);" in SQL
     assert 'authed("admin_catalogue_add", { key, of_country: null, most: 1, leis: [x.lei] })' in PAGE          # v193: "add now" on a wanted row
     assert '"Pages watched", "Documents", "Read", "Main reports", "To fetch"' in PAGE and "Added, no page watched yet" in PAGE
+
+
+def test_the_page_a_document_is_sent_from_is_watched():
+    assert "perform public.watch_page_of_upload(who, co, page_url);" in SQL and "exception when others then\n  return false;" in SQL          # never in the way of the document
+    assert "revoke all on function public.watch_page_of_upload(text, text, text) from public, anon, authenticated" in SQL
