@@ -44,6 +44,12 @@ from urllib.parse import urlparse
 LEGAL = {"inc", "incorporated", "corp", "corporation", "co", "company", "ltd", "limited", "plc", "sa", "ag", "nv", "bv", "se",
          "spa", "ab", "asa", "oyj", "as", "gmbh", "llc", "lp", "holdings", "holding", "group", "the", "sab", "de", "cv", "tbk", "pt",
          "bhd", "berhad", "kk", "pjsc", "ojsc", "jsc", "sae", "saog", "psc"}
+# 26 Nov 2026, the owner: "everything that is not SDG2000 must not be in Airtable". A company a person or the catalogue
+# adds exists in the evidence database at once (public.request_company) and gets NO row here: its request stays
+# 'new' and the files sent for it wait (browser_uploads.py treats them as waiting, not as orphans) until lantrNa's own
+# lane for these companies reads them without Airtable. Companies added before that day keep the rows they have.
+LN_IN_AIRTABLE = False
+
 LEI_RE = re.compile(r"^[A-Z0-9]{18}[0-9]{2}$")
 
 
@@ -206,7 +212,7 @@ def main():
         os.environ["QA_COMMIT"] = "true"
     run = qa.Run("add_companies.py")
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    c = {"hand rows": 0, "added": 0, "not added": 0, "requests copied": 0, "requests approved": 0, "made by people": 0, "withdrawn": 0, "rejected": 0, "restored": 0, "edited": 0}
+    c = {"hand rows": 0, "added": 0, "not added": 0, "requests copied": 0, "requests approved": 0, "made by people": 0, "withdrawn": 0, "rejected": 0, "restored": 0, "edited": 0, "kept out of Airtable": 0}
     new_ids = []
 
     records = list(sweep("companies", ["wba_id", "company_name", "website", "lei", "intake_note"]))
@@ -247,6 +253,8 @@ def main():
                     what, got, note = settle(name, website, lei, cid, existing)
                     c["made by people"] += 1
                     print(f"  company {cid} (request {rid}): {what}{' into ' + got if what == 'merge' else ''}", flush=True)
+                    if what == "add" and not LN_IN_AIRTABLE:
+                        c["kept out of Airtable"] += 1; continue          # it exists in the evidence database; nothing of it is written here
                     if what == "add":
                         new_ids.append(cid); c["added"] += 1
                     elif what == "merge":
@@ -379,7 +387,7 @@ def main():
 
     if a.ids_file:
         open(a.ids_file, "w").write(",".join(new_ids))
-    print(f"{c['made by people']} companies made by people ({c['withdrawn']} withdrawn as duplicates), {c['rejected']} rejected by the owner, {c['restored']} restored, {c['edited']} corrected; "
+    print(f"{c['made by people']} companies made by people ({c['kept out of Airtable']} kept out of Airtable, {c['withdrawn']} withdrawn as duplicates), {c['rejected']} rejected by the owner, {c['restored']} restored, {c['edited']} corrected; "
           f"{c['hand rows']} rows added by hand, {c['requests copied']} requests copied, {c['requests approved']} approved: "
           f"{c['added']} companies added, {c['not added']} not added" + ("" if a.commit else " (dry run: nothing written)"), flush=True)
     run.finish("ok", rows_in=c["hand rows"] + c["requests copied"] + c["requests approved"], rows_out=c["added"] if a.commit else 0,

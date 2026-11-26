@@ -90,6 +90,15 @@ class MadeByPeople(unittest.TestCase):
                          [("report_library", "recA", {"discard": True, "discard_reason": "Wrong company / misattributed"}), ("monitored_links", "recP", {"monitor": False})])
 
 
+
+class NotInAirtable(unittest.TestCase):
+    def test_a_company_that_is_not_sdg2000_gets_no_row(self):
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "add_companies.py"), encoding="utf-8").read()
+        self.assertFalse(A.LN_IN_AIRTABLE)          # 26 Nov 2026: the owner's rule
+        skip, post = src.index('if what == "add" and not LN_IN_AIRTABLE:'), src.index('"intake_note": f"{note}, added by a person in lanterN ({today})"')
+        self.assertLess(skip, post); self.assertIn("continue", src[skip:skip + 160])          # the row is never reached
+
+
 if __name__ == "__main__":
     unittest.main()
 
