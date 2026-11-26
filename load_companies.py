@@ -67,6 +67,35 @@ def company_rows(records):
     return out
 
 
+def pages_rows(records):
+    """[(wba_id, pages watched)] from Airtable's own count of a company's monitored pages (companies.urls_total), for the
+    admin list that says how far each company is covered (26 Nov 2026). A company with no count has none watched."""
+    out = []
+    for rec in records:
+        f = rec.get("fields", {})
+        wba = (f.get("wba_id") or "").strip()
+        if not wba or (f.get("intake_note") or "").startswith("rejected"):
+            continue
+        try:
+            n = int(f.get("urls_total") or 0)
+        except (TypeError, ValueError):
+            n = 0
+        out.append((wba, max(n, 0)))
+    return out
+
+
+def upsert_pages(conn, rows):
+    """public.company_pages (made by supabase/search.sql): the count of today, by wba_id. Skipped when the table is not there yet."""
+    with conn.cursor() as c:
+        c.execute("select to_regclass('public.company_pages') is not null")
+        if not c.fetchone()[0]:
+            conn.rollback(); return 0
+        c.executemany("""insert into public.company_pages (wba_id, watched) values (%s, %s)
+                         on conflict (wba_id) do update set watched = excluded.watched, at = now()""", rows)
+    conn.commit()
+    return len(rows)
+
+
 UNHELD_FIELDS = ["library_id", "wba_id", "document_url", "doc_label", "effective_type", "file_status"]
 UNHELD_FORMULA = "AND({file}=BLANK(), {document_url}!='', NOT({discard}))"
 UNHELD_SQL = """create table if not exists public.unheld_documents (
@@ -160,7 +189,7 @@ def main():
         os.environ["QA_COMMIT"] = "true"
     run = qa.Run("load_companies.py")
     t0 = time.time()
-    records = sweep("companies", FIELDS + ["fy_end_month"])
+    records = sweep("companies", FIELDS + ["fy_end_month", "urls_total"])
     rows, fiscal = company_rows(records), fiscal_rows(records)
     by_ind = collections.Counter(r[2] or "(none)" for r in rows)
     by_reg = collections.Counter(r[4] or "(none)" for r in rows)
@@ -171,6 +200,8 @@ def main():
         with evidence_db.connect() as conn:
             upsert(conn, rows)
             filled = fill_fiscal(conn, fiscal)
+            watched = upsert_pages(conn, pages_rows(records))
+            print(f"  pages watched: {watched:,} companies written to public.company_pages", flush=True)
         print(f"  {len(rows):,} rows upserted into public.companies; fiscal year end month: {len(fiscal):,} held by Airtable, {filled:,} written where the database had none", flush=True)
     unheld = unheld_rows(sweep("report_library", UNHELD_FIELDS + ["file", "discard"], UNHELD_FORMULA))
     print(f"{len(unheld):,} documents known by their address with no file, of {len({r[1] for r in unheld}):,} companies", flush=True)

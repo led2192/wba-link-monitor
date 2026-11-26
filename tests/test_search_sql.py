@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v192 2026-11-26";' in PAGE
+    assert 'const CLIENT = "lantern v193 2026-11-26";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -581,7 +581,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "function factLine(points, large, unit, before)" in PAGE and '"stroke-dasharray": "5 4"' in PAGE      # as first reported, dashed
     assert "update public.ask_facts f set restated = true where f.restated is null and f.kind = 'number' and public.fact_restated(f.what);" in SQL
     assert "x.shown_year desc nulls last, x.doc_year desc nulls last, x.restated desc, x.at desc)" in SQL          # in a year, the latest report first
-    assert '"All companies": adminAllCompanies' in PAGE and 'authed("admin_company_list", { key, search: st.search || null, max_rows: 200 })' in PAGE
+    assert '"All companies": adminAllCompanies' in PAGE and 'authed("admin_company_list", { key, search: st.search || null, max_rows: st.only ? 500 : 200, which: st.only || null })' in PAGE
     assert 'const worded = f.kind !== "number" && f.kind !== "yes_no";' in PAGE          # two wordings of a sentence are not "reports differ"
 
 
@@ -638,3 +638,9 @@ def test_learning_from_use_is_an_option_and_the_digest_is_on_today():
 def test_the_catalogue_shows_the_size_of_a_candidate():
     assert "alter table public.catalogue add column if not exists revenue_eur" in SQL and "'revenue_eur', c.revenue_eur" in SQL
     assert '"Last report", "Revenue", "Website"' in PAGE and "if (bySize) all.sort(" in PAGE          # v191: largest first
+
+
+def test_a_company_added_says_how_far_it_is_covered_and_one_can_be_added_alone():
+    assert "drop function if exists public.admin_company_list(text, text, int);" in SQL and "drop function if exists public.admin_catalogue_add(text, text, int);" in SQL
+    assert 'authed("admin_catalogue_add", { key, of_country: null, most: 1, leis: [x.lei] })' in PAGE          # v193: "add now" on a wanted row
+    assert '"Pages watched", "Documents", "Read", "Main reports", "To fetch"' in PAGE and "Added, no page watched yet" in PAGE

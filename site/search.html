@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v192 2026-11-26";
+  const CLIENT = "lantern v193 2026-11-26";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2670,10 +2670,10 @@
   // v189: what waits for the owner today, counted from what the sections themselves read, and what needs nobody.
   async function adminToday(body) {
     const nav = $("admin").querySelector("[data-view]").parentElement, quiet = p => p.catch(() => null), year = new Date().getFullYear();
-    const [cos, unread, recent, cat, jobs, hard, dig] = await Promise.all([quiet(authed("admin_companies", { key })),
+    const [cos, unread, recent, cat, jobs, hard, dig, addedCos] = await Promise.all([quiet(authed("admin_companies", { key })),
       quiet(authed("admin_unread_docs", { key, search: null, only_main: false, from_year: null, max_rows: 1 })),
       quiet(authed("admin_unread_docs", { key, search: null, only_main: true, from_year: year - 2, max_rows: 1 })),
-      quiet(authed("admin_catalogue", { key })), quiet(authed("admin_jobs", { key })), quiet(authed("admin_hard_searches", { key, days: 1 })), quiet(authed("admin_search_digest", { key }))]);
+      quiet(authed("admin_catalogue", { key })), quiet(authed("admin_jobs", { key })), quiet(authed("admin_hard_searches", { key, days: 1 })), quiet(authed("admin_search_digest", { key })), quiet(authed("admin_company_list", { key, search: null, max_rows: 500, which: "added" }))]);
     body.innerHTML = "";
     const line = (n, text, view, calm) => { const d = el("div"); d.style.cssText = "display:flex;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line)";
       const c = el("b", null, n == null ? "?" : String(n)); c.style.cssText = "width:56px;text-align:right;flex:none;font-size:17px" + (n && !calm ? ";color:#c0392b" : "");
@@ -2684,7 +2684,11 @@
     line(cos ? cos.filter(c => !c.review).length : null, "companies people added that you have not looked at: accept or reject.", "Companies");
     line(jobs ? (jobs.alerts || 0) : null, "critical jobs that failed or did not run.", "Jobs");
     line(recent ? recent.documents : null, `main reports of ${year - 2} or later whose file the robot could not get: open the address and send the file with the extension.`, "Documents to fetch");
+    // v193: a company added two days ago or more that the robot found no page for needs a page from the owner
+    const olderThan2 = c => c.added_at && (Date.now() - new Date(c.added_at).getTime()) > 2 * 864e5, ac = addedCos && addedCos.rows;
+    line(ac ? ac.filter(c => olderThan2(c) && c.pages === 0).length : null, "companies added two days ago or more with no page watched: the robot found no report page; give it one (open the page and send a document with the extension).", "All companies");
     head("Worth a look, when you have time");
+    line(ac ? ac.filter(c => olderThan2(c) && c.pages > 0 && !Number(c.documents)).length : null, "companies added two days ago or more with pages watched and no document yet.", "All companies", true);
     line(unread ? unread.documents : null, "documents of every kind and year the robot could not get. They wait; nothing breaks.", "Documents to fetch", true);
     const rows = (cat && cat.rows) || [], wanted = rows.filter(x => x.status === "wanted").length, fresh = rows.filter(x => x.status === "candidate" && !x.why && x.match !== "name").length;
     line(cat ? wanted : null, "candidates you marked as wanted and not added yet (20 a day).", "Catalogue", true);
@@ -2790,7 +2794,13 @@
       host.appendChild(adminTable(["Company", "Legal name", "Country", "Last report", "Revenue", "Website", kind === "new" || kind === "wanted" || kind === "not wanted" ? "Other names" : "Like", "Your choice"], shownRows.map(x => {
         const site = el("a", null, String(x.website || "").replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").slice(0, 40)); site.href = x.website; site.target = "_blank"; site.rel = "noopener";
         const pickBox = el("span"); const mk = (label, st) => { const a = el("a", null, label); a.href = "#"; a.style.marginRight = "8px"; a.onclick = ev => { ev.preventDefault(); set([x.lei], st); }; return a; };
-        if (x.status === "added") pickBox.append(el("span", "what", "added")); else pickBox.append(...(x.status === "wanted" ? [el("b", null, "wanted "), mk("undo", "candidate")] : x.status === "not wanted" ? [el("b", null, "not wanted "), mk("undo", "candidate")] : [mk("want", "wanted"), mk("not", "not wanted")]));
+        // v193 (the owner: "add one, or several, of those I want"): a wanted company is added by itself from its row
+        const addOne = () => { const a = el("a", null, "add now"); a.href = "#"; a.style.cssText = "display:block"; a.title = "It becomes a company of lantrNa now: its website is searched for report pages and its documents are fetched and read from then on.";
+          a.onclick = async ev => { ev.preventDefault(); a.textContent = "adding…"; let s = null; try { s = await authed("admin_catalogue_add", { key, of_country: null, most: 1, leis: [x.lei] }); } catch (e) {}
+            if (!s || !s.ok) { a.textContent = "not added: try again"; return; }
+            say.textContent = s.added ? ` ${x.name} added: it has its row in about 15 minutes; All companies shows how far it is covered.` : s.stopped ? " twenty companies a day at most: the rest tomorrow" : s.held ? ` ${x.name} was found among the companies held` : ` ${x.name} was not added`;
+            try { const fresh = await authed("admin_catalogue", { key }); if (fresh && fresh.rows) { rows.length = 0; rows.push(...fresh.rows); } } catch (e) {} fill(); show(); }; return a; };
+        if (x.status === "added") pickBox.append(el("span", "what", "added")); else pickBox.append(...(x.status === "wanted" ? [el("b", null, "wanted "), mk("undo", "candidate"), addOne()] : x.status === "not wanted" ? [el("b", null, "not wanted "), mk("undo", "candidate")] : [mk("want", "wanted"), mk("not", "not wanted")]));
         const name = el("span", null, x.name || ""); name.title = `LEI ${x.lei}` + (x.wikidata ? ` · Wikidata ${x.wikidata}` : "");
         // v177: a candidate matched by name says so wherever it is shown, with its entry to check
         if (x.match === "name") { const chk = el("a", null, "by name: check the entry"); chk.href = `https://www.wikidata.org/wiki/${encodeURIComponent(x.wikidata || "")}`; chk.target = "_blank"; chk.rel = "noopener"; chk.style.cssText = "display:block;font-size:12px"; name.append(chk); }
@@ -2814,7 +2824,7 @@
       adminBtn("Add 20 of the wanted", async () => { const n = rows.filter(x => x.status === "wanted" && x.match !== "name" && !x.why && live(x) && (!country || (x.country || "?") === country)).length;
         if (!n) { say.textContent = " no wanted company" + (country ? ` of ${country}` : "") + " to add: mark some first"; return; }
         if (!confirmOnce(`Add up to 20 of the ${n} wanted companies${country ? ` of ${country}` : ""}? Each becomes a company of lantrNa: its website is searched for report pages and its documents are fetched and read from then on.`)) return;
-        say.textContent = " adding…"; let s = null; try { s = await authed("admin_catalogue_add", { key, of_country: country || null, most: 20 }); } catch (e) {}
+        say.textContent = " adding…"; let s = null; try { s = await authed("admin_catalogue_add", { key, of_country: country || null, most: 20, leis: null }); } catch (e) {}
         if (!s || !s.ok) { say.textContent = " not added: try again"; return; }
         say.textContent = ` ${s.added} added` + (s.held ? `, ${s.held} already held` : "") + (s.other ? `, ${s.other} not added (see the row)` : "") + (s.stopped ? `; stopped: ${s.stopped}` : "") + ". Reading the list again…"; adminCatalogue(body); }),
       adminBtn("Download everything (CSV)", () => { const a = el("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + [cols.join(","), ...rows.map(x => cols.map(k => cell(x[k])).join(","))].join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-catalogue-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); }), say);
@@ -3611,13 +3621,20 @@
   const allCompaniesView = { search: "" };
   async function adminAllCompanies(body) {
     const st = allCompaniesView; body.innerHTML = "";
-    const got = await authed("admin_company_list", { key, search: st.search || null, max_rows: 200 }); if (!got) { body.textContent = "Not available."; return; }
+    const got = await authed("admin_company_list", { key, search: st.search || null, max_rows: st.only ? 500 : 200, which: st.only || null }); if (!got) { body.textContent = "Not available."; return; }
+    // v193 (the owner: "for the companies we add, how are we doing on coverage?"): which companies, and how far each is covered
+    const osel = el("select"); osel.setAttribute("aria-label", "which companies"); osel.style.cssText = "font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";
+    for (const [v, t] of [["", "Every company"], ["added", "Added by people or from the catalogue"], ["no pages", "Added, no page watched yet"], ["no documents", "Added, no document yet"]]) osel.append(Object.assign(el("option", null, t), { value: v }));
+    osel.value = st.only || ""; osel.onchange = () => { st.only = osel.value; adminAllCompanies(body); };
+    const num = v => v == null ? "?" : Number(v).toLocaleString("en-GB");
     const bar = el("div"); bar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px";
     const box = document.createElement("input"); box.placeholder = "a name, a country, an industry, an id"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:320px;background:var(--box);color:var(--fg)";
     const go = () => { st.search = box.value.trim(); adminAllCompanies(body); }; box.onkeydown = ev => { if (ev.key === "Enter") go(); };
-    bar.append(box, adminBtn("Search", go), el("span", null, `${Number(got.all).toLocaleString("en-GB")} companies in all, ${got.added} added by people. Showing ${got.rows.length}${got.rows.length >= 200 ? " (the first 200: search to narrow)" : ""}; people's first, then by documents.`));
+    bar.append(osel, box, adminBtn("Search", go), el("span", null, `${Number(got.all).toLocaleString("en-GB")} companies in all, ${got.added} added by people. Showing ${got.rows.length}${got.rows.length >= 200 ? " (the first 200: search to narrow)" : ""}; people's first, then by documents.`));
     body.appendChild(bar);
-    body.appendChild(adminTable(["Company", "Id", "Industry", "Country", "Documents", "Website", "LEI", "ISIN", ""], got.rows.map(c => {
+    const cover = el("p", "what", "Pages watched: the pages of the company's site the robot reads for new documents (counted twice a day; ? = not counted yet). Read: documents whose text is in the search. Main reports: annual, integrated and sustainability reports of the last two years. To fetch: documents known by their address that the robot could not get.");
+    body.appendChild(cover);
+    body.appendChild(adminTable(["Company", "Id", "Country", "Added", "Pages watched", "Documents", "Read", "Main reports", "To fetch", "Website", "LEI", ""], got.rows.map(c => {
       const name = el("span", null, c.name || "?"); if (c.added) { const t = el("span", null, "added by a person"); t.style.cssText = "font-size:11px;padding:0 6px;border:1px solid var(--line);border-radius:999px;margin-left:6px;white-space:nowrap"; name.appendChild(t); }
       let site = ""; if (c.website) { site = el("a", null, c.website.replace(/^https?:\/\//, "").replace(/\/$/, "")); site.href = /^https?:/.test(c.website) ? c.website : `https://${c.website}`; site.target = "_blank"; site.rel = "noopener"; }
       // v180 (the owner: "in All companies too"): a company a person added can be rejected here, as in Companies; pressed twice
@@ -3625,7 +3642,8 @@
         act.onclick = async ev => { ev.preventDefault(); if (act.textContent === "reject") { act.textContent = "reject: press again"; return; } act.textContent = "…";
           let s = null; try { s = await authed("admin_company_set", { key, request: c.request, verdict: "rejected", note: "rejected in All companies" }); } catch (e) {}
           if (s && s.ok) adminAllCompanies(body); else act.textContent = `not rejected: ${(s && s.why) || "try again"}`; }; }
-      return [name, c.id, c.industry || "", c.country || "", Number(c.documents).toLocaleString("en-GB"), site, c.lei || "", c.isin || "", act]; })));
+      const pg = el("span", null, num(c.pages)); if (c.added && c.pages === 0) { pg.style.color = "#c0392b"; pg.style.fontWeight = "700"; }
+      return [name, c.id, c.country || "", c.added_at ? adminWhen(c.added_at) : "", pg, num(c.documents), num(c.read), num(c.main_recent), num(c.to_fetch), site, c.lei || "", act]; })));
   }
   // Company facts (v73). One company's facts laid out by the taxonomy: a row a metric, a column a year, the newest
   // on the left, every value linked to the page it was read on. What changed from one year to the next is marked (a
