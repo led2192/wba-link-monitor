@@ -34,7 +34,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Load
         run: |
-          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then python own_lane.py --commit --minutes 100
+          if [ "${{ inputs.as_scheduled }}" = "true" ] || [ "${{ inputs.mode }}" = "commit" ]; then DISK=/srv/lantern/files; sudo mkdir -p "$DISK"; sudo chown "$(id -un)":"$(id -gn)" /srv/lantern "$DISK"; python own_lane.py --commit --minutes 100 --disk "$DISK"
           else python own_lane.py; fi
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}

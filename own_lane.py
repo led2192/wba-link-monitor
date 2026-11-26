@@ -22,10 +22,12 @@ evidence database and nowhere else. Four steps, each repeatable:
               files people sent with the extension for these companies (public.browser_uploads, status stored) are
               read from the storage the same way.
 
-The file itself is not kept: the document's address is, and the search links to it. A site that refuses the robot is
-not worked around; its documents come in through the extension.
+The file is kept (the owner, 26 Nov 2026: "if it can be kept, we keep it for now") where lantrNa keeps its copy of
+every document since 14 Nov: the private bucket `archive` of the project's storage and, with --disk, the server's
+disk, both at <wba_id>/<library_id>.pdf (archive_copy.py's own places). A file the storage refuses as too large stays
+on the disk only. A site that refuses the robot is not worked around; its documents come in through the extension.
 
-    python own_lane.py [--commit] [--minutes 100] [--docs 600] [--only LN_xxxxxxxx]
+    python own_lane.py [--commit] [--minutes 100] [--docs 600] [--only LN_xxxxxxxx] [--disk /srv/lantern/files]
 
 Dry run by default: reads and counts, fetches nothing from a company's site and writes nothing. Stops reading
 documents when the evidence database reaches MAX_DB_GB. Prints ids and counts only, never a name or an address.
@@ -116,6 +118,25 @@ def fetch_doc(sess, url, ua, max_bytes=MAX_MB << 20, timeout=90):
     return "ok", data
 
 
+def keep_file(data, wba, lid, archive=None, disk=None):
+    """Where the file was kept: "archive/<path> (N bytes)", "disk", both joined by " + ", or None when nowhere. A
+    failure to keep a file never stops its reading: it is said in the note and the document is read all the same."""
+    from archive_copy import object_path, stored_note, write_disk
+    kept = []
+    if archive is not None:
+        try:
+            if archive.upload(object_path(wba, lid), data) == "ok":
+                kept.append(stored_note(object_path(wba, lid), len(data)))
+        except Exception:
+            pass
+    if disk:
+        try:
+            write_disk(disk, wba, lid, data); kept.append("disk")
+        except Exception:
+            pass
+    return " + ".join(kept) or None
+
+
 def read_pdf(data):
     """(status, [(page, text)], page count, characters) of a PDF's bytes."""
     from build_fulltext import pdf_pages
@@ -129,6 +150,7 @@ def main():
     ap.add_argument("--minutes", type=float, default=100)
     ap.add_argument("--docs", type=int, default=600)
     ap.add_argument("--only", default="")
+    ap.add_argument("--disk", default="")
     a = ap.parse_args()
     if not os.environ.get("SUPABASE_DB_URL"):
         sys.exit("Set SUPABASE_DB_URL.")
@@ -172,6 +194,8 @@ def main():
             w, d = cur.fetchone(); print(f"Dry run: {w:,} pages watched, {d:,} documents registered and not read. Nothing fetched, nothing written.")
             run.finish("ok", rows_in=len(companies), rows_out=0, notes="dry run"); return 0
 
+        # active_search stops at import without Airtable's variables; the lane has no key to Airtable and gives it none
+        os.environ.setdefault("AIRTABLE_TOKEN", "none: the own lane does not use Airtable"); os.environ.setdefault("AIRTABLE_BASE", "none")
         import requests, active_search as AS, robot_identity as bot
         from discover_pages import explore
         from monitor_core import doc_links
@@ -229,15 +253,17 @@ def main():
                             where d.wba_id = any(%s) and (d.status = 'new' or (d.status = any(%s) and d.tries < 3 and d.tried_at < now() - interval '20 hours'))
                             order by d.first_seen desc limit %s""", (mine, list(RETRY_STATUS), a.docs))
             todo = cur.fetchall()
-            storage = None
+            storage = archive = None
             if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_KEY"):
                 from browser_uploads import Storage, library_id as upload_id
+                from archive_copy import Storage as Archive
                 storage = Storage(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"].strip(), sess)
+                archive = Archive(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"].strip(), sess)
                 cur.execute("select b.id, b.wba_id, b.source_url, b.filename, b.bytes, b.path from public.browser_uploads b where b.status = 'stored' and b.wba_id = any(%s) order by b.id limit 200", (mine,))
                 todo = [(upload_id(w, src, fn, size), w, src, None, path, uid, fn) for uid, w, src, fn, size, path in cur.fetchall()] + list(todo)
         else:
             print(f"The evidence database is at {db_gb:.0f} GB, at or over its ceiling of {MAX_DB_GB:.0f}: no document is read.", flush=True)
-        batch_docs, batch_pages, done = [], [], []
+        batch_docs, batch_pages, done, kept_at = [], [], [], {}
 
         def flush():
             if not batch_docs:
@@ -255,6 +281,8 @@ def main():
                                select %s, wba_id, url, %s, 1, now(), now(), 'sent' from public.documents where library_id = %s
                                on conflict (library_id) do update set status = excluded.status, tries = public.own_docs.tries + 1, tried_at = now(),
                                  read_at = case when excluded.status = 'ok' then now() else public.own_docs.read_at end""", (lid, status, lid))
+                if kept_at.get(lid):
+                    cur.execute("update public.own_docs set stored = %s where library_id = %s", (kept_at[lid], lid))
             conn.commit(); batch_docs.clear(); batch_pages.clear(); done.clear()
 
         for lid, wba, url, text, path, uid, fname in todo:
@@ -272,6 +300,7 @@ def main():
                 if not path:
                     cur.execute("update public.own_docs set status = %s, tries = tries + 1, tried_at = now() where library_id = %s", (status, lid)); conn.commit()
                 c[f"not read: {status}"] += 1; continue
+            kept_at[lid] = keep_file(data, wba, lid, archive if db_gb < MAX_DB_GB else None, a.disk or None); c["files kept"] += 1 if kept_at[lid] else 0
             typ, year, label = describe(url, text, pages[0][1] if pages else "", fname)
             batch_docs.append(document_row(lid, wba, names.get(wba), url, typ, year, label, status, n, chars, now()))
             batch_pages.extend((lid, p, t) for p, t in pages); done.append((lid, status, 1, uid, n))

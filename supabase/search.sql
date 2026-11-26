@@ -4968,6 +4968,7 @@ create table if not exists public.own_docs (
   read_at     timestamptz
 );
 create index if not exists own_docs_company on public.own_docs (wba_id, status);
+alter table public.own_docs add column if not exists stored text;   -- where the file is kept: "archive/<wba_id>/<library_id>.pdf (N bytes)", "disk", or both
 alter table public.own_companies enable row level security;
 alter table public.own_pages enable row level security;
 alter table public.own_docs enable row level security;
