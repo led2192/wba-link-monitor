@@ -657,3 +657,12 @@ def test_the_wanted_candidates_go_in_by_themselves_and_the_pages_say_what_happen
     import json, os
     clock = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server", "clock.json")).read()
     assert '"workflow": "catalogue_feed.yml"' in clock
+
+
+def test_the_own_lane_has_its_tables_and_its_hours():
+    for t in ("own_companies", "own_pages", "own_docs"):
+        assert f"create table if not exists public.{t} (" in SQL and f"alter table public.{t} enable row level security;" in SQL
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    assert '"workflow": "own_lane.yml"' in open(os.path.join(here, "server", "clock.json")).read()
+    assert "AIRTABLE" not in open(os.path.join(here, ".github", "workflows", "own_lane.yml")).read().replace("AIRTABLE_QA", "")          # the lane has no key to the Disclosure Library

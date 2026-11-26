@@ -1137,6 +1137,59 @@ class SearchOnPostgres(unittest.TestCase):
             self.assertEqual(sheet["facts"][0]["doc_type"], "Sustainability Report"); self.assertEqual(sheet["facts"][3]["label"], "Colour of the logo")
             c.rollback()
 
+    def test_a_company_that_is_not_sdg2000_is_followed_without_airtable(self):
+        # 26 Nov 2026: own_lane.py end to end on the database, the network stubbed: taken, its pages found and scanned,
+        # its documents read into documents and pages, the coverage counted; a second run changes nothing
+        import psycopg, own_lane as L, active_search as AS, discover_pages as D, qa
+        from unittest import mock
+        from ids import doc_id
+
+        class R:
+            status_code, url = 200, "https://lane.example/reports"
+            text = '<a href="/files/annual-report-2025.pdf">Annual Report 2025</a> <a href="/files/code.pdf">Code of conduct</a> <a href="/about">About</a>'
+
+        class Run:
+            def __init__(self, *a, **k): pass
+            def failure(self, *a, **k): pass
+            def finish(self, *a, **k): pass
+
+        with psycopg.connect(URL, autocommit=True) as c:
+            cur = c.cursor()
+            cur.execute("insert into public.companies (wba_id, name, website) values ('LN_lane0001', 'Lane Test Co', 'lane.example'), ('PT_LANE9', 'Listed Lane Co', 'listed.example') on conflict (wba_id) do nothing")
+            cur.execute("insert into public.company_requests (requester, name, wba_id, status) values ('tester@worldbenchmarkingalliance.org', 'Lane Test Co', 'LN_lane0001', 'new'), ('tester@worldbenchmarkingalliance.org', 'Listed Lane Co', 'PT_LANE9', 'new')")
+            cur.execute("insert into public.page_scans (reviewer, wba_id, url) values ('tester@worldbenchmarkingalliance.org', 'LN_lane0001', 'https://lane.example/sustainability')")
+            pages = {"https://lane.example/files/annual-report-2025.pdf": ("ok", [(1, "Lane Test Co Annual Report 2025 " + "revenue grew " * 40), (2, "zebrafinch emissions " * 30)], 140),
+                     "https://lane.example/files/code.pdf": ("no_text", [], 5)}
+            fetched = []
+
+            def fetch_doc(sess, url, ua, **k):
+                fetched.append(url); return "ok", url.encode()
+            def read_pdf(data):
+                st, pg, n = pages[data.decode()]; return st, pg, n, sum(len(t) for _, t in pg)
+            patches = [mock.patch.dict(os.environ, {"SUPABASE_DB_URL": URL, "SUPABASE_URL": "", "SUPABASE_SERVICE_KEY": ""}), mock.patch.object(sys, "argv", ["own_lane.py", "--commit"]),
+                       mock.patch.object(qa, "Run", Run), mock.patch.object(L.time, "sleep", lambda s: None), mock.patch.object(L, "fetch_doc", fetch_doc), mock.patch.object(L, "read_pdf", read_pdf),
+                       mock.patch.object(AS, "fetch", lambda sess, url, timeout=20: R()), mock.patch.object(D, "explore", lambda AS_, sess, home, want, have: ([("reports_hub", "https://lane.example/reports", "x", 2)], None))]
+            try:
+                for p in patches: p.start()
+                self.assertEqual(L.main(), 0)
+                cur.execute("select array_agg(wba_id) from public.own_companies"); self.assertEqual(cur.fetchone()[0], ["LN_lane0001"])          # the SDG2000 company never enters
+                cur.execute("select status, result from public.company_requests where wba_id = 'LN_lane0001'"); self.assertEqual(cur.fetchone(), ("added", "followed by lantrNa itself, outside Airtable"))
+                cur.execute("select how, status, last_result from public.own_pages where wba_id = 'LN_lane0001' order by how"); self.assertEqual(cur.fetchall(), [("found", "watched", "ok"), ("person", "watched", "ok")])
+                cur.execute("select status from public.page_scans where wba_id = 'LN_lane0001'"); self.assertEqual(cur.fetchone()[0], "done")
+                ar = doc_id("LN_lane0001", "https://lane.example/files/annual-report-2025.pdf")
+                cur.execute("select library_id, doc_type, year, label, pages, text_status, wba_id, company from public.documents where wba_id = 'LN_lane0001' order by text_status desc")
+                got = cur.fetchall(); self.assertEqual(got[0], (ar, "Annual Report", 2025, "Annual Report 2025", 140, "ok", "LN_lane0001", "Lane Test Co")); self.assertEqual(got[1][5], "no_text")
+                cur.execute("select count(*) from public.pages where library_id = %s", (ar,)); self.assertEqual(cur.fetchone()[0], 2)
+                cur.execute("select status, count(*) from public.own_docs where wba_id = 'LN_lane0001' group by 1 order by 1"); self.assertEqual(cur.fetchall(), [("no_text", 1), ("ok", 1)])
+                cur.execute("select watched from public.company_pages where wba_id = 'LN_lane0001'"); self.assertEqual(cur.fetchone()[0], 2)
+                n = len(fetched); self.assertEqual(L.main(), 0); self.assertEqual(len(fetched), n)          # again: nothing is fetched or written twice
+                cur.execute("select count(*) from public.documents where wba_id = 'LN_lane0001'"); self.assertEqual(cur.fetchone()[0], 2)
+            finally:
+                for p in patches: p.stop()
+                cur.execute("delete from public.pages where library_id in (select library_id from public.documents where wba_id = 'LN_lane0001')")
+                for t in ("documents", "own_docs", "own_pages", "own_companies", "company_pages", "page_scans", "company_requests", "companies"):
+                    cur.execute(f"delete from public.{t} where wba_id in ('LN_lane0001', 'PT_LANE9')")
+
     def test_the_owner_sees_every_company_with_its_documents_peoples_first(self):
         import psycopg
         with psycopg.connect(URL) as c:
