@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       step:
-        description: "count, move or delete"
+        description: "count, stop, move or delete"
         default: "count"
       mode:
         description: "dry_run or commit"
@@ -34,6 +34,7 @@ jobs:
       - name: Run
         run: |
           ARGS=()
+          if [ "${{ inputs.step }}" = "stop" ]; then ARGS+=(--stop); fi
           if [ "${{ inputs.step }}" = "move" ]; then ARGS+=(--move); fi
           if [ "${{ inputs.step }}" = "delete" ]; then ARGS+=(--delete); fi
           if [ "${{ inputs.mode }}" = "commit" ]; then ARGS+=(--commit); fi
