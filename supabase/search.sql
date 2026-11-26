@@ -4919,7 +4919,19 @@ grant execute on function public.admin_company_facts(text, text) to authenticate
 -- Every company lanterN holds, for the owner (15 Nov 2026, the owner: "I should see the ones we already have, and the
 -- ones people want to add"): the companies table, by word (name, id, industry, country), with the documents each has
 -- and whether a person added it (an id that starts with LN_). The most documents first; at most 500 rows.
-create or replace function public.admin_company_list(key text, search text default null, max_rows int default 200)
+-- How far each company is covered (26 Nov 2026; the owner: "for every company we add, I need to know how we are doing").
+-- company_pages: the pages the robot watches for a company, counted in Airtable (companies.urls_total) and copied by
+-- load_companies.py twice a day. The list then says, for a company: pages watched, documents held, documents read,
+-- main reports of the last two years, and documents known by their address with no file. "which" narrows it to the
+-- companies people added: all of them, those with no page watched, or those with no document.
+create table if not exists public.company_pages (
+  wba_id  text primary key,
+  watched int not null default 0,
+  at      timestamptz not null default now()
+);
+alter table public.company_pages enable row level security;
+drop function if exists public.admin_company_list(text, text, int);
+create or replace function public.admin_company_list(key text, search text default null, max_rows int default 200, which text default null)
 returns jsonb
 language plpgsql stable security definer
 set search_path = public, extensions
@@ -4932,21 +4944,27 @@ begin
   return jsonb_build_object(
     'all', (select count(*) from public.companies),
     'added', (select count(*) from public.companies c where c.wba_id like 'LN\_%'),
-    'rows', (select coalesce(jsonb_agg(to_jsonb(x) order by x.added desc, x.documents desc, x.name), '[]'::jsonb) from (
+    'rows', (select coalesce(jsonb_agg(to_jsonb(x) order by x.added desc, x.added_at desc nulls last, x.documents desc, x.name), '[]'::jsonb) from (
       select c.wba_id as id, c.name, c.industry, c.country, c.region, c.website, to_jsonb(c) ->> 'lei' as lei, to_jsonb(c) ->> 'isin' as isin,
-             c.wba_id like 'LN\_%' as added, coalesce(n.documents, 0) as documents,
+             c.wba_id like 'LN\_%' as added, coalesce(n.documents, 0) as documents, coalesce(n.read, 0) as read, coalesce(n.main_recent, 0) as main_recent,
+             p.watched as pages, p.at as pages_at, (select count(*) from public.unheld_documents u where u.wba_id = c.wba_id) as to_fetch,
+             (select min(q.at) from public.company_requests q where q.wba_id = c.wba_id) as added_at,
              -- the request a person's company was made by, so that the owner can reject it from this list too (25 Nov 2026)
              (select q.id from public.company_requests q where q.wba_id = c.wba_id and q.review is distinct from 'rejected' order by q.id desc limit 1) as request
       from public.companies c
-        left join (select d.wba_id, count(*) as documents from public.documents d group by d.wba_id) n on n.wba_id = c.wba_id
-      where not exists (select 1 from regexp_split_to_table(lower(btrim(coalesce(search, ''))), '\s+') w
+        left join (select d.wba_id, count(*) as documents, count(*) filter (where coalesce(d.pages, 0) > 0) as read,
+                          count(*) filter (where d.year >= extract(year from now())::int - 2 and d.doc_type in ('Annual Report', 'Integrated Report', 'Sustainability Report', '10K Form', 'ESG Report', 'CSR Report', 'Impact Report')) as main_recent
+                     from public.documents d group by d.wba_id) n on n.wba_id = c.wba_id
+        left join public.company_pages p on p.wba_id = c.wba_id
+      where (coalesce(which, '') = '' or (c.wba_id like 'LN\_%' and (which = 'added' or (which = 'no pages' and coalesce(p.watched, 0) = 0) or (which = 'no documents' and coalesce(n.documents, 0) = 0))))
+        and not exists (select 1 from regexp_split_to_table(lower(btrim(coalesce(search, ''))), '\s+') w
                         where w <> '' and position(w in lower(concat_ws(' ', c.name, c.wba_id, c.industry, c.country, c.region, c.website))) = 0)
-      order by (c.wba_id like 'LN\_%') desc, coalesce(n.documents, 0) desc, c.name
+      order by (c.wba_id like 'LN\_%') desc, 13 desc nulls last, coalesce(n.documents, 0) desc, c.name
       limit least(greatest(coalesce(max_rows, 200), 1), 500)) x));
 end;
 $$;
-revoke all on function public.admin_company_list(text, text, int) from public, anon;
-grant execute on function public.admin_company_list(text, text, int) to authenticated;
+revoke all on function public.admin_company_list(text, text, int, text) from public, anon;
+grant execute on function public.admin_company_list(text, text, int, text) to authenticated;
 
 -- The option ask_metric_names tried on a past answer (15 Nov 2026, the owner allowed this paid comparison). The pages
 -- that answer read are sent to the reader three times: twice as today (to know how much two answers differ by
@@ -5672,7 +5690,11 @@ grant execute on function public.admin_catalogue_set(text, text[], text) to auth
 -- (LN_ and a hash of its LEI), the same doubts written for the owner, the same twenty a day. From there the pipeline
 -- takes it as any company a person added: its row, the search of its website for report pages, the watch.
 -- Only exact matches (by LEI) that are new go in this way; one matched by name is added by hand after a look.
-create or replace function public.admin_catalogue_add(key text, of_country text default null, most int default 20) returns jsonb
+-- 26 Nov 2026 (the owner: "it should also let me add one, or several, of those I want"): leis names the candidates to
+-- add, wanted or not yet marked; without it, the largest of the wanted as before. The old three-argument form is
+-- dropped so that a call by name finds one function.
+drop function if exists public.admin_catalogue_add(text, text, int);
+create or replace function public.admin_catalogue_add(key text, of_country text default null, most int default 20, leis text[] default null) returns jsonb
 language plpgsql security definer set search_path = public, extensions
 as $$
 #variable_conflict use_variable
@@ -5688,9 +5710,11 @@ begin
     raise exception 'not allowed' using errcode = '42501';
   end if;
   for r in select c.lei, left(coalesce(c.owner_name, nullif(btrim(c.common_name), ''), c.legal_name), 120) as name, coalesce(c.owner_website, c.website) as website from public.catalogue c
-           where c.status = 'wanted' and c.match = 'lei' and c.duplicate_why is null and coalesce(c.owner_website, c.website) is not null
-             and (c.last_year is null or c.last_year >= extract(year from now())::int - 2)          -- not one that stopped filing: it may no longer exist
-             and (of_country is null or of_country = '' or upper(c.country) = upper(of_country))
+           where c.duplicate_why is null and coalesce(c.owner_website, c.website) is not null
+             and ((leis is not null and c.lei = any(leis) and c.status in ('wanted', 'candidate'))          -- the ones the owner named, whatever their year or match: he looked at them
+               or (leis is null and c.status = 'wanted' and c.match = 'lei'
+                   and (c.last_year is null or c.last_year >= extract(year from now())::int - 2)          -- not one that stopped filing: it may no longer exist
+                   and (of_country is null or of_country = '' or upper(c.country) = upper(of_country))))
            order by c.revenue_eur desc nulls last, coalesce(c.common_name, c.legal_name), c.lei limit greatest(1, least(coalesce(most, 20), 20)) loop          -- the largest first, where the size is known
     begin
       got := public.request_company(r.name, r.website, r.lei, 'from the catalogue', 'catalogue');
@@ -5713,8 +5737,8 @@ begin
   return jsonb_build_object('ok', true, 'added', added, 'held', held, 'other', other);
 end;
 $$;
-revoke all on function public.admin_catalogue_add(text, text, int) from public, anon;
-grant execute on function public.admin_catalogue_add(text, text, int) to authenticated;
+revoke all on function public.admin_catalogue_add(text, text, int, text[]) from public, anon;
+grant execute on function public.admin_catalogue_add(text, text, int, text[]) to authenticated;
 
 create table if not exists public.register_names (
   key    text not null,

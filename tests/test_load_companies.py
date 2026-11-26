@@ -32,6 +32,13 @@ class Rows(unittest.TestCase):
 
 
 
+class Pages(unittest.TestCase):
+    def test_the_pages_watched_of_each_company(self):
+        recs = [{"fields": {"wba_id": "PT_1", "urls_total": 6}}, {"fields": {"wba_id": "LN_a"}}, {"fields": {"wba_id": "LN_b", "urls_total": "x"}},
+                {"fields": {"urls_total": 3}}, {"fields": {"wba_id": "LN_c", "urls_total": 2, "intake_note": "rejected 25 Nov"}}]
+        self.assertEqual(L.pages_rows(recs), [("PT_1", 6), ("LN_a", 0), ("LN_b", 0)])          # no count is none watched; no id and a rejected company are left out
+
+
 class Unheld(unittest.TestCase):
     def test_only_documents_with_an_address_and_no_file(self):
         recs = [{"fields": {"library_id": "PT_1-a", "wba_id": "PT_1", "document_url": "https://x.org/ar-2024.pdf", "doc_label": "2024 | X | Annual Report", "effective_type": "Annual Report", "file_status": {"name": "blocked"}}},

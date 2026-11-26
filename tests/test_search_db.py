@@ -334,6 +334,10 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select lei, status, duplicate_why from public.catalogue order by lei"); cat = {r[0][:6]: r[1:] for r in cur.fetchall()}
         self.assertEqual(cat["529900"], ("added", None)); self.assertEqual(cat["549300"], ("candidate", "held: found when adding"))          # the same name as a company just made
         self.assertEqual((cat["213800"][0], cat["969500"][0]), ("wanted", "wanted"))          # one matched by name, and another country: not taken
+        # 26 Nov 2026: the ones the owner names are added by themselves, wanted or not yet marked, and no other
+        cur.execute("select public.admin_catalogue_add('k', null, 1, array['894500XXXXXXXXXXXX79'])"); self.assertEqual(cur.fetchone()[0], {"ok": True, "added": 1, "held": 0, "other": 0})
+        cur.execute("select lei, status from public.catalogue where lei like '8945%' or lei like '9695%' order by lei"); self.assertEqual([r[1] for r in cur.fetchall()], ["added", "wanted"])
+        cur.execute("select count(*) from pg_proc where proname = 'admin_catalogue_add'"); self.assertEqual(cur.fetchone()[0], 1)          # one form only: a call by name is not ambiguous
         cur.execute("select c.wba_id, q.lei, q.client from public.companies c join public.company_requests q on q.wba_id = c.wba_id where c.name = 'Gnu Rail'")
         made = cur.fetchone(); self.assertRegex(made[0], r"^LN_[0-9a-f]{8}$"); self.assertEqual(made[1:], ("529900ABCDEFGHIJKL12", "catalogue"))
         cur.execute("delete from public.company_requests where client = 'catalogue'"); cur.execute("delete from public.companies where name = 'Gnu Rail'"); cur.execute("delete from public.catalogue")
@@ -1132,6 +1136,17 @@ class SearchOnPostgres(unittest.TestCase):
             cur.execute("select jsonb_array_length(public.admin_company_list('k', 'zebra chile') -> 'rows'), jsonb_array_length(public.admin_company_list('k', 'zebra mars') -> 'rows'), "
                         "jsonb_array_length(public.admin_company_list('k', null, 1) -> 'rows')")
             self.assertEqual(cur.fetchone(), (1, 0, 1))
+            # 26 Nov 2026: how far a company is covered, and the companies people added on their own
+            cur.execute("insert into public.companies (wba_id, name, industry, country) values ('LN_zz000002', 'Zebra Second Co', 'Retail', 'Spain') on conflict (wba_id) do nothing")
+            cur.execute("insert into public.company_pages (wba_id, watched) values ('LN_zz000001', 0), ('LN_zz000002', 4), ('PT_ZZ9', 7)")
+            cur.execute("insert into public.documents (library_id, wba_id, year, doc_type, pages) values ('zz-3', 'LN_zz000002', extract(year from now())::int - 1, 'Annual Report', 120), ('zz-4', 'LN_zz000002', 2019, 'Policy', 0)")
+            cur.execute("select public.admin_company_list('k', 'zebra', 200, 'added')"); rows = {r["id"]: r for r in cur.fetchone()[0]["rows"]}
+            self.assertEqual(set(rows), {"LN_zz000001", "LN_zz000002"})
+            z = rows["LN_zz000002"]; self.assertEqual((z["pages"], z["documents"], z["read"], z["main_recent"], z["to_fetch"]), (4, 2, 1, 1, 0))
+            cur.execute("select public.admin_company_list('k', 'zebra', 200, 'no pages') -> 'rows' -> 0 ->> 'id', jsonb_array_length(public.admin_company_list('k', 'zebra', 200, 'no documents') -> 'rows')")
+            self.assertEqual(cur.fetchone(), ("LN_zz000001", 1))
+            cur.execute("select public.admin_company_list('k', 'zebra listed') -> 'rows' -> 0 ->> 'pages'"); self.assertEqual(cur.fetchone()[0], "7")
+            cur.execute("select count(*) from pg_proc where proname = 'admin_company_list'"); self.assertEqual(cur.fetchone()[0], 1)
             c.rollback()
 
     def test_a_readers_reply_is_reduced_to_numbers_for_the_names_comparison(self):
