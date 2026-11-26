@@ -1,0 +1,48 @@
+# The companies that are not SDG2000 and were put in Airtable leave it for lantrNa's own lane (own_migrate.py).
+# By hand only. step: count (writes nothing), move (reversible), delete (not reversible; archives every row first).
+# Nothing is written unless mode=commit. Prints ids and counts only.
+name: Own migrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: "count, move or delete"
+        default: "count"
+      mode:
+        description: "dry_run or commit"
+        default: "dry_run"
+
+concurrency:
+  group: own-migrate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: [self-hosted, lantern]      # lantrNa's server
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server's own Python (kept on its disk, shared by its runners)
+        run: |
+          [ -x /srv/lantern/venv/bin/python ] || python3 -m venv /srv/lantern/venv
+          echo "/srv/lantern/venv/bin" >> "$GITHUB_PATH"
+      - run: pip install -r requirements.txt
+      - name: Run
+        run: |
+          ARGS=()
+          if [ "${{ inputs.step }}" = "move" ]; then ARGS+=(--move); fi
+          if [ "${{ inputs.step }}" = "delete" ]; then ARGS+=(--delete); fi
+          if [ "${{ inputs.mode }}" = "commit" ]; then ARGS+=(--commit); fi
+          python own_migrate.py "${ARGS[@]}"
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          AIRTABLE_QA_TOKEN: ${{ secrets.AIRTABLE_QA_TOKEN }}
+          AIRTABLE_QA_BASE: appJQ2mRtjHjzLq9E

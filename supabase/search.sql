@@ -4968,6 +4968,7 @@ create table if not exists public.own_docs (
   read_at     timestamptz
 );
 create index if not exists own_docs_company on public.own_docs (wba_id, status);
+delete from public.own_docs where library_id like '%|%';   -- the three rows of the lane's first run (26 Nov 2026), registered under another id than the library's; nothing was read of them
 alter table public.own_docs add column if not exists stored text;   -- where the file is kept: "archive/<wba_id>/<library_id>.pdf (N bytes)", "disk", or both
 alter table public.own_companies enable row level security;
 alter table public.own_pages enable row level security;
