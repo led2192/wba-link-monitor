@@ -78,6 +78,11 @@ class Lane(unittest.TestCase):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
         self.assertLess(src.index('os.environ.setdefault("AIRTABLE_TOKEN", "none'), src.index("import requests, active_search as AS"))          # 26 Nov: the first run stopped at this import
 
+    def test_the_lane_presents_itself_as_the_lists_robot_does(self):
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
+        self.assertTrue(L.AS_BROWSER); self.assertIn("bot.BROWSER_UA if AS_BROWSER else bot.BOT_UA", src)          # the owner's choice of 26 Nov 2026
+        self.assertIn("refused", L.RETRY_STATUS)          # a document refused is asked for again, three times at most
+
     def test_nothing_of_the_lane_is_written_to_airtable(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
         self.assertNotIn("airtable_request", src); self.assertNotIn('environ["AIRTABLE', src); self.assertNotIn("secrets.AIRTABLE_TOKEN", src)

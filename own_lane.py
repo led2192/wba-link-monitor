@@ -43,7 +43,11 @@ RETRY_DAYS = 7               # a company with no page found is searched again af
 SCAN_HOURS = 20
 MAX_DOCS_A_PAGE = 400
 PAUSE = 1.0                  # seconds between two requests to company sites
-RETRY_STATUS = ("download_fail", "truncated")
+RETRY_STATUS = ("download_fail", "truncated", "refused")
+# How the lane presents itself when it fetches a document. Its first run said its name (lanterN-bot) and every site
+# refused it. The owner, 26 Nov 2026: "as a browser, the same as the present robot", which is what the fetchers of the
+# list do until the named robot is measured and adopted for all of them (robot_identity.py). One identity for both.
+AS_BROWSER = True
 WANT = ["reports_hub", "sustainability_page"]
 
 
@@ -250,7 +254,7 @@ def main():
         todo = []
         if db_gb < MAX_DB_GB:
             cur.execute("""select d.library_id, d.wba_id, d.url, d.link_text, null::text, null::bigint, null::text from public.own_docs d
-                            where d.wba_id = any(%s) and (d.status = 'new' or (d.status = any(%s) and d.tries < 3 and d.tried_at < now() - interval '20 hours'))
+                            where d.wba_id = any(%s) and (d.status = 'new' or (d.status = any(%s) and d.tries < 3 and d.tried_at < now() - interval '5 hours'))
                             order by d.first_seen desc limit %s""", (mine, list(RETRY_STATUS), a.docs))
             todo = cur.fetchall()
             storage = archive = None
@@ -288,7 +292,7 @@ def main():
         for lid, wba, url, text, path, uid, fname in todo:
             if time.time() > deadline:
                 break
-            kind, data = fetch_doc(sess, storage.signed(path) if path else url, bot.BOT_UA); c["documents fetched"] += 1
+            kind, data = fetch_doc(sess, storage.signed(path) if path else url, bot.BROWSER_UA if AS_BROWSER else bot.BOT_UA); c["documents fetched"] += 1
             if not path:
                 time.sleep(PAUSE)
             status, pages, n, chars = ("ok", [], None, 0)
