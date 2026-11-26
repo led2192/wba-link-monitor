@@ -338,6 +338,13 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select public.admin_catalogue_add('k', null, 1, array['894500XXXXXXXXXXXX79'])"); self.assertEqual(cur.fetchone()[0], {"ok": True, "added": 1, "held": 0, "other": 0})
         cur.execute("select lei, status from public.catalogue where lei like '8945%' or lei like '9695%' order by lei"); self.assertEqual([r[1] for r in cur.fetchall()], ["added", "wanted"])
         cur.execute("select count(*) from pg_proc where proname = 'admin_catalogue_add'"); self.assertEqual(cur.fetchone()[0], 1)          # one form only: a call by name is not ambiguous
+        # 26 Nov 2026: the nightly feed adds the wanted in the name of the person who added from the catalogue before; nobody else can call it
+        cur.execute("select public.catalogue_feed(20)"); self.assertEqual(cur.fetchone()[0], {"ok": True, "added": 1, "held": 0, "other": 0})          # the Swedish one, still wanted
+        cur.execute("select status from public.catalogue where lei like '9695%'"); self.assertEqual(cur.fetchone()[0], "added")
+        cur.execute("select has_function_privilege('authenticated', 'public.catalogue_feed(int)', 'execute'), has_function_privilege('authenticated', 'public.catalogue_add_inner(text, int, text[])', 'execute')")
+        self.assertEqual(cur.fetchone(), (False, False))
+        cur.execute("insert into public.catalogue_feed_log (day, added, wanted_left, db_gb, base_full) values (current_date, 1, 0, 120.5, 0.84)")
+        cur.execute("select public.admin_catalogue('k') -> 'feed' -> 0 ->> 'added'"); self.assertEqual(cur.fetchone()[0], "1")
         cur.execute("select c.wba_id, q.lei, q.client from public.companies c join public.company_requests q on q.wba_id = c.wba_id where c.name = 'Gnu Rail'")
         made = cur.fetchone(); self.assertRegex(made[0], r"^LN_[0-9a-f]{8}$"); self.assertEqual(made[1:], ("529900ABCDEFGHIJKL12", "catalogue"))
         cur.execute("delete from public.company_requests where client = 'catalogue'"); cur.execute("delete from public.companies where name = 'Gnu Rail'"); cur.execute("delete from public.catalogue")

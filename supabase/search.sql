@@ -5613,6 +5613,7 @@ begin
   return jsonb_build_object(
     'total', (select count(*) from public.catalogue),
     'seen_at', (select max(c.seen_at) from public.catalogue c),
+    'feed', (select coalesce(jsonb_agg(to_jsonb(f) order by f.day desc), '[]'::jsonb) from (select * from public.catalogue_feed_log order by day desc limit 7) f),
     'rows', (select coalesce(jsonb_agg(jsonb_build_object('lei', c.lei, 'name', coalesce(c.owner_name, c.common_name, c.legal_name), 'legal_name', c.legal_name, 'aliases', c.aliases, 'country', c.country,
                                                           'website', coalesce(c.owner_website, c.website), 'fixed', c.owner_website is not null or c.owner_name is not null, 'wikidata', c.wikidata, 'why', c.duplicate_why, 'status', c.status, 'like_lei', c.like_lei, 'match', c.match, 'last_year', c.last_year, 'revenue', c.revenue, 'revenue_currency', c.revenue_currency, 'revenue_year', c.revenue_year, 'revenue_eur', c.revenue_eur, 'revenue_concept', c.revenue_concept, 'sized', c.size_at is not null,
                                                           'held', (select h.name from public.companies h where h.wba_id = c.duplicate_of))
@@ -5694,7 +5695,7 @@ grant execute on function public.admin_catalogue_set(text, text[], text) to auth
 -- add, wanted or not yet marked; without it, the largest of the wanted as before. The old three-argument form is
 -- dropped so that a call by name finds one function.
 drop function if exists public.admin_catalogue_add(text, text, int);
-create or replace function public.admin_catalogue_add(key text, of_country text default null, most int default 20, leis text[] default null) returns jsonb
+create or replace function public.catalogue_add_inner(of_country text default null, most int default 20, leis text[] default null) returns jsonb
 language plpgsql security definer set search_path = public, extensions
 as $$
 #variable_conflict use_variable
@@ -5706,9 +5707,6 @@ declare
   other int := 0;
   why text;
 begin
-  if not public.admin_ok(key) then
-    raise exception 'not allowed' using errcode = '42501';
-  end if;
   for r in select c.lei, left(coalesce(c.owner_name, nullif(btrim(c.common_name), ''), c.legal_name), 120) as name, coalesce(c.owner_website, c.website) as website from public.catalogue c
            where c.duplicate_why is null and coalesce(c.owner_website, c.website) is not null
              and ((leis is not null and c.lei = any(leis) and c.status in ('wanted', 'candidate'))          -- the ones the owner named, whatever their year or match: he looked at them
@@ -5737,8 +5735,56 @@ begin
   return jsonb_build_object('ok', true, 'added', added, 'held', held, 'other', other);
 end;
 $$;
+revoke all on function public.catalogue_add_inner(text, int, text[]) from public, anon, authenticated;
+
+create or replace function public.admin_catalogue_add(key text, of_country text default null, most int default 20, leis text[] default null) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return public.catalogue_add_inner(of_country, most, leis);
+end;
+$$;
 revoke all on function public.admin_catalogue_add(text, text, int, text[]) from public, anon;
 grant execute on function public.admin_catalogue_add(text, text, int, text[]) to authenticated;
+
+-- The wanted candidates go in by themselves, some every night (26 Nov 2026; the owner: "I would rather you did it,
+-- while you watch the room, the documents and the index"). catalogue_feed.py checks the room first and then calls
+-- catalogue_feed: the largest of the wanted, added in the name of the person who added from the catalogue before
+-- (the owner; no address is written anywhere), under the same twenty a day. Each night's outcome is kept in
+-- catalogue_feed_log and shown on the admin pages "Today" and "Catalogue". To stop it: unmark the wanted.
+create table if not exists public.catalogue_feed_log (
+  day         date primary key,
+  added       int not null default 0,
+  held        int not null default 0,
+  other       int not null default 0,
+  waited_why  text,                  -- why nothing was added: the room, the documents not arriving, nothing wanted
+  db_gb       numeric,
+  base_full   numeric,               -- Airtable records over the limit, 0 to 1
+  wanted_left int,
+  no_pages    int,                   -- companies added three days ago or more with no page watched
+  no_docs     int,                   -- with pages watched and no document
+  at          timestamptz not null default now()
+);
+alter table public.catalogue_feed_log enable row level security;
+
+create or replace function public.catalogue_feed(most int default 20) returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  who text;
+begin
+  select q.requester into who from public.company_requests q where q.client = 'catalogue' order by q.id limit 1;
+  if who is null then
+    return jsonb_build_object('ok', false, 'why', 'nobody has added from the catalogue yet: the first ones are added by the owner');
+  end if;
+  perform set_config('request.jwt.claims', jsonb_build_object('email', who)::text, true);
+  return public.catalogue_add_inner(null, most, null);
+end;
+$$;
+revoke all on function public.catalogue_feed(int) from public, anon, authenticated;
 
 create table if not exists public.register_names (
   key    text not null,
