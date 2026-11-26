@@ -413,6 +413,19 @@ def build_search_index(conn):
 DOC_BATCH = 5000
 
 
+def own_ids(conn):
+    """The library ids of the documents lantrNa follows without Airtable (public.own_docs). Once a company has left
+    Airtable its documents are in no metadata snapshot, and this load would rewrite them with no company, no type and
+    no year: they are skipped. An empty set where the table is not installed."""
+    with conn.cursor() as c:
+        c.execute("select to_regclass('public.own_docs') is not null")
+        if not c.fetchone()[0]:
+            conn.rollback(); return set()
+        c.execute("select library_id from public.own_docs"); got = {r[0] for r in c.fetchall()}
+    conn.rollback()
+    return got
+
+
 def upsert_documents(conn, rows, batch=DOC_BATCH, say=print):
     """The documents, written in batches of 5,000 with a commit after each, and only the rows that differ.
     Only the rows that differ (12 Nov 2026): every load rewrote every document, some 300,000 rows with their
@@ -624,7 +637,8 @@ def main():
 
     c = collections.Counter(); stopped = ""
     if a.commit:
-        c["documents upserted"] = upsert_documents(conn, (document_row(d, meta.get(i, {})) for i, d in index.items()))
+        own = own_ids(conn)          # 26 Nov 2026: the documents of lantrNa's own lane are written by own_lane.py and left alone here
+        c["documents upserted"] = upsert_documents(conn, (document_row(d, meta.get(i, {})) for i, d in index.items() if i not in own))
         todo = pending_pages[:a.parts] if a.parts else pending_pages
         for k, name in enumerate(todo, 1):
             if (time.time() - t0) / 60 > a.minutes:

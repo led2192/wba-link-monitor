@@ -1142,7 +1142,8 @@ class SearchOnPostgres(unittest.TestCase):
         # its documents read into documents and pages, the coverage counted; a second run changes nothing
         import psycopg, own_lane as L, active_search as AS, discover_pages as D, qa
         from unittest import mock
-        from ids import doc_id
+        from browser_uploads import library_id
+        doc_id = lambda w, u: library_id(w, u, None, None)
 
         class R:
             status_code, url = 200, "https://lane.example/reports"
@@ -1183,6 +1184,9 @@ class SearchOnPostgres(unittest.TestCase):
                 cur.execute("select status, count(*) from public.own_docs where wba_id = 'LN_lane0001' group by 1 order by 1"); self.assertEqual(cur.fetchall(), [("no_text", 1), ("ok", 1)])
                 cur.execute("select watched from public.company_pages where wba_id = 'LN_lane0001'"); self.assertEqual(cur.fetchone()[0], 2)
                 n = len(fetched); self.assertEqual(L.main(), 0); self.assertEqual(len(fetched), n)          # again: nothing is fetched or written twice
+                import load_supabase as LS
+                with psycopg.connect(URL) as c2:
+                    self.assertIn(ar, LS.own_ids(c2))          # the nightly load of the library leaves the lane's documents alone
                 cur.execute("select count(*) from public.documents where wba_id = 'LN_lane0001'"); self.assertEqual(cur.fetchone()[0], 2)
             finally:
                 for p in patches: p.stop()

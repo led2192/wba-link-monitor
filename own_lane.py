@@ -15,7 +15,7 @@ evidence database and nowhere else. Four steps, each repeatable:
               discover_pages.py finds them for the list (the same reading: active_search and discover_pages.explore).
               Asked again after RETRY_DAYS when none was found.
   3. scan     each watched page is read once a day; the documents it links (monitor_core.doc_links, the reading
-              the robot uses) are registered in public.own_docs under the id the library would give them (ids.doc_id).
+              the robot uses) are registered in public.own_docs under the id the library would give them.
   4. read     a registered document is fetched, its text read page by page (build_fulltext.pdf_pages) and written to
               public.documents and public.pages, where every search finds it. Type, year and title come from the
               file name and the first page (classify_library, date_documents), as for a file dropped by hand. The
@@ -66,13 +66,15 @@ def is_pdf_link(url):
 
 def new_docs(wba, links, known):
     """[(library_id, url, text)] for the document links of a page (monitor_core.doc_links: {key: (url, text)}) that
-    are PDFs and not registered yet. The id is the library's own (ids.doc_id), so a document can never be two rows."""
-    from ids import doc_id
+    are PDFs and not registered yet. The id is the library's own (the company's id and ten digits of the address's
+    hash, as harvest_reports.py and browser_uploads.py make it), so a document moved from Airtable and the same
+    document found again are one row."""
+    from browser_uploads import library_id as doc_id
     out, seen = [], set()
     for _, (url, text) in sorted(links.items()):
         if not is_pdf_link(url):
             continue
-        lid = doc_id(wba, url)
+        lid = doc_id(wba, url, None, None)
         if lid in known or lid in seen:
             continue
         seen.add(lid); out.append((lid, url, (text or "").strip()[:300]))

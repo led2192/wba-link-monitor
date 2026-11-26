@@ -485,3 +485,6 @@ psycopg sends a Python float as `double precision`, and Postgres does not pick a
 ## A module that stops at import stops whoever imports it (26 Nov 2026)
 `active_search.py` ends the program at import when `AIRTABLE_TOKEN` and `AIRTABLE_BASE` are not set. `own_lane.py` imports it for its reading of a website and runs with no Airtable variables on purpose: its first real run took its four companies and stopped there. The end-to-end test had not seen it because the test machine's environment had the variables. A script that reuses a module's pure functions must check what the module does when it is imported, and the test of it must run without the variables the script is meant to do without.
 
+## The library's document id is not `ids.doc_id` (26 Nov 2026)
+`ids.doc_id` gives `<company>|<host/path>`: the key the harvester uses to refuse a second row for a document. The `library_id` of a row, which is the id of `public.documents`, is `<company>-<ten hex digits of the SHA-1 of ids.normalize(address)>` (`harvest_reports.py`, `inbox.py`, `browser_uploads.library_id`). The own lane first registered documents under `ids.doc_id`: a document moved from Airtable and the same document found again by the lane would have been two rows. Seen on the first three rows, before anything was read.
+

@@ -34,13 +34,15 @@ class Lane(unittest.TestCase):
         self.assertEqual(L.home_of(""), ""); self.assertEqual(L.home_of("acme"), "")
 
     def test_the_documents_of_a_page_are_registered_once_under_the_librarys_id(self):
-        from ids import doc_id
+        from browser_uploads import library_id
+        doc_id = lambda w, u: library_id(w, u, None, None)
         links = {"k1": ("https://acme.example/files/annual-report-2025.pdf", "Annual report 2025"), "k2": ("https://acme.example/investors/results", "Results"),
                  "k3": ("https://cdn.example.net/acme/sustainability-2025.PDF?v=2", " Sustainability  ")}
         got = L.new_docs("LN_ab12cd34", links, set())
         self.assertEqual([g[1] for g in got], ["https://acme.example/files/annual-report-2025.pdf", "https://cdn.example.net/acme/sustainability-2025.PDF?v=2"])      # a page that is not a PDF is not a document yet
         self.assertEqual(got[0][0], doc_id("LN_ab12cd34", links["k1"][0])); self.assertEqual(got[1][2], "Sustainability")
         self.assertEqual(L.new_docs("LN_ab12cd34", links, {got[0][0], got[1][0]}), [])          # known: nothing twice
+        self.assertRegex(got[0][0], r"^LN_ab12cd34-[0-9a-f]{10}$")          # the library's form of id, so a document moved from Airtable is the same row
 
     def test_type_year_and_label(self):
         typ, year, label = L.describe("https://acme.example/files/annual-report-2024.pdf", "Annual Report 2024", "Acme Group\nAnnual Report 2024")

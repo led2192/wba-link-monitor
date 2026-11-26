@@ -2,6 +2,9 @@
 
 One entry per choice between options: what was decided, why, and what was rejected. Newest first. Earlier entries are reconstructed from code comments and project notes; dates are when the choice took effect.
 
+### 2026-11-26: The companies already in Airtable are moved, then discarded, then deleted, in that order
+Some companies that are not SDG2000 were put in Airtable between 11 and 26 Nov 2026, with their pages and documents. The owner: discard them and delete them. This is the one place where rows are deleted outside the three scripts the house rule names, by the owner's word, and so it is done as those scripts do it: the evidence database learns the rows first, the change in Airtable that can be undone comes second (pages off, documents discarded with a reason), and the deletion is a separate run that stores an archive of every field of every row before it deletes anything and keeps any document whose file has no copy in lantrNa's storage. Found on the way: the nightly load of the library rewrote every document it knew from its metadata snapshot, so a document gone from Airtable would have lost its company, type and year in the search the next night; the load now leaves the lane's documents alone.
+
 ### 2026-11-26: The own lane presents itself as the list's robot does
 The lane was built fetching documents under the robot's name (lanterN-bot, with its public page). On its first run the sites of three companies refused all three documents. The fetchers of the SDG2000 list present themselves as a browser, and the change to the named robot waits for its measurement (`robot_identity.py`, 11 Nov 2026). The owner chose: the lane does as the present robot does. One identity for both, changed together when the named robot is adopted. Rejected for now: the name in the lane only (the new companies would be read far less than the list's, for the same sites).
 
