@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v197 2026-11-27";' in PAGE
+    assert 'const CLIENT = "lantern v198 2026-11-27";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -679,5 +679,5 @@ def test_a_person_can_ask_for_a_company_of_the_catalogue():
 
 
 def test_a_list_of_companies_and_the_contacts_of_their_documents():
-    assert 'authed("admin_add_list", { key, rows: rows.slice(i, i + 100), scope: "main2" })' in PAGE and 'authed("admin_contacts_in_text"' in PAGE          # v197
+    assert '/rest/v1/rpc/admin_add_list' in PAGE and 'rows: rows.slice(i, i + 10), scope: "main2"' in PAGE and 'authed("admin_contacts_in_text"' in PAGE          # v197
     assert "create table if not exists public.contacts" not in SQL          # the addresses are found when asked and kept nowhere
