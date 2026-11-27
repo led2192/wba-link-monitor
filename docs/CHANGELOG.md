@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-27 `own_lane.py`: searching for report pages takes half a run at most, so pages found are scanned and read in the same run (the first run after 921 companies were added spent all its 100 minutes searching 433 of them); a company with no report page one hop from its home page has its home page watched. (#849)
 - 2026-11-27 Fix: "From your lists: possibly held already" paired companies whose websites end in a brand of their own (group.bnpparibas) with every site holding "group", and companies that only began with the same word (Adani Power, Adani Ports). `brand_label` takes the brand from such a site; a common word never makes a pair; names must hold one another word by word; a pair of two list companies is shown once. (#848)
 - 2026-11-27 Admin v199, All companies, "From your lists: possibly held already": `admin_list_duplicates` pairs each company of the owner's lists with the held companies it looks like (same LEI, its LEI the parent of a held one, website names that contain one another, names alike), strong or likely, with "Same company" (merge) and "Not the same". The companies of the owner's lists no longer fill the review queue of "Companies". (#847)
 - 2026-11-27 Fix, page v198: "Add a list" sent a hundred companies a call and the first call ran past the time a request is given, so nothing was added ("stopped: not saved"). Ten a call now, and a failed call says the server's own words and where it stopped. (#846)
