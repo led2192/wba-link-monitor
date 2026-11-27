@@ -92,6 +92,10 @@ class Lane(unittest.TestCase):
         self.assertEqual(keep, ["a", "b"]); self.assertEqual(sorted(leave), ["c", "d", "e"])
         self.assertEqual(L.main2(cand, 1, 2026)[0], ["a"]); self.assertEqual(L.main2(cand, 2, 2026)[0], [])          # two at most, counting those read before
 
+    def test_searching_takes_half_a_run_and_a_site_with_no_report_page_has_its_home_watched(self):
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
+        self.assertIn("find_until = time.time() + (deadline - time.time()) * 0.5", src); self.assertIn('found = [("home", home, "home page, no report page found", 0)]', src)
+
     def test_nothing_of_the_lane_is_written_to_airtable(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
         self.assertNotIn("airtable_request", src); self.assertNotIn('environ["AIRTABLE', src); self.assertNotIn("secrets.AIRTABLE_TOKEN", src)

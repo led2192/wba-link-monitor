@@ -229,12 +229,17 @@ def main():
         from load_supabase import upsert_documents, load_pages
         sess = requests.Session()
 
-        # 2. find
+        # 2. find. Half the run at most (27 Nov 2026: 921 companies added at once took a whole run to search and none of
+        # their documents was read): the pages already found are scanned and read in the other half.
+        find_until = time.time() + (deadline - time.time()) * 0.5
         for wba, name, website, searched in companies:
-            if time.time() > deadline:
+            if time.time() > find_until:
                 break
             cur.execute("select count(*) from public.own_pages where wba_id = %s and status = 'watched'", (wba,))
             has_pages = cur.fetchone()[0]
+            if searched and not has_pages and home_of(website):          # searched before the home page was a fallback: it is watched now, with no new search
+                cur.execute("insert into public.own_pages (id, wba_id, url, kind, how) values (%s, %s, %s, 'home', 'found') on conflict (id) do nothing", (link_id(wba, home_of(website)), wba, home_of(website)))
+                conn.commit(); c["home pages watched for a company searched before"] += 1; continue
             if searched and (has_pages or (datetime.now(timezone.utc) - searched).days < RETRY_DAYS):
                 continue          # searched once and it has pages, or searched lately and none was found; a page a person gave does not spare the first search
             home = home_of(website); found, why = (None, "no website")
@@ -244,6 +249,10 @@ def main():
                 except Exception as e:
                     found, why = None, type(e).__name__
                 time.sleep(PAUSE)
+            if not found and home and why not in ("no website",):
+                # no page of reports one hop away: the home page itself is watched, since many small sites link their
+                # reports from it; a page that links no PDF costs one reading a day
+                found = [("home", home, "home page, no report page found", 0)]
             for typ, url, note, ndocs in (found or []):
                 cur.execute("insert into public.own_pages (id, wba_id, url, kind, how) values (%s, %s, %s, %s, 'found') on conflict (id) do nothing", (link_id(wba, url), wba, url, typ))
             c["companies searched"] += 1; c["companies with pages found"] += 1 if found else 0; c["pages found"] += len(found or [])
