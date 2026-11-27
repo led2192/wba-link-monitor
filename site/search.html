@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v194 2026-11-26";
+  const CLIENT = "lantern v195 2026-11-27";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -2827,7 +2827,19 @@
     const cols = ["lei", "name", "legal_name", "aliases", "country", "last_year", "revenue", "revenue_currency", "revenue_year", "website", "wikidata", "match", "why", "held", "like_lei", "status"];
     const oldBox = document.createElement("input"); oldBox.type = "checkbox"; oldBox.id = "cat-old"; oldBox.onchange = () => { old = oldBox.checked; show(); };
     const oldLab = el("label", "what", `also those with no report since ${RECENT - 1} (${rows.filter(x => !live(x)).length.toLocaleString()})`); oldLab.htmlFor = "cat-old"; oldLab.title = "A company that stopped filing may have merged, delisted or closed. They are left out of the list and of 'Add 20 of the wanted' unless ticked here.";
+    // v195 (the owner, 27 Nov 2026: "the companies of this list that are in the catalogue: mark them wanted"): a list of
+    // LEIs pasted here, in any form, marks as wanted the new candidates among them. The list stays in this page.
+    const listBox = el("div"); listBox.style.cssText = "display:none;margin:8px 0";
+    const area = document.createElement("textarea"); area.rows = 4; area.placeholder = "Paste LEIs (20 characters each), one a line or separated by anything"; area.setAttribute("aria-label", "LEIs to mark as wanted");
+    area.style.cssText = "width:100%;max-width:640px;font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";
+    listBox.append(area, el("br"), adminBtn("Mark these as wanted", async () => {
+      const asked = [...new Set((area.value.toUpperCase().match(/\b[A-Z0-9]{18}[0-9]{2}\b/g) || []))], by = new Map(rows.map(x => [x.lei, x]));
+      const here = asked.filter(l => by.has(l)), fresh = here.filter(l => { const x = by.get(l); return x.status === "candidate" && !x.why && x.match !== "name"; });
+      const dup = here.filter(l => by.get(l).why).length, byName = here.filter(l => !by.get(l).why && by.get(l).match === "name").length, was = here.filter(l => by.get(l).status === "wanted" || by.get(l).status === "added").length;
+      if (fresh.length) await set(fresh, "wanted");
+      say.textContent = ` ${asked.length.toLocaleString()} LEIs read: ${here.length.toLocaleString()} are in the catalogue; ${fresh.length.toLocaleString()} marked wanted now, ${was.toLocaleString()} were wanted or added, ${dup.toLocaleString()} are companies already held, ${byName.toLocaleString()} matched by name (review them one by one).`; }));
     bar.append(el("span", "what", "Show"), ksel, csel, inp, oldBox, oldLab,
+      adminBtn("Want a list", () => { listBox.style.display = listBox.style.display === "none" ? "block" : "none"; }),
       adminBtn("Want all shown", () => { if (kind === "matched by name: review") { say.textContent = " those matched by name are wanted one by one, after a look"; return; } const ids = shownRows.filter(x => x.status === "candidate" && x.match !== "name").map(x => x.lei); if (ids.length) set(ids, "wanted"); }),
       // v178 (the owner: "start with 20 Spanish ones"): wanted candidates become companies, twenty at a time, by the door a person's own request uses
       adminBtn("Add 20 of the wanted", async () => { const n = rows.filter(x => x.status === "wanted" && x.match !== "name" && !x.why && live(x) && (!country || (x.country || "?") === country)).length;
@@ -2837,7 +2849,7 @@
         if (!s || !s.ok) { say.textContent = " not added: try again"; return; }
         say.textContent = ` ${s.added} added` + (s.held ? `, ${s.held} already held` : "") + (s.other ? `, ${s.other} not added (see the row)` : "") + (s.stopped ? `; stopped: ${s.stopped}` : "") + ". Reading the list again…"; adminCatalogue(body); }),
       adminBtn("Download everything (CSV)", () => { const a = el("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + [cols.join(","), ...rows.map(x => cols.map(k => cell(x[k])).join(","))].join("\r\n")], { type: "text/csv;charset=utf-8" })); a.download = `lantrna-catalogue-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(a); a.click(); a.remove(); }), say);
-    body.append(el("p", null, `${r.total.toLocaleString()} candidates, read ${String(r.seen_at || "").slice(0, 10)}.`), el("p", "what", feedLine(r.feed)), bar, note, host); fill(); show();
+    body.append(el("p", null, `${r.total.toLocaleString()} candidates, read ${String(r.seen_at || "").slice(0, 10)}.`), el("p", "what", feedLine(r.feed)), bar, listBox, note, host); fill(); show();
   }
 
   async function adminUse(body, year, kind) {

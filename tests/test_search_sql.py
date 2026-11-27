@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v194 2026-11-26";' in PAGE
+    assert 'const CLIENT = "lantern v195 2026-11-27";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -666,3 +666,7 @@ def test_the_own_lane_has_its_tables_and_its_hours():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assert '"workflow": "own_lane.yml"' in open(os.path.join(here, "server", "clock.json")).read()
     assert "AIRTABLE" not in open(os.path.join(here, ".github", "workflows", "own_lane.yml")).read().replace("AIRTABLE_QA", "")          # the lane has no key to the Disclosure Library
+
+
+def test_a_pasted_list_of_leis_marks_the_new_candidates_wanted():
+    assert 'adminBtn("Want a list"' in PAGE and 'x.status === "candidate" && !x.why && x.match !== "name"' in PAGE          # v195: never a company already held, never a name match
