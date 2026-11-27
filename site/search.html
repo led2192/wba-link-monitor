@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v197 2026-11-27";
+  const CLIENT = "lantern v198 2026-11-27";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -3676,9 +3676,13 @@
         .map(c => ({ ref: c[0], name: c[1], website: c[2] || "", lei: c[3] || "" }));
       if (!rows.length) { lsay.textContent = " nothing to add: one company a line, reference and name at least"; return; }
       let done = { added: 0, held: 0, again: 0, refused: 0 };
-      for (let i = 0; i < rows.length; i += 100) { lsay.textContent = ` adding ${Math.min(i + 100, rows.length).toLocaleString()} of ${rows.length.toLocaleString()}…`;
-        let r = null; try { r = await authed("admin_add_list", { key, rows: rows.slice(i, i + 100), scope: "main2" }); } catch (e) {}
-        if (!r || !r.ok) { lsay.textContent = ` stopped: ${(r && r.why) || "not saved"}`; return; }
+      // v198: ten a call. A hundred at once ran past the time a request is given (each company is compared with all
+      // those held) and nothing was saved; the server's own words are said when a call fails.
+      for (let i = 0; i < rows.length; i += 10) { lsay.textContent = ` adding ${Math.min(i + 10, rows.length).toLocaleString()} of ${rows.length.toLocaleString()}…`;
+        let r = null, why = "";
+        try { const t = await token(); const resp = await fetch(`${CONFIG.url}/rest/v1/rpc/admin_add_list`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" }, body: JSON.stringify({ key, rows: rows.slice(i, i + 10), scope: "main2" }) });
+              if (resp.ok) r = await resp.json(); else { const j = await resp.json().catch(() => ({})); why = `${resp.status} ${j.message || j.hint || ""}`.trim(); } } catch (e) { why = String(e && e.message || e); }
+        if (!r || !r.ok) { lsay.textContent = ` stopped at ${i.toLocaleString()} of ${rows.length.toLocaleString()}: ${(r && r.why) || why || "not saved"}. Those before are added; press again to go on (an added company is not added twice).`; return; }
         for (const k of Object.keys(done)) done[k] += r[k] || 0; }
       lsay.textContent = ` ${done.added.toLocaleString()} added, ${done.held.toLocaleString()} already in lantrNa, ${done.again.toLocaleString()} asked before, ${done.refused.toLocaleString()} refused (a name or a website that does not look right). Their pages are searched tonight.`; }),
       adminBtn("Contacts in their documents (CSV)", async () => {
