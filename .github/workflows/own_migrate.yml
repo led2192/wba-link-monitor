@@ -38,7 +38,8 @@ jobs:
           if [ "${{ inputs.step }}" = "move" ]; then ARGS+=(--move); fi
           if [ "${{ inputs.step }}" = "delete" ]; then ARGS+=(--delete); fi
           if [ "${{ inputs.mode }}" = "commit" ]; then ARGS+=(--commit); fi
-          python own_migrate.py "${ARGS[@]}"
+          DISK=/srv/lantern/files; sudo mkdir -p "$DISK"; sudo chown "$(id -un)":"$(id -gn)" /srv/lantern "$DISK"
+          python own_migrate.py --disk "$DISK" "${ARGS[@]}"
         env:
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
           AIRTABLE_BASE: ${{ secrets.AIRTABLE_BASE }}

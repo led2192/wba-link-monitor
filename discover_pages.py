@@ -290,6 +290,8 @@ def main():
     n = collections.Counter()
     for rec in recs:
         f = rec["fields"]; wba = f.get("wba_id", "")
+        if not str(wba).startswith("PT_"):          # 27 Nov 2026: only SDG2000 companies get pages in Airtable; the others are searched by own_lane.py
+            n["not SDG2000, left to lantrNa's own lane"] += 1; continue
         pages = get("monitored_links", [("pageSize", "100"), ("filterByFormula", f"{{wba_id}}='{wba}'"),
                                         ("fields[]", "url"), ("fields[]", "type"), ("fields[]", "monitor"),
                                         ("fields[]", "status"), ("fields[]", "http_status")])

@@ -15,7 +15,9 @@ run one at a time and can each be run again:
               copy comes before --move). Reversible.
   --move      the evidence database learns them as the lane's own (own_lane.py): own_companies; own_pages from the
               pages still monitored; own_docs from the documents the database holds (with what was read of each) and
-              from the library's rows it does not hold yet (to be fetched by the lane). From then on load_supabase.py
+              from the library's rows it does not hold yet (to be fetched by the lane). A document with a file and
+              no copy of it gets its copy first (archive_copy.copy_one: the storage and, with --disk, the server's
+              disk), because once discarded no other job would copy it. From then on load_supabase.py
               leaves these documents as they are. Then, in Airtable and reversible: the pages are no longer monitored,
               the documents are discarded with the reason MOVED, the company's intake_note says where it went.
   --delete    after the owner has seen the counts: every row of the three tables for these companies is written to
@@ -84,6 +86,7 @@ def archive_bytes(rows_by_table):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--disk", default="")
     ap.add_argument("--stop", action="store_true"); ap.add_argument("--move", action="store_true"); ap.add_argument("--delete", action="store_true"); ap.add_argument("--commit", action="store_true")
     a = ap.parse_args()
     for v in ("AIRTABLE_TOKEN", "AIRTABLE_BASE", "SUPABASE_DB_URL"):
@@ -135,6 +138,23 @@ def main():
             patches = airtable_patches(companies, pages, docs, date.today().isoformat())
             print("--move: " + ", ".join(f"{t} {len(p):,} rows to change" for t, p in patches.items()) + ("" if a.commit else " (not written)"), flush=True)
             if a.commit:
+                missing = [r for r in docs if r["fields"].get("file") and not (r["fields"].get("stored_file") or "").strip() and (r["fields"].get("library_id") or "").strip()]
+                if missing and os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_KEY"):
+                    from archive_copy import Storage, copy_one
+                    sess = requests.Session(); st = Storage(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"].strip(), sess); got = collections.Counter(); notes = []
+                    for r in missing:
+                        f = r["fields"]
+                        try:
+                            what, note = copy_one(st, sess, f["wba_id"].strip(), f["library_id"].strip(), (f.get("file") or [None])[0], disk=a.disk or None)
+                        except Exception as e:
+                            what, note = f"failed: {type(e).__name__}", None
+                        got[what.split(":")[0]] += 1
+                        if note:
+                            f["stored_file"] = note; notes.append((r["id"], {"stored_file": note}))
+                    for i in range(0, len(notes), 10):
+                        airtable_request("PATCH", f"{API}/{base}/{quote('report_library')}", H, payload={"records": [{"id": rid, "fields": f} for rid, f in notes[i:i + 10]]})
+                        time.sleep(0.22)
+                    print("  files with no copy: " + ", ".join(f"{k} {v:,}" for k, v in got.most_common()), flush=True)
                 cur.execute("insert into public.own_companies (wba_id, note) select w, 'moved from Airtable' from unnest(%s::text[]) w where exists (select 1 from public.companies c where c.wba_id = w) on conflict do nothing", (wbas,))
                 cur.executemany("insert into public.own_pages (id, wba_id, url, kind, how) values (%s, %s, %s, %s, 'moved') on conflict (id) do nothing",
                                 [(link_id(r["fields"]["wba_id"].strip(), r["fields"].get("url") or ""), r["fields"]["wba_id"].strip(), r["fields"].get("url"), str(r["fields"].get("type") or "")[:60] or None)
