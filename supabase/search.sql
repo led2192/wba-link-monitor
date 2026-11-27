@@ -1840,7 +1840,12 @@ begin
     return jsonb_build_object('asked', false, 'again', true, 'name', old.name, 'request', old.id, 'review', old.review,
                               'why', case when old.review = 'rejected' then coalesce(old.review_note, 'not accepted') end);
   end if;
-  if (select count(*) from public.company_requests q where q.requester = who and q.at > now() - interval '1 day') >= 20 then
+  -- 27 Nov 2026: what comes from the catalogue has its own measure (twenty a call, owner only: catalogue_add_inner)
+  -- and does not count against the person's twenty, nor is it stopped by them: the first night of the feed added
+  -- none because the owner had added twenty by hand that afternoon.
+  -- Known by a setting only catalogue_add_inner makes, not by the client's word: a person cannot claim it.
+  if coalesce(current_setting('lantern.from_catalogue', true), '') <> 'yes'
+     and (select count(*) from public.company_requests q where q.requester = who and q.at > now() - interval '1 day' and coalesce(q.client, '') <> 'catalogue') >= 20 then
     raise exception 'twenty companies a day at most' using errcode = '22023';
   end if;
   -- Doubts: the company is made, and the owner reads these.
@@ -5758,7 +5763,9 @@ begin
                    and (of_country is null or of_country = '' or upper(c.country) = upper(of_country))))
            order by c.revenue_eur desc nulls last, coalesce(c.common_name, c.legal_name), c.lei limit greatest(1, least(coalesce(most, 20), 20)) loop          -- the largest first, where the size is known
     begin
+      perform set_config('lantern.from_catalogue', 'yes', true);
       got := public.request_company(r.name, r.website, r.lei, 'from the catalogue', 'catalogue');
+      perform set_config('lantern.from_catalogue', '', true);
     exception when others then
       why := sqlerrm;
       if why like 'twenty companies a day%' then
