@@ -339,7 +339,9 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select lei, status from public.catalogue where lei like '8945%' or lei like '9695%' order by lei"); self.assertEqual([r[1] for r in cur.fetchall()], ["added", "wanted"])
         cur.execute("select count(*) from pg_proc where proname = 'admin_catalogue_add'"); self.assertEqual(cur.fetchone()[0], 1)          # one form only: a call by name is not ambiguous
         # 26 Nov 2026: the nightly feed adds the wanted in the name of the person who added from the catalogue before; nobody else can call it
-        cur.execute("select public.catalogue_feed(20)"); self.assertEqual(cur.fetchone()[0], {"ok": True, "added": 1, "held": 0, "other": 0})          # the Swedish one, still wanted
+        cur.execute("insert into public.company_requests (requester, name, status, client, at) select 'tester@worldbenchmarkingalliance.org', 'Filler ' || g, 'new', 'catalogue', now() from generate_series(1, 25) g")
+        cur.execute("select public.catalogue_feed(20)"); self.assertEqual(cur.fetchone()[0], {"ok": True, "added": 1, "held": 0, "other": 0})          # the Swedish one, still wanted: twenty-five from the catalogue that day do not stop it (27 Nov 2026)
+        cur.execute("delete from public.company_requests where name like 'Filler %'")
         cur.execute("select status from public.catalogue where lei like '9695%'"); self.assertEqual(cur.fetchone()[0], "added")
         cur.execute("select has_function_privilege('authenticated', 'public.catalogue_feed(int)', 'execute'), has_function_privilege('authenticated', 'public.catalogue_add_inner(text, int, text[])', 'execute')")
         self.assertEqual(cur.fetchone(), (False, False))
