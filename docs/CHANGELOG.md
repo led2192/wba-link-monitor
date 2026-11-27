@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-27 Admin Catalogue v195: "Want a list" takes pasted LEIs and marks as wanted the new candidates among them (not the companies already held, not the name matches), and says how many of each. The list is read in the page only. (#843)
 - 2026-11-27 Fix: the catalogue's nightly feed added none on its first night ("twenty companies a day at most"): the owner had added twenty by hand that afternoon and the feed shared a person's limit. What `catalogue_add_inner` adds (known by a setting it alone makes) is not stopped by that limit; a call still adds twenty at most. (#842)
 - 2026-11-27 `discover_pages.py` searches report pages for SDG2000 companies only: the night after the pages of the other companies were stopped it found 41 new ones for them and 249 documents followed. `own_migrate.py --move` copies the file of a document that has no copy (storage and server disk) before discarding it. (#841)
 - 2026-11-26 `own_migrate.py --stop`: only switches off the monitored pages of the companies that are not SDG2000, so nothing new of them arrives in Airtable while their files are copied (1,200 of 2,575 files still had no copy after the first Archive copy run, which reads last night's copy of the library). (#840)
