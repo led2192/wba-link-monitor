@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v196 2026-11-27";
+  const CLIENT = "lantern v197 2026-11-27";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -3664,8 +3664,37 @@
     const bar = el("div"); bar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px";
     const box = document.createElement("input"); box.placeholder = "a name, a country, an industry, an id"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:320px;background:var(--box);color:var(--fg)";
     const go = () => { st.search = box.value.trim(); adminAllCompanies(body); }; box.onkeydown = ev => { if (ev.key === "Enter") go(); };
-    bar.append(osel, box, adminBtn("Search", go), el("span", null, `${Number(got.all).toLocaleString("en-GB")} companies in all, ${got.added} added by people. Showing ${got.rows.length}${got.rows.length >= 200 ? " (the first 200: search to narrow)" : ""}; people's first, then by documents.`));
-    body.appendChild(bar);
+    // v197 (27 Nov 2026): the owner adds a list of companies at once, read for their main reports only, and takes the
+    // addresses their documents print as a file on his computer (found when asked, kept nowhere).
+    const listBox = el("div"); listBox.style.cssText = "display:none;margin:8px 0;max-width:760px";
+    const area = document.createElement("textarea"); area.rows = 6; area.setAttribute("aria-label", "companies to add, one a line");
+    area.placeholder = "One company a line, columns separated by a tab: reference, name, website, LEI (as pasted from a spreadsheet)";
+    area.style.cssText = "width:100%;font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";
+    const lsay = el("span", "what", "");
+    listBox.append(area, el("br"), adminBtn("Add them (main reports of the last two years, two each)", async () => {
+      const rows = area.value.split(/\r?\n/).map(l => l.split("\t").map(x => x.trim())).filter(c => c.length >= 2 && c[1] && !/^(wba id|ref|reference)$/i.test(c[0]))
+        .map(c => ({ ref: c[0], name: c[1], website: c[2] || "", lei: c[3] || "" }));
+      if (!rows.length) { lsay.textContent = " nothing to add: one company a line, reference and name at least"; return; }
+      let done = { added: 0, held: 0, again: 0, refused: 0 };
+      for (let i = 0; i < rows.length; i += 100) { lsay.textContent = ` adding ${Math.min(i + 100, rows.length).toLocaleString()} of ${rows.length.toLocaleString()}…`;
+        let r = null; try { r = await authed("admin_add_list", { key, rows: rows.slice(i, i + 100), scope: "main2" }); } catch (e) {}
+        if (!r || !r.ok) { lsay.textContent = ` stopped: ${(r && r.why) || "not saved"}`; return; }
+        for (const k of Object.keys(done)) done[k] += r[k] || 0; }
+      lsay.textContent = ` ${done.added.toLocaleString()} added, ${done.held.toLocaleString()} already in lantrNa, ${done.again.toLocaleString()} asked before, ${done.refused.toLocaleString()} refused (a name or a website that does not look right). Their pages are searched tonight.`; }),
+      adminBtn("Contacts in their documents (CSV)", async () => {
+        let list = null; try { list = await authed("admin_list_refs", { key }); } catch (e) {}
+        if (!list || !list.length) { lsay.textContent = " no company was added from a list"; return; }
+        const out = [["Reference", "lantrNa id", "Company", "Website", "Email", "Document", "Page", "Type", "Year"]], by = new Map(list.map(x => [x.id, x]));
+        for (let i = 0; i < list.length; i += 50) { lsay.textContent = ` reading ${Math.min(i + 50, list.length).toLocaleString()} of ${list.length.toLocaleString()} companies…`;
+          let r = null; try { r = await authed("admin_contacts_in_text", { key, ids: list.slice(i, i + 50).map(x => x.id) }); } catch (e) {}
+          for (const x of ((r && r.rows) || [])) { const c = by.get(x.wba_id) || {}; out.push([c.ref || "", x.wba_id, c.name || "", c.website || "", x.email, x.library_id, x.page, x.doc_type || "", x.year || ""]); } }
+        const cell = v => { const s = v == null ? "" : String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+        const blob = new Blob(["\ufeff" + out.map(r => r.map(cell).join(",")).join("\r\n")], { type: "text/csv" }), a = document.createElement("a");
+        a.href = URL.createObjectURL(blob); a.download = `contacts_from_documents_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+        const readN = list.filter(x => Number(x.read) > 0).length;
+        lsay.textContent = ` ${(out.length - 1).toLocaleString()} addresses from ${readN.toLocaleString()} of ${list.length.toLocaleString()} companies whose documents are read so far; the file is in your downloads.`; }), lsay);
+    bar.append(osel, box, adminBtn("Search", go), adminBtn("Add a list", () => { listBox.style.display = listBox.style.display === "none" ? "block" : "none"; }), el("span", null, `${Number(got.all).toLocaleString("en-GB")} companies in all, ${got.added} added by people. Showing ${got.rows.length}${got.rows.length >= 200 ? " (the first 200: search to narrow)" : ""}; people's first, then by documents.`));
+    body.appendChild(bar); body.appendChild(listBox);
     const cover = el("p", "what", "Pages watched: the pages of the company's site the robot reads for new documents (counted twice a day; ? = not counted yet). Read: documents whose text is in the search. Main reports: annual, integrated and sustainability reports of the last two years. To fetch: documents known by their address that the robot could not get.");
     body.appendChild(cover);
     body.appendChild(adminTable(["Company", "Id", "Country", "Added", "Pages watched", "Documents", "Read", "Main reports", "To fetch", "Website", "LEI", ""], got.rows.map(c => {

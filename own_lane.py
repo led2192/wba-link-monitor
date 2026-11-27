@@ -44,6 +44,26 @@ SCAN_HOURS = 20
 MAX_DOCS_A_PAGE = 400
 PAUSE = 1.0                  # seconds between two requests to company sites
 RETRY_STATUS = ("download_fail", "truncated", "refused")
+MAIN = {"Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Impact Report", "10K Form", "Universal Registration Document"}
+
+
+def main2(candidates, already, this_year):
+    """For a company of scope 'main2' (its main reports of the last two years, two at most): of its registered
+    documents [(library_id, url, link_text)], the ones to read now, newest first, and the ones left out. Type and
+    year are read from the file name and the link's text, before anything is fetched. `already`: how many of its
+    main reports were read before."""
+    from classify_library import classify_from_file
+    from date_documents import decide
+    keep, out = [], []
+    for lid, url, text in candidates:
+        name = unquote(urlsplit(url or "").path.rsplit("/", 1)[-1])
+        typ = classify_from_file(name, "")[0] or (classify_from_file((text or "").replace(" ", "-") + ".pdf", "")[0] if text else "")
+        year = decide(url or "", name, text or "")[0]
+        year = int(year) if str(year).isdigit() else None
+        (keep if typ in MAIN and (year is None or year >= this_year - 2) else out).append((year or 0, lid))
+    keep.sort(reverse=True)
+    room = max(0, 2 - already)
+    return [lid for _, lid in keep[:room]], [lid for _, lid in keep[room:]] + [lid for _, lid in out]
 # How the lane presents itself when it fetches a document. Its first run said its name (lanterN-bot) and every site
 # refused it. The owner, 26 Nov 2026: "as a browser, the same as the present robot", which is what the fetchers of the
 # list do until the named robot is measured and adopted for all of them (robot_identity.py). One identity for both.
@@ -250,6 +270,18 @@ def main():
                             [(lid, wba, u, t, pid) for lid, u, t in fresh_docs])
             cur.execute("update public.own_pages set scanned_at = now(), last_result = 'ok', fails = 0, docs = %s where id = %s", (sum(1 for _, (u, _) in links.items() if is_pdf_link(u)), pid))
             conn.commit(); c["documents registered"] += len(fresh_docs)
+
+        # 3b. a company of scope 'main2' reads two of its main reports and leaves the rest
+        cur.execute("select wba_id from public.own_companies where scope = 'main2' and wba_id = any(%s)", (mine,))
+        for (wba,) in cur.fetchall():
+            cur.execute("select library_id, url, link_text from public.own_docs where wba_id = %s and status = 'new'", (wba,)); cand = cur.fetchall()
+            if not cand:
+                continue
+            cur.execute("select count(*) from public.own_docs o join public.documents d using (library_id) where o.wba_id = %s and o.status = 'ok' and d.doc_type = any(%s)", (wba, list(MAIN)))
+            read_now, leave = main2(cand, cur.fetchone()[0], datetime.now(timezone.utc).year)
+            if leave:
+                cur.execute("update public.own_docs set status = 'not read: outside the scope' where library_id = any(%s)", (leave,)); c["documents left by scope"] += len(leave)
+        conn.commit()
 
         # 4. read: the documents found, then the files people sent
         cur.execute("select pg_database_size(current_database()) / 1e9"); db_gb = float(cur.fetchone()[0])
