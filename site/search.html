@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v195 2026-11-27";
+  const CLIENT = "lantern v196 2026-11-27";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -1473,6 +1473,19 @@
     const lei = el("input"); lei.placeholder = "20 characters (optional)"; lei.maxLength = 24;
     const why = el("textarea"); why.rows = 2; why.placeholder = "Optional: why it matters, where its reports are";
     const msg = el("div", "what", ""); const go = el("button", null, "Add the company");
+    // v196 (the owner: "people could ask for the companies of the catalogue"): while a name is typed, the candidates of
+    // lantrNa's catalogue that hold it are offered; choosing one fills the form with the catalogue's website and LEI.
+    const sug = el("div", "what"); sug.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin:4px 0"; let sugT = 0, sugFor = "";
+    const suggest = async () => { const q = nm.value.trim(); if (q.length < 3 || q === sugFor) { if (q.length < 3) sug.innerHTML = ""; return; } sugFor = q;
+      const t = await token(); if (!t) return; let got = [];
+      try { const r = await fetch(`${CONFIG.url}/rest/v1/rpc/catalogue_suggest`, { method: "POST", headers: { apikey: CONFIG.key, Authorization: `Bearer ${t}`, "Content-Type": "application/json" }, body: JSON.stringify({ q }) }); if (r.ok) got = await r.json(); } catch (e) {}
+      if (nm.value.trim() !== q) return; sug.innerHTML = ""; if (!Array.isArray(got) || !got.length) return;
+      sug.append(el("span", null, "In lantrNa's catalogue, not followed yet:"));
+      for (const c of got) { const b = el("button", null, `${c.name}${c.country ? ` (${c.country})` : ""}`); b.type = "button"; b.title = `${c.legal_name || c.name}${c.website ? ` · ${c.website}` : ""}`;
+        b.style.cssText = "background:none;color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:2px 10px;font:inherit;font-size:13px;cursor:pointer";
+        b.onclick = () => { nm.value = c.name; site.value = c.website || ""; lei.value = c.lei || ""; sugFor = c.name; sug.innerHTML = ""; sug.append(el("span", null, `${c.name}: the website and the LEI are the catalogue's. Press "Add the company".`)); go.focus(); };
+        sug.append(b); } };
+    nm.addEventListener("input", () => { clearTimeout(sugT); sugT = setTimeout(suggest, 350); });
     const send = async () => {
       if (nm.value.trim().length < 2) { msg.textContent = "Write the company's name."; return; }
       const t = await token(); if (!t) { signInBox(holder, send); return; }
@@ -1488,8 +1501,8 @@
     go.onclick = send;
     const cancel = el("button", null, "Cancel"); cancel.type = "button"; cancel.style.cssText = "background:none;color:var(--muted);border-color:var(--line)"; cancel.onclick = () => f.remove();
     const acts = el("div"); acts.style.cssText = "display:flex;gap:8px"; acts.append(go, cancel);
-    f.append(el("div", "what", "A company lantrNa does not follow yet"), lab("Company"), nm, lab("Website"), site, lab("LEI"), lei, lab("A note for the team"), why, msg, acts);
-    holder.appendChild(f); (named ? site : nm).focus();
+    f.append(el("div", "what", "A company lantrNa does not follow yet"), lab("Company"), nm, sug, lab("Website"), site, lab("LEI"), lei, lab("A note for the team"), why, msg, acts);
+    holder.appendChild(f); (named ? site : nm).focus(); if (named) suggest();
   }
   function addValueLink(panel, attrs) {
     const wrap = el("div", "addrow"); const a = el("a", "addlink", "+ Add a value"); a.href = "#"; a.title = "Add a value the robot does not hold, with its source";
