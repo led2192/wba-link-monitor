@@ -412,7 +412,7 @@ def test_a_reporting_year_says_which_fiscal_year_it_is():
 def test_every_admin_function_asks_admin_ok_first_and_is_not_for_the_public():
     import re
     names = re.findall(r"create or replace function public\.(admin_(?!ok)\w+)\(", SQL)
-    assert set(names) == {"admin_search_digest", "admin_catalogue", "admin_catalogue_set", "admin_catalogue_add", "admin_catalogue_fix", "admin_register_group", "admin_register_lei_set", "admin_register_all", "admin_register", "admin_fetch_queue_set", "admin_keyword_use", "admin_reference_use_series", "admin_reference_candidates", "admin_reference_candidate_set", "admin_reference_example_set", "admin_reference_use", "admin_company_profiles", "admin_company_profile_set", "admin_reference", "admin_reference_asked_set", "admin_reference_find", "admin_reference_save", "admin_names_not_held", "admin_name_not_held_set", "admin_overview", "admin_docs", "admin_link_browsers", "admin_link_browser_set", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
+    assert set(names) == {"admin_list_refs", "admin_add_list", "admin_contacts_in_text", "admin_search_digest", "admin_catalogue", "admin_catalogue_set", "admin_catalogue_add", "admin_catalogue_fix", "admin_register_group", "admin_register_lei_set", "admin_register_all", "admin_register", "admin_fetch_queue_set", "admin_keyword_use", "admin_reference_use_series", "admin_reference_candidates", "admin_reference_candidate_set", "admin_reference_example_set", "admin_reference_use", "admin_company_profiles", "admin_company_profile_set", "admin_reference", "admin_reference_asked_set", "admin_reference_find", "admin_reference_save", "admin_names_not_held", "admin_name_not_held_set", "admin_overview", "admin_docs", "admin_link_browsers", "admin_link_browser_set", "admin_facts", "admin_fact_set", "admin_link_new", "admin_link_set", "admin_companies", "admin_company_set", "admin_company_edit", "admin_taxonomy", "admin_metric_edit", "admin_metric_new", "admin_metric_merge", "admin_taxonomy_set", "admin_company_facts", "admin_company_list", "admin_fact_trials", "admin_searches", "admin_ask_limit_set", "admin_surveys", "admin_hard_searches", "admin_link_ask", "admin_jobs", "admin_unread_docs", "admin_doc_fix", "admin_latest_missing"}
     for n in names:
         body = SQL[SQL.index(f"create or replace function public.{n}("):]
         body = body[:body.index("$$;")]
@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v196 2026-11-27";' in PAGE
+    assert 'const CLIENT = "lantern v197 2026-11-27";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -676,3 +676,8 @@ def test_a_person_can_ask_for_a_company_of_the_catalogue():
     assert "c.duplicate_why is null and c.match = 'lei' and c.status in ('candidate', 'wanted')" in SQL          # never one already held, never one the owner refused
     assert "grant execute on function public.catalogue_suggest(text) to authenticated;" in SQL and "create trigger catalogue_mark_added" in SQL
     assert "/rest/v1/rpc/catalogue_suggest" in PAGE and "In lantrNa's catalogue, not followed yet:" in PAGE          # v196
+
+
+def test_a_list_of_companies_and_the_contacts_of_their_documents():
+    assert 'authed("admin_add_list", { key, rows: rows.slice(i, i + 100), scope: "main2" })' in PAGE and 'authed("admin_contacts_in_text"' in PAGE          # v197
+    assert "create table if not exists public.contacts" not in SQL          # the addresses are found when asked and kept nowhere

@@ -4,7 +4,7 @@ Until 11 Nov 2026 the tests of supabase/search.sql only read its text. That day 
 into the page built a query the database could not carry and took it down for everyone. These tests run the
 functions: what a search returns, in what order, and that the worst a person can type comes back in time.
 """
-import os, sys, time, unittest
+import json, os, sys, time, unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pg_search
@@ -334,6 +334,18 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select lei, status, duplicate_why from public.catalogue order by lei"); cat = {r[0][:6]: r[1:] for r in cur.fetchall()}
         self.assertEqual(cat["529900"], ("added", None)); self.assertEqual(cat["549300"], ("candidate", "held: found when adding"))          # the same name as a company just made
         self.assertEqual((cat["213800"][0], cat["969500"][0]), ("wanted", "wanted"))          # one matched by name, and another country: not taken
+        # 27 Nov 2026: a list of the owner's goes in at once, past the daily twenty, into the own lane read for its main reports
+        cur.execute("select public.admin_add_list('k', %s::jsonb)", (json.dumps([{"name": f"Listed Firm {i}", "website": f"listedfirm{i}.example", "ref": f"TA_{i:05d}"} for i in range(25)]),))
+        got = cur.fetchone()[0]; self.assertEqual((got["ok"], got["added"], got["refused"]), (True, 25, 0))
+        cur.execute("select count(*), count(*) filter (where o.scope = 'main2') from public.company_requests q join public.own_companies o using (wba_id) where q.client = 'list' and q.note like 'from a list, ref TA_%'")
+        self.assertEqual(cur.fetchone(), (25, 25))
+        cur.execute("select public.admin_add_list('k', %s::jsonb) ->> 'held'", (json.dumps([{"name": "Listed Firm 3", "website": "listedfirm3.example"}]),)); self.assertEqual(cur.fetchone()[0], "1")
+        cur.execute("select wba_id from public.company_requests where note = 'from a list, ref TA_00001'"); lid = cur.fetchone()[0]
+        cur.execute("insert into public.documents (library_id, wba_id, year, doc_type, pages) values ('lf-1', %s, 2025, 'Annual Report', 2)", (lid,))
+        cur.execute("insert into public.pages (library_id, page, body) values ('lf-1', 1, 'Contact: Jane.Roe@ListedFirm1.example or ir@listedfirm1.example; auditor partner@bigaudit.example')")
+        cur.execute("select public.admin_contacts_in_text('k', array[%s])", (lid,)); rows = cur.fetchone()[0]["rows"]
+        self.assertEqual(sorted(r["email"] for r in rows), ["ir@listedfirm1.example", "jane.roe@listedfirm1.example"])          # its own domain only
+        cur.execute("select has_function_privilege('anon', 'public.admin_contacts_in_text(text, text[])', 'execute'), to_regclass('public.contacts') is null"); self.assertEqual(cur.fetchone(), (False, True))
         # 27 Nov 2026: a person is offered the new candidates that hold what is typed, and asking for one marks it added
         cur.execute("select public.catalogue_suggest('gn')"); self.assertEqual(cur.fetchone()[0], [])          # three letters at least
         cur.execute("select lei, coalesce(common_name, legal_name) from public.catalogue where duplicate_why is null and match = 'lei' and status in ('candidate', 'wanted') order by lei limit 1"); one = cur.fetchone()
@@ -1181,7 +1193,7 @@ class SearchOnPostgres(unittest.TestCase):
             try:
                 for p in patches: p.start()
                 self.assertEqual(L.main(), 0)
-                cur.execute("select array_agg(wba_id) from public.own_companies"); self.assertEqual(cur.fetchone()[0], ["LN_lane0001"])          # the SDG2000 company never enters
+                cur.execute("select array_agg(wba_id) from public.own_companies where wba_id in ('LN_lane0001', 'PT_LANE9')"); self.assertEqual(cur.fetchone()[0], ["LN_lane0001"])          # the SDG2000 company never enters
                 cur.execute("select status, result from public.company_requests where wba_id = 'LN_lane0001'"); self.assertEqual(cur.fetchone(), ("added", "followed by lantrNa itself, outside Airtable"))
                 cur.execute("select how, status, last_result from public.own_pages where wba_id = 'LN_lane0001' order by how"); self.assertEqual(cur.fetchall(), [("found", "watched", "ok"), ("person", "watched", "ok")])
                 cur.execute("select status from public.page_scans where wba_id = 'LN_lane0001'"); self.assertEqual(cur.fetchone()[0], "done")

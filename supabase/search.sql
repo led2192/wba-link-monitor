@@ -1844,8 +1844,8 @@ begin
   -- and does not count against the person's twenty, nor is it stopped by them: the first night of the feed added
   -- none because the owner had added twenty by hand that afternoon.
   -- Known by a setting only catalogue_add_inner makes, not by the client's word: a person cannot claim it.
-  if coalesce(current_setting('lantern.from_catalogue', true), '') <> 'yes'
-     and (select count(*) from public.company_requests q where q.requester = who and q.at > now() - interval '1 day' and coalesce(q.client, '') <> 'catalogue') >= 20 then
+  if coalesce(current_setting('lantern.from_catalogue', true), '') <> 'yes' and coalesce(current_setting('lantern.owner_list', true), '') <> 'yes'
+     and (select count(*) from public.company_requests q where q.requester = who and q.at > now() - interval '1 day' and coalesce(q.client, '') not in ('catalogue', 'list')) >= 20 then
     raise exception 'twenty companies a day at most' using errcode = '22023';
   end if;
   -- Doubts: the company is made, and the owner reads these.
@@ -4974,7 +4974,10 @@ create table if not exists public.own_docs (
 );
 create index if not exists own_docs_company on public.own_docs (wba_id, status);
 delete from public.own_docs where library_id like '%|%';   -- the three rows of the lane's first run (26 Nov 2026), registered under another id than the library's; nothing was read of them
-alter table public.own_docs add column if not exists stored text;   -- where the file is kept: "archive/<wba_id>/<library_id>.pdf (N bytes)", "disk", or both
+alter table public.own_docs add column if not exists stored text;
+-- 27 Nov 2026: a company added from a list of the owner's for its contacts reads its main reports of the last two
+-- years only, two at most (scope 'main2'); the others read everything their pages link (scope null).
+alter table public.own_companies add column if not exists scope text;   -- where the file is kept: "archive/<wba_id>/<library_id>.pdf (N bytes)", "disk", or both
 alter table public.own_companies enable row level security;
 alter table public.own_pages enable row level security;
 alter table public.own_docs enable row level security;
@@ -5866,6 +5869,100 @@ begin
 end;
 $$;
 revoke all on function public.catalogue_suggest(text) from public, anon;
+
+-- A list of companies added at once by the owner (27 Nov 2026; for the companies WBA analyses outside its universe
+-- whose contacts are wanted). Each row goes in by the door of a person's request (request_company: duplicates, the
+-- LN_ id), without the daily twenty, and enters lantrNa's own lane with the scope given ('main2': the main reports
+-- of the last two years, two at most). ref is kept in the request's note, to find the row again. Nothing is added
+-- when the evidence database is at its ceiling.
+create or replace function public.admin_add_list(key text, rows jsonb, scope text default 'main2') returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  r jsonb;
+  got jsonb;
+  c jsonb := jsonb_build_object('added', 0, 'held', 0, 'again', 0, 'refused', 0);
+  ids text[] := '{}';
+  held jsonb := '[]'::jsonb;
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if jsonb_typeof(rows) <> 'array' or jsonb_array_length(rows) > 2000 then
+    return jsonb_build_object('ok', false, 'why', 'a list of 2,000 companies at most');
+  end if;
+  if pg_database_size(current_database()) / 1e9 >= 140 then
+    return jsonb_build_object('ok', false, 'why', 'the evidence database is at its ceiling of 140 GB: nothing added');
+  end if;
+  perform set_config('lantern.owner_list', 'yes', true);
+  for r in select * from jsonb_array_elements(rows) loop
+    begin
+      got := public.request_company(r ->> 'name', nullif(r ->> 'website', ''), nullif(r ->> 'lei', ''),
+                                    left('from a list' || coalesce(', ref ' || nullif(r ->> 'ref', ''), ''), 120), 'list');
+      if (got ->> 'created')::boolean is true then
+        c := jsonb_set(c, '{added}', to_jsonb((c ->> 'added')::int + 1)); ids := ids || (got ->> 'id');
+      elsif (got ->> 'held')::boolean is true then
+        c := jsonb_set(c, '{held}', to_jsonb((c ->> 'held')::int + 1));
+        held := held || jsonb_build_object('ref', r ->> 'ref', 'id', got ->> 'id');
+      else
+        c := jsonb_set(c, '{again}', to_jsonb((c ->> 'again')::int + 1));
+      end if;
+    exception when others then
+      c := jsonb_set(c, '{refused}', to_jsonb((c ->> 'refused')::int + 1));
+    end;
+  end loop;
+  perform set_config('lantern.owner_list', '', true);
+  insert into public.own_companies (wba_id, scope, note) select unnest(ids), nullif(scope, ''), 'from a list of the owner''s' on conflict (wba_id) do update set scope = excluded.scope;
+  return c || jsonb_build_object('ok', true, 'held_ids', held);
+end;
+$$;
+revoke all on function public.admin_add_list(text, jsonb, text) from public, anon;
+grant execute on function public.admin_add_list(text, jsonb, text) to authenticated;
+
+-- The email addresses printed in the documents lantrNa holds for some companies (27 Nov 2026), found when asked and
+-- kept nowhere: the owner's page turns them into a file on his computer. Only addresses on the company's own domain
+-- (the label of its website's host). Owner only; at most 50 companies a call.
+create or replace function public.admin_contacts_in_text(key text, ids text[]) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  if coalesce(array_length(ids, 1), 0) > 50 then
+    return jsonb_build_object('ok', false, 'why', '50 companies a call at most');
+  end if;
+  return jsonb_build_object('ok', true, 'rows', (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from (
+    select d.wba_id, lower(m[1]) as email, min(d.library_id) as library_id, min(p.page) as page, min(d.doc_type) as doc_type, max(d.year) as year
+      from public.documents d join public.companies co on co.wba_id = d.wba_id
+      join public.pages p on p.library_id = d.library_id and p.body like '%@%'
+      cross join lateral regexp_matches(p.body, '([A-Za-z0-9][A-Za-z0-9._%+-]{0,63}@[A-Za-z0-9][A-Za-z0-9.-]{1,120}\.[A-Za-z]{2,24})', 'g') m
+     where d.wba_id = any(ids)
+       and public.site_label(public.site_host(co.website)) <> ''
+       and public.site_label(split_part(lower(m[1]), '@', 2)) = public.site_label(public.site_host(co.website))
+     group by d.wba_id, lower(m[1])) x));
+end;
+$$;
+revoke all on function public.admin_contacts_in_text(text, text[]) from public, anon;
+
+-- The companies added from the owner's lists, with the reference he gave each and how far each is read.
+create or replace function public.admin_list_refs(key text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+begin
+  if not public.admin_ok(key) then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return (select coalesce(jsonb_agg(to_jsonb(x) order by x.ref), '[]'::jsonb) from (
+    select q.wba_id as id, q.name, q.website, nullif(substring(q.note from 'ref ([^ ,]+)'), '') as ref,
+           (select count(*) from public.own_pages p where p.wba_id = q.wba_id and p.status = 'watched') as pages,
+           (select count(*) from public.documents d where d.wba_id = q.wba_id and coalesce(d.pages, 0) > 0) as read
+      from public.company_requests q where q.client = 'list' and q.wba_id is not null) x);
+end;
+$$;
+revoke all on function public.admin_list_refs(text) from public, anon;
+grant execute on function public.admin_list_refs(text) to authenticated;
+grant execute on function public.admin_contacts_in_text(text, text[]) to authenticated;
 grant execute on function public.catalogue_suggest(text) to authenticated;
 
 create or replace function public.catalogue_mark_added() returns trigger

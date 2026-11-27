@@ -85,6 +85,13 @@ class Lane(unittest.TestCase):
         self.assertTrue(L.AS_BROWSER); self.assertIn("bot.BROWSER_UA if AS_BROWSER else bot.BOT_UA", src)          # the owner's choice of 26 Nov 2026
         self.assertIn("refused", L.RETRY_STATUS)          # a document refused is asked for again, three times at most
 
+    def test_a_company_read_for_its_contacts_reads_two_main_reports_of_the_last_two_years(self):
+        cand = [("a", "https://a.example/files/annual-report-2025.pdf", "Annual Report 2025"), ("b", "https://a.example/files/sustainability-report-2024.pdf", ""),
+                ("c", "https://a.example/files/annual-report-2023.pdf", ""), ("d", "https://a.example/files/annual-report-2019.pdf", ""), ("e", "https://a.example/files/code-of-conduct.pdf", "Code of conduct")]
+        keep, leave = L.main2(cand, 0, 2026)
+        self.assertEqual(keep, ["a", "b"]); self.assertEqual(sorted(leave), ["c", "d", "e"])
+        self.assertEqual(L.main2(cand, 1, 2026)[0], ["a"]); self.assertEqual(L.main2(cand, 2, 2026)[0], [])          # two at most, counting those read before
+
     def test_nothing_of_the_lane_is_written_to_airtable(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
         self.assertNotIn("airtable_request", src); self.assertNotIn('environ["AIRTABLE', src); self.assertNotIn("secrets.AIRTABLE_TOKEN", src)
