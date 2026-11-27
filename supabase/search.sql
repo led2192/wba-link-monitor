@@ -5965,11 +5965,22 @@ revoke all on function public.admin_list_refs(text) from public, anon;
 -- The companies of the owner's lists that may be a company lantrNa held already (27 Nov 2026: "Barilla G. e R.
 -- Fratelli" from the list beside "Barilla" of the SDG2000, barilla.com beside barillagroup.com). request_company
 -- refuses only an exact match (the same name compared, website, LEI or id). Here, for each list company not yet
--- looked at, the held companies (and the other list companies) that look like it, and why:
---   the same LEI; its LEI is the parent of a held company (GLEIF, company_register); the names of their websites
---   contain one another; their names, without the legal forms, contain one another word by word, or begin with the
---   same word of five letters or more and are alike (trigram similarity 0.4).
+-- looked at, the held companies (and the other list companies, each pair once) that look like it, and why:
+--   the same LEI; its LEI is the parent of a held company (GLEIF, company_register); the brand of their websites
+--   is the same, or one holds the other (five letters at least, never a common word like "group"); their names,
+--   without the legal forms, hold one another word by word (the shorter of five letters at least).
 -- 'strong' when an LEI says it, or the websites and the names both do; 'likely' otherwise. Read only.
+-- Second version, the same evening: the first paired companies whose websites end in a brand of their own
+-- (group.bnpparibas, group.ntt) with every "...group..." site, and companies that only began with the same word
+-- (Adani Power and Adani Ports).
+create or replace function public.brand_label(host text) returns text
+language sql immutable
+as $$
+  select case when public.site_label(host) = any(array['group', 'global', 'corporate', 'corp', 'home', 'www', 'investors', 'ir', 'about', 'company', 'en'])
+                   and length(split_part(host, '.', array_length(string_to_array(host, '.'), 1))) > 3
+              then split_part(host, '.', array_length(string_to_array(host, '.'), 1))
+              else replace(public.site_label(host), '-', '') end
+$$;
 create or replace function public.admin_list_duplicates(key text) returns jsonb
 language plpgsql stable security definer set search_path = public, extensions
 as $$
@@ -5979,32 +5990,36 @@ begin
   end if;
   return (with l as materialized (
       select q.id as request, q.wba_id, q.name, q.website, upper(q.lei) as lei, nullif(substring(q.note from 'ref ([^ ,]+)'), '') as ref,
-             public.name_key(q.name) as k, public.site_label(public.site_host(q.website)) as lab
+             public.name_key(q.name) as k, public.brand_label(public.site_host(q.website)) as lab
         from public.company_requests q
        where q.client = 'list' and q.wba_id is not null and q.review is null),
     h as materialized (
-      select c.wba_id, c.name, c.website, upper(to_jsonb(c) ->> 'lei') as lei, public.name_key(c.name) as k, public.site_label(public.site_host(c.website)) as lab,
-             r.direct_parent_lei, r.ultimate_parent_lei
+      select c.wba_id, c.name, c.website, upper(to_jsonb(c) ->> 'lei') as lei, public.name_key(c.name) as k, public.brand_label(public.site_host(c.website)) as lab,
+             r.direct_parent_lei, r.ultimate_parent_lei, exists (select 1 from l where l.wba_id = c.wba_id) as listed
         from public.companies c left join public.company_register r on r.wba_id = c.wba_id
        where not exists (select 1 from public.company_requests x where x.wba_id = c.wba_id and x.review = 'rejected')),
-    p as (
+    g as (select unnest(array['group', 'global', 'corporate', 'holding', 'holdings', 'international', 'industries', 'company', 'bank', 'energy', 'power', 'capital', 'investments', 'enterprises']) as w),
+    p0 as (
       select l.*, h.wba_id as other, h.name as other_name, h.website as other_website, h.lei as other_lei,
              (l.lei is not null and l.lei = h.lei) as same_lei,
              (l.lei is not null and l.lei in (h.direct_parent_lei, h.ultimate_parent_lei)) as parent,
-             (length(l.lab) >= 4 and length(h.lab) >= 4 and (position(l.lab in h.lab) > 0 or position(h.lab in l.lab) > 0)) as sites,
-             (length(l.k) >= 4 and length(h.k) >= 4 and ((' ' || h.k || ' ') like ('% ' || l.k || ' %') or (' ' || l.k || ' ') like ('% ' || h.k || ' %')
-               or (split_part(l.k, ' ', 1) = split_part(h.k, ' ', 1) and length(split_part(l.k, ' ', 1)) >= 5 and similarity(l.k, h.k) >= 0.4))) as names
-        from l join h on h.wba_id <> l.wba_id
+             (l.lab <> '' and h.lab <> '' and (l.lab = h.lab
+               or (least(length(l.lab), length(h.lab)) >= 5 and (position(l.lab in h.lab) > 0 or position(h.lab in l.lab) > 0)
+                   and not exists (select 1 from g where g.w = case when length(l.lab) <= length(h.lab) then l.lab else h.lab end)))) as sites,
+             (least(length(l.k), length(h.k)) >= 5 and ((' ' || h.k || ' ') like ('% ' || l.k || ' %') or (' ' || l.k || ' ') like ('% ' || h.k || ' %'))
+               and not exists (select 1 from g where g.w = case when length(l.k) <= length(h.k) then l.k else h.k end)) as names
+        from l join h on h.wba_id <> l.wba_id and (not h.listed or l.wba_id < h.wba_id)
          and ((l.lei is not null and (l.lei = h.lei or l.lei in (h.direct_parent_lei, h.ultimate_parent_lei)))
-              or (length(l.lab) >= 4 and length(h.lab) >= 4 and (position(l.lab in h.lab) > 0 or position(h.lab in l.lab) > 0))
-              or split_part(l.k, ' ', 1) = split_part(h.k, ' ', 1)))
+              or (l.lab <> '' and h.lab <> '' and (position(l.lab in h.lab) > 0 or position(h.lab in l.lab) > 0))
+              or split_part(l.k, ' ', 1) = split_part(h.k, ' ', 1))),
+    p as (select * from p0 where same_lei or parent or sites or names)
     select coalesce(jsonb_agg(jsonb_build_object('request', p.request, 'id', p.wba_id, 'name', p.name, 'website', p.website, 'lei', p.lei, 'ref', p.ref,
              'other', p.other, 'other_name', p.other_name, 'other_website', p.other_website, 'other_lei', p.other_lei,
              'why', array_remove(array[case when p.same_lei then 'the same LEI' end, case when p.parent then 'its LEI is the parent of the other' end,
-                                       case when p.sites then 'the names of their websites contain one another' end, case when p.names then 'their names are alike' end], null),
+                                       case when p.sites then 'the same brand in their websites' end, case when p.names then 'one name holds the other' end], null),
              'strength', case when p.same_lei or p.parent or (p.sites and p.names) then 'strong' else 'likely' end)
            order by (p.same_lei or p.parent or (p.sites and p.names)) desc, p.name), '[]'::jsonb)
-      from p where p.same_lei or p.parent or p.sites or p.names);
+      from p);
 end;
 $$;
 revoke all on function public.admin_list_duplicates(text) from public, anon;

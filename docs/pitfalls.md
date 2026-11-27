@@ -491,3 +491,6 @@ psycopg sends a Python float as `double precision`, and Postgres does not pick a
 ## Stopping a company's pages does not stop pages being found for it (27 Nov 2026)
 The 84 monitored pages of the companies that are not SDG2000 were switched off in the evening. By morning `discover_pages.py`, which looks for report pages for any company of the `companies` table that has few, had added 41 new ones, and the harvest 249 documents. A company leaves a pipeline only when every job that selects companies leaves it: closing the doors in (`add_companies.py`, `page_scans.py`, `browser_uploads.py`) was not enough while its row was there.
 
+## `site_label` of a brand top-level domain is "group" (27 Nov 2026)
+`site_label('group.bnpparibas')` is `group`: the function takes the part before the ending, and for a company with its own ending (.bnpparibas, .ntt, .softbank) that part is a common word. The first list of possible duplicates paired every website holding "group" with BNP Paribas, NTT and SoftBank. `brand_label` takes the ending when the label is a common word. Other uses of `site_label` (the website check of `request_company`, `watch_page_of_upload`) have the same blind spot for these companies.
+
