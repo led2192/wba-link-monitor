@@ -502,7 +502,7 @@ def test_the_taxonomy_of_facts_is_rows_the_owner_can_change():
     assert "revoke all on function public.fact_match(text, text) from public, anon, authenticated;" in SQL
     assert "revoke all on function public.fact_match(text) from public, anon, authenticated;" in SQL
     assert '"Fact taxonomy": adminTaxonomy' in PAGE and 'authed("admin_taxonomy", { key })' in PAGE
-    assert 'const CLIENT = "lantern v195 2026-11-27";' in PAGE
+    assert 'const CLIENT = "lantern v196 2026-11-27";' in PAGE
     # v107: a person's own link may ask without a sign-in
     assert 'const t = (await token()) || (linkAsk ? CONFIG.key : null);' in PAGE and 'authed("admin_link_ask", { key, name: l.name, may: !l.may_ask })' in PAGE
     assert "who text := coalesce(lower(auth.jwt() ->> 'email'), public.link_asker(key));" in SQL
@@ -670,3 +670,9 @@ def test_the_own_lane_has_its_tables_and_its_hours():
 
 def test_a_pasted_list_of_leis_marks_the_new_candidates_wanted():
     assert 'adminBtn("Want a list"' in PAGE and 'x.status === "candidate" && !x.why && x.match !== "name"' in PAGE          # v195: never a company already held, never a name match
+
+
+def test_a_person_can_ask_for_a_company_of_the_catalogue():
+    assert "c.duplicate_why is null and c.match = 'lei' and c.status in ('candidate', 'wanted')" in SQL          # never one already held, never one the owner refused
+    assert "grant execute on function public.catalogue_suggest(text) to authenticated;" in SQL and "create trigger catalogue_mark_added" in SQL
+    assert "/rest/v1/rpc/catalogue_suggest" in PAGE and "In lantrNa's catalogue, not followed yet:" in PAGE          # v196

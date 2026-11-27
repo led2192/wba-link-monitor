@@ -5836,6 +5836,54 @@ end;
 $$;
 revoke all on function public.catalogue_feed(int) from public, anon, authenticated;
 
+-- A person asks for a company of the catalogue (27 Nov 2026; the owner: "people could ask not only for companies we do
+-- not have in the catalogue, but for those in it that are not wanted yet"). catalogue_suggest gives the form "Missing
+-- a company?" up to six candidates whose name holds what is typed: new ones only (no duplicate found, matched by
+-- LEI), not those the owner marked not wanted. Choosing one fills the form with the catalogue's own name, website and
+-- LEI; the company is then added by the door every request uses (request_company, a person's twenty a day), and a
+-- trigger marks the candidate added so that it is neither offered nor fed again.
+create or replace function public.catalogue_suggest(q text) returns jsonb
+language plpgsql stable security definer set search_path = public, extensions
+as $$
+declare
+  who text := lower(auth.jwt() ->> 'email');
+  needle text := lower(btrim(regexp_replace(coalesce(q, ''), '[%_\\]', ' ', 'g')));
+begin
+  if who is null or not public.email_may_search(who) then
+    raise exception 'sign in with a listed address' using errcode = '42501';
+  end if;
+  if length(needle) < 3 then
+    return '[]'::jsonb;
+  end if;
+  return (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from (
+    select c.lei, coalesce(c.common_name, c.legal_name) as name, c.legal_name, c.country, coalesce(c.owner_website, c.website) as website
+      from public.catalogue c
+     where c.duplicate_why is null and c.match = 'lei' and c.status in ('candidate', 'wanted')
+       and (lower(coalesce(c.common_name, '')) like '%' || needle || '%' or lower(c.legal_name) like '%' || needle || '%'
+            or exists (select 1 from unnest(c.aliases) a where lower(a) like '%' || needle || '%'))
+     order by (lower(coalesce(c.common_name, c.legal_name)) like needle || '%') desc, c.revenue_eur desc nulls last, c.lei
+     limit 6) x);
+end;
+$$;
+revoke all on function public.catalogue_suggest(text) from public, anon;
+grant execute on function public.catalogue_suggest(text) to authenticated;
+
+create or replace function public.catalogue_mark_added() returns trigger
+language plpgsql security definer set search_path = public, extensions
+as $$
+begin
+  if new.lei is not null and new.wba_id is not null then
+    update public.catalogue c set status = 'added' where c.lei = new.lei and c.status in ('candidate', 'wanted');
+  end if;
+  return new;
+end;
+$$;
+do $$ begin          -- made once: making it again at every install would lock the table people's requests are written to
+  if not exists (select 1 from pg_trigger where tgname = 'catalogue_mark_added' and tgrelid = 'public.company_requests'::regclass) then
+    create trigger catalogue_mark_added after insert or update of wba_id on public.company_requests for each row execute function public.catalogue_mark_added();
+  end if;
+end $$;
+
 create table if not exists public.register_names (
   key    text not null,
   wba_id text not null,

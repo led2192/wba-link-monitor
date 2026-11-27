@@ -334,6 +334,12 @@ class SearchOnPostgres(unittest.TestCase):
         cur.execute("select lei, status, duplicate_why from public.catalogue order by lei"); cat = {r[0][:6]: r[1:] for r in cur.fetchall()}
         self.assertEqual(cat["529900"], ("added", None)); self.assertEqual(cat["549300"], ("candidate", "held: found when adding"))          # the same name as a company just made
         self.assertEqual((cat["213800"][0], cat["969500"][0]), ("wanted", "wanted"))          # one matched by name, and another country: not taken
+        # 27 Nov 2026: a person is offered the new candidates that hold what is typed, and asking for one marks it added
+        cur.execute("select public.catalogue_suggest('gn')"); self.assertEqual(cur.fetchone()[0], [])          # three letters at least
+        cur.execute("select lei, coalesce(common_name, legal_name) from public.catalogue where duplicate_why is null and match = 'lei' and status in ('candidate', 'wanted') order by lei limit 1"); one = cur.fetchone()
+        cur.execute("select public.catalogue_suggest(%s)", (one[1][:5].upper(),)); got = cur.fetchone()[0]
+        self.assertIn(one[0], [x["lei"] for x in got]); self.assertTrue(all(set(x) == {"lei", "name", "legal_name", "country", "website"} for x in got))
+        cur.execute("select has_function_privilege('anon', 'public.catalogue_suggest(text)', 'execute')"); self.assertFalse(cur.fetchone()[0])
         # 26 Nov 2026: the ones the owner names are added by themselves, wanted or not yet marked, and no other
         cur.execute("select public.admin_catalogue_add('k', null, 1, array['894500XXXXXXXXXXXX79'])"); self.assertEqual(cur.fetchone()[0], {"ok": True, "added": 1, "held": 0, "other": 0})
         cur.execute("select lei, status from public.catalogue where lei like '8945%' or lei like '9695%' order by lei"); self.assertEqual([r[1] for r in cur.fetchall()], ["added", "wanted"])
