@@ -488,3 +488,6 @@ psycopg sends a Python float as `double precision`, and Postgres does not pick a
 ## The library's document id is not `ids.doc_id` (26 Nov 2026)
 `ids.doc_id` gives `<company>|<host/path>`: the key the harvester uses to refuse a second row for a document. The `library_id` of a row, which is the id of `public.documents`, is `<company>-<ten hex digits of the SHA-1 of ids.normalize(address)>` (`harvest_reports.py`, `inbox.py`, `browser_uploads.library_id`). The own lane first registered documents under `ids.doc_id`: a document moved from Airtable and the same document found again by the lane would have been two rows. Seen on the first three rows, before anything was read.
 
+## Stopping a company's pages does not stop pages being found for it (27 Nov 2026)
+The 84 monitored pages of the companies that are not SDG2000 were switched off in the evening. By morning `discover_pages.py`, which looks for report pages for any company of the `companies` table that has few, had added 41 new ones, and the harvest 249 documents. A company leaves a pipeline only when every job that selects companies leaves it: closing the doors in (`add_companies.py`, `page_scans.py`, `browser_uploads.py`) was not enough while its row was there.
+

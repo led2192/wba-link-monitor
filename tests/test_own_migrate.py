@@ -34,6 +34,13 @@ class Move(unittest.TestCase):
         may, keep = M.deletable(self.docs)
         self.assertEqual([r["id"] for r in may], ["rec5", "rec7"]); self.assertEqual([r["id"] for r in keep], ["rec6"])
 
+    def test_a_file_is_copied_before_its_document_is_discarded_and_no_page_is_found_for_them_any_more(self):
+        import os
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = open(os.path.join(here, "own_migrate.py"), encoding="utf-8").read()
+        self.assertLess(src.index("from archive_copy import Storage, copy_one"), src.index("for table in TABLES:          # the documents first"))
+        self.assertIn('if not str(wba).startswith("PT_"):', open(os.path.join(here, "discover_pages.py"), encoding="utf-8").read())          # 27 Nov: 41 pages were found for them the night after their pages were stopped
+
     def test_the_archive_holds_every_row_with_every_field(self):
         data = M.archive_bytes({"companies": self.companies[:1], "report_library": self.docs[:1]})
         lines = [json.loads(x) for x in gzip.decompress(data).decode("utf-8").splitlines()]
