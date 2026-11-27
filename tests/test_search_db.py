@@ -341,6 +341,12 @@ class SearchOnPostgres(unittest.TestCase):
         self.assertEqual(cur.fetchone(), (25, 25))
         cur.execute("select public.admin_add_list('k', %s::jsonb) ->> 'held'", (json.dumps([{"name": "Listed Firm 3", "website": "listedfirm3.example"}]),)); self.assertEqual(cur.fetchone()[0], "1")
         cur.execute("select wba_id from public.company_requests where note = 'from a list, ref TA_00001'"); lid = cur.fetchone()[0]
+        # a list company that looks like one held: the website's name inside the other's, and the names word by word
+        cur.execute("insert into public.companies (wba_id, name, website) values ('PT_DUPE1', 'Listedfirm Seven Group', 'www.listedfirm7group.example') on conflict do nothing")
+        cur.execute("select public.admin_list_duplicates('k')"); d = cur.fetchone()[0]
+        seven = [x for x in d if x["other"] == "PT_DUPE1"]
+        self.assertTrue(seven and seven[0]["ref"] == "TA_00007" and "the names of their websites contain one another" in seven[0]["why"])
+        cur.execute("select count(*) from jsonb_array_elements(public.admin_companies('k')) x where x ->> 'id' in (select wba_id from public.company_requests where client = 'list')"); self.assertEqual(cur.fetchone()[0], 0)          # not in the review queue
         cur.execute("insert into public.documents (library_id, wba_id, year, doc_type, pages) values ('lf-1', %s, 2025, 'Annual Report', 2)", (lid,))
         cur.execute("insert into public.pages (library_id, page, body) values ('lf-1', 1, 'Contact: Jane.Roe@ListedFirm1.example or ir@listedfirm1.example; auditor partner@bigaudit.example')")
         cur.execute("select public.admin_contacts_in_text('k', array[%s])", (lid,)); rows = cur.fetchone()[0]["rows"]

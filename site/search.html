@@ -324,7 +324,7 @@
 <script>
 (async () => {
   const CONFIG = { url: "__SUPABASE_URL__", key: "__SUPABASE_PUBLISHABLE_KEY__" };
-  const CLIENT = "lantern v198 2026-11-27";
+  const CLIENT = "lantern v199 2026-11-27";
   const TYPES = ["Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Climate Report",
     "Environmental Reports", "Social Reports", "Impact Report", "CDP Report", "GRI", "SASB Index", "Engagement Report",
     "Financial Statement", "10K Form", "Registration Document", "Interim Reports", "Company Presentations", "Statutory Documents",
@@ -3658,8 +3658,26 @@
     const got = await authed("admin_company_list", { key, search: st.search || null, max_rows: st.only ? 500 : 200, which: st.only || null }); if (!got) { body.textContent = "Not available."; return; }
     // v193 (the owner: "for the companies we add, how are we doing on coverage?"): which companies, and how far each is covered
     const osel = el("select"); osel.setAttribute("aria-label", "which companies"); osel.style.cssText = "font:inherit;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)";
-    for (const [v, t] of [["", "Every company"], ["added", "Added by people or from the catalogue"], ["no pages", "Added, no page watched yet"], ["no documents", "Added, no document yet"]]) osel.append(Object.assign(el("option", null, t), { value: v }));
+    for (const [v, t] of [["", "Every company"], ["added", "Added by people or from the catalogue"], ["no pages", "Added, no page watched yet"], ["no documents", "Added, no document yet"], ["duplicates", "From your lists: possibly held already"]]) osel.append(Object.assign(el("option", null, t), { value: v }));
     osel.value = st.only || ""; osel.onchange = () => { st.only = osel.value; adminAllCompanies(body); };
+    // v199 (27 Nov 2026): the companies of the owner's lists that may be a company held already, side by side, with why
+    if (st.only === "duplicates") {
+      body.innerHTML = ""; body.append(el("h2", null, "All companies"), osel);
+      let d = null; try { d = await authed("admin_list_duplicates", { key }); } catch (e) {}
+      if (!d) { body.append(el("p", "what", "Not available.")); return; }
+      const strong = d.filter(x => x.strength === "strong").length, comps = new Set(d.map(x => x.id)).size;
+      body.append(el("p", "what", `${comps.toLocaleString()} companies of your lists look like one held already (${d.length.toLocaleString()} pairs, ${strong.toLocaleString()} strong). "Same company" merges the list's into the held one (its pages and documents stop being read; its files go to the held one); "Not the same" keeps both and the pair is not shown again.`));
+      body.append(adminTable(["From your list", "Held already", "Why", "", ""], d.map(x => {
+        const a = el("div"); a.append(el("b", null, x.name), el("br"), el("span", "what", `${x.ref || ""} · ${x.id} · ${x.website || "no website"}${x.lei ? " · " + x.lei : ""}`));
+        const b = el("div"); b.append(el("b", null, x.other_name), el("br"), el("span", "what", `${x.other} · ${x.other_website || "no website"}${x.other_lei ? " · " + x.other_lei : ""}`));
+        const w = el("span", null, (x.why || []).join("; ")); if (x.strength === "strong") w.style.fontWeight = "700";
+        const say = el("span", "what", "");
+        const act = (label, verdict, into) => adminBtn(label, async () => { let r = null; try { r = await authed("admin_company_set", { key, request: x.request, verdict, note: verdict === "merged" ? `the same company as ${x.other}` : `checked: not the same as ${x.other}`, into_company: into }); } catch (e) {}
+          say.textContent = r && r.ok ? (verdict === "merged" ? " merged" : " kept") : ` not saved${r && r.why ? ": " + r.why : ""}`; });
+        const btns = el("div"); btns.append(act("Same company", "merged", x.other), act("Not the same", "accepted", null), say);
+        return [a, b, w, btns, ""]; })));
+      return;
+    }
     const num = v => v == null ? "?" : Number(v).toLocaleString("en-GB");
     const bar = el("div"); bar.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px";
     const box = document.createElement("input"); box.placeholder = "a name, a country, an industry, an id"; box.value = st.search; box.style.cssText = "font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;width:320px;background:var(--box);color:var(--fg)";
