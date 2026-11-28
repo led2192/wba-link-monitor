@@ -201,6 +201,9 @@ def main():
     now = lambda: datetime.now(timezone.utc).isoformat(timespec="seconds")
     with evidence_db.connect() as conn:
         cur = conn.cursor()
+        # 28 Nov 2026: the pages of 25 main reports (thousands of rows, each indexed for the search) ran past the
+        # connection's two minutes and the run died; the session allows ten, and a batch is written at 2,500 pages.
+        cur.execute("set statement_timeout = '10min'"); conn.commit()
         cur.execute("select to_regclass('public.own_companies') is not null")
         if not cur.fetchone()[0]:
             print("public.own_companies is not there yet (supabase/search.sql): nothing to do."); run.finish("ok", rows_in=0, rows_out=0, notes="no table yet"); return 0
@@ -367,7 +370,7 @@ def main():
             batch_docs.append(document_row(lid, wba, names.get(wba), url, typ, year, label, status, n, chars, now()))
             batch_pages.extend((lid, p, t) for p, t in pages); done.append((lid, status, 1, uid, n))
             c["documents read" if status == "ok" else f"no text: {status}"] += 1
-            if len(batch_docs) >= 25:
+            if len(batch_docs) >= 25 or len(batch_pages) >= 2500:
                 flush()
         flush()
 
