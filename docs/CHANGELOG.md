@@ -3,6 +3,7 @@
 Newest first. One line per change, with the pull request. Every pull request adds its line here.
 
 ## November 2026
+- 2026-11-28 Fix: an own lane run died writing the pages of 25 main reports at once (statement timeout); the session allows ten minutes and a batch is written at 2,500 pages. (#851)
 - 2026-11-28 `own_lane.py`, scope `main2`: a company none of whose files is named as a known report kind reads the two newest whose name or link says "report" in some language (the first runs left 14,412 documents of the list's companies out and read 265); for a company with nothing read, what an earlier run left out is weighed again. (#850)
 - 2026-11-27 `own_lane.py`: searching for report pages takes half a run at most, so pages found are scanned and read in the same run (the first run after 921 companies were added spent all its 100 minutes searching 433 of them); a company with no report page one hop from its home page has its home page watched. (#849)
 - 2026-11-27 Fix: "From your lists: possibly held already" paired companies whose websites end in a brand of their own (group.bnpparibas) with every site holding "group", and companies that only began with the same word (Adani Power, Adani Ports). `brand_label` takes the brand from such a site; a common word never makes a pair; names must hold one another word by word; a pair of two list companies is shown once. (#848)

@@ -99,6 +99,10 @@ class Lane(unittest.TestCase):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
         self.assertIn("find_until = time.time() + (deadline - time.time()) * 0.5", src); self.assertIn('found = [("home", home, "home page, no report page found", 0)]', src)
 
+    def test_a_long_batch_of_pages_is_given_time_and_cut(self):
+        src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
+        self.assertLess(src.index("set statement_timeout = '10min'"), src.index("# 1. take")); self.assertIn("len(batch_pages) >= 2500", src)
+
     def test_nothing_of_the_lane_is_written_to_airtable(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
         self.assertNotIn("airtable_request", src); self.assertNotIn('environ["AIRTABLE', src); self.assertNotIn("secrets.AIRTABLE_TOKEN", src)
