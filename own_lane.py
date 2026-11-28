@@ -33,7 +33,7 @@ Dry run by default: reads and counts, fetches nothing from a company's site and 
 documents when the evidence database reaches MAX_DB_GB. Prints ids and counts only, never a name or an address.
 Env: SUPABASE_DB_URL; SUPABASE_URL and SUPABASE_SERVICE_KEY for the files of the extension (without them they wait).
 """
-import argparse, collections, io, os, sys, time
+import argparse, collections, io, os, re, sys, time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, unquote
 
@@ -47,6 +47,10 @@ RETRY_STATUS = ("download_fail", "truncated", "refused")
 MAIN = {"Annual Report", "Integrated Report", "Sustainability Report", "ESG Report", "CSR Report", "Impact Report", "10K Form", "Universal Registration Document"}
 
 
+REPORT_WORDS = re.compile(r"report|rapport|informe|relat[oó]rio|relazione|bericht|verslag|[åa]rsredovisning|vuosikertomus|sprawozdanie|rapor|"
+                          r"annual|sustainab|esg|csr|integrated|(?<![a-z])ar[-_ ]?20\d\d|報告|报告|年报|年報|보고서|отч[её]т", re.I)
+
+
 def main2(candidates, already, this_year):
     """For a company of scope 'main2' (its main reports of the last two years, two at most): of its registered
     documents [(library_id, url, link_text)], the ones to read now, newest first, and the ones left out. Type and
@@ -54,13 +58,21 @@ def main2(candidates, already, this_year):
     main reports were read before."""
     from classify_library import classify_from_file
     from date_documents import decide
-    keep, out = [], []
+    keep, out, said = [], [], []
     for lid, url, text in candidates:
         name = unquote(urlsplit(url or "").path.rsplit("/", 1)[-1])
         typ = classify_from_file(name, "")[0] or (classify_from_file((text or "").replace(" ", "-") + ".pdf", "")[0] if text else "")
         year = decide(url or "", name, text or "")[0]
         year = int(year) if str(year).isdigit() else None
-        (keep if typ in MAIN and (year is None or year >= this_year - 2) else out).append((year or 0, lid))
+        recent = year is None or year >= this_year - 2
+        (keep if typ in MAIN and recent else out).append((year or 0, lid))
+        if typ not in MAIN and recent and REPORT_WORDS.search(f"{name} {text or ''}"):
+            said.append((year or 0, lid))
+    if not keep and not already:
+        # 28 Nov 2026: of the first 921 companies read this way most had no file named as a report kind the labeller
+        # knows (AR2024.pdf, 年度报告.pdf). A company with none reads the two newest whose name or link says "report"
+        # in some language; their type is read from their first page once fetched.
+        keep = said; out = [x for x in out if x not in said]
     keep.sort(reverse=True)
     room = max(0, 2 - already)
     return [lid for _, lid in keep[:room]], [lid for _, lid in keep[room:]] + [lid for _, lid in out]
@@ -283,6 +295,9 @@ def main():
         # 3b. a company of scope 'main2' reads two of its main reports and leaves the rest
         cur.execute("select wba_id from public.own_companies where scope = 'main2' and wba_id = any(%s)", (mine,))
         for (wba,) in cur.fetchall():
+            cur.execute("select count(*) from public.own_docs where wba_id = %s and status = 'ok'", (wba,))
+            if not cur.fetchone()[0]:          # nothing read yet: what an earlier, narrower run left out is weighed again
+                cur.execute("update public.own_docs set status = 'new' where wba_id = %s and status = 'not read: outside the scope'", (wba,))
             cur.execute("select library_id, url, link_text from public.own_docs where wba_id = %s and status = 'new'", (wba,)); cand = cur.fetchall()
             if not cand:
                 continue

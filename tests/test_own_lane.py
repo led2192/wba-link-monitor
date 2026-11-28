@@ -91,6 +91,9 @@ class Lane(unittest.TestCase):
         keep, leave = L.main2(cand, 0, 2026)
         self.assertEqual(keep, ["a", "b"]); self.assertEqual(sorted(leave), ["c", "d", "e"])
         self.assertEqual(L.main2(cand, 1, 2026)[0], ["a"]); self.assertEqual(L.main2(cand, 2, 2026)[0], [])          # two at most, counting those read before
+        odd = [("x", "https://a.example/dl/AR2025.pdf", "Download"), ("y", "https://a.example/dl/2025年度报告.pdf", ""), ("z", "https://a.example/dl/menu.pdf", "Menu"), ("w", "https://a.example/dl/report-2019.pdf", "")]
+        self.assertEqual(sorted(L.main2(odd, 0, 2026)[0]), ["x", "y"])          # no known kind: the newest saying "report", recent only
+        self.assertEqual(L.main2(odd, 1, 2026)[0], [])          # one read already: no guessing
 
     def test_searching_takes_half_a_run_and_a_site_with_no_report_page_has_its_home_watched(self):
         src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "own_lane.py"), encoding="utf-8").read()
